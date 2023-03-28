@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+__author__ = "John Wieczorek"
+__copyright__ = "Copyright 2023 Rauthiflor LLC"
+__version__ = "speed.py 2023-03-16T11:15:08-03:00"
+
+# TODO: Incorporate methods for actual speed.
+
+from utils import convert_to_numeric, convert_to_speed
+       
+class Speed():
+    def __init__(self, ambulate=0, burrow=0, climb=0, fly=0, swim=0):
+        self.speeds = {}
+        self.speeds['ambulate'] = convert_to_speed(ambulate)
+        self.speeds['burrow'] = convert_to_speed(burrow)
+        self.speeds['climb'] = convert_to_speed(climb)
+        self.speeds['fly'] = convert_to_speed(fly)
+        self.speeds['swim'] = convert_to_speed(swim)
+
+    def sprint(self):
+        return self.speeds.get('ambulate')
+
+    def burrow(self):
+        return self.speeds.get('burrow')
+
+    def climb(self):
+        return self.speeds.get('climb')
+
+    def fly(self):
+        return self.speeds.get('fly')
+
+    def swim(self):
+        return self.speeds.get('swim')
+
+    def set_max_speed(self, speed_type, new_value):
+        if convert_to_numeric(new_value) is None:
+            return
+        v = convert_to_speed(new_value)
+        if v >= 0 and speed_type in ['ambulate', 'burrow', 'climb', 'fly', 'swim']:
+            self.speeds[speed_type] = v
+
+    def copy(self):
+        '''
+        Get an independent copy of the Speed instance.
+        '''
+        return Speed(self.sprint(), self.burrow(), self.climb(), self.fly(), self.swim())

@@ -1,0 +1,41 @@
+{
+    "Animal": [
+        "Boar", "Bull"
+    ],
+    "Bedding": [
+        "Linen pillow", "Silk pillow"
+    ],
+    "Clothing": [
+        "Breeches", "Cap"
+    ],
+    "Drink": [
+        "Ale (pint)", "Beer (pint)"
+    ],
+    "Equipment": [
+        "Awl (leather)", "Backpack (80 lb. capacity)"
+    ],
+    "Healing herb": [
+        "Adder's-tongue ointment (oz.)", "Birthwort (oz.)"
+    ],
+    "Herb": [
+        "Amaryllis stalk (ea.)", "Belladonna (oz.)"
+    ],
+    "Material": [
+        "Brick", "Brocade (yd.)"
+    ],
+    "Missile": [
+        "Arrow (ea.)", "Bolt, hand crossbow"
+    ],
+    "Provisions": [
+        "Barley, rye, corn  (lb.)", "Beef (lb.)"
+    ],
+    "Substance": [
+        "Acid (strong, oz.)", "Acorns (lb.)"
+    ],
+    "Tack & Harness": [
+        "Bit and Bridle", "Halter"
+    ],
+    "Transport": [
+        "Barge", "Canoe (small)"
+    ]
+}

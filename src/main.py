@@ -1,13 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2022 Rauthiflor LLC"
-__version__ = "main.py 2022-01-02T15:46-03:00"
+__copyright__ = "Copyright 2023 Rauthiflor LLC"
+__version__ = "main.py 2023-01-02T15:46-03:00"
+
+# TODO:
 
 import argparse
 
-from thing import Thing
-from world import World
+from identifiable import Identifiable
+from universe import Universe
+
 from worldmap import WorldMap
 from object import Object
 from being import Being

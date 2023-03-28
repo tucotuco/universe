@@ -1,0 +1,24 @@
+name	is_ordinary	is_progressive
+aerial combat	True	False
+ambidexterity	True	False
+aquatic combat	True	False
+armed combat	True	True
+balance	True	True
+blind-fight	False	False
+escape artist	True	True
+extraordinary fortitude	True	True
+extraordinary reflex	True	True
+extraordinary will	True	True
+extraordinary toughness	True	True
+improved grapple	True	True
+ki	False	True
+multi-action	False	True
+quick-draw	True	False
+ride	True	True
+run	True	True
+shield	True	False
+stun	False	True
+terrestrial combat	True	False
+throw	True	True
+tumble	True	True
+unarmed combat	True	True

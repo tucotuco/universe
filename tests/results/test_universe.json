@@ -1,0 +1,6362 @@
+{
+  "armor_dict": {
+    "object_categories": {
+      "Accessories": [
+        "Gauntlet",
+        "Locked gauntlet",
+        "Spiked gauntlet"
+      ],
+      "Clothing": [
+        "No armor",
+        "Normal clothing",
+        "Cold clothing",
+        "Very cold clothing"
+      ],
+      "Heavy armor": [
+        "Banded armor",
+        "Half-plate armor",
+        "Full plate armor"
+      ],
+      "Light armor": [
+        "Padded armor",
+        "Leather armor",
+        "Studded leather armor",
+        "Ring mail",
+        "Chain shirt"
+      ],
+      "Medium armor": [
+        "Hide",
+        "Scale mail",
+        "Brigandine armor",
+        "Chain mail",
+        "Breastplate"
+      ]
+    },
+    "objects": {
+      "Banded armor": {
+        "armor_check_penalty": 6,
+        "cost": 50000,
+        "defenses": {
+          "D": {
+            "B": 5,
+            "P": 4,
+            "S": 6
+          },
+          "H": {
+            "B": 5,
+            "P": 6,
+            "S": 6
+          }
+        },
+        "dexterity_check_penalty": -3,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 80,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Banded armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 35,
+        "width": 0
+      },
+      "Breastplate": {
+        "armor_check_penalty": 4,
+        "cost": 40000,
+        "defenses": {
+          "D": {
+            "B": 3,
+            "P": 6,
+            "S": 7
+          },
+          "H": {
+            "B": 5,
+            "P": 8,
+            "S": 7
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 60,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Breastplate",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 30,
+        "width": 0
+      },
+      "Brigandine armor": {
+        "armor_check_penalty": 4,
+        "cost": 25000,
+        "defenses": {
+          "D": {
+            "B": 5,
+            "P": 3,
+            "S": 5
+          },
+          "H": {
+            "B": 5,
+            "P": 5,
+            "S": 4
+          }
+        },
+        "dexterity_check_penalty": -2,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 70,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Brigandine armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 30,
+        "width": 0
+      },
+      "Chain mail": {
+        "armor_check_penalty": 5,
+        "cost": 30000,
+        "defenses": {
+          "D": {
+            "B": 3,
+            "P": 2,
+            "S": 5
+          },
+          "H": {
+            "B": 7,
+            "P": 6,
+            "S": 5
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 80,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Chain mail",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 40,
+        "width": 0
+      },
+      "Chain shirt": {
+        "armor_check_penalty": 1,
+        "cost": 20000,
+        "defenses": {
+          "D": {
+            "B": 3,
+            "P": 1,
+            "S": 5
+          },
+          "H": {
+            "B": 7,
+            "P": 6,
+            "S": 5
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 50,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Chain shirt",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 25,
+        "width": 0
+      },
+      "Cold clothing": {
+        "armor_check_penalty": 0,
+        "cost": 1780,
+        "defenses": {
+          "D": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          },
+          "H": {
+            "B": 3,
+            "P": 5,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Cold clothing",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 8,
+        "width": 0
+      },
+      "Full plate armor": {
+        "armor_check_penalty": 8,
+        "cost": 300000,
+        "defenses": {
+          "D": {
+            "B": 7,
+            "P": 6,
+            "S": 7
+          },
+          "H": {
+            "B": 5,
+            "P": 8,
+            "S": 7
+          }
+        },
+        "dexterity_check_penalty": -4,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 100,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Full plate armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 50,
+        "width": 0
+      },
+      "Gauntlet": {
+        "armor_check_penalty": 0,
+        "cost": 400,
+        "defenses": {
+          "D": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          },
+          "H": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Gauntlet",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0
+      },
+      "Half-plate armor": {
+        "armor_check_penalty": 7,
+        "cost": 120000,
+        "defenses": {
+          "D": {
+            "B": 6,
+            "P": 5,
+            "S": 7
+          },
+          "H": {
+            "B": 5,
+            "P": 8,
+            "S": 7
+          }
+        },
+        "dexterity_check_penalty": -4,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 90,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Half-plate armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 45,
+        "width": 0
+      },
+      "Hide": {
+        "armor_check_penalty": 2,
+        "cost": 3000,
+        "defenses": {
+          "D": {
+            "B": 3,
+            "P": 1,
+            "S": 2
+          },
+          "H": {
+            "B": 7,
+            "P": 5,
+            "S": 1
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Hide",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 25,
+        "width": 0
+      },
+      "Leather armor": {
+        "armor_check_penalty": 1,
+        "cost": 3600,
+        "defenses": {
+          "D": {
+            "B": 2,
+            "P": 1,
+            "S": 2
+          },
+          "H": {
+            "B": 7,
+            "P": 5,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Leather armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 15,
+        "width": 0
+      },
+      "Locked gauntlet": {
+        "armor_check_penalty": 0,
+        "cost": 1600,
+        "defenses": {
+          "D": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          },
+          "H": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Locked gauntlet",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1.5,
+        "width": 0
+      },
+      "No armor": {
+        "armor_check_penalty": 0,
+        "cost": 0,
+        "defenses": {
+          "D": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          },
+          "H": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 0,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "No armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0,
+        "width": 0
+      },
+      "Normal clothing": {
+        "armor_check_penalty": 0,
+        "cost": 1360,
+        "defenses": {
+          "D": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          },
+          "H": {
+            "B": 1,
+            "P": 4,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Normal clothing",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 4.5,
+        "width": 0
+      },
+      "Padded armor": {
+        "armor_check_penalty": 1,
+        "cost": 3000,
+        "defenses": {
+          "D": {
+            "B": 4,
+            "P": 1,
+            "S": 2
+          },
+          "H": {
+            "B": 8,
+            "P": 7,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 20,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Padded armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 10,
+        "width": 0
+      },
+      "Ring mail": {
+        "armor_check_penalty": 1,
+        "cost": 6000,
+        "defenses": {
+          "D": {
+            "B": 2,
+            "P": 1,
+            "S": 4
+          },
+          "H": {
+            "B": 6,
+            "P": 5,
+            "S": 2
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 40,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Ring mail",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 20,
+        "width": 0
+      },
+      "Scale mail": {
+        "armor_check_penalty": 3,
+        "cost": 20000,
+        "defenses": {
+          "D": {
+            "B": 3,
+            "P": 2,
+            "S": 4
+          },
+          "H": {
+            "B": 6,
+            "P": 5,
+            "S": 4
+          }
+        },
+        "dexterity_check_penalty": -2,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 60,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Scale mail",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 35,
+        "width": 0
+      },
+      "Spiked gauntlet": {
+        "armor_check_penalty": 0,
+        "cost": 1000,
+        "defenses": {
+          "D": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          },
+          "H": {
+            "B": 0,
+            "P": 0,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Spiked gauntlet",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 2,
+        "width": 0
+      },
+      "Studded leather armor": {
+        "armor_check_penalty": 1,
+        "cost": 5000,
+        "defenses": {
+          "D": {
+            "B": 2,
+            "P": 1,
+            "S": 3
+          },
+          "H": {
+            "B": 7,
+            "P": 5,
+            "S": 1
+          }
+        },
+        "dexterity_check_penalty": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 35,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Studded leather armor",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 20,
+        "width": 0
+      },
+      "Very cold clothing": {
+        "armor_check_penalty": 1,
+        "cost": 2880,
+        "defenses": {
+          "D": {
+            "B": 1,
+            "P": 0,
+            "S": 1
+          },
+          "H": {
+            "B": 5,
+            "P": 6,
+            "S": 0
+          }
+        },
+        "dexterity_check_penalty": -1,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Very cold clothing",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 20,
+        "width": 0
+      }
+    }
+  },
+  "being_dict": {
+    "object_categories": {},
+    "objects": {}
+  },
+  "config_path": "../src/config",
+  "current": {
+    "cost": 0,
+    "hardness": 9223372036854775807,
+    "height": 9223372036854775807,
+    "hit_points": 9223372036854775807,
+    "is_magical": true,
+    "length": 9223372036854775807,
+    "obj_type": "universe",
+    "tags": {},
+    "weapon_categories": [],
+    "weight": 9223372036854775807,
+    "width": 9223372036854775807
+  },
+  "events": [
+    {
+      "endtime": 200,
+      "id": "264522a2-1fa3-450c-9ba6-400270939c72",
+      "location": "Moon",
+      "name": "",
+      "parent": null,
+      "starttime": 100,
+      "type": "Event"
+    },
+    {
+      "action_dict": {
+        "actions": {}
+      },
+      "action_timeline": {
+        "action_heap": []
+      },
+      "beings_present": {
+        "object_instances": {}
+      },
+      "endtime": 400,
+      "id": "beefbfe4-df6a-4a61-b1d8-45223ea2a417",
+      "location": "Mars",
+      "map": null,
+      "name": "",
+      "parent": null,
+      "starttime": 300,
+      "type": "Encounter",
+      "weapon_dict": {
+        "object_categories": {},
+        "objects": {}
+      }
+    }
+  ],
+  "front_facing": 1,
+  "id": "universe",
+  "name": "Test Universe",
+  "object_dict": {
+    "object_categories": {
+      "Animal": [
+        "Boar",
+        "Bull"
+      ],
+      "Bedding": [
+        "Linen pillow",
+        "Silk pillow"
+      ],
+      "Clothing": [
+        "Breeches",
+        "Cap"
+      ],
+      "Drink": [
+        "Ale (pint)",
+        "Beer (pint)"
+      ],
+      "Equipment": [
+        "Awl (leather)",
+        "Backpack (80 lb. capacity)"
+      ],
+      "Healing herb": [
+        "Adder's-tongue ointment (oz.)",
+        "Birthwort (oz.)"
+      ],
+      "Herb": [
+        "Amaryllis stalk (ea.)",
+        "Belladonna (oz.)"
+      ],
+      "Material": [
+        "Brick",
+        "Brocade (yd.)"
+      ],
+      "Missile": [
+        "Arrow (ea.)",
+        "Bolt, hand crossbow"
+      ],
+      "Provisions": [
+        "Barley, rye, corn  (lb.)",
+        "Beef (lb.)"
+      ],
+      "Substance": [
+        "Acid (strong, oz.)",
+        "Acorns (lb.)"
+      ],
+      "Tack & Harness": [
+        "Bit and Bridle",
+        "Halter"
+      ],
+      "Transport": [
+        "Barge",
+        "Canoe (small)"
+      ]
+    },
+    "objects": {
+      "Acid (strong, oz.)": {
+        "cost": 200,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.1,
+        "obj_type": "Acid (strong, oz.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.1,
+        "width": 0.1
+      },
+      "Acorns (lb.)": {
+        "cost": 5,
+        "hardness": 0,
+        "height": 0.3,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Acorns (lb.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0.3
+      },
+      "Adder's-tongue ointment (oz.)": {
+        "cost": 200,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.1,
+        "obj_type": "Adder's-tongue ointment (oz.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.1,
+        "width": 0.1
+      },
+      "Ale (pint)": {
+        "cost": 10,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Ale (pint)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0.3
+      },
+      "Amaryllis stalk (ea.)": {
+        "cost": 400,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Amaryllis stalk (ea.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.1,
+        "width": 0.1
+      },
+      "Arrow (ea.)": {
+        "cost": 30,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Arrow (ea.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.3,
+        "width": 0.1
+      },
+      "Awl (leather)": {
+        "cost": 100,
+        "hardness": 4,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.4,
+        "obj_type": "Awl (leather)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.1,
+        "width": 0.1
+      },
+      "Backpack (80 lb. capacity)": {
+        "cost": 400,
+        "hardness": 1,
+        "height": 3,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.75,
+        "obj_type": "Backpack (80 lb. capacity)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 3,
+        "width": 1.5
+      },
+      "Barge": {
+        "cost": 20000,
+        "hardness": 7,
+        "height": 2,
+        "hit_points": 60,
+        "is_magical": false,
+        "length": 12,
+        "obj_type": "Barge",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1000,
+        "width": 6
+      },
+      "Barley, rye, corn  (lb.)": {
+        "cost": 4,
+        "hardness": 0,
+        "height": 0.3,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Barley, rye, corn  (lb.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0.3
+      },
+      "Beef (lb.)": {
+        "cost": 20,
+        "hardness": 0,
+        "height": 0.3,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Beef (lb.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0.3
+      },
+      "Beer (pint)": {
+        "cost": 8,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Beer (pint)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0.3
+      },
+      "Belladonna (oz.)": {
+        "cost": 50,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.1,
+        "obj_type": "Belladonna (oz.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.1,
+        "width": 0.1
+      },
+      "Birthwort (oz.)": {
+        "cost": 100,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.1,
+        "obj_type": "Birthwort (oz.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.1,
+        "width": 0.1
+      },
+      "Bit and Bridle": {
+        "cost": 350,
+        "hardness": 5,
+        "height": 0.5,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Bit and Bridle",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0.5
+      },
+      "Boar": {
+        "cost": 8000,
+        "hardness": 5,
+        "height": 2,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Boar",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 400,
+        "width": 2
+      },
+      "Bolt, hand crossbow": {
+        "cost": 40,
+        "hardness": 1,
+        "height": 1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 1,
+        "obj_type": "Bolt, hand crossbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.3,
+        "width": 0.1
+      },
+      "Breeches": {
+        "cost": 120,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Breeches",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 1
+      },
+      "Brick": {
+        "cost": 1,
+        "hardness": 3,
+        "height": 0.3,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 1,
+        "obj_type": "Brick",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1.5,
+        "width": 0.5
+      },
+      "Brocade (yd.)": {
+        "cost": 1800,
+        "hardness": 0,
+        "height": 0.1,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Brocade (yd.)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 8,
+        "width": 3
+      },
+      "Bull": {
+        "cost": 10000,
+        "hardness": 5,
+        "height": 6,
+        "hit_points": 12,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Bull",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 2000,
+        "width": 3
+      },
+      "Canoe (small)": {
+        "cost": 5000,
+        "hardness": 4,
+        "height": 1.5,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Canoe (small)",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 40,
+        "width": 1.5
+      },
+      "Cap": {
+        "cost": 60,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Cap",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.3,
+        "width": 0.5
+      },
+      "Halter": {
+        "cost": 100,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Halter",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 0.3,
+        "width": 0.5
+      },
+      "Linen pillow": {
+        "cost": 80,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Linen pillow",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 1
+      },
+      "Silk pillow": {
+        "cost": 5000,
+        "hardness": 0,
+        "height": 0.5,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Silk pillow",
+        "tags": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 1
+      }
+    }
+  },
+  "object_registry": {
+    "object_instances": {}
+  },
+  "original": {
+    "cost": 0,
+    "hardness": 9223372036854775807,
+    "height": 9223372036854775807,
+    "hit_points": 9223372036854775807,
+    "is_magical": true,
+    "length": 9223372036854775807,
+    "obj_type": "universe",
+    "tags": {},
+    "weapon_categories": [],
+    "weight": 9223372036854775807,
+    "width": 9223372036854775807
+  },
+  "parent_container_id": null,
+  "skill_dict": {
+    "skills": {
+      "Aklys": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Arm": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Armor spike": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Atlatl": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Axes": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Ballista": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Bardiche": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Bastard sword": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Battle scythe": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Battleaxe": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Bec de corbin": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Blowgun": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Bo stick": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Bola": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Boomerang": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Bows": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Broadsword": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Buckler": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Caltrops (Tetsu-bishi)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Catapults": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Chain": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Chakram": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Chijiriki": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Club": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Clubs": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Composite longbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Composite shortbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Dagger": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Dart": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Entanglers": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Falchion": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Fang": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Fauchard": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Fauchard-fork": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Flails": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Garrote": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Gauntlet": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Glaive": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Glaive-guisarme": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Greataxe": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Greatclub": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Greatsword (2-handed)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Guisarme (Bill hook)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Guisarme-voulge": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Halberd": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Halfspear": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Hammer": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Hammers": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Hand Weapons": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Hand crossbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Handaxe": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Harpoon": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Heavy catapult": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Heavy crossbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Heavy flail": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Heavy lance": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Heavy mace": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Heavy pick": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Hook fauchard": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Hooked net": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Javelin": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Jo stick": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kama (Sickle)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Katana": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kau sin ke": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kawanaga": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kiseru": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Knife": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kukri": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kumade": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Kusari-gama": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Lajatang": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Lances": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Large shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Large wooden shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Lasso": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Leg": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Light catapult": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Light crossbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Light flail": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Light lance": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Light mace": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Light pick": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Lochaber axe": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Locked gauntlet": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Longbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Longsword": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Lucern hammer": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Machete (Parang)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Man catcher": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Medium lance": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Medium shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Medium wooden shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Military fork": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Morningstar": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Nagimaki": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Naginata": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Needle (Pin)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Nekode": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Net": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Nunchaku": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Partisan": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Pelletbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Pike": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Portable ram": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Punching dagger (Katar)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Quarterstaff": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Rams": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Ranseur": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Rapier": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Repeating crossbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Sai (Jitte)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Sap (Blackjack)": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Scimitar": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Scourge": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Scythes": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Shields": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Short sword": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Shortbow": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Shuriken": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Siangham": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Six-person ram": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Sling": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Slings": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Small shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Small wooden shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spear": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spears": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Special": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spetum": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked buckler": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked chain": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked gauntlet": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked large shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked large wooden shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked medium shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked medium wooden shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked small shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked small wooden shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked tower shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Spiked wooden buckler": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Staff-sling": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Staves": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Stone": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Suspended ram": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Swords": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Tetsubo": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Three-piece staff": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Thrown": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Tomahawk": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Tower shield": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Trebuchet": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Trident": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Uichi-ne": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Unarmed": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Voulge": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Wakizashi": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Warhammer": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Whip": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "Wooden buckler": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "aerial combat": {
+        "is_ordinary": true,
+        "is_progressive": false
+      },
+      "ambidexterity": {
+        "is_ordinary": true,
+        "is_progressive": false
+      },
+      "aquatic combat": {
+        "is_ordinary": true,
+        "is_progressive": false
+      },
+      "armed combat": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "balance": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "blind-fight": {
+        "is_ordinary": false,
+        "is_progressive": false
+      },
+      "escape artist": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "extraordinary fortitude": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "extraordinary reflex": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "extraordinary toughness": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "extraordinary will": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "improved grapple": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "ki": {
+        "is_ordinary": false,
+        "is_progressive": true
+      },
+      "multi-action": {
+        "is_ordinary": false,
+        "is_progressive": true
+      },
+      "quick-draw": {
+        "is_ordinary": true,
+        "is_progressive": false
+      },
+      "ride": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "run": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "shield": {
+        "is_ordinary": true,
+        "is_progressive": false
+      },
+      "stun": {
+        "is_ordinary": false,
+        "is_progressive": true
+      },
+      "terrestrial combat": {
+        "is_ordinary": true,
+        "is_progressive": false
+      },
+      "throw": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "tumble": {
+        "is_ordinary": true,
+        "is_progressive": true
+      },
+      "unarmed combat": {
+        "is_ordinary": true,
+        "is_progressive": true
+      }
+    }
+  },
+  "top_facing": 0,
+  "type": "Universe",
+  "weapon_dict": {
+    "object_categories": {
+      "Axes": [
+        "Battleaxe",
+        "Bardiche",
+        "Bec de corbin",
+        "Greataxe",
+        "Guisarme-voulge",
+        "Halberd",
+        "Handaxe",
+        "Lochaber axe",
+        "Tomahawk",
+        "Voulge"
+      ],
+      "Bows": [
+        "Shortbow",
+        "Pelletbow",
+        "Longbow",
+        "Composite shortbow",
+        "Composite longbow",
+        "Hand crossbow",
+        "Light crossbow",
+        "Heavy crossbow",
+        "Repeating crossbow",
+        "Ballista"
+      ],
+      "Catapults": [
+        "Light catapult",
+        "Heavy catapult",
+        "Trebuchet"
+      ],
+      "Clubs": [
+        "Bo stick",
+        "Club",
+        "Greatclub",
+        "Jo stick",
+        "Kiseru",
+        "Heavy mace",
+        "Light mace",
+        "Morningstar",
+        "Tetsubo"
+      ],
+      "Entanglers": [
+        "Bola",
+        "Chain",
+        "Chijiriki",
+        "Hooked net",
+        "Kawanaga",
+        "Kusari-gama",
+        "Lasso",
+        "Net",
+        "Spiked chain",
+        "Whip"
+      ],
+      "Flails": [
+        "Heavy flail",
+        "Light flail",
+        "Kau sin ke",
+        "Kusari-gama",
+        "Nunchaku",
+        "Sap (Blackjack)",
+        "Scourge",
+        "Three-piece staff"
+      ],
+      "Hammers": [
+        "Fang",
+        "Hammer",
+        "Lucern hammer",
+        "Heavy pick",
+        "Light pick",
+        "Warhammer"
+      ],
+      "Hand Weapons": [
+        "Dagger",
+        "Punching dagger (Katar)",
+        "Gauntlet",
+        "Locked gauntlet",
+        "Spiked gauntlet",
+        "Knife",
+        "Kukri",
+        "Needle (Pin)",
+        "Nekode",
+        "Sai (Jitte)",
+        "Siangham",
+        "Stone",
+        "Uichi-ne"
+      ],
+      "Lances": [
+        "Heavy lance",
+        "Light lance",
+        "Medium lance"
+      ],
+      "Rams": [
+        "Portable ram",
+        "Six-person ram",
+        "Suspended ram"
+      ],
+      "Scythes": [
+        "Battle scythe",
+        "Fauchard",
+        "Fauchard-fork",
+        "Glaive",
+        "Glaive-guisarme",
+        "Guisarme (Bill hook)",
+        "Guisarme-voulge",
+        "Hook fauchard",
+        "Kama (Sickle)",
+        "Kusari-gama",
+        "Nagimaki",
+        "Naginata"
+      ],
+      "Shields": [
+        "Wooden buckler",
+        "Buckler",
+        "Small wooden shield",
+        "Small shield",
+        "Medium wooden shield",
+        "Medium shield",
+        "Large wooden shield",
+        "Large shield",
+        "Tower shield",
+        "Spiked wooden buckler",
+        "Spiked buckler",
+        "Spiked small wooden shield",
+        "Spiked small shield",
+        "Spiked medium wooden shield",
+        "Spiked medium shield",
+        "Spiked large wooden shield",
+        "Spiked large shield",
+        "Spiked tower shield"
+      ],
+      "Slings": [
+        "Sling",
+        "Staff-sling"
+      ],
+      "Spears": [
+        "Bec de corbin",
+        "Chijiriki",
+        "Fauchard-fork",
+        "Halfspear",
+        "Harpoon",
+        "Hook fauchard",
+        "Javelin",
+        "Kumade",
+        "Military fork",
+        "Partisan",
+        "Pike",
+        "Ranseur",
+        "Spear",
+        "Spetum",
+        "Trident"
+      ],
+      "Special": [
+        "Aklys",
+        "Armor spike",
+        "Atlatl",
+        "Blowgun",
+        "Caltrops (Tetsu-bishi)",
+        "Garrote",
+        "Lajatang",
+        "Man catcher"
+      ],
+      "Staves": [
+        "Bo stick",
+        "Nunchaku",
+        "Quarterstaff",
+        "Staff-sling",
+        "Three-piece staff"
+      ],
+      "Swords": [
+        "Bastard sword",
+        "Broadsword",
+        "Falchion",
+        "Greatsword (2-handed)",
+        "Katana",
+        "Longsword",
+        "Machete (Parang)",
+        "Rapier",
+        "Scimitar",
+        "Short sword",
+        "Wakizashi"
+      ],
+      "Thrown": [
+        "Boomerang",
+        "Chakram",
+        "Dagger",
+        "Dart",
+        "Javelin",
+        "Knife",
+        "Needle (Pin)",
+        "Shuriken",
+        "Stone",
+        "Uichi-ne"
+      ],
+      "Unarmed": [
+        "Arm",
+        "Leg",
+        "Gauntlet",
+        "Locked gauntlet",
+        "Spiked gauntlet",
+        "Nekode",
+        "Stone"
+      ]
+    },
+    "objects": {
+      "Aklys": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 5,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Aklys",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3.5,
+        "width": 0
+      },
+      "Arm": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 2,
+            "P": "B",
+            "T": 3
+          }
+        },
+        "cost": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": null,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Arm",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0,
+        "width": 0
+      },
+      "Armor spike": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 3,
+            "P": "P",
+            "T": 6
+          }
+        },
+        "cost": 400,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Armor spike",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 1,
+        "width": 0
+      },
+      "Atlatl": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 200,
+        "hardness": 2,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Atlatl",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 1.5,
+        "width": 0
+      },
+      "Ballista": {
+        "attacks": {
+          "R": {
+            "D": 15,
+            "P": "B, P",
+            "T": 18
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 30000,
+        "hardness": 3,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 10,
+        "obj_type": "Ballista",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 100,
+        "width": 0
+      },
+      "Bardiche": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "S",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "P,S",
+            "T": 6
+          }
+        },
+        "cost": 1400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Bardiche",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 9,
+        "width": 0
+      },
+      "Bastard sword": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 11,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 8,
+            "P": "P",
+            "T": 6
+          }
+        },
+        "cost": 6000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 9,
+        "is_magical": false,
+        "length": 4.5,
+        "obj_type": "Bastard sword",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 10,
+        "width": 0
+      },
+      "Battle scythe": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 1400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Battle scythe",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 7,
+        "width": 0
+      },
+      "Battleaxe": {
+        "attacks": {
+          "R": {
+            "D": 7,
+            "P": "B,S",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "B,S",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Battleaxe",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 7,
+        "width": 0
+      },
+      "Bec de corbin": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 1600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Bec de corbin",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 6,
+        "width": 0
+      },
+      "Blowgun": {
+        "attacks": {
+          "R": {
+            "D": 1,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 1000,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 0,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Blowgun",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.1,
+        "width": 0
+      },
+      "Bo stick": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 5,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 100,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 6.5,
+        "obj_type": "Bo stick",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Bola": {
+        "attacks": {
+          "R": {
+            "D": 2,
+            "P": "B,E",
+            "T": 6
+          },
+          "S": {
+            "D": 2,
+            "P": "B,E",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 600,
+        "hardness": 2,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Bola",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 2.5,
+        "width": 0
+      },
+      "Boomerang": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 2,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Boomerang",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 2,
+        "width": 0
+      },
+      "Broadsword": {
+        "attacks": {
+          "R": {
+            "D": 7,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 5000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 7,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Broadsword",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 8,
+        "width": 0
+      },
+      "Buckler": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 1,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 1,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 400,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 16,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Buckler",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "1",
+        "weight": 3,
+        "width": 0
+      },
+      "Caltrops (Tetsu-bishi)": {
+        "attacks": {
+          "R": {
+            "D": 2,
+            "P": "P",
+            "T": 4
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 20,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.25,
+        "obj_type": "Caltrops (Tetsu-bishi)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.4,
+        "width": 0
+      },
+      "Chain": {
+        "attacks": {
+          "R": {
+            "D": 1,
+            "P": "B,E",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B,E",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 1200,
+        "hardness": 8,
+        "height": 0,
+        "hit_points": 8,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Chain",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 8,
+        "width": 0
+      },
+      "Chakram": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "S",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "S",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 1,
+        "obj_type": "Chakram",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.5,
+        "width": 0
+      },
+      "Chijiriki": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B,P,E",
+            "T": 5
+          },
+          "T": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 1400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Chijiriki",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 7,
+        "width": 0
+      },
+      "Club": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 0,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Club",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3,
+        "width": 0
+      },
+      "Composite longbow": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 4000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Composite longbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Composite shortbow": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 2400,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Composite shortbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3,
+        "width": 0
+      },
+      "Dagger": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 400,
+        "hardness": 7,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 1.25,
+        "obj_type": "Dagger",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 1,
+        "width": 0
+      },
+      "Dart": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "P",
+            "T": 4
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 3,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 50,
+        "hardness": 3,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Dart",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.3,
+        "width": 0
+      },
+      "Falchion": {
+        "attacks": {
+          "R": {
+            "D": 7,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 6000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 8,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Falchion",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 9,
+        "width": 0
+      },
+      "Fang": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B,P",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B,P",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B,P",
+            "T": 4
+          }
+        },
+        "cost": 100,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Fang",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3,
+        "width": 0
+      },
+      "Fauchard": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "S",
+            "T": 6
+          },
+          "S": {
+            "D": 6,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Fauchard",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 6,
+        "width": 0
+      },
+      "Fauchard-fork": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 1600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Fauchard-fork",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 7,
+        "width": 0
+      },
+      "Garrote": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 10,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 0,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Garrote",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.1,
+        "width": 0
+      },
+      "Gauntlet": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 400,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Gauntlet",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 2,
+        "width": 0
+      },
+      "Glaive": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "S",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 8,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Glaive",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 6.5,
+        "width": 0
+      },
+      "Glaive-guisarme": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Glaive-guisarme",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 7,
+        "width": 0
+      },
+      "Greataxe": {
+        "attacks": {
+          "R": {
+            "D": 9,
+            "P": "B,S",
+            "T": 6
+          },
+          "S": {
+            "D": 10,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 5,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 4000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 8,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Greataxe",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 20,
+        "width": 0
+      },
+      "Greatclub": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "B,P",
+            "T": 6
+          },
+          "T": {
+            "D": 5,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 20,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Greatclub",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 10,
+        "width": 0
+      },
+      "Greatsword (2-handed)": {
+        "attacks": {
+          "R": {
+            "D": 9,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 12,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 9,
+            "P": "P",
+            "T": 6
+          }
+        },
+        "cost": 10000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Greatsword (2-handed)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 15,
+        "width": 0
+      },
+      "Guisarme (Bill hook)": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "S",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "S",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Guisarme (Bill hook)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 6.5,
+        "width": 0
+      },
+      "Guisarme-voulge": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 9,
+            "P": "P,S",
+            "T": 6
+          }
+        },
+        "cost": 1600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Guisarme-voulge",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 9.5,
+        "width": 0
+      },
+      "Halberd": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 10,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 2000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Halberd",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 8.5,
+        "width": 0
+      },
+      "Halfspear": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Halfspear",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 3,
+        "width": 0
+      },
+      "Hammer": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Hammer",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 2,
+        "width": 0
+      },
+      "Hand crossbow": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 7
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 7000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Hand crossbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 3,
+        "width": 0
+      },
+      "Handaxe": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B,S",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B,S",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Handaxe",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 4,
+        "width": 0
+      },
+      "Harpoon": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Harpoon",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 6,
+        "width": 0
+      },
+      "Heavy catapult": {
+        "attacks": {
+          "R": {
+            "D": 30,
+            "P": "B",
+            "T": 48
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 160000,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 6,
+        "is_magical": false,
+        "length": 30,
+        "obj_type": "Heavy catapult",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "C",
+        "weight": 1000,
+        "width": 0
+      },
+      "Heavy crossbow": {
+        "attacks": {
+          "R": {
+            "D": 10,
+            "P": "P",
+            "T": 9
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 10000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Heavy crossbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 9,
+        "width": 0
+      },
+      "Heavy flail": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "B,P",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 3000,
+        "hardness": 8,
+        "height": 0,
+        "hit_points": 8,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Heavy flail",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 10,
+        "width": 0
+      },
+      "Heavy lance": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 6,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 3000,
+        "hardness": 7,
+        "height": 0,
+        "hit_points": 6,
+        "is_magical": false,
+        "length": 14,
+        "obj_type": "Heavy lance",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 15,
+        "width": 0
+      },
+      "Heavy mace": {
+        "attacks": {
+          "R": {
+            "D": 7,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 2400,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 12,
+        "is_magical": false,
+        "length": 2.5,
+        "obj_type": "Heavy mace",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 12,
+        "width": 0
+      },
+      "Heavy pick": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 7,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 1600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Heavy pick",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 6,
+        "width": 0
+      },
+      "Hook fauchard": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Hook fauchard",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 7,
+        "width": 0
+      },
+      "Hooked net": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "E,P,S",
+            "T": 7
+          },
+          "S": {
+            "D": 4,
+            "P": "E,P,S",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 3000,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Hooked net",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 17,
+        "width": 0
+      },
+      "Javelin": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 3,
+            "P": "P",
+            "T": 5
+          },
+          "T": {
+            "D": 5,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 150,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Javelin",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 2,
+        "width": 0
+      },
+      "Jo stick": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 50,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Jo stick",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 1.5,
+        "width": 0
+      },
+      "Kama (Sickle)": {
+        "attacks": {
+          "R": {
+            "D": 2,
+            "P": "P,S",
+            "T": 5
+          },
+          "S": {
+            "D": 5,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 2,
+            "P": "S",
+            "T": 4
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Kama (Sickle)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Katana": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 10,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 8000,
+        "hardness": 12,
+        "height": 0,
+        "hit_points": 15,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Katana",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 7,
+        "width": 0
+      },
+      "Kau sin ke": {
+        "attacks": {
+          "R": {
+            "D": 2,
+            "P": "S,5",
+            "T": 5
+          },
+          "S": {
+            "D": 3,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 100,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Kau sin ke",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Kawanaga": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B,E,P",
+            "T": 6
+          },
+          "S": {
+            "D": 3,
+            "P": "B,E,P",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 25,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Kawanaga",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 1,
+        "width": 0
+      },
+      "Kiseru": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 250,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Kiseru",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.5,
+        "width": 0
+      },
+      "Knife": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 3,
+            "P": "P,S",
+            "T": 4
+          },
+          "T": {
+            "D": 3,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 1,
+        "obj_type": "Knife",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.5,
+        "width": 0
+      },
+      "Kukri": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": 8,
+        "height": 0,
+        "hit_points": 4,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Kukri",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 3,
+        "width": 0
+      },
+      "Kumade": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 5,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Kumade",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 5,
+        "width": 0
+      },
+      "Kusari-gama": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B,E,S",
+            "T": 6
+          },
+          "S": {
+            "D": 6,
+            "P": "B,E,S",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 1600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Kusari-gama",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 8,
+        "width": 0
+      },
+      "Lajatang": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B,P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Lajatang",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 8,
+        "width": 0
+      },
+      "Large shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 2000,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 48,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Large shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "4",
+        "weight": 15,
+        "width": 0
+      },
+      "Large wooden shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 1600,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 48,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Large wooden shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "4",
+        "weight": 12,
+        "width": 0
+      },
+      "Lasso": {
+        "attacks": {
+          "R": {
+            "D": 0,
+            "P": "E",
+            "T": 6
+          },
+          "S": {
+            "D": 0,
+            "P": "E",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 50,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 20,
+        "obj_type": "Lasso",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Leg": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": null,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Leg",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0,
+        "width": 0
+      },
+      "Light catapult": {
+        "attacks": {
+          "R": {
+            "D": 20,
+            "P": "B",
+            "T": 30
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 110000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 15,
+        "obj_type": "Light catapult",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "H",
+        "weight": 500,
+        "width": 0
+      },
+      "Light crossbow": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P",
+            "T": 8
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 7000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Light crossbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 6,
+        "width": 0
+      },
+      "Light flail": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B,P",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B,P",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 1600,
+        "hardness": 8,
+        "height": 0,
+        "hit_points": 8,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Light flail",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 5,
+        "width": 0
+      },
+      "Light lance": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 5,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 1200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 4,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Light lance",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 5,
+        "width": 0
+      },
+      "Light mace": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 1000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Light mace",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 6,
+        "width": 0
+      },
+      "Light pick": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 5,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 800,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Light pick",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 4,
+        "width": 0
+      },
+      "Lochaber axe": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 9,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 12,
+        "obj_type": "Lochaber axe",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 8.5,
+        "width": 0
+      },
+      "Locked gauntlet": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 1600,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Locked gauntlet",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 1.5,
+        "width": 0
+      },
+      "Longbow": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 3000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Longbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 3,
+        "width": 0
+      },
+      "Longsword": {
+        "attacks": {
+          "R": {
+            "D": 7,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P",
+            "T": 5
+          }
+        },
+        "cost": 3600,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 6,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Longsword",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 6,
+        "width": 0
+      },
+      "Lucern hammer": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B,P",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B,P",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 1400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Lucern hammer",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 6,
+        "width": 0
+      },
+      "Machete (Parang)": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 5,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 4,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Machete (Parang)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 5,
+        "width": 0
+      },
+      "Man catcher": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          }
+        },
+        "cost": 2000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Man catcher",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 10,
+        "width": 0
+      },
+      "Medium lance": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 5,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 2000,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 12,
+        "obj_type": "Medium lance",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 10,
+        "width": 0
+      },
+      "Medium shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 1400,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 40,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Medium shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "3",
+        "weight": 8,
+        "width": 0
+      },
+      "Medium wooden shield": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 1200,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 40,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Medium wooden shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "3",
+        "weight": 6,
+        "width": 0
+      },
+      "Military fork": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "P",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Military fork",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 4.5,
+        "width": 0
+      },
+      "Morningstar": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "B,P",
+            "T": 6
+          },
+          "T": {
+            "D": 5,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 1600,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Morningstar",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 8,
+        "width": 0
+      },
+      "Nagimaki": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "S",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Nagimaki",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 4,
+        "width": 0
+      },
+      "Naginata": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "S",
+            "T": 6
+          },
+          "S": {
+            "D": 7,
+            "P": "S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Naginata",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 5,
+        "width": 0
+      },
+      "Needle (Pin)": {
+        "attacks": {
+          "R": {
+            "D": 0,
+            "P": "P",
+            "T": 4
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 1,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 3,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 0,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Needle (Pin)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.1,
+        "width": 0
+      },
+      "Nekode": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 300,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Nekode",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.5,
+        "width": 0
+      },
+      "Net": {
+        "attacks": {
+          "R": {
+            "D": 0,
+            "P": "E",
+            "T": 6
+          },
+          "S": {
+            "D": 0,
+            "P": "E",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 200,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Net",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 1,
+        "width": 0
+      },
+      "Nunchaku": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 5,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Nunchaku",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 2,
+        "width": 0
+      },
+      "Partisan": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P,S",
+            "T": 5
+          },
+          "S": {
+            "D": 5,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 7,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 1400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Partisan",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 5.5,
+        "width": 0
+      },
+      "Pelletbow": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 3000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Pelletbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 3,
+        "width": 0
+      },
+      "Pike": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 8,
+            "P": "P",
+            "T": 6
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 18,
+        "obj_type": "Pike",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 8.5,
+        "width": 0
+      },
+      "Portable ram": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 6,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 2000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 20,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Portable ram",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 40,
+        "width": 0
+      },
+      "Punching dagger (Katar)": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 400,
+        "hardness": 7,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 0,
+        "obj_type": "Punching dagger (Katar)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 2,
+        "width": 0
+      },
+      "Quarterstaff": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B,P",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 0,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Quarterstaff",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 5,
+        "width": 0
+      },
+      "Ranseur": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 1200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Ranseur",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 4.5,
+        "width": 0
+      },
+      "Rapier": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 4000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Rapier",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Repeating crossbow": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P",
+            "T": 2
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 30000,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Repeating crossbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 16,
+        "width": 0
+      },
+      "Sai (Jitte)": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 500,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Sai (Jitte)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 2,
+        "width": 0
+      },
+      "Sap (Blackjack)": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 200,
+        "hardness": 2,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 1,
+        "obj_type": "Sap (Blackjack)",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3,
+        "width": 0
+      },
+      "Scimitar": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 3000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 6,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Scimitar",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 5,
+        "width": 0
+      },
+      "Scourge": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B,E,P",
+            "T": 4
+          },
+          "S": {
+            "D": 5,
+            "P": "B,E,P",
+            "T": 5
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 200,
+        "hardness": 2,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Scourge",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 2,
+        "width": 0
+      },
+      "Short sword": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 5,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": 5,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 2000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 2.5,
+        "obj_type": "Short sword",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3.5,
+        "width": 0
+      },
+      "Shortbow": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 1800,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Shortbow",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 2,
+        "width": 0
+      },
+      "Shuriken": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 20,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Shuriken",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.2,
+        "width": 0
+      },
+      "Siangham": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 5,
+            "P": "P,S",
+            "T": 4
+          },
+          "T": {
+            "D": 5,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Siangham",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 1,
+        "width": 0
+      },
+      "Six-person ram": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 12,
+            "P": "B",
+            "T": 6
+          }
+        },
+        "cost": 0,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 40,
+        "is_magical": false,
+        "length": 10,
+        "obj_type": "Six-person ram",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 300,
+        "width": 0
+      },
+      "Sling": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 50,
+        "hardness": 0,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Sling",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.2,
+        "width": 0
+      },
+      "Small shield": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 2,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 2,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 800,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 24,
+        "is_magical": false,
+        "length": 2.5,
+        "obj_type": "Small shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "2",
+        "weight": 6,
+        "width": 0
+      },
+      "Small wooden shield": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 2,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 2,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 24,
+        "is_magical": false,
+        "length": 2.5,
+        "obj_type": "Small wooden shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "2",
+        "weight": 4,
+        "width": 0
+      },
+      "Spear": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 5,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 7,
+        "obj_type": "Spear",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 4,
+        "width": 0
+      },
+      "Spetum": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 7,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 9,
+        "obj_type": "Spetum",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 6,
+        "width": 0
+      },
+      "Spiked buckler": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 1,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 3,
+            "P": "B,P",
+            "T": 4
+          }
+        },
+        "cost": 800,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 16,
+        "is_magical": false,
+        "length": 2.5,
+        "obj_type": "Spiked buckler",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "1",
+        "weight": 4,
+        "width": 0
+      },
+      "Spiked chain": {
+        "attacks": {
+          "R": {
+            "D": 5,
+            "P": "B,E,P",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "B,E,P",
+            "T": 6
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 5000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 10,
+        "obj_type": "Spiked chain",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 15,
+        "width": 0
+      },
+      "Spiked gauntlet": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 5,
+            "P": "B,P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "B,P,S",
+            "T": 4
+          }
+        },
+        "cost": 1000,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 0.5,
+        "obj_type": "Spiked gauntlet",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 3,
+        "width": 0
+      },
+      "Spiked large shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "B,P",
+            "T": 6
+          }
+        },
+        "cost": 2400,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 48,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Spiked large shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "4",
+        "weight": 16,
+        "width": 0
+      },
+      "Spiked large wooden shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 6,
+            "P": "B,P",
+            "T": 6
+          }
+        },
+        "cost": 2000,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 48,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Spiked large wooden shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "4",
+        "weight": 13,
+        "width": 0
+      },
+      "Spiked medium shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 5,
+            "P": "B,P",
+            "T": 6
+          }
+        },
+        "cost": 1800,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 40,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Spiked medium shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "3",
+        "weight": 9,
+        "width": 0
+      },
+      "Spiked medium wooden shield": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 5,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 1600,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 40,
+        "is_magical": false,
+        "length": 3.5,
+        "obj_type": "Spiked medium wooden shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "3",
+        "weight": 7,
+        "width": 0
+      },
+      "Spiked small shield": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 2,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "B,P",
+            "T": 5
+          }
+        },
+        "cost": 1200,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 24,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Spiked small shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "2",
+        "weight": 7,
+        "width": 0
+      },
+      "Spiked small wooden shield": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 2,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 4,
+            "P": "B,P",
+            "T": 4
+          }
+        },
+        "cost": 1000,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 24,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Spiked small wooden shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "2",
+        "weight": 5,
+        "width": 0
+      },
+      "Spiked tower shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 7
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 7
+          },
+          "T": {
+            "D": 6,
+            "P": "B,P",
+            "T": 7
+          }
+        },
+        "cost": 4400,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 56,
+        "is_magical": false,
+        "length": 5.5,
+        "obj_type": "Spiked tower shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "5",
+        "weight": 31,
+        "width": 0
+      },
+      "Spiked wooden buckler": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 1,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 3,
+            "P": "B,P",
+            "T": 4
+          }
+        },
+        "cost": 600,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 16,
+        "is_magical": false,
+        "length": 2.5,
+        "obj_type": "Spiked wooden buckler",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "1",
+        "weight": 3,
+        "width": 0
+      },
+      "Staff-sling": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B,P",
+            "T": 6
+          },
+          "S": {
+            "D": 5,
+            "P": "B,P",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 1100,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Staff-sling",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 2,
+        "width": 0
+      },
+      "Stone": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 0,
+        "hardness": 7,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 0.3,
+        "obj_type": "Stone",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 0.5,
+        "width": 0
+      },
+      "Suspended ram": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": 15,
+            "P": "B",
+            "T": 12
+          }
+        },
+        "cost": 20000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 30,
+        "is_magical": false,
+        "length": 12,
+        "obj_type": "Suspended ram",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "H",
+        "weight": 500,
+        "width": 0
+      },
+      "Tetsubo": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 7,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 600,
+        "hardness": 10,
+        "height": 0,
+        "hit_points": 10,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Tetsubo",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 7.5,
+        "width": 0
+      },
+      "Three-piece staff": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          },
+          "S": {
+            "D": 6,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 3,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 800,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Three-piece staff",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 6,
+        "width": 0
+      },
+      "Tomahawk": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B,S",
+            "T": 5
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 5
+          },
+          "T": {
+            "D": 3,
+            "P": "B,S",
+            "T": 5
+          }
+        },
+        "cost": 100,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 2,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Tomahawk",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 3,
+        "width": 0
+      },
+      "Tower shield": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "B",
+            "T": 7
+          },
+          "S": {
+            "D": 4,
+            "P": "B",
+            "T": 7
+          },
+          "T": {
+            "D": 4,
+            "P": "B",
+            "T": 7
+          }
+        },
+        "cost": 4000,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 56,
+        "is_magical": false,
+        "length": 5,
+        "obj_type": "Tower shield",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "5",
+        "weight": 30,
+        "width": 0
+      },
+      "Trebuchet": {
+        "attacks": {
+          "R": {
+            "D": 36,
+            "P": "B",
+            "T": 48
+          },
+          "S": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 200000,
+        "hardness": 6,
+        "height": 0,
+        "hit_points": 6,
+        "is_magical": false,
+        "length": 20,
+        "obj_type": "Trebuchet",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "G",
+        "weight": 1000,
+        "width": 0
+      },
+      "Trident": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P",
+            "T": 6
+          },
+          "S": {
+            "D": 5,
+            "P": "P",
+            "T": 6
+          },
+          "T": {
+            "D": 8,
+            "P": "P",
+            "T": 6
+          }
+        },
+        "cost": 1800,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 6,
+        "obj_type": "Trident",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 7.5,
+        "width": 0
+      },
+      "Uichi-ne": {
+        "attacks": {
+          "R": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          },
+          "S": {
+            "D": 4,
+            "P": "P,S",
+            "T": 5
+          },
+          "T": {
+            "D": 4,
+            "P": "P,S",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 3,
+        "is_magical": false,
+        "length": 1.5,
+        "obj_type": "Uichi-ne",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "T",
+        "weight": 2,
+        "width": 0
+      },
+      "Voulge": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "P,S",
+            "T": 6
+          },
+          "S": {
+            "D": 9,
+            "P": "P,S",
+            "T": 6
+          },
+          "T": {
+            "D": 7,
+            "P": "P,S",
+            "T": 5
+          }
+        },
+        "cost": 1000,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 5,
+        "is_magical": false,
+        "length": 8,
+        "obj_type": "Voulge",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "L",
+        "weight": 8.5,
+        "width": 0
+      },
+      "Wakizashi": {
+        "attacks": {
+          "R": {
+            "D": 6,
+            "P": "P",
+            "T": 5
+          },
+          "S": {
+            "D": 7,
+            "P": "S",
+            "T": 5
+          },
+          "T": {
+            "D": 6,
+            "P": "P",
+            "T": 4
+          }
+        },
+        "cost": 4000,
+        "hardness": 12,
+        "height": 0,
+        "hit_points": 6,
+        "is_magical": false,
+        "length": 3,
+        "obj_type": "Wakizashi",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 3,
+        "width": 0
+      },
+      "Warhammer": {
+        "attacks": {
+          "R": {
+            "D": 8,
+            "P": "B",
+            "T": 6
+          },
+          "S": {
+            "D": 8,
+            "P": "B",
+            "T": 6
+          },
+          "T": {
+            "D": 5,
+            "P": "B",
+            "T": 5
+          }
+        },
+        "cost": 2400,
+        "hardness": 5,
+        "height": 0,
+        "hit_points": 8,
+        "is_magical": false,
+        "length": 4,
+        "obj_type": "Warhammer",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "M",
+        "weight": 8,
+        "width": 0
+      },
+      "Whip": {
+        "attacks": {
+          "R": {
+            "D": null,
+            "P": "",
+            "T": null
+          },
+          "S": {
+            "D": 2,
+            "P": "B,E",
+            "T": 5
+          },
+          "T": {
+            "D": null,
+            "P": "",
+            "T": null
+          }
+        },
+        "cost": 100,
+        "hardness": 1,
+        "height": 0,
+        "hit_points": 1,
+        "is_magical": false,
+        "length": 20,
+        "obj_type": "Whip",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "S",
+        "weight": 1,
+        "width": 0
+      },
+      "Wooden buckler": {
+        "attacks": {
+          "R": {
+            "D": 3,
+            "P": "B",
+            "T": 4
+          },
+          "S": {
+            "D": 1,
+            "P": "B",
+            "T": 4
+          },
+          "T": {
+            "D": 1,
+            "P": "B",
+            "T": 4
+          }
+        },
+        "cost": 200,
+        "hardness": null,
+        "height": 0,
+        "hit_points": 16,
+        "is_magical": false,
+        "length": 2,
+        "obj_type": "Wooden buckler",
+        "tags": {},
+        "weapon_categories": [],
+        "weapon_size": "1",
+        "weight": 2,
+        "width": 0
+      }
+    }
+  }
+}

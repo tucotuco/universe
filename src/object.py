@@ -1,132 +1,293 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2022 Rauthiflor LLC"
-__version__ = "object.py 2022-01-02T15:49-03:00"
+__copyright__ = "Copyright 2023 Rauthiflor LLC"
+__version__ = "object.py 2023-03-20T18:56-03:00"
 
-from thing import Thing
+# TODO: Make size category function from largest of length, width, height
+# TODO: Check whether subtype dictionaries have copy() methods and determine if they are needed.
+# TODO: Implement an ObjectDictionary save_to_file() method
+# TODO: get_objects_in_category() needs test suite
+import json
 
-# An Object is a Thing with mass that occupies space for a period of time. This does not 
-# mean that it is necessarily stationary, nor that it is permanent. There are normal and 
-# current values for various characteristics. Normal values are those that characterize 
-# original state of the Object. Current values are those that are in effect.
-class Object(Thing):
-  def __init__(self, mass=0, length=0, width=0, height=0, hp = 0, name=''):
-    # hit points
-    # mass
-    # size (length, width, height)
-    # name
+from identifiable import Identifiable
+from utils import convert_to_numeric
 
-    Thing.__init__(self, name)
-    self.typestr = 'Object'
-    self.rename(name)
-    self.normal_hit_points = hp
-    self.normal_mass = mass
-    self.normal_size = Size(length,width,height)
-    self.top_facing = 0 # up 
-    self.front_facing = 1 # whichever horizontal orientation (1-6 on hex) 1 refers to
-    self.current_hit_points = hp
-    self.current_mass = self.normal_mass
-    self.current_size = self.normal_size
-    self.as_weapon_categories = []
+class ObjectDefinition:
+    def __init__(self, obj_type, length, width, height, weight, cost, hardness, 
+                 hit_points, is_magical=False, tags=None, weapon_categories=None):
+        self.obj_type = obj_type
+        self.length = convert_to_numeric(length)
+        self.width = convert_to_numeric(width)
+        self.height = convert_to_numeric(height)
+        self.weight = convert_to_numeric(weight)
+        self.cost = convert_to_numeric(cost)
+        self.hardness = convert_to_numeric(hardness)
+        self.hit_points = convert_to_numeric(hit_points)
+        self.is_magical = is_magical
+        self.tags = tags or {}
+        self.weapon_categories = weapon_categories or []
+        if weapon_categories is not None:
+            self.weapon_categories = weapon_categories
 
-  def set_facing(self, new_front_facing, new_top_facing):
-    self.top_facing = new_top_facing
-    self.front_facing = new_front_facing
-    
-  def set_normal_hit_points(self, new_hit_points):
-    self.normal_hit_points = new_hit_points
+    def copy(self):
+        '''
+        Get an independent copy of the ObjectDefinition.
+        '''
+        new_definition = ObjectDefinition(
+            self.obj_type,
+            self.length,
+            self.width,
+            self.height,
+            self.weight,
+            self.cost,
+            self.hardness,
+            self.hit_points,
+            self.is_magical,
+            self.tags.copy(),
+            self.weapon_categories)
+        return new_definition
 
-  def set_current_hit_points(self, new_hit_points):
-    self.current_hit_points = new_hit_points
+    def to_json(self):
+        '''
+        Get a representation of a ObjectDefinition as JSON.
+        '''
+        data = {
+            'type': self.obj_type,
+            'length': self.length,
+            'width': self.width,
+            'height': self.height,
+            'weight': self.weight,
+            'cost': self.cost,
+            'hardness': self.hardness,
+            'hit_points': self.hit_points,
+            'is_magical': self.is_magical,
+            'tags': self.tags,
+            'weapon_categories': self.weapon_categories
+        }
+        return json.dumps(data)
 
-  def set_normal_mass(self, new_mass):
-    self.normal_mass = new_mass
+    def size_category(self):
+        # ToDo: return size category based on dimensions using the categories:
+        # 'diminuitive (D)', 'tiny (T), small (S)', 'medium (M)', 'large (L), 'huge (H)', 'gargantuan (G), colossal (C)'
+        return 'M' 
 
-  def set_current_mass(self, new_mass):
-    self.current_mass = new_mass
-    
-  def remass_percent(self, new_percent):
-    self.current_mass = self.current_mass*new_percent/100
+    def tag(self, tag):
+        return self.tags.get(tag)
 
-  # set the dimensions to newly provided values
-  def set_size(new_length, new_width, new_height):
-    self.current_size.set_size(new_length, new_width, new_height)
+    def set_tag(self, tag, added_tag):
+        self.tags[tag] = added_tag
 
-  # add to the length
-  def lengthen(added_length):
-    self.current_size.lengthen(added_length)
+    def set_tags(self, new_tag_dict):
+        self.tags = new_tag_dict
 
-  # add to the width
-  def widen(added_width):
-    self.current_size.widen(added_width)
+    def set_weapon_categories(self, weapon_categories):
+        self.weapon_categories = weapon_categories
 
-  # add to the height
-  def deepen(added_height):
-    self.current_size.deepen(added_height)
+    def add_weapon_category(self, added_weapon_category):
+        if self.weapon_categories is None:
+            self.weapon_categories = []
+        if added_weapon_category not in self.weapon_categories:
+            self.weapon_categories.append(added_weapon_category)
 
-  # set all dimensions to a percentage of their current values
-  def resize_percent(new_percent):
-    self.current_size.resize_percent(new_percent)
+class ObjectInstance(Identifiable):
+    ''' 
+    An ObjectInstance is an Identifiable that has a Size and occupies space for a period 
+    of time. It is not necessarily stationary or permanent. It has normal properties that 
+    indicate its original state and current values that are in effect at the time they are 
+    accessed.
+    '''
+    def __init__(self, object_definition, name='', id=None):
+        Identifiable.__init__(self, name, id)
+        self.top_facing = 0 # up 
+        self.front_facing = 1 # whichever horizontal orientation (1-6 on hex) 1 refers to
+        self.original = object_definition
+        self.current = object_definition.copy()
+        self.parent_container_id = None
 
-  def as_json(self):
-    pass
+    def obj_type(self):
+        return self.current.obj_type
 
-  def add_as_weapon_category(self, weapon_category):
-    self.as_weapon_categories.append(weapon_category)
+    def length(self):
+        return self.current.length
 
-  def as_text(self, separator='\n'):
-    s = f'Type: {self.typestr}'
-    s += f'{separator}Id: {self.id}'
-    s += f'{separator}Name: {self.name}'
-    s += f'{separator}normal mass: {self.normal_mass}'
-    s += f'{separator}normal size: {self.normal_size.as_text(" ")}'
-    s += f'{separator}normal hit points: {self.normal_hit_points}'
-    s += f'{separator}current mass: {self.current_mass}'
-    s += f'{separator}current size: {self.current_size.as_text(" ")}'
-    s += f'{separator}current hit points: {self.current_hit_points}'
-    s += f'{separator}top facing: {self.top_facing}'
-    s += f'{separator}front facing: {self.front_facing}'
-    if len(self.as_weapon_categories) > 0:
-        s += f'{separator}Use as weapon Categories:'
-        for weapon_category in self.as_weapon_categories:
-          s += f'[separator]  {weapon_category}'
-    return s
+    def width(self):
+        return self.current.width
 
-# A Size is a three-dimensional definition of occupied space where the dimensions are 
-# the extremes measures of length, width, and height that form a minimum bounding box.
-class Size():
-  def __init__(self, length=0, width=0, height=0):
-    self.length = length
-    self.width = width
-    self.height = height
+    def height(self):
+        return self.current.height
 
-  # set the dimensions to newly provided values
-  def set_size(new_length, new_width, new_height):
-    self.length = new_length
-    self.width = new_width
-    self.height = new_height
+    def weight(self):
+        return self.current.weight
 
-  # add to the length
-  def lengthen(added_length):
-    self.length = self.length + added_length
+    def cost(self):
+        return self.current.cost
 
-  # add to the width
-  def widen(added_width):
-    self.width = self.width + added_width
+    def hardness(self):
+        return self.current.hardness
 
-  # add to the height
-  def deepen(added_height):
-    self.height = self.height + added_height
+    def hit_points(self):
+        return self.current.hit_points
 
-  # set all dimensions to a percentage of their current values
-  def resize_percent(new_percent):
-    self.length = self.length*new_percent/100
-    self.width = self.width*new_percent/100
-    self.height = self.height*new_percent/100
+    def is_magical(self):
+        return self.current.is_magical
 
-  def as_text(self, separator='\n'):
-    s = f'{separator}length: {self.length}'
-    s += f'{separator}width: {self.width}'
-    s += f'{separator}height: {self.height}'
-    return s
+    def tags(self):
+        return self.current.tags
+
+    def tag(self, tag):
+        return self.current.tag(tag)
+
+    def weapon_categories(self):
+        return self.current.weapon_categories
+
+    def has_weapon_category(self, weapon_category):
+        if weapon_category in self.current.weapon_categories:
+            return True
+        return False
+
+    def set_size(self, new_length, new_width, new_height):
+        self.current.length = convert_to_numeric(new_length)
+        self.current.width = convert_to_numeric(new_width)
+        self.current.height = convert_to_numeric(new_height)
+
+    def lengthen(self, added_length):
+        added_length = convert_to_numeric(added_length)
+        self.current.length += added_length
+
+    def widen(self, added_width):
+        added_width = convert_to_numeric(added_width)
+        self.current.width += added_width
+
+    def deepen(self, added_height):
+        added_height = convert_to_numeric(added_height)
+        self.current.height += added_height
+
+    def resize_percent(self, new_percent):
+        percent = convert_to_numeric(new_percent)
+        if self.current.length is not None:
+            self.current.length = self.current.length*percent/100
+        if self.current.width is not None:
+            self.current.width = self.current.width*percent/100
+        if self.current.height is not None:
+            self.current.height = self.current.height*percent/100
+
+    def reweight_percent(self, new_percent):
+        percent = convert_to_numeric(new_percent)
+        if self.current.weight is not None:
+            self.current.weight = self.current.weight*percent/100
+
+    def set_tag(self, tag, tag_value):
+        self.current.tags[tag] = tag_value
+
+    def set_tags(self, new_tag_dict):
+        self.current.tags = new_tag_dict
+
+    def add_weapon_category(self, weapon_category):
+        if self.current.weapon_categories is None:
+            self.current.weapon_categories = []
+        self.current.weapon_categories.append(weapon_category)
+
+    def get_parent_container_id(self):
+        return self.parent_container_id
+
+    def set_parent_container_id(self, object_registry, new_parent_container_id):
+        if new_parent_container_id == self.get_id():
+            return
+        if new_parent_container_id is None:
+            self.parent_container_id = 'universe'
+            return
+        if not isinstance(object_registry, ObjectRegistry):
+            return
+        if object_registry.get_object_by_id(new_parent_container_id) is not None:
+            self.parent_container_id = new_parent_container_id
+
+class ObjectDictionary:
+    '''
+    A dictionary of information about objects.
+    '''
+    def __init__(self):
+        self.object_categories = {}
+        self.objects = {}
+
+    def to_json(self):
+        '''
+        Get a representation of an ObjectDictionary as JSON.
+        '''
+        return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=2)
+
+    def get_objects_in_category(self, object_category):
+        '''
+        Get a list of objects in a category.
+        '''
+        return self.object_categories.get(object_category)
+
+    def add_object_categories(self, obj_category_dict):
+        '''
+        Add object categories from a dict.
+        '''
+        self.object_categories = obj_category_dict
+            
+    def load_object_categories(self, file_path):
+        '''
+        Get object categories from a JSON file.
+        '''
+        with open(file_path) as f:
+            self.object_categories = json.load(f)
+            
+    def add_objects(self, obj_dict):
+        '''
+        Add objects from a dict.
+        '''
+        self.objects = obj_dict
+            
+    def load_objects(self, filename):
+        '''
+        Get ObjectDefinitions from a CSV file.
+        '''
+        p = True
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+            headers = lines[0].strip().split('\t')
+            if p==True:
+                p = False
+            for line in lines[1:]:
+                fields = line.strip().split('\t')
+                object_dict = {}
+                for i in range(len(headers)):
+                    object_dict[headers[i]] = fields[i]
+                object = ObjectDefinition(**object_dict)
+                self.objects[object.obj_type] = object
+
+    def load_from_dict(self, object_dict):
+        self.object_categories = object_dict.get('object_categories')
+        self.objects = object_dict.get('objects')
+
+class ObjectRegistry:
+    '''
+    A dictionary of all ObjectInstances with their ids as keys.
+    '''
+    def __init__(self):
+        self.object_instances = {}
+
+    def add_object(self, obj):
+        if isinstance(obj, ObjectInstance):
+            self.object_instances[obj.get_id()] = obj
+
+    def get_object_by_id(self, obj_id):
+        return self.object_instances.get(obj_id)
+
+    def get_object_contents(self, container_object_id):
+        contents = []
+        for object_id, object in self.object_instances:
+            if object.parent_object_id == container_object_id:
+                contents.append(object_id)
+
+    def load_from_dict(self, object_dict):
+        self.object_instances = object_dict.get('object_instances')
+
+    def len(self):
+        return len(self.object_instances)
+        
+    def __iter__(self):
+        return iter(self.object_instances.items())

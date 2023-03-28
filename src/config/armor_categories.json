@@ -1,0 +1,18 @@
+{
+    "Accessories": [
+        "Gauntlet", "Locked gauntlet", "Spiked gauntlet"
+    ],
+    "Clothing": [
+        "No armor", "Normal clothing", "Cold clothing", "Very cold clothing"
+    ],
+    "Light armor": [
+        "Padded armor", "Leather armor", "Studded leather armor",  "Ring mail", 
+        "Chain shirt"
+    ],
+    "Medium armor": [
+        "Hide", "Scale mail", "Brigandine armor", "Chain mail", "Breastplate"
+    ],
+    "Heavy armor": [
+        "Banded armor", "Half-plate armor", "Full plate armor"
+    ]
+}

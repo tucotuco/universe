@@ -1,0 +1,80 @@
+{
+    "Axes": [
+        "Battleaxe", "Bardiche", "Bec de corbin", "Greataxe", "Guisarme-voulge", 
+        "Halberd", "Handaxe", "Lochaber axe", "Tomahawk", "Voulge"
+    ],
+    "Bows": [
+        "Shortbow", "Pelletbow", "Longbow", "Composite shortbow", "Composite longbow",
+        "Hand crossbow", "Light crossbow", "Heavy crossbow", "Repeating crossbow", 
+        "Ballista"
+    ],
+    "Catapults": [
+        "Light catapult", "Heavy catapult", "Trebuchet"
+    ],
+    "Clubs": [
+        "Bo stick", "Club", "Greatclub", "Jo stick", "Kiseru", "Heavy mace", "Light mace",
+        "Morningstar", "Tetsubo"
+    ],
+    "Entanglers": [
+        "Bola", "Chain", "Chijiriki", "Hooked net", "Kawanaga", "Kusari-gama", "Lasso", 
+        "Net", "Spiked chain", "Whip"
+    ],
+    "Flails": [
+        "Heavy flail", "Light flail", "Kau sin ke", "Kusari-gama", "Nunchaku",
+        "Sap (Blackjack)", "Scourge", "Three-piece staff"
+    ],
+    "Hammers": [
+        "Fang", "Hammer", "Lucern hammer", "Heavy pick", "Light pick", "Warhammer"
+    ],
+    "Hand Weapons": [
+        "Dagger", "Punching dagger (Katar)", "Gauntlet", "Locked gauntlet", 
+        "Spiked gauntlet", "Knife", "Kukri", "Needle (Pin)", "Nekode", "Sai (Jitte)", 
+        "Siangham", "Stone", "Uichi-ne"
+    ],
+    "Lances": [
+        "Heavy lance", "Light lance", "Medium lance"
+    ],
+    "Rams": [
+        "Portable ram", "Six-person ram", "Suspended ram"
+    ],
+    "Scythes": [
+        "Battle scythe", "Fauchard", "Fauchard-fork", "Glaive", "Glaive-guisarme",
+        "Guisarme (Bill hook)", "Guisarme-voulge", "Hook fauchard", "Kama (Sickle)",
+        "Kusari-gama", "Nagimaki", "Naginata"
+    ],
+    "Shields": [
+        "Wooden buckler", "Buckler", "Small wooden shield", "Small shield", 
+        "Medium wooden shield", "Medium shield", "Large wooden shield", "Large shield", 
+        "Tower shield", "Spiked wooden buckler", "Spiked buckler", 
+        "Spiked small wooden shield", "Spiked small shield", 
+        "Spiked medium wooden shield", "Spiked medium shield", 
+        "Spiked large wooden shield", "Spiked large shield", 
+        "Spiked tower shield"
+    ],
+    "Slings": [
+        "Sling", "Staff-sling"
+    ],
+    "Spears": [
+        "Bec de corbin", "Chijiriki", "Fauchard-fork", "Halfspear", "Harpoon", 
+        "Hook fauchard", "Javelin", "Kumade", "Military fork", "Partisan", "Pike", 
+        "Ranseur", "Spear", "Spetum", "Trident"
+    ],
+    "Special": [
+        "Aklys", "Armor spike", "Atlatl", "Blowgun", "Caltrops (Tetsu-bishi)", "Garrote", 
+        "Lajatang", "Man catcher"
+    ], 
+    "Staves": [
+        "Bo stick", "Nunchaku", "Quarterstaff", "Staff-sling", "Three-piece staff"
+    ],
+    "Swords": [
+        "Bastard sword", "Broadsword", "Falchion", "Greatsword (2-handed)", "Katana", 
+        "Longsword", "Machete (Parang)", "Rapier", "Scimitar", "Short sword", "Wakizashi"
+    ], 
+    "Thrown": [
+        "Boomerang", "Chakram", "Dagger", "Dart", "Javelin", "Knife", "Needle (Pin)", 
+        "Shuriken", "Stone", "Uichi-ne"
+    ], 
+    "Unarmed": [
+        "Arm", "Leg", "Gauntlet", "Locked gauntlet", "Spiked gauntlet", "Nekode", "Stone"
+    ]
+}

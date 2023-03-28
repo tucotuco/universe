@@ -1,0 +1,142 @@
+obj_type	cost	weight	length	RT	RD	RP	ST	SD	SP	TT	TD	TP	hardness	hit_points	weapon_size
+Aklys	400	3.5	2	6	5	P	6	5	B	4	3	P	5	2	S
+Arm	0	0	0				4	3	B	3	2	B	0		T
+Armor spike	400	1	0.5							6	3	P	10	10	S
+Atlatl	200	1.5	3	5	5	P	6	6	P				2	2	T
+Bardiche	1400	9	5	6	5	S	6	9	S	6	6	P,S	5	5	L
+Bastard sword	6000	10	4.5	6	8	P	6	11	S	6	8	P	10	9	L
+Battle scythe	1400	7	5	6	4	P,S	6	9	P,S	5	4	B	5	5	L
+Battleaxe	1000	7	4	6	7	B,S	6	8	B,S	5	4	B,P	5	5	M
+Bec de corbin	1600	6	6	6	4	P	6	6	P	5	4	P	5	5	L
+Blowgun	1000	0.1	4	6	1	P							1	0	T
+Bo stick	100	4	6.5	5	4	B	5	5	B	4	4	B	6	3	M
+Bola	600	2.5	6	6	2	B,E	6	2	B,E				2	2	S
+Boomerang	600	2	2	6	3	B	4	3	B	4	2	B	5	2	T
+Broadsword	5000	8	3.5	6	7	P	6	9	S	5	7	P	10	7	M
+Caltrops (Tetsu-bishi)	20	0.4	0.25	4	2	P							10	1	T
+Chain	1200	8	8	6	1	B,E	6	4	B,E				8	8	M
+Chakram	200	0.5	1	5	4	S	4	4	S	4	4	P,S	10	3	T
+Chijiriki	1400	7	7	6	5	B,P	5	4	B,P,E	5	5	P	5	5	M
+Club	0	3	3	5	3	B	5	6	B	4	4	B	5	10	S
+Dagger	400	1	1.25	4	4	P,S	4	4	P,S	4	4	P,S	7	3	T
+Punching dagger (Katar)	400	2	0				4	4	P,S	4	4	P,S	7	3	T
+Dart	50	0.3	0.3	4	3	P				4	3	P	3	1	T
+Falchion	6000	9	3.5	6	7	P	6	9	S	5	7	P	10	8	L
+Fang	100	3	3	5	5	B,P	5	6	B,P	4	3	B,P	10	5	S
+Fauchard	1000	6	7	6	4	S	6	6	S	5	4	P,S	5	5	L
+Fauchard-fork	1600	7	8	6	4	P,S	5	4	P,S	5	6	P	5	5	L
+Heavy flail	3000	10	4	6	4	B,P	6	8	B,P				8	8	L
+Light flail	1600	5	2	5	3	B,P	6	6	B,P				8	8	M
+Garrote	10	0.1	3				5	4	S				1	0	T
+Gauntlet	400	2	0				5	4	B	4	3	B	10	5	T
+Locked gauntlet	1600	1.5	0				5	4	B	4	3	B	10	5	T
+Spiked gauntlet	1000	3	0.5				5	5	B,P,S	4	4	B,P,S	10	5	T
+Glaive	1200	6.5	8	6	6	S	6	8	S	5	8	P,S	5	5	L
+Glaive-guisarme	1400	7	8	6	6	P,S	6	8	P,S	5	7	P,S	5	5	L
+Greataxe	4000	20	4	6	9	B,S	6	10	S	6	5	B	5	8	L
+Greatclub	1000	10	4	6	5	B	6	8	B,P	6	5	B	5	20	L
+Greatsword (2-handed)	10000	15	6	6	9	P	6	12	S	6	9	P	10	10	L
+Guisarme (Bill hook)	1000	6.5	6	6	4	S	6	8	P,S	5	7	S	5	5	L
+Guisarme-voulge	1600	9.5	7	6	6	P,S	6	9	P,S	6	9	P,S	5	5	L
+Halberd	2000	8.5	5	6	6	P,S	6	10	P,S	5	7	P,S	5	5	L
+Halfspear	200	3	4	5	4	P	5	4	P,S	4	4	P	5	5	M
+Hammer	200	2	1.5	5	5	B	6	6	B	4	3	B	5	5	S
+Handaxe	200	4	1.5	5	5	B,S	5	6	B,S	5	3	B	5	3	S
+Harpoon	400	6	6	6	6	P	6	4	P	5	6	P	5	5	M
+Hook fauchard	1200	7	8	6	4	P	6	6	P	5	6	P,S	5	5	L
+Hooked net	3000	17	6	7	4	E,P,S	6	4	E,P,S				1	5	L
+Javelin	150	2	3	5	5	P	5	3	P	4	5	P	5	5	S
+Jo stick	50	1.5	3	5	3	B	4	4	B	4	4	B	6	3	S
+Kama (Sickle)	1000	4	2	5	2	P,S	6	5	P,S	4	2	S	5	5	M
+Katana	8000	7	3	6	8	P	6	10	S	5	6	P	12	15	M
+Kau sin ke	100	4	5	5	2	S,5	6	3	S				6	5	M
+Kawanaga	25	1	8	6	3	B,E,P	6	3	B,E,P				1	1	S
+Kiseru	250	0.5	2	5	3	B	4	3	B	4	3	B	10	2	T
+Knife	200	0.5	1	4	3	P,S	4	3	P,S	4	3	P,S	6	2	T
+Kukri	600	3	1.5	4	4	P,S	4	4	P,S	4	4	P,S	8	4	T
+Kumade	600	5	6	5	5	P	5	4	P,S	4	5	P	5	5	M
+Kusari-gama	1600	8	5	6	4	B,E,S	6	6	B,E,S	4	3	B	5	5	M
+Lajatang	1000	8	4	6	4	P	6	4	B,P,S	5	4	P	5	5	M
+Heavy lance	3000	15	14	6	6	B,P	6	6	B	5	7	B,P	7	6	M
+Light lance	1200	5	8	6	4	B,P	6	4	B	5	5	B,P	5	4	S
+Medium lance	2000	10	12	6	5	B,P	6	5	B	5	6	B,P	6	5	M
+Lasso	50	4	20	6	0	E	6	0	E				1	1	M
+Leg	0	0	0				5	4	B	4	3	B	0		T
+Lochaber axe	1000	8.5	12	6	8	P,S	6	9	P,S	5	9	P,S	5	5	L
+Longsword	3600	6	3.5	6	7	P	6	8	S	5	7	P	10	6	M
+Lucern hammer	1400	6	5	5	5	B,P	6	6	B,P	4	6	P	5	5	M
+Heavy mace	2400	12	2.5	6	7	B	6	9	B	6	4	B	10	12	M
+Light mace	1000	6	1.5	5	5	B	6	6	B	4	3	B	10	10	S
+Machete (Parang)	600	5	2	5	5	P	5	5	S	4	4	P	10	4	S
+Man catcher	2000	10	8	6	4	P	6	4	P	6	4	P	5	5	L
+Military fork	1000	4.5	7	5	6	P	5	4	P	4	6	P	5	5	L
+Morningstar	1600	8	4	6	8	B,P	6	9	B,P	5	5	B,P	10	5	M
+Nagimaki	1000	4	4	5	6	S	5	6	S	5	6	P,S	5	5	S
+Naginata	1000	5	7	6	6	S	6	7	S	5	7	P,S	5	5	M
+Needle (Pin)	3	0.1	0.5	4	0	P				4	1	P	1	0	T
+Nekode	300	0.5	0.5				5	4	P,S	4	4	B	6	2	T
+Net	200	1	6	6	0	E	6	0	E				1	5	M
+Nunchaku	400	2	3	4	4	P,S	5	5	B	4	3	B	5	5	S
+Partisan	1400	5.5	8	5	6	P,S	5	5	P,S	4	7	P,S	5	5	L
+Heavy pick	1600	6	4	5	6	P	6	7	P	4	4	P	5	5	M
+Light pick	800	4	2	5	5	P	6	5	P	4	3	P	5	5	S
+Pike	1000	8.5	18	6	6	P				6	8	P	5	5	L
+Quarterstaff	0	5	7	5	4	B	6	6	B,P	5	4	B	5	5	M
+Portable ram	2000	40	5							6	6	B	5	20	L
+Six-person ram	0	300	10							6	12	B	5	40	L
+Suspended ram	20000	500	12							12	15	B	5	30	H
+Ranseur	1200	4.5	8	5	6	P	5	4	P,S	4	6	P	5	5	L
+Rapier	4000	4	3	5	6	P	5	6	S	4	6	P	10	5	M
+Sai (Jitte)	500	2	1.5	4	3	P,S	4	4	P,S	4	4	P,S	6	2	T
+Sap (Blackjack)	200	3	1	4	4	B	5	4	B				2	1	S
+Scimitar	3000	5	3	5	6	P	5	6	S	4	6	P	10	6	M
+Scourge	200	2	3	4	3	B,E,P	5	5	B,E,P				2	2	S
+Short sword	2000	3.5	2.5	5	5	P	5	5	S	4	5	P	10	5	S
+Shuriken	20	0.2	0.3	4	3	P,S	5	6	P				10	1	T
+Siangham	600	1	2	4	4	P,S	4	5	P,S	4	5	P,S	5	3	S
+Sling	50	0.2	2	6	4	B	6	4	B				0	1	T
+Spear	200	4	7	5	5	P	5	4	P,S	4	5	P	5	5	M
+Spetum	1000	6	9	5	5	P	5	4	P,S	4	7	P	5	5	L
+Spiked chain	5000	15	10	6	5	B,E,P	6	8	B,E,P				10	10	L
+Staff-sling	1100	2	5	6	4	B,P	5	5	B,P	4	3	B	5	5	M
+Stone	0	0.5	0.3				4	4	B	4	3	B	7	5	T
+Tetsubo	600	7.5	4	6	6	B	6	7	B	5	4	B	10	10	M
+Three-piece staff	800	6	6	5	3	B	6	6	B	5	3	B	5	5	M
+Tomahawk	100	3	1.5	5	4	B,S	5	4	B	5	3	B,S	5	2	T
+Trident	1800	7.5	6	6	8	P	6	5	P	6	8	P	5	5	M
+Uichi-ne	200	2	1.5	4	4	P,S	5	4	P,S	4	4	P,S	5	3	T
+Voulge	1000	8.5	8	6	8	P,S	6	9	P,S	5	7	P,S	5	5	L
+Wakizashi	4000	3	3	5	6	P	5	7	S	4	6	P	12	6	S
+Warhammer	2400	8	4	6	8	B	6	8	B	5	5	B	5	8	M
+Whip	100	1	20				5	2	B,E				1	1	S
+Shortbow	1800	2	3	6	4	P							0	1	S
+Pelletbow	3000	3	5	6	5	B							0	1	M
+Longbow	3000	3	5	6	6	P							0	1	M
+Composite shortbow	2400	3	3	6	4	P							0	1	S
+Composite longbow	4000	4	5	6	6	P							0	1	M
+Hand crossbow	7000	3	1.5	7	4	P							0	1	T
+Light crossbow	7000	6	3	8	8	P							0	1	S
+Heavy crossbow	10000	9	4	9	10	P							0	1	M
+Repeating crossbow	30000	16	3	2	8	P							0	1	M
+Ballista	30000	100	10	18	15	B, P							3	3	L
+Light catapult	110000	500	15	30	20	B							5	5	H
+Heavy catapult	160000	1000	30	48	30	B							6	6	C
+Trebuchet	200000	1000	20	48	36	B							6	6	G
+Wooden buckler	200	2	2	4	3	B	4	1	B	4	1	B		16	1
+Buckler	400	3	2	4	3	B	4	1	B	4	1	B		16	1
+Small wooden shield	600	4	2.5	4	3	B	4	2	B	4	2	B		24	2
+Small shield	800	6	2.5	5	3	B	5	2	B	5	2	B		24	2
+Medium wooden shield	1200	6	3	5	3	B	5	3	B	5	3	B		40	3
+Medium shield	1400	8	3	6	4	B	6	3	B	6	3	B		40	3
+Large wooden shield	1600	12	3.5	6	4	B	6	4	B	6	4	B		48	4
+Large shield	2000	15	3.5	6	4	B	6	4	B	6	4	B		48	4
+Tower shield	4000	30	5	7	4	B	7	4	B	7	4	B		56	5
+Spiked wooden buckler	600	3	2.5	4	3	B	4	1	B	4	3	B,P		16	1
+Spiked buckler	800	4	2.5	4	3	B	4	1	B	4	3	B,P		16	1
+Spiked small wooden shield	1000	5	3	4	3	B	4	2	B	4	4	B,P		24	2
+Spiked small shield	1200	7	3	5	3	B	5	2	B	5	4	B,P		24	2
+Spiked medium wooden shield	1600	7	3.5	5	3	B	5	3	B	5	5	B,P		40	3
+Spiked medium shield	1800	9	3.5	6	4	B	6	3	B	6	5	B,P		40	3
+Spiked large wooden shield	2000	13	4	6	4	B	6	4	B	6	6	B,P		48	4
+Spiked large shield	2400	16	4	6	4	B	6	4	B	6	6	B,P		48	4
+Spiked tower shield	4400	31	5.5	7	4	B	7	4	B	7	6	B,P		56	5

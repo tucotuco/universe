@@ -1,0 +1,45 @@
+name	required_skill
+break hold	none
+armed break weapon	none
+unarmed break weapon	unarmed combat
+bull rush	none
+charge	none
+coup de grace	none
+delay	none
+disarm with weapon	advanced weapon
+disarm unarmed	unarmed combat
+end-run	none
+feint with weapon	advanced weapon
+feint unarmed	unarmed combat
+grab	none
+hold	none
+takedown	none
+reverse	none
+pin from above	none
+pin from below	none
+escape	none
+dismount rider	none
+multiple action	multi-action
+overrun	none
+ready	none
+shield bash	none
+shoot	none
+launch	none
+swing	none
+thrust	none
+stun	stun
+subdue	none
+throw	none
+touch	none
+trip	none
+two-handed swing	none
+two-handed thrust	none
+undefended attack	none
+wrest	none
+block	none
+deflect unarmed	unarmed combat
+disengage	none
+dodge	none
+parry with weapon	advanced weapon
+parry unarmed	unarmed combat
+yield	none

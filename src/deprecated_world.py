@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2022 Rauthiflor LLC"
+__copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "world.py 2023-01-02T15:41-03:00"
 
 from encounter import EncounterHistory
