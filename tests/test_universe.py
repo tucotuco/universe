@@ -5,7 +5,9 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_universe.py 2023-03-20T18:55-03:00"
 
+# TODO: Check comprehensiveness
 # TODO: Make tests for loaded universe verus saved universe to make sure they are the same.
+# TODO: For all classes, set consistent method order: __init__, copy, to_json, get/set combos
 
 import unittest
 import uuid

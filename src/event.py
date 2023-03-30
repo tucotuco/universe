@@ -10,6 +10,9 @@ __version__ = "event.py 2023-02-08T19:25-03:00"
 from identifiable import Identifiable
 
 class Event(Identifiable):
+    '''
+    Something that happens at a place and time. Instances have unique identifiers.
+    '''
     def __init__(self, location, starttime, endtime=None, name="", parent=None, id=None):
         Identifiable.__init__(self, name, id)
         self.starttime = starttime
@@ -18,6 +21,9 @@ class Event(Identifiable):
         self.parent = parent
 
     def __eq__(self, other):
+        '''
+        Method to establish equality of two Event instances.
+        '''
         if isinstance(other, Event):
             if self.location != other.location:
                 return False

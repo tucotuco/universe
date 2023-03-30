@@ -6,13 +6,17 @@ __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "weapon.py 2023-03-20T18:57-03:00"
 
 # TODO: WeaponDefinitions from file will need widths and heights eventually
-# TODO: deprecate weapon_size in favor of a function based on actual size?
+# TODO: Deprecate weapon_size in favor of a function based on actual size and size of wielder
+# TODO: Make ''' comments on classes and methods
 
 import json
 from object import ObjectInstance, ObjectDefinition, ObjectDictionary
 from utils import convert_to_numeric
 
 class WeaponDefinition(ObjectDefinition):
+    '''
+    A template for characteristics of a Weapon, which is a subtype of Object.
+    '''
     def __init__(self, obj_type, length, weight, cost, hardness, hit_points, RT, RD, RP, 
                  ST, SD, SP, TT, TD, TP, weapon_size, width=0, height=0, is_magical=False, 
                  tags=None, weapon_categories=None):

@@ -6,12 +6,16 @@ __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "armor.py 2023-03-20T18:56-03:00"
 
 # TODO: ArmorDefinitions will need widths and heights eventually
+# TODO: Make ''' comments on classes and methods
 
 import json
 from object import ObjectInstance, ObjectDefinition, ObjectDictionary
 from utils import convert_to_numeric
 
 class ArmorDefinition(ObjectDefinition):
+    '''
+    A template for characteristics of an Armor, which is a subtype of Object.
+    '''
     def __init__(self, obj_type, cost, weight, HB, HP, HS, DB, DP, DS, 
                  armor_check_penalty, dexterity_check_penalty, hit_points, 
                  length=0, width=0, height=0, hardness=0, is_magical=False, tags=None, 
@@ -57,7 +61,7 @@ class ArmorDefinition(ObjectDefinition):
 
     def to_json(self):
         '''
-        Get a representation of a ArmorDefinition as JSON.
+        Get a representation of an ArmorDefinition as JSON.
         '''
         parent_json = super().to_json()
         data = {
@@ -69,21 +73,39 @@ class ArmorDefinition(ObjectDefinition):
         return json.dumps(data)
 
     def HB(self):
+        '''
+        Get the value of hardness against a bludgeon penetration type.
+        '''
         return self.defenses.get('H').get('B')
 
     def HP(self):
+        '''
+        Get the value of hardness against a pierce penetration type.
+        '''
         return self.defenses.get('H').get('P')
 
     def HS(self):
+        '''
+        Get the value of hardness against a slash penetration type.
+        '''
         return self.defenses.get('H').get('S')
 
     def DB(self):
+        '''
+        Get the value of damage stopped for a bludgeon penetration type.
+        '''
         return self.defenses.get('D').get('B')
 
     def DP(self):
+        '''
+        Get the value of damage stopped for a pierce penetration type.
+        '''
         return self.defenses.get('D').get('P')
 
     def DS(self):
+        '''
+        Get the value of damage stopped for a slash penetration type.
+        '''
         return self.defenses.get('D').get('S')
 
 class ArmorInstance(ObjectInstance):
@@ -130,8 +152,10 @@ class ArmorInstance(ObjectInstance):
                     except Exception as e:
                         print(f'Version: {__version__}: {e}')
 
-# A dictionary of all information about armors
 class ArmorDictionary(ObjectDictionary):
+    '''
+    A reference for information about ArmorDefinitions.
+    '''
     def __init__(self):
         ObjectDictionary.__init__(self)
 

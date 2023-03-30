@@ -5,7 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_identifiable.py 2023-02-08T21:31-03:00"
 
-# TODO:
+# TODO: Check comprehensiveness
 
 import unittest
 import uuid
@@ -31,6 +31,9 @@ class TestIdentifiable(unittest.TestCase):
     def test_name_assignment(self):
         name = "Test Name"
         identifiable = Identifiable(name=name)
+        self.assertEqual(identifiable.name, name)
+        name = "New Name"
+        identifiable.set_name(name)
         self.assertEqual(identifiable.name, name)
     
     def test_type_assignment(self):

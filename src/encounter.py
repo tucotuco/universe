@@ -6,6 +6,8 @@ __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "encounter.py 2023-01-02T15:45-03:00"
 
 # TODO: Just about everything
+# TODO: Make ''' comments on classes and methods
+# TODO: Deprecate EncounterHistory in favor of EventHistory?
 
 from event import Event
 from actiontimeline import ActionTimeline
@@ -18,6 +20,9 @@ from weapon import WeaponDictionary
 # of time. Each Encounter has a start time in seconds from a base epoch that anchors it 
 # in a broder historical context.
 class Encounter(Event):
+    '''
+    A subtype of Event that captures the interactions of Beings.
+    '''
     def __init__(self, location, starttime, endtime=None, name="", parent=None, id=None, initiated=False, map=None, action_dict=None, weapon_dict=None, action_timeline=None, beings_present=None):
         Event.__init__(self, location, starttime, endtime, name, parent)
         self.map = map
@@ -99,8 +104,10 @@ class Encounter(Event):
     def save(self):
         pass
 
-# An EncounterHistory is a container for Encounters.
 class EncounterHistory:
+    '''
+    A reference for information about Encounters.
+    '''
     def __init__(self):
       self.encounters = []
 

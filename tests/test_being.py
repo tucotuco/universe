@@ -3,9 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_being.py 2023-03-17T08:43-03:00"
+__version__ = "test_being.py 2023-03-29T02:37-03:00"
 
-# TODO: Make comprehensive test coverage (all methods)
+# TODO: Check comprehensiveness
 
 import json
 import unittest
@@ -20,6 +20,7 @@ from weapon import WeaponDictionary
 from speeds import Speed
 from abilities import Abilities
 from skill import SkillDictionary
+from states import StatesList
 
 class TestBeingDefinition(unittest.TestCase):
     def setUp(self):
@@ -116,18 +117,18 @@ class TestBeingDefinition(unittest.TestCase):
         self.being_def.set_skill_level(self.skill_dictionary, 'bardiche', 1)
         self.assertEqual(self.being_def.get_skill_level('ki'), 6)
         self.assertIsNone(self.being_def.get_skill_level('astronomy'))
-        self.assertEqual(len(self.being_def.states),0)
+        self.assertEqual(len(self.being_def.get_states()),0)
 
-    def test_set_and_remove_arm(self):
+    def test_set_and_body_part_remove_object(self):
         being = BeingDefinition(obj_type='humanoid', length=6, weight=180, hit_points=50, hit_dice='5d10', 
-                 alignment='neutral', armor_class=15, challenge_rating=2, arms={'left': 'dagger', 'right': 'sword'})
-        # Test set_arm()
-        being.set_arm('head', 'helmet')
-        self.assertEqual(being.arms['head'], 'helmet')
-        # Test remove_arm()
-        removed_weapon = being.remove_arm('left')
+                 alignment='neutral', armor_class=15, challenge_rating=2, body_parts={'left': 'dagger', 'right': 'sword'})
+        # Test set_body_part_holds_object()
+        being.set_body_part_holds_object('head', 'helmet')
+        self.assertEqual(being.body_parts['head'], 'helmet')
+        # Test body_part_remove_object()
+        removed_weapon = being.body_part_remove_object('left')
         self.assertEqual(removed_weapon, 'dagger')
-        self.assertNotIn('left', being.arms)
+        self.assertNotIn('left', being.body_parts)
 
 class TestBeingInstance(unittest.TestCase):
     def setUp(self):
@@ -140,9 +141,14 @@ class TestBeingInstance(unittest.TestCase):
         self.weapon_dict.load_object_categories(self.categories_file)
         self.weapon_dict.load_objects(self.weapons_file)
 
+        self.states_file = '../src/config/states.tsv'
+        self.states_list = StatesList()
+        self.states_list.load_states(self.states_file)
+
         self.being_def = BeingDefinition('Human', 6, 170, 7, '2d6', 'Neutral', 10, 1)
         self.being_inst = BeingInstance(self.being_def, name='Tobe')
         self.assertEqual(self.being_inst.possessions, {})
+
         current_being_state = self.being_inst.current
         original_being_state = self.being_inst.original
 
@@ -184,7 +190,7 @@ class TestBeingInstance(unittest.TestCase):
         self.assertEqual(original_being_state.traits, {})
         self.assertEqual(original_being_state.actions, {})
         self.assertEqual(original_being_state.reactions, {})
-        self.assertEqual(len(original_being_state.states),0)
+        self.assertEqual(len(original_being_state.get_states()),0)
 
         self.assertEqual(current_being_state.obj_type, 'Human')
         self.assertEqual(current_being_state.length, 6)
@@ -222,7 +228,7 @@ class TestBeingInstance(unittest.TestCase):
         self.assertEqual(current_being_state.psionics, {})
         self.assertEqual(current_being_state.spells, {})
         self.assertEqual(current_being_state.traits, {})
-        self.assertEqual(current_being_state.states,{})
+        self.assertEqual(current_being_state.get_states(),{})
         self.assertEqual(current_being_state.actions, {})
         self.assertEqual(current_being_state.reactions, {})
 
@@ -237,19 +243,19 @@ class TestBeingInstance(unittest.TestCase):
         self.assertEqual(self.being_inst.get_skill_level('run'), 3)
 
     def test_states(self):
-        current_states = self.being_inst.current.states
+        current_states = self.being_inst.get_states()
         self.assertEqual(current_states, {})
-        self.being_inst.un_paralyze()
+        self.being_inst.un_paralyze(self.states_list)
         self.assertEqual(current_states, {})
-        self.being_inst.paralyze()
+        self.being_inst.paralyze(self.states_list)
         self.assertEqual(self.being_inst.is_paralyzed(), True)
-        self.being_inst.un_paralyze()
+        self.being_inst.un_paralyze(self.states_list)
         self.assertEqual(self.being_inst.is_paralyzed(), False)
 
         self.assertEqual(self.being_inst.is_stunned(), False)
-        self.being_inst.stun()
+        self.being_inst.stun(self.states_list)
         self.assertEqual(self.being_inst.is_stunned(), True)
-        self.being_inst.un_stun()
+        self.being_inst.un_stun(self.states_list)
         self.assertEqual(self.being_inst.is_stunned(), False)
         
         self.assertEqual(self.being_inst.is_paralyzed(), False)
@@ -257,13 +263,13 @@ class TestBeingInstance(unittest.TestCase):
         self.assertEqual(self.being_inst.get_hit_points()>0, True)
 #        print(f'{self.being_inst.current.states} {self.being_inst.get_abilities()}')
         self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.paralyze()
+        self.being_inst.paralyze(self.states_list)
         self.assertEqual(self.being_inst.is_helpless(), True)
-        self.being_inst.un_paralyze()
+        self.being_inst.un_paralyze(self.states_list)
         self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.stun()
+        self.being_inst.stun(self.states_list)
         self.assertEqual(self.being_inst.is_helpless(), True)
-        self.being_inst.un_stun()
+        self.being_inst.un_stun(self.states_list)
         self.assertEqual(self.being_inst.is_helpless(), False)
         self.being_inst.set_ability('str', 2)
         self.assertEqual(self.being_inst.is_helpless(), False)
@@ -304,12 +310,12 @@ class TestBeingInstance(unittest.TestCase):
         self.assertIn('parry with weapon', possible_actions)
         self.assertEqual(len(possible_actions), 43)
 
-    def test_set_arm(self):
-        self.assertEqual(self.being_inst.current.arms, {})
-        self.being_inst.set_arm("right_arm", "Longsword")
-        self.assertEqual(self.being_inst.current.arms, {"right_arm": "Longsword"})
-        self.being_inst.set_arm("left_arm", "Small wooden shield")
-        self.assertEqual(self.being_inst.current.arms, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
+    def test_set_body_part_holds_object(self):
+        self.assertEqual(self.being_inst.current.body_parts, {})
+        self.being_inst.set_body_part_holds_object("right_arm", "Longsword")
+        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword"})
+        self.being_inst.set_body_part_holds_object("left_arm", "Small wooden shield")
+        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
 
     def test_currently_possible_actions(self):
         action_dict_file = '../src/config/actions.tsv'
@@ -343,10 +349,10 @@ class TestBeingInstance(unittest.TestCase):
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 2)
 
-        self.assertEqual(self.being_inst.current.arms, {})
-        self.being_inst.set_arm("right_arm", "Longsword")
-        self.being_inst.set_arm("left_arm", None)
-        self.assertEqual(self.being_inst.current.arms, {"right_arm": "Longsword", "left_arm": None})
+        self.assertEqual(self.being_inst.current.body_parts, {})
+        self.being_inst.set_body_part_holds_object("right_arm", "Longsword")
+        self.being_inst.set_body_part_holds_object("left_arm", None)
+        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": None})
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 7)
 
@@ -374,30 +380,30 @@ class TestBeingInstance(unittest.TestCase):
         self.being_inst.set_fatigue_level(0)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 8)
-        self.being_inst.paralyze()
+        self.being_inst.paralyze(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 0)
-        self.being_inst.un_paralyze()
+        self.being_inst.un_paralyze(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 8)
-        self.being_inst.stun()
+        self.being_inst.stun(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 0)
-        self.being_inst.un_stun()
+        self.being_inst.un_stun(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 8)
         chosen = self.being_inst.choose_action(action_dict, weapon_dict)
         self.assertIn(chosen, currently_possible)
         print(f'Chose: {chosen}')
 
-    def test_remove_arm(self):
-        self.being_inst.current.arms = {"right_arm": "Longsword", "left_arm": "Small wooden shield"}
-        self.assertEqual(self.being_inst.current.arms, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
-        removed_weapon = self.being_inst.remove_arm("right_arm")
-        self.assertEqual(self.being_inst.current.arms, {"left_arm": "Small wooden shield"})
+    def test_body_part_remove_object(self):
+        self.being_inst.current.body_parts = {"right_arm": "Longsword", "left_arm": "Small wooden shield"}
+        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
+        removed_weapon = self.being_inst.body_part_remove_object("right_arm")
+        self.assertEqual(self.being_inst.current.body_parts, {"left_arm": "Small wooden shield"})
         self.assertEqual(removed_weapon, "Longsword")
-        removed_weapon = self.being_inst.remove_arm("right_arm")
-        self.assertEqual(self.being_inst.current.arms, {"left_arm": "Small wooden shield"})
+        removed_weapon = self.being_inst.body_part_remove_object("right_arm")
+        self.assertEqual(self.being_inst.current.body_parts, {"left_arm": "Small wooden shield"})
         self.assertIsNone(removed_weapon)
 
     def test_set_armor(self):

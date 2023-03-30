@@ -5,6 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_object.py 2023-03-06T11:19-03:00"
 
+# TODO: Check comprehensiveness
 # TODO: Make sure an ObjectInstance is inside one and only one ObjectInstance as it's immediate container
 # TODO: Make Universe and Object and the parentmost container
 
@@ -191,7 +192,8 @@ class TestObjectDictionary(unittest.TestCase):
     def setUp(self):
         self.objects_file = '../src/config/objects.tsv'
         self.categories_file = '../src/config/object_categories.json'
-        self.dictionary = ObjectDictionary()
+        self.object_dict = ObjectDictionary()
+
         self.expected_categories = {
     "Animal": [
         "Boar", "Bull"
@@ -233,19 +235,12 @@ class TestObjectDictionary(unittest.TestCase):
         "Barge", "Canoe (small)"
     ]
 }
-
-    def test_load_object_categories(self):
-        self.dictionary.load_object_categories(self.categories_file)
-        self.assertEqual(len(self.dictionary.object_categories), 13)
-        self.assertDictEqual(self.dictionary.object_categories, self.expected_categories)
-
-    def test_load_objects(self):
-        self.dictionary.load_objects(self.objects_file)
-        self.assertEqual(len(self.dictionary.objects), 26)
-        for object in self.dictionary.objects:
-            object_dict = self.dictionary.objects[object]
-            self.assertIsInstance(object_dict, ObjectDefinition)
-        object = self.dictionary.objects['Boar']
+        self.object_dict.load_objects(self.objects_file)
+        self.assertEqual(len(self.object_dict.objects), 26)
+        for object in self.object_dict.objects:
+            object_dict = self.object_dict.objects[object]
+        self.assertIsInstance(object_dict, ObjectDefinition)
+        object = self.object_dict.objects['Boar']
         self.assertEqual(object.obj_type, 'Boar')
         self.assertEqual(object.cost, 8000)
         self.assertEqual(object.weight, 400)
@@ -253,25 +248,34 @@ class TestObjectDictionary(unittest.TestCase):
         self.assertEqual(object.hardness, 5)
         self.assertEqual(object.hit_points, 10)
 
+        self.object_dict.load_object_categories(self.categories_file)
+        self.assertEqual(len(self.object_dict.object_categories), 13)
+        self.assertDictEqual(self.object_dict.object_categories, self.expected_categories)
+
     def test_all_objects_in_categories(self):
-        self.dictionary.load_object_categories(self.categories_file)
-        self.dictionary.load_objects(self.objects_file)
-        for object in self.dictionary.objects:
-            object_dict = self.dictionary.objects[object]
+        self.object_dict.load_object_categories(self.categories_file)
+        self.object_dict.load_objects(self.objects_file)
+        for object in self.object_dict.objects:
+            object_dict = self.object_dict.objects[object]
             found = False
-            for category in self.dictionary.object_categories.values():
+            for category in self.object_dict.object_categories.values():
                 if object_dict.obj_type in category:
                     found = True
                     break
             self.assertTrue(found, f"ObjectDefinition {object} with name {object_dict.obj_type} not found in any object category")
     
     def test_all_categories_in_objects(self):
-        self.dictionary.load_object_categories(self.categories_file)
-        self.dictionary.load_objects(self.objects_file)
-        for category_name, category in self.dictionary.object_categories.items():
+        self.object_dict.load_object_categories(self.categories_file)
+        self.object_dict.load_objects(self.objects_file)
+        for category_name, category in self.object_dict.object_categories.items():
             for object_name in category:
-                self.assertIn(object_name, self.dictionary.objects, 
+                self.assertIn(object_name, self.object_dict.objects, 
                               f"ObjectDefinition {object_name} in category {category_name} not found in objects list")
+
+    def test_get_objects_in_category(self):
+        self.assertEqual(self.object_dict.get_objects_in_category('Animal'), ['Boar', 'Bull'])
+        self.assertEqual(self.object_dict.get_objects_in_category('Drink'), ['Ale (pint)', 'Beer (pint)'])
+        self.assertIsNone(self.object_dict.get_objects_in_category('nonexistent_category'))
 
 class TestObjectRegistry(unittest.TestCase):
     def setUp(self):

@@ -5,7 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_encounter.py 2023-02-10T23:49-03:00"
 
-# TODO:
+# TODO: Check comprehensiveness
 
 import unittest
 import sys
@@ -32,7 +32,7 @@ class TestEncounter(unittest.TestCase):
         self.assertEqual(self.encounter.name, "")
         self.assertIsNone(self.encounter.parent)
         self.assertIsNone(self.encounter.map)
-        self.assertIsNone(self.encounter.action_timeline)
+        self.assertIsNotNone(self.encounter.action_timeline)
         self.assertIsInstance(self.encounter.beings_present, ObjectRegistry)
 
     def test_generate(self):

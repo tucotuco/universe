@@ -5,7 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_armor.py 2023-03-20T18:57-03:00"
 
-# TODO:
+# TODO: Check comprehensiveness
 
 import json
 import unittest

@@ -5,7 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_event.py 2023-02-10T23:12-03:00"
 
-# TODO:
+# TODO: Check comprehensiveness
 
 import unittest
 import sys

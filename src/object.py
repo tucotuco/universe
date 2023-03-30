@@ -5,15 +5,18 @@ __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "object.py 2023-03-20T18:56-03:00"
 
 # TODO: Make size category function from largest of length, width, height
-# TODO: Check whether subtype dictionaries have copy() methods and determine if they are needed.
-# TODO: Implement an ObjectDictionary save_to_file() method
-# TODO: get_objects_in_category() needs test suite
+# TODO: Implement an ObjectRegistry save_to_file() method
+# TODO: Make ''' comments on classes and methods
+
 import json
 
 from identifiable import Identifiable
 from utils import convert_to_numeric
 
 class ObjectDefinition:
+    '''
+    A template for characteristics of Objects.
+    '''
     def __init__(self, obj_type, length, width, height, weight, cost, hardness, 
                  hit_points, is_magical=False, tags=None, weapon_categories=None):
         self.obj_type = obj_type
@@ -95,7 +98,7 @@ class ObjectInstance(Identifiable):
     An ObjectInstance is an Identifiable that has a Size and occupies space for a period 
     of time. It is not necessarily stationary or permanent. It has normal properties that 
     indicate its original state and current values that are in effect at the time they are 
-    accessed.
+    accessed. Instances have unique identifiers.
     '''
     def __init__(self, object_definition, name='', id=None):
         Identifiable.__init__(self, name, id)
@@ -204,7 +207,7 @@ class ObjectInstance(Identifiable):
 
 class ObjectDictionary:
     '''
-    A dictionary of information about objects.
+    A reference for information about ObjectDefinitions.
     '''
     def __init__(self):
         self.object_categories = {}

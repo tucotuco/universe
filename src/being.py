@@ -3,18 +3,15 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2023-03-20T18:56-03:00"
+__version__ = "being.py 2023-03-29T02:38-03:00"
 
 # TODO: Make class BeingDictionary and tests
+# TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make BeingInstance to_json()
+# TODO: Make Being categories?
 # TODO: Make file to load dictionary from
-# TODO: Make character class based on Being?
-# TODO: Make a SkillDefinition class with name, experience, level? SkillDictionary to load from file, subclass WeaponSkill?
-# TODO: Make possessions class with named containers (and Container class) (backpack, left_hand, right_hand, body, head, etc.)
 # TODO: Make methods such as isArmored, isArmed, isShielded
 # TODO: Check for properties that need constraints and implement them (done example, experience)
-# TODO: Add dict key removers.
-# TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make ''' comments on classes and methods
 
 import json
@@ -25,17 +22,21 @@ from action import ActionDictionary
 from object import ObjectDefinition, ObjectInstance, ObjectDictionary
 from skill import Skills
 from speeds import Speed
+from states import States
 from utils import convert_to_numeric, convert_to_experience, convert_to_fatigue
 from weapon import WeaponDictionary
 
 class BeingDefinition(ObjectDefinition):
+    '''
+    A template for characteristics of a Being, which is a subtype of Object.
+    '''
     def __init__(self, obj_type, length, weight, hit_points, hit_dice, alignment, 
                  armor_class, challenge_rating, width=0, height=0, cost=0, hardness=0, 
                  is_magical=False, tags=None, weapon_categories=None, experience=0, 
                  max_speed=None, abilities=None, skills=None, senses=None, 
                  vulnerabilities=None, resistances=None, immunities=None, languages=None, 
                  psionics=None, spells=None, traits=None, states=None, actions=None, reactions=None,
-                 arms=None, armor=None, fatigue_level=0):
+                 body_parts=None, armor=None, fatigue_level=0):
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
                          hit_points, is_magical, tags, weapon_categories)
         self.experience = convert_to_experience(experience)
@@ -54,14 +55,12 @@ class BeingDefinition(ObjectDefinition):
         self.psionics = psionics or {}
         self.spells = spells or {}
         self.traits = traits or {}
-        # TODO: Make a States class with all of the functionally useful states as a dict?
-        self.states = states or {}
+        self.states = states or States()
         self.actions = actions or {}
         self.reactions = reactions or {}
-        # TODO: Make an Arms class with all of the body locations (arm, leg, tail. etc.) 
-        # that can hold something or attack
-        # arms are expected to be a body location and the weapon in that location
-        self.arms = arms or {}
+        # body_parts are expected to include a body location and the object or natural 
+        # weapon in that location
+        self.body_parts = body_parts or {}
         self.armor = armor
         self.fatigue_level = 0
 
@@ -100,7 +99,7 @@ class BeingDefinition(ObjectDefinition):
             self.states.copy(), 
             self.actions.copy(), 
             self.reactions.copy(),
-            self.arms.copy(),
+            self.body_parts.copy(),
             self.armor,
             self.fatigue_level)
         return new_being_definition
@@ -140,7 +139,7 @@ class BeingDefinition(ObjectDefinition):
             'states': self.states,
             'actions': self.actions,
             'reactions': self.reactions,
-            'arms': self.arms,
+            'body_parts': self.body_parts,
             'armor': self.armor,
             'fatigue_level': self.fatigue_level
         }
@@ -217,17 +216,17 @@ class BeingDefinition(ObjectDefinition):
     def set_weapon_skill_level(self, weapon_dict, weapon_name, level=0):
         self.skills.set_weapon_skill_level(weapon_dict, weapon_name, level)
 
-    def get_arms(self):
-        return self.arms
+    def get_body_parts(self):
+        return self.body_parts
 
-    def set_arm(self, body_location, weapon):
-        self.arms[body_location] = weapon
+    def set_body_part_holds_object(self, body_location, object):
+        self.body_parts[body_location] = object
 
-    def remove_arm(self, body_location):
-        weapon = self.arms.get(body_location)
-        if weapon is not None:
-            del self.arms[body_location]
-        return weapon
+    def body_part_remove_object(self, body_location):
+        object = self.body_parts.get(body_location)
+        if object is not None:
+            del self.body_parts[body_location]
+        return object
 
     def get_fatigue_level(self):
         return self.fatigue_level
@@ -235,6 +234,14 @@ class BeingDefinition(ObjectDefinition):
     def set_fatigue_level(self, new_fatigue_level):
         self.fatigue_level = convert_to_fatigue(new_fatigue_level)
         
+    def get_states(self):
+        return self.states.get_states()
+        
+    def get_state(self, state_name):
+        return self.states.get_state(state_name)
+        
+    def set_state(self, state_list, state_name, value):
+        self.states.set_state(state_list, state_name, value)
 
 class BeingInstance(ObjectInstance):
     def __init__(self, being_definition, name=''):
@@ -370,26 +377,33 @@ class BeingInstance(ObjectInstance):
 
     def set_possession(self, added_possession): 
         self.current.possessions.add_possession(added_possession)
-        # TODO: Implement posssession as a dict with ObjectDefinition categories and a dictionary of instances inside those with ids as keys
 
     def remove_possession(self, possession_id):
-        # TODO: Possessions will have to have identifiers and be removed by identifier
         pass
 
-    def get_arms(self):
-        return self.current.arms
+    def get_body_parts(self):
+        return self.current.body_parts
 
-    def set_arm(self, body_location, weapon):
-        self.current.arms[body_location] = weapon
+    def set_body_part_holds_object(self, body_location, object):
+        self.current.body_parts[body_location] = object
 
-    def remove_arm(self, body_location):
-        weapon = self.current.arms.get(body_location)
-        if weapon is not None:
-            del self.current.arms[body_location]
-        return weapon
+    def body_part_remove_object(self, body_location):
+        object = self.current.body_parts.get(body_location)
+        if object is not None:
+            del self.current.body_parts[body_location]
+        return object
 
     def set_armor(self, armor):
         self.current.armor = armor
+
+    def get_states(self):
+        return self.current.states.get_states()
+        
+    def get_state(self, state_name):
+        return self.current.states.get_state(state_name)
+        
+    def set_state(self, state_list, state_name, value):
+        self.current.states.set_state(state_list, state_name, value)
 
     def is_immobilized(self):
         if is_pinned():
@@ -410,49 +424,49 @@ class BeingInstance(ObjectInstance):
         return False
 
     def is_pinned(self):
-        if len(self.current.states) == 0:
+        if len(self.current.get_states()) == 0:
             return False
-        if self.current.states.get('isPinned') is None:
+        if self.current.get_state('pinned') is None:
             return False
-        return self.current.states.get('isPinned')
+        return self.current.get_state('pinned')
 
-    def pin(self):
-        self.current.states['isPinned'] = True
+    def pin(self, state_list):
+        self.current.set_state(state_list, 'pinned', True)
 
-    def un_pin(self):
-        if self.current.states.get('isPinned') is None:
+    def un_pin(self, state_list):
+        if self.current.get_state('pinned') is None:
             return
-        self.current.states['isPinned'] = False
+        self.current.set_state(state_list, 'pinned', False)
 
     def is_paralyzed(self):
-        if len(self.current.states) == 0:
+        if len(self.current.get_states()) == 0:
             return False
-        if self.current.states.get('isParalyzed') is None:
+        if self.current.get_state('paralyzed') is None:
             return False
-        return self.current.states.get('isParalyzed')
+        return self.current.get_state('paralyzed')
 
-    def paralyze(self):
-        self.current.states['isParalyzed'] = True
+    def paralyze(self, state_list):
+        self.current.set_state(state_list, 'paralyzed', True)
 
-    def un_paralyze(self):
-        if self.current.states.get('isParalyzed') is None:
+    def un_paralyze(self, state_list):
+        if self.current.get_state('paralyzed') is None:
             return
-        self.current.states['isParalyzed'] = False
+        self.current.set_state(state_list, 'paralyzed', False)
 
     def is_stunned(self):
-        if len(self.current.states) == 0:
+        if len(self.current.get_states()) == 0:
             return False
-        if self.current.states.get('isStunned') is None:
+        if self.current.get_state('stunned') is None:
             return False
-        return self.current.states.get('isStunned')
+        return self.current.get_state('stunned')
 
-    def stun(self):
-        self.current.states['isStunned'] = True
+    def stun(self, state_list):
+        self.current.set_state(state_list, 'stunned', True)
 
-    def un_stun(self):
-        if self.current.states.get('isStunned') is None:
+    def un_stun(self, state_list):
+        if self.current.get_state('stunned') is None:
             return
-        self.current.states['isStunned'] = False
+        self.current.set_state(state_list, 'stunned', False)
 
     def choose_action(self, action_dict, weapon_dict):
         currently_possible_actions = self.currently_possible_actions(action_dict, weapon_dict)
@@ -489,17 +503,17 @@ class BeingInstance(ObjectInstance):
         has_free_hand = False
         armed_with = []
         shielded_with = []
-        for body_location, weapon in self.get_arms().items():
+        for body_location, weapon in self.get_body_parts().items():
             if weapon is None: # at least one hand unarmed
                 has_free_hand = True
                 break
 
-        for body_location, weapon in self.get_arms().items():
+        for body_location, weapon in self.get_body_parts().items():
             if self.get_weapon_skill_level(weapon) > 0:
                 armed_with.append(weapon)
 
         if isinstance(weapon_dict, WeaponDictionary):
-            for body_location, weapon in self.get_arms().items():
+            for body_location, weapon in self.get_body_parts().items():
                 if weapon in weapon_dict.get_objects_in_category('Shields'):
                     shielded_with.append(weapon)
 
@@ -593,13 +607,13 @@ class BeingInstance(ObjectInstance):
                     actions[action] = properties
             elif action == 'shoot':
                 # Must be armed with a weapon of the bows category
-                for body_location, weapon in self.get_arms().items():
+                for body_location, weapon in self.get_body_parts().items():
                     if weapon in weapon_dict.get_objects_in_category('Bows'):
                         actions[action] = properties
                         break
             elif action == 'launch':
                 # Must be armed with a weapon of the catapults category
-                for body_location, weapon in self.get_arms().items():
+                for body_location, weapon in self.get_body_parts().items():
                     if weapon in weapon_dict.get_objects_in_category('Catapults'):
                         actions[action] = properties
                         break
@@ -666,8 +680,10 @@ class BeingInstance(ObjectInstance):
 #        print(f'currently possible actions: {actions}')
         return actions
 
-# A dictionary of all information categories of beings
 class BeingDictionary(ObjectDictionary):
+    '''
+    A reference for information about BeingDefinitions.
+    '''
     def __init__(self):
         ObjectDictionary.__init__(self)
 
@@ -685,24 +701,3 @@ class BeingDictionary(ObjectDictionary):
                     being_dict[headers[i]] = fields[i]
                 being = BeingDefinition(**being_dict)
                 self.objects[being.obj_type] = being
-
-# Define a class to represent actions
-class Action:
-    def __init__(self, actor, start_time, end_time, action_type):
-        self.start_time = start_time
-        self.end_time = end_time
-        self.action_type = action_type
-        self.actor = self.set_actor(actor)
-
-    # Define a method to compare actions by start time
-    def __lt__(self, other):
-        return self.start_time < other.start_time
-
-    # Define a method to add an actor to the action
-    def set_actor(self, actor):
-        if isinstance(actor, BeingInstance):
-            self.actor = actor
-            return actor
-        else:
-            raise TypeError('actor must be an instance of the BeingInstance class')
-        return None

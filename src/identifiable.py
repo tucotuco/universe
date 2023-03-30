@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "identifiable.py 2023-03-18T20:23-03:00"
+__version__ = "identifiable.py 2023-03-30T01:58-03:00"
 
 # TODO:
 
@@ -11,6 +11,9 @@ import uuid
 import json
 
 class Identifiable:
+    '''
+    Something that has an optional name and a unique identifier.
+    '''
     def __init__(self, name="", id=None):
         if id:
             self.id = id
@@ -20,13 +23,19 @@ class Identifiable:
         self.type = self.__class__.__name__
 
     def get_id(self):
+        '''
+        Get the value of the identifier for the instance.
+        '''
         return self.id
 
     def to_json(self):
         '''
-        Get a representation of a Identifiable as JSON.
+        Get a representation of an Identifiable as JSON.
         '''
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=2)
 
-    def rename(self, new_name):
+    def set_name(self, new_name):
+        '''
+        Set the value of the name.
+        '''
         self.name = new_name

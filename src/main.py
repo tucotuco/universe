@@ -4,7 +4,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "main.py 2023-01-02T15:46-03:00"
 
-# TODO:
+# TODO: Figure out what this will do an implement it. Requires complete refactor.
 
 import argparse
 

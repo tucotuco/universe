@@ -5,7 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_ability.py 2023-02-26T16:04-03:00"
 
-# TODO:
+# TODO: Check comprehensiveness
 
 import unittest
 import sys

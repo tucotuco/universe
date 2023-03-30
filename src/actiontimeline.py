@@ -5,7 +5,10 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "actiontimeline.py 2023-03-28T04:02-03:00"
 
-# TODO: 
+# TODO: Everything
+# TODO: Decide if this should be an EventTimeline or a separate thing.
+# TODO: Make Action a subtype of Event
+# TODO: Make ''' comments on classes and methods
 
 import json
 import heapq
@@ -31,7 +34,6 @@ class ActionTimeline:
     def clear_actions(self):
         self.action_heap = []
 
-# Define a class to represent actions
 class Action:
     def __init__(self, actor, start_time, end_time, action_type):
         self.start_time = start_time

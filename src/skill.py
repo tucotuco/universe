@@ -15,7 +15,7 @@ from utils import convert_to_numeric, convert_to_boolean
 
 class SkillDefinition():
     '''
-    A class to capture Skill definitions.
+    A template for characteristics of a Skill.
     '''
     def __init__(self, name, is_ordinary, is_progressive):
         self.name = name
@@ -32,24 +32,24 @@ class SkillDefinition():
             self.is_progressive)
         return new_definition
 
-    def property_dict(self):
-        '''
-        Get a dictionary representing the properties of a SkillDefinition.
-        '''
-        return {'is_ordinary': self.is_ordinary, 'is_progressive': self.is_progressive}
-
     def to_json(self):
         '''
         Get a representation of a SkillDefinition as JSON.
         '''
         data = {
-            self.name: self.property_dict()
+            self.name: self.get_property_dict()
         }
         return json.dumps(data)
 
+    def get_property_dict(self):
+        '''
+        Get a dictionary with the properties of a SkillDefinition.
+        '''
+        return {'is_ordinary': self.is_ordinary, 'is_progressive': self.is_progressive}
+
 class SkillDictionary():
     '''
-    A reference for SkillDefinitions.
+    A reference for information about SkillDefinitions.
     '''
     def __init__(self, skill_dictionary_file=None):
         self.skills = {}
@@ -80,7 +80,7 @@ class SkillDictionary():
         if not isinstance(skill_definition, SkillDefinition):
             raise TypeError('skill_definition must be an instance of SkillDefinition')
             return
-        self.skills[skill_definition.name]=skill_definition.property_dict()
+        self.skills[skill_definition.name]=skill_definition.get_property_dict()
 
     def get_skill_definition(self, skill_name):
         '''
@@ -108,6 +108,9 @@ class SkillDictionary():
                 self.add_skill(skill)
 
     def load_from_dict(self, skill_dict):
+        '''
+        Load the SkillDictionary from a dictionary.
+        '''
         self.skills = skill_dict.get('skills')
 
 class Skills():

@@ -5,12 +5,13 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "test_action.py 2023-03-21T09:50-03:00"
 
-# TODO:
+# TODO: Check comprehensiveness
 
 import unittest
 import sys
 import os
 import json
+
 from unittest.mock import patch
 from io import StringIO
 
@@ -29,9 +30,9 @@ class TestActionDefinition(unittest.TestCase):
         self.assertEqual(self.def1.required_skill, self.def2.required_skill)
         self.assertIsNot(self.def1, self.def2)
     
-    def test_property_dict(self):
+    def test_get_property_dict(self):
         expected_dict = {'required_skill': 'skill1'}
-        self.assertEqual(self.def1.property_dict(), expected_dict)
+        self.assertEqual(self.def1.get_property_dict(), expected_dict)
     
     def test_to_json(self):
         expected_json = json.dumps({'Action1': {'required_skill': 'skill1'}})

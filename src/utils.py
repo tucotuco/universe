@@ -5,7 +5,7 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "utils.py 2023-03-17T08:31-03:00"
 
-# TODO:
+# TODO: Make ''' comments on classes and methods
 
 def convert_to_numeric(value):
     if value is None:

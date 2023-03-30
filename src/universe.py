@@ -5,7 +5,8 @@ __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
 __version__ = "universe.py 2023-03-20T18:56-03:00"
 
-# TODO:
+# TODO: Make ''' comments on classes and methods
+# TODO: Everything
 
 import json, sys
 from armor import ArmorDictionary
@@ -19,6 +20,9 @@ from event import Event
 from encounter import Encounter
 
 class Universe(ObjectInstance):
+    '''
+    A template for characteristics of a Universe, which is a subtype of Object.
+    '''
     def __init__(self, name="", is_magical=True):
         universe_def = ObjectDefinition('universe', sys.maxsize, sys.maxsize, sys.maxsize,
                                         sys.maxsize, 0, sys.maxsize, sys.maxsize, 
