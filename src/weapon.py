@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "weapon.py 2023-03-20T18:57-03:00"
+__version__ = "weapon.py 2023-12-26T18:19-03:00"
 
 # TODO: WeaponDefinitions from file will need widths and heights eventually
 # TODO: Deprecate weapon_size in favor of a function based on actual size and size of wielder
@@ -16,16 +16,19 @@ from utils import convert_to_numeric
 class WeaponDefinition(ObjectDefinition):
     '''
     A template for characteristics of a Weapon, which is a subtype of Object.
+    R - Throw  t - timing
+    S - Swing  d - damage
+    T - Thrust p - penetration types
     '''
-    def __init__(self, obj_type, length, weight, cost, hardness, hit_points, RT, RD, RP, 
-                 ST, SD, SP, TT, TD, TP, weapon_size, width=0, height=0, is_magical=False, 
+    def __init__(self, obj_type, length, weight, cost, hardness, hit_points, Rt, Rd, Rp, 
+                 St, Sd, Sp, Tt, Td, Tp, weapon_size, width=0, height=0, is_magical=False, 
                  tags=None, weapon_categories=None):
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
                          hit_points, is_magical, tags, weapon_categories)
         self.attacks = {
-            'R': {'T': convert_to_numeric(RT), 'D': convert_to_numeric(RD), 'P': RP},
-            'S': {'T': convert_to_numeric(ST), 'D': convert_to_numeric(SD), 'P': SP},
-            'T': {'T': convert_to_numeric(TT), 'D': convert_to_numeric(TD), 'P': TP}
+            'R': {'t': convert_to_numeric(Rt), 'd': convert_to_numeric(Rd), 'p': Rp},
+            'S': {'t': convert_to_numeric(St), 'd': convert_to_numeric(Sd), 'p': Sp},
+            'T': {'t': convert_to_numeric(Tt), 'd': convert_to_numeric(Td), 'p': Tp}
         }
         self.weapon_size = weapon_size
 
@@ -40,15 +43,15 @@ class WeaponDefinition(ObjectDefinition):
             self.cost,
             self.hardness,
             self.hit_points,
-            self.RT(), # Throw timing
-            self.RD(), # Throw damage
-            self.RP(), # Throw penetration types
-            self.ST(), # Swing timing
-            self.SD(), # Swing damage
-            self.SP(), # Swing penetration types
-            self.TT(), # Thrust timing
-            self.TD(), # Thrust damage
-            self.TP(), # Thrust penetration types
+            self.Rt(), # Throw timing
+            self.Rd(), # Throw damage
+            self.Rp(), # Throw penetration types
+            self.St(), # Swing timing
+            self.Sd(), # Swing damage
+            self.Sp(), # Swing penetration types
+            self.Tt(), # Thrust timing
+            self.Td(), # Thrust damage
+            self.Tp(), # Thrust penetration types
             self.weapon_size,
             self.width,
             self.height,
@@ -69,35 +72,38 @@ class WeaponDefinition(ObjectDefinition):
         }
         return json.dumps(data)
 
-    def RT(self):
-        return self.attacks.get('R').get('T')
+    def Rt(self):
+        return self.attacks.get('R').get('t')
 
-    def RD(self):
-        return self.attacks.get('R').get('D')
+    def Rd(self):
+        return self.attacks.get('R').get('d')
 
-    def RP(self):
-        return self.attacks.get('R').get('P')
+    def Rp(self):
+        return self.attacks.get('R').get('p')
 
-    def ST(self):
-        return self.attacks.get('S').get('T')
+    def St(self):
+        return self.attacks.get('S').get('t')
 
-    def SD(self):
-        return self.attacks.get('S').get('D')
+    def Sd(self):
+        return self.attacks.get('S').get('d')
 
-    def SP(self):
-        return self.attacks.get('S').get('P')
+    def Sp(self):
+        return self.attacks.get('S').get('p')
 
-    def TT(self):
-        return self.attacks.get('T').get('T')
+    def Tt(self):
+        return self.attacks.get('T').get('t')
 
-    def TD(self):
-        return self.attacks.get('T').get('D')
+    def Td(self):
+        return self.attacks.get('T').get('d')
 
-    def TP(self):
-        return self.attacks.get('T').get('P')
+    def Tp(self):
+        return self.attacks.get('T').get('p')
 
 class WeaponInstance(ObjectInstance):
-    def __init__(self, weapon_definition, name=''):
+    ''' 
+    An ObjectInstance based on a WeaponDefinition.
+    '''
+    def __init__(self, weapon_definition, name=None):
         ObjectInstance.__init__(self, weapon_definition, name)
         self.original = weapon_definition
         self.current = weapon_definition.copy()
@@ -107,6 +113,40 @@ class WeaponInstance(ObjectInstance):
 
     def set_weapon_size(self, new_weapon_size):
         self.current.weapon_size = new_weapon_size
+
+    def Rt(self):
+        return self.current.attacks.get('R').get('t')
+
+    def Rd(self):
+        return self.current.attacks.get('R').get('d')
+
+    def Rp(self):
+        return self.current.attacks.get('R').get('p')
+
+    def St(self):
+        return self.current.attacks.get('S').get('t')
+
+    def Sd(self):
+        return self.current.attacks.get('S').get('d')
+
+    def Sp(self):
+        return self.current.attacks.get('S').get('p')
+
+    def Tt(self):
+        return self.current.attacks.get('T').get('t')
+
+    def Td(self):
+        return self.current.attacks.get('T').get('d')
+
+    def Tp(self):
+        return self.current.attacks.get('T').get('p')
+
+    def get_penetration_types(self, attack_type):
+        if attack_type == 'swing':
+            return self.Sp()
+        if attack_type == 'thrust':
+            return self.Tp()
+        return self.Rp()
 
     def set_attack(self, attack_type, attack_attribute, new_value):
         try:
@@ -122,7 +162,7 @@ class WeaponInstance(ObjectInstance):
     def modify_attacks(self, mod_attack_dict):
         for attack_type in mod_attack_dict:
             for attack_attribute in mod_attack_dict[attack_type]:
-                if attack_attribute != 'P':
+                if attack_attribute != 'p':
                     try:
                         new_value = mod_attack_dict[attack_type][attack_attribute]
                         self.current.attacks[attack_type][attack_attribute] += new_value
@@ -133,23 +173,12 @@ class WeaponInstance(ObjectInstance):
 
 # A dictionary of all information about weapons
 class WeaponDictionary(ObjectDictionary):
-    def __init__(self):
+    def __init__(self, dictionary_file=None):
         ObjectDictionary.__init__(self)
 
-#     def to_json(self):
-#         '''
-#         Get a representation of a WeaponDictionary as JSON.
-#         '''
-#         data = {
-#             'weapon_categories': self.weapon_categories,
-#             'weapons': self.weapons,
-#         }
-#         return json.dumps(data, indent=2)
+        if dictionary_file is not None:
+            self.load_objects(dictionary_file)
 
-#     def load_weapon_categories(self, file_path):
-#         with open(file_path) as f:
-#             self.weapon_categories = json.load(f)
-            
     def load_objects(self, filename):
         p = True
         with open(filename, 'r') as f:

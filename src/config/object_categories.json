@@ -21,10 +21,10 @@
         "Amaryllis stalk (ea.)", "Belladonna (oz.)"
     ],
     "Material": [
-        "Brick", "Brocade (yd.)"
+        "Brick", "Brocade (yd.)", "Rock"
     ],
     "Missile": [
-        "Arrow (ea.)", "Bolt, hand crossbow"
+        "Arrow (ea.)", "Bolt, hand crossbow", "Rock"
     ],
     "Provisions": [
         "Barley, rye, corn  (lb.)", "Beef (lb.)"

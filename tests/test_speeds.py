@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_speeds.py 2023-03-16T11:21-03:00"
+__version__ = "test_speeds.py 2023-03-30T02:11-03:00"
 
 # TODO: Check comprehensiveness
 

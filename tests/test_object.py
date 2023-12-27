@@ -3,11 +3,10 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_object.py 2023-03-06T11:19-03:00"
+__version__ = "test_object.py 2023-12-26T17:00-03:00"
 
 # TODO: Check comprehensiveness
 # TODO: Make sure an ObjectInstance is inside one and only one ObjectInstance as it's immediate container
-# TODO: Make Universe and Object and the parentmost container
 
 import unittest
 import sys
@@ -188,6 +187,21 @@ class TestObjectInstance(unittest.TestCase):
         self.apple_inst.add_weapon_category('hand')
         self.assertEqual(self.apple_inst.current.weapon_categories, ['sword', 'hand'])
 
+    def test_damage(self):
+        hp_before = self.apple_inst.hit_points()
+        self.apple_inst.damage(hp_before)
+        self.assertEqual(self.apple_inst.hit_points(), 0)
+
+        self.apple_inst.current.hit_points = hp_before
+        self.apple_inst.damage(hp_before+1)
+
+        self.assertEqual(self.apple_inst.current.hit_points, 0)
+        self.assertEqual(self.apple_inst.hit_points(), 0)
+
+        self.apple_inst.current.hit_points = hp_before
+        self.apple_inst.damage(hp_before-1)
+        self.assertEqual(self.apple_inst.hit_points(), 1)
+
 class TestObjectDictionary(unittest.TestCase):
     def setUp(self):
         self.objects_file = '../src/config/objects.tsv'
@@ -195,48 +209,48 @@ class TestObjectDictionary(unittest.TestCase):
         self.object_dict = ObjectDictionary()
 
         self.expected_categories = {
-    "Animal": [
-        "Boar", "Bull"
-    ],
-    "Bedding": [
-        "Linen pillow", "Silk pillow"
-    ],
-    "Clothing": [
-        "Breeches", "Cap"
-    ],
-    "Drink": [
-        "Ale (pint)", "Beer (pint)"
-    ],
-    "Equipment": [
-        "Awl (leather)", "Backpack (80 lb. capacity)"
-    ],
-    "Healing herb": [
-        "Adder's-tongue ointment (oz.)", "Birthwort (oz.)"
-    ],
-    "Herb": [
-        "Amaryllis stalk (ea.)", "Belladonna (oz.)"
-    ],
-    "Material": [
-        "Brick", "Brocade (yd.)"
-    ],
-    "Missile": [
-        "Arrow (ea.)", "Bolt, hand crossbow"
-    ],
-    "Provisions": [
-        "Barley, rye, corn  (lb.)", "Beef (lb.)"
-    ],
-    "Substance": [
-        "Acid (strong, oz.)", "Acorns (lb.)"
-    ],
-    "Tack & Harness": [
-        "Bit and Bridle", "Halter"
-    ],
-    "Transport": [
-        "Barge", "Canoe (small)"
-    ]
-}
+        "Animal": [
+            "Boar", "Bull"
+        ],
+        "Bedding": [
+            "Linen pillow", "Silk pillow"
+        ],
+        "Clothing": [
+            "Breeches", "Cap"
+        ],
+        "Drink": [
+            "Ale (pint)", "Beer (pint)"
+        ],
+        "Equipment": [
+            "Awl (leather)", "Backpack (80 lb. capacity)"
+        ],
+        "Healing herb": [
+            "Adder's-tongue ointment (oz.)", "Birthwort (oz.)"
+        ],
+        "Herb": [
+            "Amaryllis stalk (ea.)", "Belladonna (oz.)"
+        ],
+        "Material": [
+            "Brick", "Brocade (yd.)", "Rock"
+        ],
+        "Missile": [
+            "Arrow (ea.)", "Bolt, hand crossbow", "Rock"
+        ],
+        "Provisions": [
+            "Barley, rye, corn  (lb.)", "Beef (lb.)"
+        ],
+        "Substance": [
+            "Acid (strong, oz.)", "Acorns (lb.)"
+        ],
+        "Tack & Harness": [
+            "Bit and Bridle", "Halter"
+        ],
+        "Transport": [
+            "Barge", "Canoe (small)"
+        ]
+        }
         self.object_dict.load_objects(self.objects_file)
-        self.assertEqual(len(self.object_dict.objects), 26)
+        self.assertEqual(len(self.object_dict.objects), 27)
         for object in self.object_dict.objects:
             object_dict = self.object_dict.objects[object]
         self.assertIsInstance(object_dict, ObjectDefinition)
@@ -336,9 +350,6 @@ class TestObjectRegistry(unittest.TestCase):
 
         self.seed_inst.set_parent_container_id(self.object_registry, self.apple_inst.get_id())
         self.assertEqual(self.seed_inst.get_parent_container_id(), self.apple_inst.get_id())
-
-if __name__ == '__main__':
-    unittest.main()
 
 if __name__ == '__main__':
     unittest.main()

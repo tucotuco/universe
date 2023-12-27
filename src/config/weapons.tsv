@@ -1,4 +1,4 @@
-obj_type	cost	weight	length	RT	RD	RP	ST	SD	SP	TT	TD	TP	hardness	hit_points	weapon_size
+obj_type	cost	weight	length	Rt	Rd	Rp	St	Sd	Sp	Tt	Td	Tp	hardness	hit_points	weapon_size
 Aklys	400	3.5	2	6	5	P	6	5	B	4	3	P	5	2	S
 Arm	0	0	0				4	3	B	3	2	B	0		T
 Armor spike	400	1	0.5							6	3	P	10	10	S

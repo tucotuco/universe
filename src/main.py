@@ -2,83 +2,68 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "main.py 2023-01-02T15:46-03:00"
+__version__ = "main.py 2023-12-26T17:48-03:00"
 
-# TODO: Figure out what this will do an implement it. Requires complete refactor.
+# TODO: Figure out what this will do and implement it. Requires complete refactor.
 
 import argparse
+import os
 
 from identifiable import Identifiable
 from universe import Universe
+from library import Library
 
-from worldmap import WorldMap
-from object import Object
-from being import Being
-from encounter import Encounter, EncounterHistory
-from weapon import Weapon, WeaponDefinition
+from actiondictionary import ActionDictionary
+from object import ObjectInstance, ObjectDefinition, ObjectRegistry
+from being import BeingInstance, BeingDefinition, BeingDictionary
+from encounter import Encounter
+from speeds import Speed
+from weapon import WeaponInstance, WeaponDefinition, WeaponDictionary
 
-def test():
-  nl = '\n'
-  universe = Thing(name='The Universe')
-  print(f'{universe.as_text()}{nl}')
+def test1(library, universe_output_file):
+  # Make a Universe to play in
+  tobes_universe = Universe(name="Tobe's Universe", library=library)
 
-  earth = World('Earth', 100, 100)
-  
-  rock = Object(mass=1, length=0.2, width=0.2, height=0.2, hp=2, name="Tobe's rock")
-  print(f'{rock.as_text()}{nl}')
-  
-  npc = Being(mass=172.5, length=1, width=2, height=5.75, hp=6, name='Tobe')
-  print(f'{npc.as_text()}{nl}')
+#  print(f"weapon dictionary: {tobes_universe.library.weapon_dictionary.to_json()}")
+  # Make an Encounter to play in
+  encounter = Encounter(tobes_universe, difficulty_class=1, start_time=0, end_time=None, 
+                 event_type="Encounter", location=None, name="Tobe's Big Day", 
+                 parent_event=None, id=None, initiated=False, map=None)
+  tobes_universe.add_event(encounter)
 
-  encounter = Encounter(starttime=0, x=0, y=0)
-  encounter_history = EncounterHistory()
-  encounter_history.add_encounter(encounter)
+  # Make a Being
+  tobe_id = encounter.make_being("Half-elf", "Tobe")
 
-  weapon_definitions = setup_weapons_list()
-  loki = Weapon(mass=1, length=2, width=0.1, height=0.1, hp=6, name='Loki')
-  loki.set_weapon_definition(weapon_definitions.get('longsword'))
+  # Make a another Being
+  grak_id = encounter.make_being("Kobold", "Grak")
 
-def setup_weapons_list():
-  weapon_definitions = {}
+  # Here you could modify the Beings' properties
 
-  weapon_name = 'longsword'
-  weapon_definition = WeaponDefinition(weapon_name)
-  weapon_definition.add_attack_category('Blunt throw', 'Throw', 'Bludgeon', 6, 4, 3.5)
-  weapon_definition.add_attack_category('Piercing throw', 'Throw', 'Pierce', 6, 7, 3.5)
-  weapon_definition.add_attack_category('Blunt swing', 'Swing', 'Bludgeon', 6, 4, 3.5)
-  weapon_definition.add_attack_category('Slashing swing', 'Swing', 'Slash', 6, 8, 3.5)
-  weapon_definition.add_attack_category('Blunt thrust', 'Thrust', 'Bludgeon', 5, 3, 0.5)
-  weapon_definition.add_attack_category('Piercing thrust', 'Thrust', 'Pierce', 5, 7, 3.5)
-  weapon_definitions[weapon_name] = weapon_definition
-  
-  weapon_name = 'dagger'
-  weapon_definition = WeaponDefinition(weapon_name)
-  weapon_definition.add_attack_category('Blunt throw', 'Throw', 'Bludgeon', 4, 3, 3.5)
-  weapon_definition.add_attack_category('Piercing throw', 'Throw', 'Pierce', 4, 4, 3.5)
-  weapon_definition.add_attack_category('Blunt swing', 'Swing', 'Bludgeon', 4, 3, 3.5)
-  weapon_definition.add_attack_category('Slashing swing', 'Swing', 'Slash', 4, 4, 3.5)
-  weapon_definition.add_attack_category('Blunt thrust', 'Thrust', 'Bludgeon', 4, 3, 0.5)
-  weapon_definition.add_attack_category('Piercing thrust', 'Thrust', 'Pierce', 4, 4, 3.5)
-  weapon_definitions[weapon_name] = weapon_definition
+  # Here you give the Beings possessions, arm them, armor them, etc.
 
-  weapon_name = 'battleaxe'
-  weapon_definition = WeaponDefinition(weapon_name)
-  weapon_definition.add_attack_category('Blunt throw', 'Throw', 'Bludgeon', 4, 3, 3.5)
-  weapon_definition.add_attack_category('Piercing throw', 'Throw', 'Pierce', 4, 4, 3.5)
-  weapon_definition.add_attack_category('Blunt swing', 'Swing', 'Bludgeon', 4, 3, 3.5)
-  weapon_definition.add_attack_category('Slashing swing', 'Swing', 'Slash', 4, 4, 3.5)
-  weapon_definition.add_attack_category('Blunt thrust', 'Thrust', 'Bludgeon', 4, 3, 0.5)
-  weapon_definition.add_attack_category('Piercing thrust', 'Thrust', 'Pierce', 4, 4, 3.5)
-  weapon_definitions[weapon_name] = weapon_definition
+  # Make an Object for a Being
+  tobes_rock_id = encounter.make_object_for_being(tobe_id, "Rock", "Tobe's rock")
+  print(f"tobes_rock_id: {tobes_rock_id}")
+  tobes_rock = tobes_universe.get_object_by_id(tobes_rock_id)
+  tobes_rock.resize_percent(0.2)
+  tobes_rock.reweight_percent(0.2)
 
-  return weapon_definitions
+  # Make a Weapon for a Being
+  weapon_id = encounter.make_weapon_for_being(tobe_id, "Longsword", "Loki")
+  encounter.arm_being(tobe_id, weapon_id, "right hand")
+
+  # Make a Weapon for a Being
+  weapon_id = encounter.make_weapon_for_being(grak_id, "Short sword", "Pilfer")
+  encounter.arm_being(grak_id, weapon_id, "right hand")
+
+  encounter.run()
+
+  tobes_universe.save_to_file(universe_output_file)
+  print(f"Tobe's Universe saved to {universe_output_file}")
 
 def _getoptions():
   ''' Parse command line options and return them.'''
   parser = argparse.ArgumentParser()
-
-  help = 'weapon to loo up (required)'
-  parser.add_argument("-c", "--choice", help=help)
 
   help = 'directory for the output file (optional)'
   parser.add_argument("-w", "--workspace", help=help)
@@ -97,10 +82,9 @@ def _getoptions():
 def main():
   options = _getoptions()
 
-  if options.choice is None or len(options.choice)==0:
+  if options.workspace is None or len(options.workspace)==0:
     s =  'syntax:\n'
-    s += 'python object.py'
-    s += ' -c Longsword'
+    s += 'python main.py'
     s += ' -w ./workspace'
     s += ' -i universe.json'
     s += ' -o universe.json'
@@ -108,15 +92,15 @@ def main():
     print(f'{s}')
     return
 
-  test()
+  if not os.path.isdir(options.workspace):
+    try:
+      os.makedirs(options.workspace)
+    except OSError as error:
+      print(f"Error creating directory{options.workspace}: {error}")
 
-  weapons_list = setup_weapons_list()
-  weapon = weapons_list.get(options.choice)
-  if weapon is not None:
-    s = weapon.as_text('\n')
-    print(f'{s}')
-  else:
-    print(f'Weapon "{options.choice}" not found in the weapons list')
+  library = Library()
+    
+  test1(library, f'{options.workspace}/{options.outputfile}')
 
 if __name__ == '__main__':
   main()

@@ -3,10 +3,11 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "world.py 2023-03-30T01:23-03:00"
+__version__ = "world.py 2023-12-21T09:22-03:00"
 
 # TODO: Everything
 # TODO: Make ''' comments on classes and methods
+# TODO: Make World and have map be part of it
 
 # Refer to Triangular Mesh Grid system: https://tinyurl.com/tri-mesh-grid
 class WorldMap:

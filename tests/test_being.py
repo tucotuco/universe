@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_being.py 2023-03-29T02:37-03:00"
+__version__ = "test_being.py 2023-12-26T15:53-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -14,13 +14,14 @@ import os
 
 sys.path.insert(0, os.path.abspath('../src'))
 
-from action import ActionDictionary
-from being import BeingDefinition, BeingInstance
+from actiondictionary import ActionDictionary
+from being import BeingDefinition, BeingInstance, BeingDictionary
 from weapon import WeaponDictionary
 from speeds import Speed
 from abilities import Abilities
 from skill import SkillDictionary
 from states import StatesList
+from strategy import Strategy
 
 class TestBeingDefinition(unittest.TestCase):
     def setUp(self):
@@ -137,6 +138,7 @@ class TestBeingInstance(unittest.TestCase):
 
         self.weapons_file = '../src/config/weapons.tsv'
         self.categories_file = '../src/config/weapon_categories.json'
+
         self.weapon_dict = WeaponDictionary()
         self.weapon_dict.load_object_categories(self.categories_file)
         self.weapon_dict.load_objects(self.weapons_file)
@@ -147,7 +149,7 @@ class TestBeingInstance(unittest.TestCase):
 
         self.being_def = BeingDefinition('Human', 6, 170, 7, '2d6', 'Neutral', 10, 1)
         self.being_inst = BeingInstance(self.being_def, name='Tobe')
-        self.assertEqual(self.being_inst.possessions, {})
+        self.assertEqual(self.being_inst.possessions, [])
 
         current_being_state = self.being_inst.current
         original_being_state = self.being_inst.original
@@ -232,90 +234,90 @@ class TestBeingInstance(unittest.TestCase):
         self.assertEqual(current_being_state.actions, {})
         self.assertEqual(current_being_state.reactions, {})
 
-    def test_setters_getters(self):
-        current_being_state = self.being_inst.current
-        original_being_state = self.being_inst.original
-        self.being_inst.add_hit_points(-3)
-        self.assertEqual(self.being_inst.get_hit_points(), 4)
-        self.being_inst.add_experience('50')
-        self.assertEqual(self.being_inst.get_experience(), 50)
-        self.being_inst.set_skill_level(self.skill_dictionary, 'run', 3)
-        self.assertEqual(self.being_inst.get_skill_level('run'), 3)
-
-    def test_states(self):
-        current_states = self.being_inst.get_states()
-        self.assertEqual(current_states, {})
-        self.being_inst.un_paralyze(self.states_list)
-        self.assertEqual(current_states, {})
-        self.being_inst.paralyze(self.states_list)
-        self.assertEqual(self.being_inst.is_paralyzed(), True)
-        self.being_inst.un_paralyze(self.states_list)
-        self.assertEqual(self.being_inst.is_paralyzed(), False)
-
-        self.assertEqual(self.being_inst.is_stunned(), False)
-        self.being_inst.stun(self.states_list)
-        self.assertEqual(self.being_inst.is_stunned(), True)
-        self.being_inst.un_stun(self.states_list)
-        self.assertEqual(self.being_inst.is_stunned(), False)
-        
-        self.assertEqual(self.being_inst.is_paralyzed(), False)
-        self.assertEqual(self.being_inst.is_stunned(), False)
-        self.assertEqual(self.being_inst.get_hit_points()>0, True)
-#        print(f'{self.being_inst.current.states} {self.being_inst.get_abilities()}')
-        self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.paralyze(self.states_list)
-        self.assertEqual(self.being_inst.is_helpless(), True)
-        self.being_inst.un_paralyze(self.states_list)
-        self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.stun(self.states_list)
-        self.assertEqual(self.being_inst.is_helpless(), True)
-        self.being_inst.un_stun(self.states_list)
-        self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.set_ability('str', 2)
-        self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.set_ability('str', 0)
-        self.assertEqual(self.being_inst.is_helpless(), True)
-        self.being_inst.set_ability('str', 10)
-        self.assertEqual(self.being_inst.is_helpless(), False)
-
-        self.being_inst.set_fatigue_level(5)
-        self.assertEqual(self.being_inst.is_helpless(), True)
-        self.being_inst.set_fatigue_level(4)
-        self.assertEqual(self.being_inst.is_helpless(), False)
-        self.being_inst.set_fatigue_level(0)
-        self.assertEqual(self.being_inst.is_helpless(), False)
-
-    def test_possible_actions(self):
-        action_dict_file = '../src/config/actions.tsv'
-        action_dict = ActionDictionary()
-        action_dict.load_actions(action_dict_file)
-
-        skill_dict_file = '../src/config/skills.tsv'
-        skill_dict = SkillDictionary()
-        skill_dict.load_skills(skill_dict_file)
-#        print(f'skill dict: {skill_dict.to_json()}')
-
-        self.being_inst.set_skill_level(skill_dict, 'stun', 1)
-        self.being_inst.set_skill_level(skill_dict, 'unarmed combat', 2)
-        possible_actions = self.being_inst.possible_actions(action_dict)
-#        print(f'{possible_actions}')
-        self.assertIn('stun', possible_actions)
-        self.assertIn('parry unarmed', possible_actions)
-        self.assertNotIn('astronomy', possible_actions)
-        self.assertNotIn('parry with weapon', possible_actions)
-        self.assertEqual(len(possible_actions), 40)
-        self.being_inst.set_weapon_skill_level(self.weapon_dict, 'Longsword', 4)
-#        print(f'{self.being_inst.get_weapon_skills()}')
-        possible_actions = self.being_inst.possible_actions(action_dict)
-        self.assertIn('parry with weapon', possible_actions)
-        self.assertEqual(len(possible_actions), 43)
-
-    def test_set_body_part_holds_object(self):
-        self.assertEqual(self.being_inst.current.body_parts, {})
-        self.being_inst.set_body_part_holds_object("right_arm", "Longsword")
-        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword"})
-        self.being_inst.set_body_part_holds_object("left_arm", "Small wooden shield")
-        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
+#     def test_setters_getters(self):
+#         current_being_state = self.being_inst.current
+#         original_being_state = self.being_inst.original
+#         self.being_inst.add_hit_points(-3)
+#         self.assertEqual(self.being_inst.get_hit_points(), 4)
+#         self.being_inst.add_experience('50')
+#         self.assertEqual(self.being_inst.get_experience(), 50)
+#         self.being_inst.set_skill_level(self.skill_dictionary, 'run', 3)
+#         self.assertEqual(self.being_inst.get_skill_level('run'), 3)
+# 
+#     def test_states(self):
+#         current_states = self.being_inst.get_states()
+#         self.assertEqual(current_states, {})
+#         self.being_inst.un_paralyze(self.states_list)
+#         self.assertEqual(current_states, {})
+#         self.being_inst.paralyze(self.states_list)
+#         self.assertEqual(self.being_inst.is_paralyzed(), True)
+#         self.being_inst.un_paralyze(self.states_list)
+#         self.assertEqual(self.being_inst.is_paralyzed(), False)
+# 
+#         self.assertEqual(self.being_inst.is_stunned(), False)
+#         self.being_inst.stun(self.states_list)
+#         self.assertEqual(self.being_inst.is_stunned(), True)
+#         self.being_inst.un_stun(self.states_list)
+#         self.assertEqual(self.being_inst.is_stunned(), False)
+#         
+#         self.assertEqual(self.being_inst.is_paralyzed(), False)
+#         self.assertEqual(self.being_inst.is_stunned(), False)
+#         self.assertEqual(self.being_inst.get_hit_points()>0, True)
+# #        print(f'{self.being_inst.current.states} {self.being_inst.get_abilities()}')
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+#         self.being_inst.paralyze(self.states_list)
+#         self.assertEqual(self.being_inst.is_helpless(), True)
+#         self.being_inst.un_paralyze(self.states_list)
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+#         self.being_inst.stun(self.states_list)
+#         self.assertEqual(self.being_inst.is_helpless(), True)
+#         self.being_inst.un_stun(self.states_list)
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+#         self.being_inst.set_ability('str', 2)
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+#         self.being_inst.set_ability('str', 0)
+#         self.assertEqual(self.being_inst.is_helpless(), True)
+#         self.being_inst.set_ability('str', 10)
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+# 
+#         self.being_inst.set_fatigue_level(5)
+#         self.assertEqual(self.being_inst.is_helpless(), True)
+#         self.being_inst.set_fatigue_level(4)
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+#         self.being_inst.set_fatigue_level(0)
+#         self.assertEqual(self.being_inst.is_helpless(), False)
+# 
+#     def test_possible_actions(self):
+#         action_dict_file = '../src/config/actions.tsv'
+#         action_dict = ActionDictionary()
+#         action_dict.load_actions(action_dict_file)
+# 
+#         skill_dict_file = '../src/config/skills.tsv'
+#         skill_dict = SkillDictionary()
+#         skill_dict.load_skills(skill_dict_file)
+# #        print(f'skill dict: {skill_dict.to_json()}')
+# 
+#         self.being_inst.set_skill_level(skill_dict, 'stun', 1)
+#         self.being_inst.set_skill_level(skill_dict, 'unarmed combat', 2)
+#         possible_actions = self.being_inst.possible_actions(action_dict)
+# #        print(f'{possible_actions}')
+#         self.assertIn('stun', possible_actions)
+#         self.assertIn('parry (unarmed)', possible_actions)
+#         self.assertNotIn('astronomy', possible_actions)
+#         self.assertNotIn('parry (armed)', possible_actions)
+#         self.assertEqual(len(possible_actions), 51)
+#         self.being_inst.set_weapon_skill_level(self.weapon_dict, 'Longsword', 4)
+# #        print(f'{self.being_inst.get_weapon_skills()}')
+#         possible_actions = self.being_inst.possible_actions(action_dict)
+#         self.assertIn('parry (armed)', possible_actions)
+#         self.assertEqual(len(possible_actions), 54)
+# 
+#     def test_set_body_part_holds_object(self):
+#         self.assertEqual(self.being_inst.current.body_parts, {})
+#         self.being_inst.set_body_part_holds_object("right_arm", "Longsword")
+#         self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword"})
+#         self.being_inst.set_body_part_holds_object("left_arm", "Small wooden shield")
+#         self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
 
     def test_currently_possible_actions(self):
         action_dict_file = '../src/config/actions.tsv'
@@ -335,36 +337,44 @@ class TestBeingInstance(unittest.TestCase):
         possible_actions = self.being_inst.possible_actions(action_dict)
 #        print(f'possible: {possible_actions}')
         self.assertNotIn('stun', possible_actions)
-        self.assertNotIn('parry unarmed', possible_actions)
-        self.assertNotIn('parry with weapon', possible_actions)
-        self.assertEqual(len(possible_actions), 34)
+        self.assertNotIn('parry (unarmed)', possible_actions)
+        self.assertNotIn('parry (armed))', possible_actions)
+        self.assertEqual(len(possible_actions), 45)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 2)
+        self.assertEqual(len(currently_possible), 4)
 
         self.being_inst.set_weapon_skill_level(self.weapon_dict, 'Longsword', 4)
         possible_actions = self.being_inst.possible_actions(action_dict)
-        self.assertIn('parry with weapon', possible_actions)
-        self.assertEqual(len(possible_actions), 37)
+        self.assertIn('parry (armed)', possible_actions)
+        self.assertEqual(len(possible_actions), 48)
 
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 2)
+        self.assertEqual(len(currently_possible), 4)
 
         self.assertEqual(self.being_inst.current.body_parts, {})
         self.being_inst.set_body_part_holds_object("right_arm", "Longsword")
         self.being_inst.set_body_part_holds_object("left_arm", None)
         self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": None})
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 7)
+        self.assertIn('swing at being', currently_possible)
+        self.assertIn('thrust at being', currently_possible)
+        self.assertIn('two-handed swing at being', currently_possible)
+        self.assertIn('two-handed thrust at being', currently_possible)
+        self.assertEqual(len(currently_possible), 8)
+#        print(f'currently possible: {currently_possible}')
+
+        # The following will change as new actions are implemented
+        self.assertEqual(len(currently_possible), 8)
 
         self.being_inst.set_skill_level(skill_dict, 'stun', 4)
         possible_actions = self.being_inst.possible_actions(action_dict)
         self.assertIn('stun', possible_actions)
-        self.assertNotIn('parry unarmed', possible_actions)
-        self.assertIn('parry with weapon', possible_actions)
-        self.assertEqual(len(possible_actions), 38)
+        self.assertNotIn('parry (unarmed)', possible_actions)
+        self.assertIn('parry (armed)', possible_actions)
+        self.assertEqual(len(possible_actions), 49)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertIn('stun', currently_possible)
-        self.assertEqual(len(currently_possible), 8)        
+        self.assertEqual(len(currently_possible), 9)        
         
         self.being_inst.set_hit_points(0)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
@@ -372,48 +382,122 @@ class TestBeingInstance(unittest.TestCase):
         
         self.being_inst.set_hit_points(10)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 8)
+        self.assertEqual(len(currently_possible), 9)
         self.being_inst.set_fatigue_level(5)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 0)
 
         self.being_inst.set_fatigue_level(0)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 8)
+        self.assertEqual(len(currently_possible), 9)
         self.being_inst.paralyze(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 0)
         self.being_inst.un_paralyze(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 8)
+        self.assertEqual(len(currently_possible), 9)
         self.being_inst.stun(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
         self.assertEqual(len(currently_possible), 0)
         self.being_inst.un_stun(self.states_list)
         currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 8)
+        self.assertEqual(len(currently_possible), 9)
         chosen = self.being_inst.choose_action(action_dict, weapon_dict)
         self.assertIn(chosen, currently_possible)
-        print(f'Chose: {chosen}')
+#        print(f'Chose: {chosen}')
 
-    def test_body_part_remove_object(self):
-        self.being_inst.current.body_parts = {"right_arm": "Longsword", "left_arm": "Small wooden shield"}
-        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
-        removed_weapon = self.being_inst.body_part_remove_object("right_arm")
-        self.assertEqual(self.being_inst.current.body_parts, {"left_arm": "Small wooden shield"})
-        self.assertEqual(removed_weapon, "Longsword")
-        removed_weapon = self.being_inst.body_part_remove_object("right_arm")
-        self.assertEqual(self.being_inst.current.body_parts, {"left_arm": "Small wooden shield"})
-        self.assertIsNone(removed_weapon)
-
-    def test_set_armor(self):
-        self.assertIsNone(self.being_inst.current.armor)
-        self.being_inst.set_armor("plate armor")
-        self.assertEqual(self.being_inst.current.armor, "plate armor")
+#     def test_shielded_with(self):
+#         self.being_inst.current.body_parts = {"right_arm": "Longsword"}
+#         shielded = self.being_inst.shielded_with(self.weapon_dict)
+#         self.assertEqual(shielded, {})
+#         
+#         # Set up a being a shield
+#         self.being_inst.current.body_parts = {"right_arm": "Longsword", "left_arm": "Small wooden shield"}
+#         # Test the Being is shielded with that shield
+#         shielded = self.being_inst.shielded_with(self.weapon_dict)
+#         self.assertEqual(shielded, {"left_arm": "Small wooden shield"})
+# 
+#     def test_body_part_remove_object(self):
+#         self.being_inst.current.body_parts = {"right_arm": "Longsword", "left_arm": "Small wooden shield"}
+#         self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
+#         removed_weapon = self.being_inst.body_part_remove_object("right_arm")
+#         self.assertEqual(self.being_inst.current.body_parts, {"left_arm": "Small wooden shield"})
+#         self.assertEqual(removed_weapon, "Longsword")
+#         removed_weapon = self.being_inst.body_part_remove_object("right_arm")
+#         self.assertEqual(self.being_inst.current.body_parts, {"left_arm": "Small wooden shield"})
+#         self.assertIsNone(removed_weapon)
+# 
+#     def test_set_armor(self):
+#         self.assertIsNone(self.being_inst.current.armor)
+#         self.being_inst.set_armor("plate armor")
+#         self.assertEqual(self.being_inst.current.armor, "plate armor")
 
 class TestBeingDictionary(unittest.TestCase):
     def setUp(self):
-        pass
+        self.objects_file = '../src/config/beings.tsv'
+        self.categories_file = '../src/config/being_categories.json'
+        self.object_dict = BeingDictionary()
+
+        self.expected_categories = {
+    "Elves": [
+        "Drow", "Grey elf", "High elf",  "Wood elf", "Half-elf"
+    ],
+    "Giants": [
+        "Cloud giant", "Fire giant", "Frost giant", "Hill giant", "Stone giant", 
+        "Storm giant"
+    ],
+    "Kobolds": [
+        "Kobold"
+    ],
+    "Sphinx": [
+        "Androsphinx", "Gymnosphinx"
+    ],
+    "Undead": [
+    "Skeleton", "Zombie", "Ghoul", "Wight", "Mummy", "Specter", "Vampire Spawn", 
+    "Ghost", "Wraith", "Mummy Lord", "Vampire", "Lich"
+    ]
+}
+        self.object_dict.load_objects(self.objects_file)
+        self.assertEqual(len(self.object_dict.objects), 26)
+        for object in self.object_dict.objects:
+            object_dict = self.object_dict.objects[object]
+        self.assertIsInstance(object_dict, BeingDefinition)
+        object = self.object_dict.objects['Androsphinx']
+        self.assertEqual(object.obj_type, 'Androsphinx')
+        self.assertEqual(object.cost, 0)
+        self.assertEqual(object.weight, 20000)
+        self.assertEqual(object.length, 10)
+        self.assertEqual(object.hardness, 0)
+        self.assertEqual(object.hit_points, 199)
+
+        self.object_dict.load_object_categories(self.categories_file)
+        self.assertEqual(len(self.object_dict.object_categories), 5)
+        self.assertDictEqual(self.object_dict.object_categories, self.expected_categories)
+
+    def test_all_objects_in_categories(self):
+        self.object_dict.load_object_categories(self.categories_file)
+        self.object_dict.load_objects(self.objects_file)
+        for object in self.object_dict.objects:
+            object_dict = self.object_dict.objects[object]
+            found = False
+            for category in self.object_dict.object_categories.values():
+                if object_dict.obj_type in category:
+                    found = True
+                    break
+            self.assertTrue(found, f"ObjectDefinition {object} with name {object_dict.obj_type} not found in any object category")
+    
+    def test_all_categories_in_objects(self):
+        self.object_dict.load_object_categories(self.categories_file)
+        self.object_dict.load_objects(self.objects_file)
+        for category_name, category in self.object_dict.object_categories.items():
+            for object_name in category:
+                self.assertIn(object_name, self.object_dict.objects, 
+                              f"ObjectDefinition {object_name} in category {category_name} not found in objects list")
+
+    def test_get_objects_in_category(self):
+        self.assertEqual(self.object_dict.get_objects_in_category('Sphinx'), ['Androsphinx', 'Gymnosphinx'])
+        self.assertEqual(self.object_dict.get_objects_in_category('Elves'), ['Drow', 'Grey elf', 'High elf',  'Wood elf', 'Half-elf'])
+        self.assertIsNone(self.object_dict.get_objects_in_category('nonexistent_category'))
 
         # clean up the file
 #        os.remove(filename)

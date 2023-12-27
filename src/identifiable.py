@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "identifiable.py 2023-03-30T01:58-03:00"
+__version__ = "identifiable.py 2023-12-22T18:01-03:00"
 
 # TODO:
 
@@ -14,7 +14,7 @@ class Identifiable:
     '''
     Something that has an optional name and a unique identifier.
     '''
-    def __init__(self, name="", id=None):
+    def __init__(self, name=None, id=None):
         if id:
             self.id = id
         else:
@@ -32,6 +32,12 @@ class Identifiable:
         '''
         Get a representation of an Identifiable as JSON.
         '''
+        # Specify properties in a particular order
+        data = {
+            "type": self.type,
+            "name": self.name,
+            "id": self.id,
+        }
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=2)
 
     def set_name(self, new_name):

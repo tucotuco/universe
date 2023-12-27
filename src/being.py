@@ -3,28 +3,25 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2023-03-29T02:38-03:00"
+__version__ = "being.py 2023-12-26T21:19-03:00"
 
-# TODO: Make class BeingDictionary and tests
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
-# TODO: Make BeingInstance to_json()
-# TODO: Make Being categories?
-# TODO: Make file to load dictionary from
 # TODO: Make methods such as isArmored, isArmed, isShielded
-# TODO: Check for properties that need constraints and implement them (done example, experience)
+# TODO: Check for properties that need constraints and implement them (a finished example is experience)
 # TODO: Make ''' comments on classes and methods
 
 import json
 import random
 
 from abilities import Abilities
-from action import ActionDictionary
+from actiondictionary import ActionDictionary
 from object import ObjectDefinition, ObjectInstance, ObjectDictionary
 from skill import Skills
 from speeds import Speed
 from states import States
+from strategy import Strategy
 from utils import convert_to_numeric, convert_to_experience, convert_to_fatigue
-from weapon import WeaponDictionary
+from weapon import WeaponInstance, WeaponDictionary
 
 class BeingDefinition(ObjectDefinition):
     '''
@@ -35,8 +32,8 @@ class BeingDefinition(ObjectDefinition):
                  is_magical=False, tags=None, weapon_categories=None, experience=0, 
                  max_speed=None, abilities=None, skills=None, senses=None, 
                  vulnerabilities=None, resistances=None, immunities=None, languages=None, 
-                 psionics=None, spells=None, traits=None, states=None, actions=None, reactions=None,
-                 body_parts=None, armor=None, fatigue_level=0):
+                 psionics=None, spells=None, traits=None, states=None, actions=None, 
+                 reactions=None, body_parts=None, armor=None, fatigue_level=0):
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
                          hit_points, is_magical, tags, weapon_categories)
         self.experience = convert_to_experience(experience)
@@ -130,7 +127,7 @@ class BeingDefinition(ObjectDefinition):
             'skills': self.skills,
             'senses': self.senses,
             'vulnerabilities': self.vulnerabilities,
-            'resistences': self.resistences,
+            'resistances': self.resistances,
             'immunities': self.immunities,
             'languages': self.languages,
             'psionics': self.psionics,
@@ -219,14 +216,13 @@ class BeingDefinition(ObjectDefinition):
     def get_body_parts(self):
         return self.body_parts
 
-    def set_body_part_holds_object(self, body_location, object):
-        self.body_parts[body_location] = object
+    def set_body_part_holds_object(self, body_part, object_id):
+        self.body_parts[body_part] = object_id
 
-    def body_part_remove_object(self, body_location):
-        object = self.body_parts.get(body_location)
-        if object is not None:
-            del self.body_parts[body_location]
-        return object
+    def body_part_remove_object(self, remove_object_id):
+        for body_part, object_id in self.body_parts.iter_items():
+            if remove_object_id == object_id:
+                del self.body_parts[body_part]
 
     def get_fatigue_level(self):
         return self.fatigue_level
@@ -244,11 +240,19 @@ class BeingDefinition(ObjectDefinition):
         self.states.set_state(state_list, state_name, value)
 
 class BeingInstance(ObjectInstance):
-    def __init__(self, being_definition, name=''):
+    ''' 
+    An ObjectInstance based on a BeingDefinition.
+    '''
+    def __init__(self, being_definition, name=None):
         ObjectInstance.__init__(self, being_definition, name)
         self.original = being_definition
         self.current = being_definition.copy()
-        self.possessions = {}
+        self.possessions = []
+        self.weapons = []
+        self.strategy = Strategy()
+
+    def set_strategy(self, attack=0, defense=0, timing=0, extra_damage=0):
+        self.strategy = Strategy(attack, defense, timing, extra_damage)
 
     def get_experience(self):
         return self.current.experience
@@ -292,11 +296,11 @@ class BeingInstance(ObjectInstance):
         return self.current.armor_class
 
     def set_armor_class(self, new_armor_class):
-        # ToDo: make convert_to_armor_class method in utils
+        # TODO: make convert_to_armor_class method in utils
         self.current_armor_class = convert_to_numeric(new_armor_class)
 
     def get_challenge_rating(self):
-        # ToDo: make convert_to_challenge_rating method in utils
+        # TODO: make convert_to_challenge_rating method in utils
         return self.current.challenge_rating
 
     def sprint(self):
@@ -370,16 +374,22 @@ class BeingInstance(ObjectInstance):
         if self.current.fitness < 0:
             self.current.fitness = 0
 
-    def fitness(self, add_fitness):
+    def add_fitness(self, add_fitness):
         self.current.fitness += convert_to_numeric(add_fitness)
         if self.current.fitness < 0:
             self.current.fitness = 0
 
-    def set_possession(self, added_possession): 
-        self.current.possessions.add_possession(added_possession)
+    def add_possession(self, added_possession): 
+        self.possessions.append(added_possession)
 
     def remove_possession(self, possession_id):
-        pass
+        self.possessions.remove(possession_id)
+
+    def add_weapon(self, weapon):
+        self.weapons.append(weapon)
+
+    def remove_weapon(self, weapon_id):
+        self.weapons.remove(weapon_id)
 
     def get_body_parts(self):
         return self.current.body_parts
@@ -392,6 +402,9 @@ class BeingInstance(ObjectInstance):
         if object is not None:
             del self.current.body_parts[body_location]
         return object
+
+    def get_armor(self):
+        return self.current.armor
 
     def set_armor(self, armor):
         self.current.armor = armor
@@ -468,21 +481,50 @@ class BeingInstance(ObjectInstance):
             return
         self.current.set_state(state_list, 'stunned', False)
 
-    def choose_action(self, action_dict, weapon_dict):
-        currently_possible_actions = self.currently_possible_actions(action_dict, weapon_dict)
+#    def choose_melee_action(self, action_dict, weapon_dict):
+    def choose_melee_action(self, universe):
+        '''
+        Choose a melee action from among those currently possible
+        '''        
+        from universe import Universe
+        actions_possible_now = self.currently_possible_actions(universe)
+#        currently_possible_actions = self.currently_possible_actions(action_dict, weapon_dict)
+#        print(f"being.py: choose_melee_action:currently_possible_actions: {currently_possible_actions}")
         options = []
-        for action in currently_possible_actions:
+        action_dict = universe.get_action_dictionary()
+        for action in actions_possible_now:
+            action_definition = action_dict.get_action_definition(action)
+#            print(f"being.py: choose_melee_action: action_definition: {action_definition}")
+            if action_definition.get("is_melee") == 'True':
+                options.append(action)
+        if len(options) == 0:
+            return None
+        return random.choice(options)
+
+#    def choose_action(self, action_dict, weapon_dict):
+    def choose_action(self, universe):
+        '''
+        Choose an action from among those currently possible
+        '''        
+        from universe import Universe
+#        actions_possible_now = self.currently_possible_actions(action_dict, weapon_dict)
+        actions_possible_now = self.currently_possible_actions(universe)
+        options = []
+        for action in actions_possible_now:
             options.append(action)
         if len(options) == 0:
             return None
         return random.choice(options)
 
-    # Make an actions list based on the Being's skills
     def possible_actions(self, action_dict):
+        '''
+        Make an actions list based on the Being's skills
+        '''
         if not isinstance(action_dict, ActionDictionary):
             return {}
         actions = {}
         for action, properties in action_dict:
+#            print(f"being.py: possible_actions(): {action}: {properties}")
             required_skill = properties.get('required_skill')
             if required_skill == 'none':
                 actions[action] = properties
@@ -492,32 +534,69 @@ class BeingInstance(ObjectInstance):
                 actions[action] = properties
         return actions
 
-    # Make an actions dictionary based on Being's current situation
-    def currently_possible_actions(self, action_dict, weapon_dict):
-        # TODO: implement multi-action
-        possible_actions = self.possible_actions(action_dict)
+    def shielded_with(self, universe):
+        '''
+        Get a dictionary of body locations that have shields on them.
+        '''
+        from universe import Universe
 
+        weapon_dict = universe.library.weapon_dictionary
+        shielded = {}
+        for body_location, object_id in self.get_body_parts().items():
+            an_object = universe.get_object_by_id(object_id)
+            if an_object.current.obj_type in weapon_dict.get_objects_in_category('Shields') == True:
+                shielded[body_location]=object_id
+        return shielded
+    
+    def armed_with(self, universe):
+        '''
+        Get a dictionary of body locations that have weapons in which the Being has skill.
+        '''
+        from universe import Universe
+
+        weapon_dict = universe.get_weapon_dictionary()
+        armed = {}
+        for body_location, object_id in self.get_body_parts().items():
+            an_object = universe.get_object_by_id(object_id)
+            if weapon_dict.get_object_definition(an_object.current.obj_type) is not None:
+                armed[body_location]=object_id
+        print(f"being.py: armed_with(): {armed}")
+        return armed
+
+    def choose_weapon(self, armed):
+#        print(f"being.py choose_weapon() armed: {armed}")
+        choice = random.choice(list(armed))
+#        print(f"being.py choose_weapon() choice: {choice}")
+        return armed[choice]
+    
+#    def currently_possible_actions(self, action_dict, weapon_dict, target=None):
+    def currently_possible_actions(self, universe, target=None):
+        '''
+        Make an actions dictionary based on Being's current situation
+        '''
+        # TODO: implement multi-action. Could the same mechanism as an Encounter be nested?
+        from universe import Universe
+        action_dict = universe.get_action_dictionary()
+        weapon_dict = universe.get_weapon_dictionary()
+        
+        possible_actions = self.possible_actions(action_dict)
+#        print(f"being.py: currently_possible_actions:possible_actions: {possible_actions}")
+
+#        print(f"\ncurrently_possible_actions(): possible_actions = {possible_actions}")
         if self.is_helpless():
             return {}
         actions = {}
         has_free_hand = False
         armed_with = []
-        shielded_with = []
+#        shielded_with = self.shielded_with(weapon_dict)
+        shielded_with = self.shielded_with(universe)
+        armed_with = self.armed_with(universe)
+
         for body_location, weapon in self.get_body_parts().items():
             if weapon is None: # at least one hand unarmed
                 has_free_hand = True
                 break
 
-        for body_location, weapon in self.get_body_parts().items():
-            if self.get_weapon_skill_level(weapon) > 0:
-                armed_with.append(weapon)
-
-        if isinstance(weapon_dict, WeaponDictionary):
-            for body_location, weapon in self.get_body_parts().items():
-                if weapon in weapon_dict.get_objects_in_category('Shields'):
-                    shielded_with.append(weapon)
-
-#        print(f'free hand: {has_free_hand} armed with: {armed_with} shielded with: {shielded_with}')
         for action, properties in possible_actions.items():
             required_skill = properties.get('required_skill')
             if required_skill == 'advanced weapon':
@@ -537,11 +616,20 @@ class BeingInstance(ObjectInstance):
                 # TODO: implement break hold
                 # Must be held
                 pass
-            elif action == 'armed break weapon':
+            elif action == 'break weapon (armed)':
                 # TODO: implement armed break weapon
-                # Must be armed and target must be armed
+                # Must be armed with a weapon that allows a swing attack and target must 
+                # be armed
                 pass
-            elif action == 'unarmed break weapon':
+#                 if isinstance(target, WeaponInstance) == False:
+#                     pass
+#                 for body_part, weapon in armed_with.items():
+#                     attack_types = weapon_dict.objects[weapon].attacks XXX
+#                     
+#                     if attack_types.get('S') is not None:
+#                         actions[action] = properties
+#                         break            
+            elif action == 'break weapon (unarmed)':
                 # TODO: implement unarmed break weapon
                 # Must have an unarmed attack and target must be armed
                 pass
@@ -561,11 +649,19 @@ class BeingInstance(ObjectInstance):
                 # TODO: implement end run
                 # Must have a target within moving distance
                 pass
-            elif action == 'grab':
+            elif action == 'grab object':
                 # TODO: implement grab
                 # Target must be within reach, success makes target held
                 pass
-            elif action == 'hold':
+            elif action == 'grab being':
+                # TODO: implement grab
+                # Target must be within reach, success makes target held
+                pass
+            elif action == 'hold object':
+                # TODO: implement hold
+                # Target must be held
+                pass
+            elif action == 'hold being':
                 # TODO: implement hold
                 # Target must be held
                 pass
@@ -601,17 +697,33 @@ class BeingInstance(ObjectInstance):
                 # TODO: implement ready
                 # Must have object to ready
                 pass
-            elif action == 'shield bash':
+            elif action == 'shield bash being':
                 # Must be armed with a shield
                 if len(shielded_with) > 0:
                     actions[action] = properties
-            elif action == 'shoot':
+            elif action == 'shield bash object':
+                # Must be armed with a shield
+                if len(shielded_with) > 0:
+                    actions[action] = properties
+            elif action == 'shoot being':
                 # Must be armed with a weapon of the bows category
                 for body_location, weapon in self.get_body_parts().items():
                     if weapon in weapon_dict.get_objects_in_category('Bows'):
                         actions[action] = properties
                         break
-            elif action == 'launch':
+            elif action == 'shoot object':
+                # Must be armed with a weapon of the bows category
+                for body_location, weapon in self.get_body_parts().items():
+                    if weapon in weapon_dict.get_objects_in_category('Bows'):
+                        actions[action] = properties
+                        break
+            elif action == 'launch at being':
+                # Must be armed with a weapon of the catapults category
+                for body_location, weapon in self.get_body_parts().items():
+                    if weapon in weapon_dict.get_objects_in_category('Catapults'):
+                        actions[action] = properties
+                        break
+            elif action == 'launch at object':
                 # Must be armed with a weapon of the catapults category
                 for body_location, weapon in self.get_body_parts().items():
                     if weapon in weapon_dict.get_objects_in_category('Catapults'):
@@ -620,10 +732,16 @@ class BeingInstance(ObjectInstance):
             elif action == 'stun':
                 if has_free_hand == True:
                     actions[action] = properties
-            elif action == 'swing':
+            elif action == 'swing at being':
                 # Could be armed or unarmed
                 actions[action] = properties
-            elif action == 'thrust':
+            elif action == 'swing at object':
+                # Could be armed or unarmed
+                actions[action] = properties
+            elif action == 'thrust at being':
+                # Could be armed or unarmed
+                actions[action] = properties
+            elif action == 'thrust at object':
                 # Could be armed or unarmed
                 actions[action] = properties
             elif action == 'subdue':
@@ -635,7 +753,11 @@ class BeingInstance(ObjectInstance):
                 # TODO: implement throw
                 # Must have object ready that can be thrown
                 pass
-            elif action == 'touch':
+            elif action == 'touch being':
+                # TODO: implement touch
+                # Target must be within reach
+                pass
+            elif action == 'touch object':
                 # TODO: implement touch
                 # Target must be within reach
                 pass
@@ -643,11 +765,19 @@ class BeingInstance(ObjectInstance):
                 # TODO: implement trip
                 # Must first make a successful touch, grab, bull rush, or strike against 
                 pass
-            elif action == 'two-handed swing':
+            elif action == 'two-handed swing at being':
                 # Must be armed with one hand free
                 if len(armed_with) > 0 and has_free_hand:
                         actions[action] = properties
-            elif action == 'two-handed thrust':
+            elif action == 'two-handed swing at object':
+                # Must be armed with one hand free
+                if len(armed_with) > 0 and has_free_hand:
+                        actions[action] = properties
+            elif action == 'two-handed thrust at being':
+                # Must be armed with one hand free
+                if len(armed_with) > 0 and has_free_hand:
+                        actions[action] = properties
+            elif action == 'two-handed thrust at object':
                 # Must be armed with one hand free
                 if len(armed_with) > 0 and has_free_hand:
                         actions[action] = properties
@@ -684,10 +814,31 @@ class BeingDictionary(ObjectDictionary):
     '''
     A reference for information about BeingDefinitions.
     '''
-    def __init__(self):
+    def __init__(self, dictionary_file=None):
         ObjectDictionary.__init__(self)
 
+        if dictionary_file is not None:
+            self.load_beings(dictionary_file)
+
     def load_beings(self, filename):
+        self.load_objects(filename)
+
+#     def load_beings(self, filename):
+#         p = True
+#         with open(filename, 'r') as f:
+#             lines = f.readlines()
+#             headers = lines[0].strip().split('\t')
+#             if p==True:
+#                 p = False
+#             for line in lines[1:]:
+#                 fields = line.strip().split('\t')
+#                 being_dict = {}
+#                 for i in range(len(headers)):
+#                     being_dict[headers[i]] = fields[i]
+#                 being = BeingDefinition(**being_dict)
+#                 self.objects[being.obj_type] = being
+
+    def load_objects(self, filename):
         p = True
         with open(filename, 'r') as f:
             lines = f.readlines()

@@ -3,8 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_encounter.py 2023-02-10T23:49-03:00"
+__version__ = "test_encounter.py 2023-04-11T11:33-03:00"
 
+# TODO: Everything
 # TODO: Check comprehensiveness
 
 import unittest
@@ -23,22 +24,21 @@ import unittest
 
 class TestEncounter(unittest.TestCase):
     def setUp(self):
-        self.encounter = Encounter("location", 0)
+        self.encounter = Encounter(0)
 
     def test_init(self):
-        self.assertEqual(self.encounter.location, "location")
-        self.assertEqual(self.encounter.starttime, 0)
-        self.assertIsNone(self.encounter.endtime)
+        self.assertIsNone(self.encounter.location)
+        self.assertEqual(self.encounter.start_time, 0)
+        self.assertIsNone(self.encounter.end_time)
         self.assertEqual(self.encounter.name, "")
         self.assertIsNone(self.encounter.parent)
         self.assertIsNone(self.encounter.map)
-        self.assertIsNotNone(self.encounter.action_timeline)
-        self.assertIsInstance(self.encounter.beings_present, ObjectRegistry)
+        self.assertEqual(len(self.encounter.child_events), 0)
+        self.assertIsInstance(self.encounter.objects_present, ObjectRegistry)
 
     def test_generate(self):
         self.encounter.generate()
 #        self.assertIsNotNone(self.encounter.map)
-        self.assertIsNotNone(self.encounter.action_timeline)
 
     def test_add_being(self):
         being_def1 = BeingDefinition('Human', '6', '160', '5', '2d4', 'Chaotic Good', '9', '2')
@@ -47,9 +47,9 @@ class TestEncounter(unittest.TestCase):
         being2 = BeingInstance(being_def2, 'Elf Dude')
         self.encounter.add_being(being1)
         self.encounter.add_being(being2)
-        self.assertEqual(self.encounter.beings_present.len(),2)
-        self.assertIsNotNone(self.encounter.beings_present.get_object_by_id(being1.get_id()))
-        self.assertIsNotNone(self.encounter.beings_present.get_object_by_id(being2.get_id()))
-
+        self.assertEqual(self.encounter.objects_present.len(),2)
+        self.assertIsNotNone(self.encounter.objects_present.get_object_by_id(being1.get_id()))
+        self.assertIsNotNone(self.encounter.objects_present.get_object_by_id(being2.get_id()))
+        
 if __name__ == '__main__':
     unittest.main()

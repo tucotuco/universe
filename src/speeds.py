@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "speed.py 2023-03-30T02:07:08-03:00"
+__version__ = "speed.py 2023-12-21T16:04:08-03:00"
 
 # TODO: Incorporate methods for actual speed.
 # TODO: Make ''' comments on classes and methods
@@ -24,6 +24,19 @@ class Speed():
         Get an independent copy of the Speed instance.
         '''
         return Speed(self.sprint(), self.burrow(), self.climb(), self.fly(), self.swim())
+
+#     def to_json(self):
+#         '''
+#         Get a representation of a Speed as JSON.
+#         '''
+#         data = {
+#             'ambulate': self.speeds['ambulate'],
+#             'burrow': self.speeds['burrow'],
+#             'climb': self.speeds['climb'],
+#             'fly': self.speeds['fly'],
+#             'swim': self.speeds['swim']
+#         }
+#         return json.dumps(data)
 
     def sprint(self):
         return self.speeds.get('ambulate')

@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_utils.py 2023-03-15T10:26-03:00"
+__version__ = "test_utils.py 2023-04-23T18:34+02:00"
 
 # TODO: Check comprehensiveness
 
@@ -14,10 +14,88 @@ import os
 sys.path.insert(0, os.path.abspath('../src'))
 #print(f'{__version__}:{sys.path}')
 
-from utils import convert_to_numeric, convert_to_boolean
+from utils import get_random_key
+from utils import roll_dice
+from utils import convert_to_numeric, convert_to_boolean, convert_to_dc
 from utils import convert_to_ability, convert_to_speed, convert_to_experience
 from utils import convert_to_fatigue
 
+class TestGetRandomKey(unittest.TestCase):
+    def test_with_empty_dict(self):
+        result = get_random_key({})
+        self.assertIsNone(result)
+    
+    def test_with_non_dict_input(self):
+        result = get_random_key([])
+        self.assertIsNone(result)
+    
+    def test_with_single_entry_dict(self):
+        the_dict = {'a': 1}
+        result = get_random_key(the_dict)
+        self.assertEqual(result, 'a')
+    
+    def test_with_multi_entry_dict(self):
+        the_dict = {'a': 1, 'b': 2, 'c': 3}
+        result = get_random_key(the_dict)
+        self.assertIn(result, the_dict.keys())
+
+class TestRollDice(unittest.TestCase):    
+    def test_valid_input(self):
+        i=0
+        for _ in range(1000):
+            result = roll_dice('1d20-5')
+            self.assertLessEqual(result,15)
+            self.assertGreaterEqual(result,-4)
+
+        i=0
+        for _ in range(1000):
+            result = roll_dice('1d20+5')
+            self.assertLessEqual(result,25)
+            self.assertGreaterEqual(result,6)
+
+        i=0
+        for _ in range(1000):
+            result = roll_dice('20d20+100')
+            self.assertLessEqual(result,500)
+            self.assertGreaterEqual(result,120)
+
+        i=0
+        for _ in range(1000):
+            result = roll_dice('20d20-100')
+            self.assertLessEqual(result,300)
+            self.assertGreaterEqual(result,-80)
+
+        i=0
+        for _ in range(1000):
+            result = roll_dice('2d4-1')
+            self.assertLessEqual(result,7)
+            self.assertGreaterEqual(result,1)
+    
+    def test_invalid_input(self):
+        with self.assertRaises(ValueError) as cm:
+            roll_dice('d20')  # Missing number of dice
+        self.assertEqual(str(cm.exception), 'Invalid dice string: d20')
+        
+        with self.assertRaises(ValueError) as cm:
+            roll_dice('1d')  # Missing number of sides
+        self.assertEqual(str(cm.exception), 'Invalid dice string: 1d')
+        
+        with self.assertRaises(ValueError) as cm:
+            roll_dice('1d20-')  # Missing modifier value
+        self.assertEqual(str(cm.exception), 'Invalid dice string: 1d20-')
+        
+        with self.assertRaises(ValueError) as cm:
+            roll_dice('1d20++5')  # Invalid modifier format
+        self.assertEqual(str(cm.exception), 'Invalid dice string: 1d20++5')
+        
+        with self.assertRaises(ValueError) as cm:
+            roll_dice('1d20+5.5')  # Invalid modifier format
+        self.assertEqual(str(cm.exception), 'Invalid dice string: 1d20+5.5')
+        
+        with self.assertRaises(ValueError) as cm:
+            roll_dice('1d20+-5')  # Invalid modifier format
+        self.assertEqual(str(cm.exception), 'Invalid dice string: 1d20+-5')
+        
 class TestConvertToNumeric(unittest.TestCase):
     def test_int(self):
         self.assertEqual(convert_to_numeric(5), 5)
@@ -168,7 +246,7 @@ class TestConvertToExperience(unittest.TestCase):
     def test_none(self):
         self.assertEqual(convert_to_experience(None), 0)
 
-class TestConvertToFatiguee(unittest.TestCase):
+class TestConvertToFatigue(unittest.TestCase):
     def test_int(self):
         self.assertEqual(convert_to_fatigue(0), 0)
         self.assertEqual(convert_to_fatigue(1), 1)
@@ -195,6 +273,36 @@ class TestConvertToFatiguee(unittest.TestCase):
 
     def test_none(self):
         self.assertEqual(convert_to_fatigue(None), 0)
+
+class TestConvertToDC(unittest.TestCase):
+    def test_int(self):
+        self.assertEqual(convert_to_dc(0), 0)
+        self.assertEqual(convert_to_dc(1), 1)
+        self.assertEqual(convert_to_dc(-1), 0)
+        self.assertEqual(convert_to_dc(30), 30)
+        self.assertEqual(convert_to_dc(31), 30)
+
+    def test_float(self):
+        self.assertEqual(convert_to_dc(3.14), 0)
+
+    def test_bool(self):
+        self.assertEqual(convert_to_dc(True), 1)
+        self.assertEqual(convert_to_dc(False), 0)
+
+    def test_str_int(self):
+        self.assertEqual(convert_to_dc("0"), 0)
+        self.assertEqual(convert_to_dc("21"), 21)
+        self.assertEqual(convert_to_dc("-1"), 0)
+        self.assertEqual(convert_to_dc("30"), 30)
+
+    def test_str_float(self):
+        self.assertEqual(convert_to_dc("3.14"), 0)
+
+    def test_other_str(self):
+        self.assertEqual(convert_to_dc("whatever"), 0)
+
+    def test_none(self):
+        self.assertEqual(convert_to_dc(None), 0)
 
 if __name__ == '__main__':
     unittest.main()

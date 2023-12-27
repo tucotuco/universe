@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_weapon.py 2023-03-20T11:31-03:00"
+__version__ = "test_weapon.py 2023-04-30T18:02-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -38,15 +38,15 @@ class TestWeaponDefinition(unittest.TestCase):
         self.assertDictEqual(self.def1.tags, 
             {'tag1': 'tag1_value', 'tag2': 'tag2_value'})
         self.assertEqual(self.def1.weapon_categories, [])
-        self.assertEqual(self.def1.RT(), 6)
-        self.assertEqual(self.def1.RD(), 7)
-        self.assertEqual(self.def1.RP(), 'P')
-        self.assertEqual(self.def1.ST(), 6)
-        self.assertEqual(self.def1.SD(), 8)
-        self.assertEqual(self.def1.SP(), 'S')
-        self.assertEqual(self.def1.TT(), 5)
-        self.assertEqual(self.def1.TD(), 7)
-        self.assertEqual(self.def1.TP(), 'P')
+        self.assertEqual(self.def1.Rt(), 6)
+        self.assertEqual(self.def1.Rd(), 7)
+        self.assertEqual(self.def1.Rp(), 'P')
+        self.assertEqual(self.def1.St(), 6)
+        self.assertEqual(self.def1.Sd(), 8)
+        self.assertEqual(self.def1.Sp(), 'S')
+        self.assertEqual(self.def1.Tt(), 5)
+        self.assertEqual(self.def1.Td(), 7)
+        self.assertEqual(self.def1.Tp(), 'P')
         self.assertEqual(self.def1.weapon_size, 'M')
 
     def test_to_json(self):
@@ -68,70 +68,79 @@ class TestWeaponDefinition(unittest.TestCase):
 
 class TestWeaponInstance(unittest.TestCase):
     def setUp(self):
-        self.def1 = WeaponDefinition(
+        longsword_def = WeaponDefinition(
             'Longsword', 3.5, 6, 3600, 10, 6, 6, 7, 'P', 6, 8, 'S', 5, 7, 'P', 'M')
-        self.def1.set_tag('tag1', 'tag1_value')
-        self.def1.set_tag('tag2', 'tag2_value')
-        self.weapon_inst = WeaponInstance(self.def1, 'Nail biter')
+        longsword_def.set_tag('tag1', 'tag1_value')
+        longsword_def.set_tag('tag2', 'tag2_value')
+        self.longsword = WeaponInstance(longsword_def, 'Nail biter')
 
     def test_weapon_instance_creation(self):
-        self.assertEqual(self.weapon_inst.type, 'WeaponInstance')
-        self.assertEqual(self.weapon_inst.name, 'Nail biter')
-        self.assertEqual(self.weapon_inst.current.obj_type, 'Longsword')
-        self.assertEqual(self.weapon_inst.current.weight, 6)
-        self.assertEqual(self.weapon_inst.current.cost, 3600)
-        self.assertEqual(self.weapon_inst.current.length, 3.5)
-        self.assertEqual(self.weapon_inst.current.width, 0)
-        self.assertEqual(self.weapon_inst.current.height, 0)
-        self.assertEqual(self.weapon_inst.current.hardness, 10)
-        self.assertEqual(self.weapon_inst.current.hit_points, 6)
-        self.assertEqual(self.weapon_inst.current.RT(), 6)
-        self.assertEqual(self.weapon_inst.current.RD(), 7)
-        self.assertEqual(self.weapon_inst.current.RP(), 'P')
-        self.assertEqual(self.weapon_inst.current.ST(), 6)
-        self.assertEqual(self.weapon_inst.current.SD(), 8)
-        self.assertEqual(self.weapon_inst.current.SP(), 'S')
-        self.assertEqual(self.weapon_inst.current.TT(), 5)
-        self.assertEqual(self.weapon_inst.current.TD(), 7)
-        self.assertEqual(self.weapon_inst.current.TP(), 'P')
-        self.assertEqual(self.weapon_inst.current.weapon_size, 'M')
-        self.assertDictEqual(self.weapon_inst.current.tags, 
-            {'tag1': 'tag1_value', 'tag2': 'tag2_value'})
-        self.assertEqual(self.weapon_inst.current.is_magical, False)
-        self.assertEqual(self.weapon_inst.current.weapon_categories, [])
+        weapon = self.longsword
+        self.assertEqual(weapon.type, 'WeaponInstance')
+        self.assertEqual(weapon.name, 'Nail biter')
+        self.assertEqual(weapon.current.obj_type, 'Longsword')
+        self.assertEqual(weapon.current.weight, 6)
+        self.assertEqual(weapon.current.cost, 3600)
+        self.assertEqual(weapon.current.length, 3.5)
+        self.assertEqual(weapon.current.width, 0)
+        self.assertEqual(weapon.current.height, 0)
+        self.assertEqual(weapon.current.hardness, 10)
+        self.assertEqual(weapon.current.hit_points, 6)
+        self.assertEqual(weapon.current.Rt(), 6)
+        self.assertEqual(weapon.current.Rd(), 7)
+        self.assertEqual(weapon.current.Rp(), 'P')
+        self.assertEqual(weapon.current.St(), 6)
+        self.assertEqual(weapon.current.Sd(), 8)
+        self.assertEqual(weapon.current.Sp(), 'S')
+        self.assertEqual(weapon.current.Tt(), 5)
+        self.assertEqual(weapon.current.Td(), 7)
+        self.assertEqual(weapon.current.Tp(), 'P')
+        self.assertEqual(weapon.current.weapon_size, 'M')
+        self.assertDictEqual(weapon.current.tags, {'tag1': 'tag1_value', 'tag2': 'tag2_value'})
+        self.assertEqual(weapon.current.is_magical, False)
+        self.assertEqual(weapon.current.weapon_categories, [])
 
+    def test_get_weapon_penetration_types(self):
+         weapon = self.longsword
+         self.assertEqual(weapon.get_penetration_types('swing'), 'S')
+         self.assertEqual(weapon.get_penetration_types('thrust'), 'P')
+         self.assertEqual(weapon.get_penetration_types('throw'), 'P')
+    
     def test_set_weapon_size(self):
-        original_weapon_size = self.weapon_inst.original.weapon_size
-        self.weapon_inst.set_weapon_size('L')
-        self.assertEqual(self.weapon_inst.original.weapon_size, original_weapon_size)
-        self.assertEqual(self.weapon_inst.current.weapon_size, 'L')
+        weapon = self.longsword
+        original_weapon_size = weapon.original.weapon_size
+        weapon.set_weapon_size('L')
+        self.assertEqual(weapon.original.weapon_size, original_weapon_size)
+        self.assertEqual(weapon.current.weapon_size, 'L')
 
     def test_set_attacks(self):
-        original_attacks = self.weapon_inst.original.attacks
-        new_attacks = {'R': {'T': 6, 'D': 5, 'P': 'P'},
-                    'S': {'T': 6, 'D': 5, 'P': 'B'},
-                    'T': {'T': 4, 'D': 3, 'P': 'P'}}
-        self.weapon_inst.set_attacks(new_attacks)
-        self.assertDictEqual(self.weapon_inst.original.attacks, original_attacks)
-        self.assertDictEqual(self.weapon_inst.current.attacks, new_attacks)
+        weapon = self.longsword
+        original_attacks = weapon.original.attacks
+        new_attacks = {'R': {'t': 6, 'd': 5, 'p': 'P'},
+                       'S': {'t': 6, 'd': 5, 'p': 'B'},
+                       'T': {'t': 4, 'd': 3, 'p': 'P'}}
+        weapon.set_attacks(new_attacks)
+        self.assertDictEqual(weapon.original.attacks, original_attacks)
+        self.assertDictEqual(weapon.current.attacks, new_attacks)
 
     def test_modify_attacks(self):
-        original_attacks = self.weapon_inst.original.attacks
-        current_attacks_before = self.weapon_inst.original.attacks
-        attack_modifications = {'R': {'T': 0, 'D': -1, 'P': 'P'},
-                    'S': {'T': 1, 'D': 0, 'P': 'B'},
-                    'T': {'T': -1, 'D': 1, 'P': 'P'}}
-        self.weapon_inst.modify_attacks(attack_modifications)
-        self.assertDictEqual(self.weapon_inst.original.attacks, original_attacks)
-        self.assertEqual(self.weapon_inst.current.RT(),6)
-        self.assertEqual(self.weapon_inst.current.RD(),6)
-        self.assertEqual(self.weapon_inst.current.RP(),'P')
-        self.assertEqual(self.weapon_inst.current.ST(),7)
-        self.assertEqual(self.weapon_inst.current.SD(),8)
-        self.assertEqual(self.weapon_inst.current.SP(),'S')
-        self.assertEqual(self.weapon_inst.current.TT(),4)
-        self.assertEqual(self.weapon_inst.current.TD(),8)
-        self.assertEqual(self.weapon_inst.current.TP(),'P')
+        weapon = self.longsword
+        original_attacks = weapon.original.attacks
+        current_attacks_before = weapon.original.attacks
+        attack_modifications = {'R': {'t': 0, 'd': -1, 'p': 'P'},
+                                'S': {'t': 1, 'd': 0, 'p': 'B'},
+                                'T': {'t': -1, 'd': 1, 'p': 'P'}}
+        weapon.modify_attacks(attack_modifications)
+        self.assertDictEqual(weapon.original.attacks, original_attacks)
+        self.assertEqual(weapon.current.Rt(),6)
+        self.assertEqual(weapon.current.Rd(),6)
+        self.assertEqual(weapon.current.Rp(),'P')
+        self.assertEqual(weapon.current.St(),7)
+        self.assertEqual(weapon.current.Sd(),8)
+        self.assertEqual(weapon.current.Sp(),'S')
+        self.assertEqual(weapon.current.Tt(),4)
+        self.assertEqual(weapon.current.Td(),8)
+        self.assertEqual(weapon.current.Tp(),'P')
 
 class TestWeaponDictionary(unittest.TestCase):
     def setUp(self):
@@ -233,9 +242,9 @@ class TestWeaponDictionary(unittest.TestCase):
         self.assertEqual(weapon.cost, 400)
         self.assertEqual(weapon.weight, 3.5)
         self.assertEqual(weapon.length, 2)
-        self.assertDictEqual(weapon.attacks, {'R': {'T': 6, 'D': 5, 'P': 'P'},
-                                              'S': {'T': 6, 'D': 5, 'P': 'B'},
-                                              'T': {'T': 4, 'D': 3, 'P': 'P'}})
+        self.assertDictEqual(weapon.attacks, {'R': {'t': 6, 'd': 5, 'p': 'P'},
+                                              'S': {'t': 6, 'd': 5, 'p': 'B'},
+                                              'T': {'t': 4, 'd': 3, 'p': 'P'}})
         self.assertEqual(weapon.hardness, 5)
         self.assertEqual(weapon.hit_points, 2)
         self.assertEqual(weapon.weapon_size, 'S')

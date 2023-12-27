@@ -1,45 +1,56 @@
-name	required_skill
-break hold	none
-armed break weapon	none
-unarmed break weapon	unarmed combat
-bull rush	none
-charge	none
-coup de grace	none
-delay	none
-disarm with weapon	advanced weapon
-disarm unarmed	unarmed combat
-end-run	none
-feint with weapon	advanced weapon
-feint unarmed	unarmed combat
-grab	none
-hold	none
-takedown	none
-reverse	none
-pin from above	none
-pin from below	none
-escape	none
-dismount rider	none
-multiple action	multi-action
-overrun	none
-ready	none
-shield bash	none
-shoot	none
-launch	none
-swing	none
-thrust	none
-stun	stun
-subdue	none
-throw	none
-touch	none
-trip	none
-two-handed swing	none
-two-handed thrust	none
-undefended attack	none
-wrest	none
-block	none
-deflect unarmed	unarmed combat
-disengage	none
-dodge	none
-parry with weapon	advanced weapon
-parry unarmed	unarmed combat
-yield	none
+name	target_type	required_skill	is_melee
+break weapon (armed)	weapon	none	True
+break weapon (unarmed)	weapon	unarmed combat	True
+block	attack	none	False
+break hold	being	none	False
+bull rush	being	none	False
+charge	being	none	False
+coup de grace	being	none	False
+deflect (unarmed)	attack	unarmed combat	False
+delay	none	none	False
+disarm (armed)	weapon	advanced weapon	True
+disarm (unarmed)	weapon	unarmed combat	True
+disengage	being	none	False
+dismount rider	being	none	False
+dodge	attack	none	False
+end-run	being	none	False
+escape	being	none	False
+feint (armed)	being	advanced weapon	True
+feint (unarmed)	being	unarmed combat	True
+grab being	being	none	False
+grab object	object	none	False
+hold being	being	none	False
+hold object	object	none	False
+launch at being	being	none	True
+launch at object	object	none	False
+multiple action	none	multi-action	False
+overrun	being	none	False
+parry (unarmed)	attack	unarmed combat	True
+parry (armed)	attack	advanced weapon	True
+pin from above	being	none	False
+pin from below	being	none	False
+ready object	object	none	False
+ready weapon	weapon	none	False
+reverse	being	none	False
+shield bash being	being	none	True
+shield bash object	object	none	True
+shoot being	being	none	True
+shoot object	object	none	False
+stun	being	stun	True
+subdue	being	none	False
+swing at being	being	none	True
+swing at object	object	none	False
+takedown	being	none	False
+throw	object	none	True
+thrust at being	being	none	True
+thrust at object	object	none	False
+touch being	being	none	False
+touch object	object	none	False
+trip	being	none	False
+two-handed swing at being	being	none	True
+two-handed swing at object	object	none	False
+two-handed thrust at being	being	none	True
+two-handed thrust at object	object	none	False
+undefended attack	being	none	True
+wrest	object	none	False
+yield	being	none	False

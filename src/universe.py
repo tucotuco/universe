@@ -3,54 +3,55 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "universe.py 2023-03-20T18:56-03:00"
+__version__ = "universe.py 2023-12-26T17:38-03:00"
 
+# TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
-# TODO: Everything
+# TODO: Have save_to_file ignore dictionaries and object registry.
+# TODO: Have save_to_file save object registry separately.
 
 import json, sys
-from armor import ArmorDictionary
-from being import BeingDictionary
-from object import ObjectDefinition, ObjectDictionary, ObjectInstance, ObjectRegistry
-from skill import SkillDictionary
-from weapon import WeaponDictionary
+
+from library import Library
+from object import ObjectInstance, ObjectRegistry
 
 from identifiable import Identifiable
 from event import Event
 from encounter import Encounter
 
-class Universe(ObjectInstance):
+class Universe(Identifiable):
     '''
-    A template for characteristics of a Universe, which is a subtype of Object.
+    A container for a "world" and the Objects and Events that populate it.
     '''
-    def __init__(self, name="", is_magical=True):
-        universe_def = ObjectDefinition('universe', sys.maxsize, sys.maxsize, sys.maxsize,
-                                        sys.maxsize, 0, sys.maxsize, sys.maxsize, 
-                                        is_magical)
-        ObjectInstance.__init__(self, universe_def, name, id='universe')
-        self.armor_dict = ArmorDictionary()
-        self.being_dict = BeingDictionary()
-        self.object_dict = ObjectDictionary()
-        self.skill_dict = SkillDictionary()
-        self.weapon_dict = WeaponDictionary()
+    def __init__(self, name="", library=None, config_path="./config"):
+        Identifiable.__init__(self, name)
+        self.library = None
+        if isinstance(library, (Library)):
+            self.library = library
+
         self.object_registry = ObjectRegistry()
+        self.event_history = []
+        first_event = Event(library, 0, name="History of the Universe")
+        self.event_history.append(first_event)
 
-    def new_universe(self, config_path='./config'):
-        self.config_path = config_path
-        self.events = []
-        self.load_dictionaries()
+    def to_json(self):
+        def handle_circular_refs(obj):
+            if isinstance(obj, (Library, Universe)):
+                return obj.id  # Return only the ID for Universe and Event instances
+            return obj.__dict__
 
-    def load_dictionaries(self):
-        # Load dictionaries...
-        self.object_dict.load_objects(f'{self.config_path}/objects.tsv')
-        self.object_dict.load_object_categories(f'{self.config_path}/object_categories.json')
-        self.armor_dict.load_objects(f'{self.config_path}/armors.tsv')
-        self.armor_dict.load_object_categories(f'{self.config_path}/armor_categories.json')
-        self.weapon_dict.load_objects(f'{self.config_path}/weapons.tsv')
-        self.weapon_dict.load_object_categories(f'{self.config_path}/weapon_categories.json')
-        self.skill_dict.load_skills(f'{self.config_path}/skills.tsv')
-        self.skill_dict.add_weapon_skills(self.weapon_dict)
-#        self.being_dict.load_beings(f'{self.config_path}/beings.tsv')
+        data = {
+            "type": self.type,
+            "name": self.name,
+            "id": self.id,
+            "library_id": self.library.get_id(),
+            "object_registry": self.object_registry,
+            "event_history": [event for event in self.event_history]
+        }
+        return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
+
+    def get_event_history(self):
+        return self.event_history
 
     def add_object(self, obj):
         if isinstance(obj, ObjectInstance):
@@ -60,13 +61,9 @@ class Universe(ObjectInstance):
         return self.object_registry.get_object_by_id(obj_id)
 
     def add_event(self, event):
-        if isinstance(event, Event):
-            self.events.append(event)
-            self.sort_events()
+        if isinstance(event, (Event)):
+            self.event_history.append(event)
 
-    def sort_events(self):
-        self.events.sort(key=lambda x: (x.starttime, x.endtime))
-        
     def save_to_file(self, filename):
         with open(filename, "w") as f:
             f.write(self.to_json())
@@ -76,13 +73,12 @@ class Universe(ObjectInstance):
             data = json.load(f)
 
         if data["type"] == "Universe":
-            print(f'name: {data["name"]}')
+#            print(f'name: {data["name"]}')
             self.name = data["name"]
         else:
             raise ValueError(f"Unexpected type: {data['type']}")
 
-        self.events = []
-        for event_data in data["events"]:
+        for event_data in data["event_history"]["child_events"]:
             event_type = event_data.get("type", "Event")
             if event_type == "Event":
                 event = Event(**{k: v for k, v in event_data.items() if k != 'type'})
@@ -90,17 +86,49 @@ class Universe(ObjectInstance):
                 event = Encounter(**{k: v for k, v in event_data.items() if k != 'type'})
             else:
                 raise ValueError(f"Unexpected event type: {event_type}")
-            self.events.append(event)
+            self.add_event(event)
 
-        object_dict = data.get('object_dict')
-        self.object_dict.load_from_dict(object_dict)
-        armor_dict = data.get('armor_dict')
-        self.armor_dict.load_from_dict(armor_dict)
-        weapon_dict = data.get('weapon_dict')
-        self.weapon_dict.load_from_dict(weapon_dict)
-        being_dict = data.get('being_dict')
-        self.being_dict.load_from_dict(being_dict)
-        skill_dict = data.get('skill_dict')
-        self.skill_dict.load_from_dict(skill_dict)
         object_registry_dict = data.get('object_registry')
         self.object_registry.load_from_dict(object_registry_dict)
+
+    def get_library(self):
+        return self.library
+
+    def get_object_registry(self):
+        return self.object_registry
+
+    def get_action_dictionary(self):
+        return self.library.action_dictionary
+
+    def get_armor_dictionary(self):
+        return self.library.armor_dictionary
+
+    def get_being_dictionary(self):
+        return self.library.being_dictionary
+
+    def get_object_dictionary(self):
+        return self.library.object_dictionary
+
+    def get_skill_dictionary(self):
+        return self.library.skill_dictionary
+
+    def get_weapon_dictionary(self):
+        return self.library.weapon_dictionary
+
+    def get_action_definition(self, action_name):
+        return self.get_action_dictionary().get_action_definition(action_name)
+
+    def get_armor_definition(self, armor_name):
+        return self.get_armor_dictionary().get_object_definition(armor_name)
+
+    def get_being_definition(self, being_name):
+        return self.get_being_dictionary().get_object_definition(being_name)
+
+    def get_object_definition(self, object_name):
+        return self.get_object_dictionary().get_object_definition(object_name)
+
+    def get_skill_definition(self, skill_name):
+        return self.get_skill_dictionary().get_object_definition(skill_name)
+
+    def get_weapon_definition(self, weapon_name):
+        return self.get_weapon_dictionary().get_object_definition(weapon_name)

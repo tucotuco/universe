@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_action.py 2023-04-02T11:39-03:00"
+__version__ = "test_actiondictionary.py 2023-04-22T12:29-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -18,7 +18,7 @@ from io import StringIO
 sys.path.insert(0, os.path.abspath('../src'))
 #print(f'{__version__}:{sys.path}')
 
-from action import ActionDefinition, ActionDictionary
+from actiondictionary import ActionDefinition, ActionDictionary
 	
 class TestActionDefinition(unittest.TestCase):
     def setUp(self):

@@ -1,4 +1,4 @@
-obj_type	cost	weight	HB	HP	HS	DB	DP	DS	armor_check_penalty	dexterity_check_penalty	hit_points														
+obj_type	cost	weight	Bh	Ph	Sh	Bd	Pd	Sd	armor_check_penalty	dexterity_check_penalty	hit_points														
 No armor	0	0	0	0	0	0	0	0	0	0	0														
 Gauntlet	400	1	0	0	0	0	0	0	0	-1	30
 Locked gauntlet	1600	1.5	0	0	0	0	0	0	0	-1	30

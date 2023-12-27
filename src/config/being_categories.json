@@ -1,0 +1,19 @@
+{
+    "Elves": [
+        "Drow", "Grey elf", "High elf",  "Wood elf", "Half-elf"
+    ],
+    "Giants": [
+        "Cloud giant", "Fire giant", "Frost giant", "Hill giant", "Stone giant", 
+        "Storm giant"
+    ],
+    "Kobolds": [
+        "Kobold"
+    ],
+    "Sphinx": [
+        "Androsphinx", "Gymnosphinx"
+    ],
+    "Undead": [
+    "Skeleton", "Zombie", "Ghoul", "Wight", "Mummy", "Specter", "Vampire Spawn", 
+    "Ghost", "Wraith", "Mummy Lord", "Vampire", "Lich"
+    ]
+}

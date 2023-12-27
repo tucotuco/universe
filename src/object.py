@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "object.py 2023-03-20T18:56-03:00"
+__version__ = "object.py 2023-12-27T13:44-03:00"
 
 # TODO: Make size category function from largest of length, width, height
-# TODO: Implement an ObjectRegistry save_to_file() method
 # TODO: Make ''' comments on classes and methods
 
 import json
@@ -71,7 +70,7 @@ class ObjectDefinition:
         return json.dumps(data)
 
     def size_category(self):
-        # ToDo: return size category based on dimensions using the categories:
+        # TODO: return size category based on dimensions using the categories:
         # 'diminuitive (D)', 'tiny (T), small (S)', 'medium (M)', 'large (L), 'huge (H)', 'gargantuan (G), colossal (C)'
         return 'M' 
 
@@ -100,13 +99,33 @@ class ObjectInstance(Identifiable):
     indicate its original state and current values that are in effect at the time they are 
     accessed. Instances have unique identifiers.
     '''
-    def __init__(self, object_definition, name='', id=None):
+    def __init__(self, object_definition, name=None, id=None):
         Identifiable.__init__(self, name, id)
         self.top_facing = 0 # up 
         self.front_facing = 1 # whichever horizontal orientation (1-6 on hex) 1 refers to
         self.original = object_definition
-        self.current = object_definition.copy()
+        self.current = object_definition.copy() or None
         self.parent_container_id = None
+
+    def to_json(self):
+        def handle_circular_refs(obj):
+            from library import Library
+            from universe import Universe
+            if isinstance(obj, (Library, Universe)):
+                return obj.id  # Return only the ID for Universe and Event instances
+            return obj.__dict__
+
+        data = {
+            "type": self.type,
+            "name": self.name,
+            "id": self.id,
+            "top_facing": self.top_facing,
+            "front_facing": self.front_facing,
+            "original": self.original,
+            "current": self.current,
+            "parent_container_id": self.parent_container_id
+        }
+        return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
 
     def obj_type(self):
         return self.current.obj_type
@@ -205,19 +224,35 @@ class ObjectInstance(Identifiable):
         if object_registry.get_object_by_id(new_parent_container_id) is not None:
             self.parent_container_id = new_parent_container_id
 
+    def damage(self, damage):
+        if damage > self.hit_points():
+            self.current.hit_points = 0
+        else:
+            self.current.hit_points -= damage
+
 class ObjectDictionary:
     '''
     A reference for information about ObjectDefinitions.
     '''
-    def __init__(self):
+    def __init__(self, dictionary_file=None):
         self.object_categories = {}
         self.objects = {}
+
+        if dictionary_file is not None:
+            self.load_objects(dictionary_file)
 
     def to_json(self):
         '''
         Get a representation of an ObjectDictionary as JSON.
         '''
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=2)
+
+    def get_object_definition(self, object_name):
+        '''
+        Get the ObjectDefinition out of the ObjectDictionary. 
+        If not in the dictionary, return None
+        '''
+        return self.objects.get(object_name)
 
     def get_objects_in_category(self, object_category):
         '''
@@ -275,7 +310,12 @@ class ObjectRegistry:
 
     def add_object(self, obj):
         if isinstance(obj, ObjectInstance):
-            self.object_instances[obj.get_id()] = obj
+            if self.object_instances.get(obj.id) is None:
+                if obj.name is None:
+                    object_type_str = type(instance).__name__
+                    obj.set_name(f"{object_type_str}{len(self.object_instances)}")
+#                print(f"object.py: Adding ObjectInstance with name={obj.name} and object_id={obj.id} to ObjectRegistry")
+                self.object_instances[obj.id] = obj
 
     def get_object_by_id(self, obj_id):
         return self.object_instances.get(obj_id)

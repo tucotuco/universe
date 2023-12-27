@@ -576,8 +576,1468 @@
     }
   },
   "being_dict": {
-    "object_categories": {},
-    "objects": {}
+    "object_categories": {
+      "Elves": [
+        "Drow",
+        "Grey elf",
+        "High elf",
+        "Wood elf",
+        "Half-elf"
+      ],
+      "Giants": [
+        "Cloud giant",
+        "Fire giant",
+        "Frost giant",
+        "Hill giant",
+        "Stone giant",
+        "Storm giant"
+      ],
+      "Sphinx": [
+        "Androsphinx",
+        "Gymnosphinx"
+      ],
+      "Undead": [
+        "Skeleton",
+        "Zombie",
+        "Ghoul",
+        "Wight",
+        "Mummy",
+        "Specter",
+        "Vampire Spawn",
+        "Ghost",
+        "Wraith",
+        "Mummy Lord",
+        "Vampire",
+        "Lich"
+      ]
+    },
+    "objects": {
+      "Androsphinx": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful neutral",
+        "armor": null,
+        "armor_class": 17,
+        "body_parts": {},
+        "challenge_rating": 17,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "17d10",
+        "hit_points": 199,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 10,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Androsphinx",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 20000,
+        "width": 0
+      },
+      "Cloud giant": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral good",
+        "armor": null,
+        "armor_class": 14,
+        "body_parts": {},
+        "challenge_rating": 9,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "16d12",
+        "hit_points": 200,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 18,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Cloud giant",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 5300,
+        "width": 0
+      },
+      "Drow": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic evil",
+        "armor": null,
+        "armor_class": 15,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "2d8",
+        "hit_points": 13,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 4.5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Drow",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 90,
+        "width": 0
+      },
+      "Fire giant": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful evil",
+        "armor": null,
+        "armor_class": 18,
+        "body_parts": {},
+        "challenge_rating": 9,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "15d12",
+        "hit_points": 162,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 18,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Fire giant",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 5300,
+        "width": 0
+      },
+      "Frost giant": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic evil",
+        "armor": null,
+        "armor_class": 15,
+        "body_parts": {},
+        "challenge_rating": 8,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "13d12",
+        "hit_points": 138,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 20,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Frost giant",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 5900,
+        "width": 0
+      },
+      "Ghost": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Any",
+        "armor": null,
+        "armor_class": 11,
+        "body_parts": {},
+        "challenge_rating": 4,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "10d8",
+        "hit_points": 45,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Ghost",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0
+      },
+      "Ghoul": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic Evil",
+        "armor": null,
+        "armor_class": 12,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "5d8",
+        "hit_points": 22,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Ghoul",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 150,
+        "width": 0
+      },
+      "Grey elf": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral good",
+        "armor": null,
+        "armor_class": 11,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "2d6+2",
+        "hit_points": 37,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5.5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Grey elf",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 120,
+        "width": 0
+      },
+      "Gymnosphinx": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful neutral",
+        "armor": null,
+        "armor_class": 17,
+        "body_parts": {},
+        "challenge_rating": 11,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "11d10",
+        "hit_points": 136,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 8,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Gymnosphinx",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 6500,
+        "width": 0
+      },
+      "Half-elf": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral",
+        "armor": null,
+        "armor_class": 11,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "1d8",
+        "hit_points": 11,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5.5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Half-elf",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 140,
+        "width": 0
+      },
+      "High elf": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic good",
+        "armor": null,
+        "armor_class": 11,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "1d8",
+        "hit_points": 13,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5.5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "High elf",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 120,
+        "width": 0
+      },
+      "Hill giant": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic evil",
+        "armor": null,
+        "armor_class": 13,
+        "body_parts": {},
+        "challenge_rating": 5,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "13d12",
+        "hit_points": 105,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 16,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Hill giant",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 4400,
+        "width": 0
+      },
+      "Lich": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Any",
+        "armor": null,
+        "armor_class": 17,
+        "body_parts": {},
+        "challenge_rating": 21,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "18d8",
+        "hit_points": 135,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Lich",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 175,
+        "width": 0
+      },
+      "Mummy": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful Evil",
+        "armor": null,
+        "armor_class": 11,
+        "body_parts": {},
+        "challenge_rating": 3,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "9d8",
+        "hit_points": 58,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Mummy",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 200,
+        "width": 0
+      },
+      "Mummy Lord": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful Evil",
+        "armor": null,
+        "armor_class": 17,
+        "body_parts": {},
+        "challenge_rating": 15,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "13d8",
+        "hit_points": 97,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Mummy Lord",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 225,
+        "width": 0
+      },
+      "Skeleton": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful Evil",
+        "armor": null,
+        "armor_class": 13,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "2d8",
+        "hit_points": 13,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Skeleton",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 50,
+        "width": 0
+      },
+      "Specter": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic Evil",
+        "armor": null,
+        "armor_class": 12,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "5d8",
+        "hit_points": 22,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Specter",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 10,
+        "width": 0
+      },
+      "Stone giant": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral",
+        "armor": null,
+        "armor_class": 17,
+        "body_parts": {},
+        "challenge_rating": 7,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "14d12",
+        "hit_points": 126,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 18,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Stone giant",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 5300,
+        "width": 0
+      },
+      "Storm giant": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral good",
+        "armor": null,
+        "armor_class": 16,
+        "body_parts": {},
+        "challenge_rating": 13,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "26d12",
+        "hit_points": 230,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 26,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Storm giant",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 9600,
+        "width": 0
+      },
+      "Vampire": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful Evil",
+        "armor": null,
+        "armor_class": 16,
+        "body_parts": {},
+        "challenge_rating": 13,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "18d8",
+        "hit_points": 144,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Vampire",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 200,
+        "width": 0
+      },
+      "Vampire Spawn": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Lawful Evil",
+        "armor": null,
+        "armor_class": 16,
+        "body_parts": {},
+        "challenge_rating": 5,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "11d8",
+        "hit_points": 82,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Vampire Spawn",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 200,
+        "width": 0
+      },
+      "Wight": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral Evil",
+        "armor": null,
+        "armor_class": 14,
+        "body_parts": {},
+        "challenge_rating": 3,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "6d8",
+        "hit_points": 45,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Wight",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 175,
+        "width": 0
+      },
+      "Wood elf": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Chaotic good",
+        "armor": null,
+        "armor_class": 11,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "1d8",
+        "hit_points": 11,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5.5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Wood elf",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 120,
+        "width": 0
+      },
+      "Wraith": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral Evil",
+        "armor": null,
+        "armor_class": 13,
+        "body_parts": {},
+        "challenge_rating": 5,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "10d8",
+        "hit_points": 67,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 5,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Wraith",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 1,
+        "width": 0
+      },
+      "Zombie": {
+        "abilities": {
+          "abilities": {
+            "CHA": 10,
+            "CON": 10,
+            "DEX": 10,
+            "INT": 10,
+            "STR": 10,
+            "WIS": 10
+          }
+        },
+        "actions": {},
+        "alignment": "Neutral Evil",
+        "armor": null,
+        "armor_class": 8,
+        "body_parts": {},
+        "challenge_rating": 1,
+        "cost": 0,
+        "experience": 0,
+        "fatigue_level": 0,
+        "hardness": 0,
+        "height": 0,
+        "hit_dice": "3d8",
+        "hit_points": 22,
+        "immunities": {},
+        "is_magical": false,
+        "languages": {},
+        "length": 6,
+        "max_speed": {
+          "speeds": {
+            "ambulate": 0,
+            "burrow": 0,
+            "climb": 0,
+            "fly": 0,
+            "swim": 0
+          }
+        },
+        "obj_type": "Zombie",
+        "psionics": {},
+        "reactions": {},
+        "resistances": {},
+        "senses": {},
+        "skills": {
+          "skills": {},
+          "weapon_skills": {}
+        },
+        "spells": {},
+        "states": {
+          "states": {}
+        },
+        "tags": {},
+        "traits": {},
+        "vulnerabilities": {},
+        "weapon_categories": [],
+        "weight": 175,
+        "width": 0
+      }
+    }
   },
   "config_path": "../src/config",
   "current": {
@@ -593,40 +2053,51 @@
     "weight": 9223372036854775807,
     "width": 9223372036854775807
   },
-  "events": [
-    {
-      "endtime": 200,
-      "id": "e2b41a15-b191-41c0-9e77-492ce50d83a1",
-      "location": "Moon",
-      "name": "",
-      "parent": null,
-      "starttime": 100,
-      "type": "Event"
-    },
-    {
-      "action_dict": {
-        "actions": {}
+  "event_history": {
+    "child_events": [
+      {
+        "child_events": [],
+        "end_time": 200,
+        "event_type": "war",
+        "id": "aa621880-536a-44b6-a9eb-36b51ee789d5",
+        "location": "France",
+        "name": null,
+        "parent": null,
+        "start_time": 100,
+        "type": "Event"
       },
-      "action_timeline": {
-        "action_heap": []
-      },
-      "beings_present": {
-        "object_instances": {}
-      },
-      "endtime": 400,
-      "id": "0256766d-0f32-4412-935b-343eec8d332f",
-      "location": "Mars",
-      "map": null,
-      "name": "",
-      "parent": null,
-      "starttime": 300,
-      "type": "Encounter",
-      "weapon_dict": {
-        "object_categories": {},
-        "objects": {}
+      {
+        "action_dict": {
+          "actions": {}
+        },
+        "child_events": [],
+        "end_time": 400,
+        "event_type": "battle",
+        "id": "5b1a5a04-19df-4627-9f7d-4a78d6ccbd6f",
+        "location": "Florence",
+        "map": null,
+        "name": "",
+        "objects_present": {
+          "object_instances": {}
+        },
+        "parent": null,
+        "start_time": 300,
+        "type": "Encounter",
+        "weapon_dict": {
+          "object_categories": {},
+          "objects": {}
+        }
       }
-    }
-  ],
+    ],
+    "end_time": null,
+    "event_type": "Event",
+    "id": "c0f84e23-24e9-4935-b562-e7d1fe62dc67",
+    "location": null,
+    "name": "History of the Universe",
+    "parent": null,
+    "start_time": 0,
+    "type": "Event"
+  },
   "front_facing": 1,
   "id": "universe",
   "name": "Test Universe",
