@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "speed.py 2023-12-21T16:04:08-03:00"
+__version__ = "speed.py 2023-12-27T13:14:08-03:00"
 
 # TODO: Incorporate methods for actual speed.
 # TODO: Make ''' comments on classes and methods

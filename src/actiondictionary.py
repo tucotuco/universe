@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "actiondictionary.py 2023-12-26T17:29-03:00"
+__version__ = "actiondictionary.py 2023-12-27T13:09-03:00"
 
 # TODO: Make action categories and populate the config/action_categories.tsv
 

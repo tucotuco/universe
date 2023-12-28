@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "weapon.py 2023-12-26T18:19-03:00"
+__version__ = "weapon.py 2023-12-28T13:16-03:00"
 
 # TODO: WeaponDefinitions from file will need widths and heights eventually
 # TODO: Deprecate weapon_size in favor of a function based on actual size and size of wielder

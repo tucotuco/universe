@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "event.py 2023-12-27T03:30-03:00"
+__version__ = "event.py 2023-12-28T12:06-03:00"
 
 # TODO: Redo unit tests for library parent
 
@@ -17,16 +17,17 @@ class Event(Identifiable):
     Something that happens at a place and time. Instances have unique identifiers.
     '''
     def __init__(self, universe, start_time, end_time=None, event_type='Event', location=None, 
-                 name=None, parent_event=None, id=None, child_events=None):
+                 name=None, parent_event_id=None, id=None, child_events=None):
         Identifiable.__init__(self, name, id)
         self.universe = universe
         self.event_type = event_type
         self.start_time = start_time
         self.end_time = end_time
         self.location = location
-        self.parent_event = None
+        self.parent_event_id = None
+        parent_event = self.universe.get_event_by_id(parent_event_id)
         if isinstance(parent_event, Event):
-            self.parent_event = parent_event
+            self.parent_event_id = parent_event_id
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -34,9 +35,6 @@ class Event(Identifiable):
                 return obj.id  # Return only the ID for Universe and Event instances
             return obj.__dict__
 
-        parent_event_id = None
-        if isinstance(self.parent_event, Event):
-            parent_event_id = self.parent_event.get_id()
         data = {
             "type": self.type,
             "event_type": self.event_type,
@@ -44,7 +42,7 @@ class Event(Identifiable):
             "universe_id": self.universe.id,
             "start_time": self.start_time,
             "end_time": self.end_time,
-            "parent_event_id": parent_event_id,
+            "parent_event_id": self.parent_event_id,
             "location": self.location
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
@@ -128,6 +126,6 @@ class Event(Identifiable):
             return False
         if self.location != other.location:
             return False
-        if self.parent_event != other.parent_event:
+        if self.parent_event_id != other.parent_event_id:
             return False
         return True

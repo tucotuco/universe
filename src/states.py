@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "states.py 2023-03-30T02:09-03:00"
+__version__ = "states.py 2023-12-27T13:15-03:00"
 
 # TODO: Make ''' comments on classes and methods
 

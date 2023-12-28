@@ -3,9 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "utils.py 2023-04-23T22:58+02:00"
+__version__ = "utils.py 2023-12-28T11:58-03:00"
 
-# TODO: 
+# TODO: Write test for experience_level()
 
 import random
 import re
@@ -28,12 +28,17 @@ def roll_dice(dice_string):
     the format "XdY+Z" or "XdY-Z", where X is the number of dice to roll, Y is the number of 
     sides on each die, and Z is an optional modifier to add to/subtract from the total.
     '''
-    match = re.match(r'^(\d+)d(\d+)([+-]\d+)$', dice_string)
+#    match = re.match(r'^(\d+)d(\d+)([+-]\d+)$', dice_string)
+    modifier = 0
+    num_dice = 1
+    match = re.match(r'^(\d+)d(\d+)(([-+]?\d+)?)$', dice_string)
     if not match:
         raise ValueError(f'Invalid dice string: {dice_string}')
-    num_dice = int(match.group(1))
+    if match.group(1) != '':
+        num_dice = int(match.group(1))
     num_sides = int(match.group(2))
-    modifier = int(match.group(3))
+    if match.group(3) != '':
+        modifier = int(match.group(3))
     
     # Roll the dice and compute the total
     rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
@@ -109,6 +114,21 @@ def convert_to_experience(value):
         return n
     return 0
 
+def experience_level(experience_points):
+    '''
+    Get experience level from experience points.
+    '''
+    experience_list = [1000,3000,6000,10000,15000,21000,28000,36000,45000,55000,66000,
+                       78000,91000,105000,120000,136000,153000,171000,190000]
+    for i, value in enumerate(experience_list):
+        if value > experience_points:
+            break
+    return i+1
+
+def saving_throw_experience_modifier(experience_level):
+    experience_list = [0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10]
+    return experience_list[experience_level]
+    
 def convert_to_fatigue(value):
     '''
     Interpret an input value as a fatigue value, if possible.

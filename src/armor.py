@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "armor.py 2023-12-21T15:09-03:00"
+__version__ = "armor.py 2023-12-27T13:09-03:00"
 
 # TODO: ArmorDefinitions will need widths and heights eventually
 # TODO: *** Implement damage_to_armor()

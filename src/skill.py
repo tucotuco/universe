@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "skill.py 2023-12-26T17:34-03:00"
+__version__ = "skill.py 2023-12-27T13:14-03:00"
 
 # TODO: Make skill categories and populate the config/skill_categories.tsv
 

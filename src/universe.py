@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "universe.py 2023-12-26T17:38-03:00"
+__version__ = "universe.py 2023-12-28T10:01-03:00"
 
 # TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
@@ -31,7 +31,7 @@ class Universe(Identifiable):
 
         self.object_registry = ObjectRegistry()
         self.event_history = []
-        first_event = Event(library, 0, name="History of the Universe")
+        first_event = Event(self, 0, name="History of the Universe")
         self.event_history.append(first_event)
 
     def to_json(self):
@@ -52,6 +52,12 @@ class Universe(Identifiable):
 
     def get_event_history(self):
         return self.event_history
+
+    def get_event_by_id(self, event_id):
+        for event in self.event_history:
+            if event.id == event_id:
+              return event
+        return None
 
     def add_object(self, obj):
         if isinstance(obj, ObjectInstance):

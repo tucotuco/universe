@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2023-12-26T21:19-03:00"
+__version__ = "being.py 2023-12-28T12:06-03:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make methods such as isArmored, isArmed, isShielded
@@ -20,7 +20,8 @@ from skill import Skills
 from speeds import Speed
 from states import States
 from strategy import Strategy
-from utils import convert_to_numeric, convert_to_experience, convert_to_fatigue
+from utils import convert_to_numeric, convert_to_experience, convert_to_fatigue, roll_dice
+from utils import experience_level
 from weapon import WeaponInstance, WeaponDictionary
 
 class BeingDefinition(ObjectDefinition):
@@ -481,15 +482,24 @@ class BeingInstance(ObjectInstance):
             return
         self.current.set_state(state_list, 'stunned', False)
 
-#    def choose_melee_action(self, action_dict, weapon_dict):
+    def makes_save(self, ability_score, difficulty_class):
+        roll = roll_dice('1d20')
+        if roll == 1:
+            return False
+        if roll == 20:
+            return True
+        level = experience_level(self.current.experience)
+        if roll >= difficulty_class - saving_throw_experience_modifier(level):
+            return True
+        return False
+
     def choose_melee_action(self, universe):
         '''
         Choose a melee action from among those currently possible
         '''        
         from universe import Universe
         actions_possible_now = self.currently_possible_actions(universe)
-#        currently_possible_actions = self.currently_possible_actions(action_dict, weapon_dict)
-#        print(f"being.py: choose_melee_action:currently_possible_actions: {currently_possible_actions}")
+#        print(f"being.py: choose_melee_action() actions possible now: {actions_possible_now}")
         options = []
         action_dict = universe.get_action_dictionary()
         for action in actions_possible_now:
@@ -501,7 +511,6 @@ class BeingInstance(ObjectInstance):
             return None
         return random.choice(options)
 
-#    def choose_action(self, action_dict, weapon_dict):
     def choose_action(self, universe):
         '''
         Choose an action from among those currently possible
@@ -560,7 +569,7 @@ class BeingInstance(ObjectInstance):
             an_object = universe.get_object_by_id(object_id)
             if weapon_dict.get_object_definition(an_object.current.obj_type) is not None:
                 armed[body_location]=object_id
-        print(f"being.py: armed_with(): {armed}")
+#        print(f"being.py: armed_with(): {armed}")
         return armed
 
     def choose_weapon(self, armed):
@@ -580,7 +589,7 @@ class BeingInstance(ObjectInstance):
         weapon_dict = universe.get_weapon_dictionary()
         
         possible_actions = self.possible_actions(action_dict)
-#        print(f"being.py: currently_possible_actions:possible_actions: {possible_actions}")
+#        print(f"being.py: currently_possible_actions() possible_actions: {possible_actions}")
 
 #        print(f"\ncurrently_possible_actions(): possible_actions = {possible_actions}")
         if self.is_helpless():
@@ -822,21 +831,6 @@ class BeingDictionary(ObjectDictionary):
 
     def load_beings(self, filename):
         self.load_objects(filename)
-
-#     def load_beings(self, filename):
-#         p = True
-#         with open(filename, 'r') as f:
-#             lines = f.readlines()
-#             headers = lines[0].strip().split('\t')
-#             if p==True:
-#                 p = False
-#             for line in lines[1:]:
-#                 fields = line.strip().split('\t')
-#                 being_dict = {}
-#                 for i in range(len(headers)):
-#                     being_dict[headers[i]] = fields[i]
-#                 being = BeingDefinition(**being_dict)
-#                 self.objects[being.obj_type] = being
 
     def load_objects(self, filename):
         p = True

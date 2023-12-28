@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "object.py 2023-12-27T13:44-03:00"
+__version__ = "object.py 2023-12-27T13:14-03:00"
 
 # TODO: Make size category function from largest of length, width, height
 # TODO: Make ''' comments on classes and methods

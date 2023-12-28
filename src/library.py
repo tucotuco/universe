@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "universe.py 2023-12-26T17:47-03:00"
+__version__ = "universe.py 2023-12-28T07:34-03:00"
 
 # TODO: Write unit tests
 
@@ -34,7 +34,7 @@ class Library(Identifiable):
         try:
             dictionary_filename = f'{config_dir}/actions.tsv'
             self.action_dictionary = ActionDictionary(dictionary_filename)
-            print(f"Dictionary added to library from {dictionary_filename}!")
+#            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")
         
@@ -43,7 +43,7 @@ class Library(Identifiable):
             categories_filename = f'{config_dir}/armor_categories.json'
             self.armor_dictionary = ArmorDictionary(dictionary_filename)
             self.armor_dictionary.load_object_categories(categories_filename)
-            print(f"Dictionary added to library from {dictionary_filename}!")
+#            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")
 
@@ -52,7 +52,7 @@ class Library(Identifiable):
             categories_filename = f'{config_dir}/being_categories.json'
             self.being_dictionary = BeingDictionary(dictionary_filename)
             self.being_dictionary.load_object_categories(categories_filename)
-            print(f"Dictionary added to library from {dictionary_filename}!")
+#            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")
 
@@ -61,7 +61,7 @@ class Library(Identifiable):
             categories_filename = f'{config_dir}/object_categories.json'
             self.object_dictionary = ObjectDictionary(dictionary_filename)
             self.being_dictionary.load_object_categories(categories_filename)
-            print(f"Dictionary added to library from {dictionary_filename}!")
+#            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")
 
@@ -70,7 +70,7 @@ class Library(Identifiable):
             self.skill_dictionary = SkillDictionary(dictionary_filename)
 #            categories_filename = f'{config_dir}/skill_categories.json'
 #            self.skill_dictionary.load_object_categories(categories_filename)
-            print(f"Dictionary added to library from {dictionary_filename}!")
+#            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")
 
@@ -79,7 +79,7 @@ class Library(Identifiable):
             categories_filename = f'{config_dir}/weapon_categories.json'
             self.weapon_dictionary = WeaponDictionary(dictionary_filename)
             self.weapon_dictionary.load_object_categories(categories_filename)
-            print(f"Dictionary added to library from {dictionary_filename}!")
+#            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")
 

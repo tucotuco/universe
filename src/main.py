@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "main.py 2023-12-26T17:48-03:00"
+__version__ = "main.py 2023-12-28T12:07-03:00"
 
 # TODO: Figure out what this will do and implement it. Requires complete refactor.
 
@@ -24,9 +24,8 @@ def test1(library, universe_output_file):
   # Make a Universe to play in
   tobes_universe = Universe(name="Tobe's Universe", library=library)
 
-#  print(f"weapon dictionary: {tobes_universe.library.weapon_dictionary.to_json()}")
   # Make an Encounter to play in
-  encounter = Encounter(tobes_universe, difficulty_class=1, start_time=0, end_time=None, 
+  encounter = Encounter(tobes_universe, difficulty_class=15, start_time=0, end_time=None, 
                  event_type="Encounter", location=None, name="Tobe's Big Day", 
                  parent_event=None, id=None, initiated=False, map=None)
   tobes_universe.add_event(encounter)
@@ -43,7 +42,6 @@ def test1(library, universe_output_file):
 
   # Make an Object for a Being
   tobes_rock_id = encounter.make_object_for_being(tobe_id, "Rock", "Tobe's rock")
-  print(f"tobes_rock_id: {tobes_rock_id}")
   tobes_rock = tobes_universe.get_object_by_id(tobes_rock_id)
   tobes_rock.resize_percent(0.2)
   tobes_rock.reweight_percent(0.2)
@@ -56,6 +54,11 @@ def test1(library, universe_output_file):
   weapon_id = encounter.make_weapon_for_being(grak_id, "Short sword", "Pilfer")
   encounter.arm_being(grak_id, weapon_id, "right hand")
 
+  tobe = tobes_universe.get_object_by_id(tobe_id)
+  print(f"Tobe: {tobe.to_json()}")
+
+  grak = tobes_universe.get_object_by_id(grak_id)
+  print(f"Grak: {grak.to_json()}")
   encounter.run()
 
   tobes_universe.save_to_file(universe_output_file)
