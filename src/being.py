@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2023-12-28T12:06-03:00"
+__version__ = "being.py 2023-12-29T01:13-03:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make methods such as isArmored, isArmed, isShielded
@@ -21,7 +21,7 @@ from speeds import Speed
 from states import States
 from strategy import Strategy
 from utils import convert_to_numeric, convert_to_experience, convert_to_fatigue, roll_dice
-from utils import experience_level
+from utils import experience_level, saving_throw_experience_modifier
 from weapon import WeaponInstance, WeaponDictionary
 
 class BeingDefinition(ObjectDefinition):
