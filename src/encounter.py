@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "encounter.py 2023-12-28T12:06-03:00"
+__version__ = "encounter.py 2024-01-19T01:24-08:00"
 
 # TODO: Just about everything
 # TODO: Make ''' comments on classes and methods
@@ -40,7 +40,8 @@ class Encounter(Event):
         self.time = start_time
         self.being_list = [] # A list of ids of Beings involved in the Encounter
         self.non_being_object_list = [] # A list of ids of Objects involved in the Encounter
-        self.action_list = []
+        self.pending_action_list = []
+        self.finished_action_list = []
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -74,58 +75,47 @@ class Encounter(Event):
             pass
 	
     def make_being(self, being_type, name):
-        being_def = self.universe.library.get_being_definition(being_type)
-        being = BeingInstance(being_def, name)
-        self.universe.add_object(being)
-        self.being_list.append(being.id)
-        print(f"Added Being {being.name} ({being.id})) to the Encounter.")
-        return being.id
+        new_being_id = self.universe.make_being(being_type, name)
+        self.add_being(new_being_id)
+        return new_being_id
     
     def make_object(self, object_type, name):
-        object_def = self.universe.library.get_object_definition(object_type)
-        obj = ObjectInstance(object_def, name)
-        self.universe.add_object(obj)
-#        print(f"Added {object_type} {name} ({obj.id})) to the Encounter.")
-        return obj.id
+        new_object_id = self.universe.make_object(object_type, name)
+        self.add_object(new_object_id)
+        return new_object_id
 
     def make_weapon(self, weapon_type, name):
-        weapon_def = self.universe.library.get_weapon_definition(weapon_type)
-        weapon = WeaponInstance(weapon_def, name)
-        self.universe.add_object(weapon)
-#        print(f"Added {weapon_type} {name} ({weapon.id})) to the Encounter.")
-        return weapon.id
-
-    def make_object_for_being(self, being_id, object_type, name):
-        being = self.universe.get_object_by_id(being_id)
-        if being is not None:
-           obj_id = self.make_object(object_type,name)
-           self.non_being_object_list.append(obj_id)
-           being.add_possession(obj_id)
-           print(f"Made {object_type} {name} ({obj_id})) for {being.name}.")
-           return obj_id
-        else:
-           print(f"Being {being_id} not found, no Object made.")        
+        new_weapon_id = self.universe.make_weapon(weapon_type, name)
+        self.add_object(new_weapon_id)
+        return new_weapon_id
 
     def make_weapon_for_being(self, being_id, weapon_type, name):
-        being = self.universe.get_object_by_id(being_id)
-        if being is not None:
-           weapon_id = self.make_weapon(weapon_type,name)
-           being.weapons.append(weapon_id)
-           self.non_being_object_list.append(weapon_id)
-           print(f"Made {weapon_type} {name} ({weapon_id})) for {being.name}.")
-           return weapon_id
-        else:
-           print(f"Being {being_id} not found, no Object made.")        
+        return self.universe.make_weapon_for_being(being_id, weapon_type, name)
+    
+    def make_object_for_being(self, being_id, object_type, name):
+        new_object_id = self.universe.make_object_for_being(being_id, object_type, name)
+        if new_object_id is None:
+            return None
+        self.non_being_object_list.append(new_object_id)
+        return new_object_id
+
+    def make_weapon_for_being(self, being_id, weapon_type, name):
+        new_weapon_id = self.universe.make_weapon_for_being(being_id, weapon_type, name)
+        if new_weapon_id is None:
+            return None
+        self.non_being_object_list.append(new_weapon_id)
+        return new_weapon_id
 
     def arm_being(self, being_id, weapon_id, body_location):
-        being = self.universe.get_object_by_id(being_id)
-        weapon = self.universe.get_object_by_id(weapon_id)
-        if being is not None and weapon is not None:
-            being.set_body_part_holds_object(body_location, weapon_id)
+        return self.universe.arm_being(being_id, weapon_id, body_location)
 
     def add_object(self, object_id):
-        if object_id not in self.object_list:
-            self.object_list.append(object_id)
+        if object_id not in self.non_being_object_list:
+            self.non_being_object_list.append(object_id)
+
+    def add_being(self, being_id):
+        if being_id not in self.being_list:
+            self.being_list.append(being_id)
 
     # Load an Encounter from storage.
 #    def load(self):
@@ -139,11 +129,11 @@ class Encounter(Event):
     # 6. save state
     # 7. prompt to continue playing: if continue, go to 1 else exit
     def run(self, run_children=True):
-        if self.initiated == False:
+        if not self.initiated:
             self.generate()
 
         continue_turns = True
-        while continue_turns == True:
+        while continue_turns:
             print(f"----- {self.name} turn {self.time} -----")
 #            print(f"choose movement: not implemented")
             self.choose_movement()
@@ -157,19 +147,27 @@ class Encounter(Event):
 #            self.choose_actions()
 #            print(f"choose fight actions")
             self.choose_fight_actions()
+#             print("Pending actions:")
+#             for action_id in self.pending_action_list:
+#                 action = self.universe.get_event_by_id(action_id)
+#                 if action is None:
+#                     print(f"Action {action_id} not found in event history")
+#                 else:
+#                     print(f"{action.get_actor().name} targets {action.get_target().name} with {action.name} starting: {action.start_time} ending: {action.end_time}")
             self.time += 1
             continue_turns = self.keep_going()
 
     def keep_going(self):
         # Do just one round
-#         if self.time == 10:
-#             return False
+#        if self.time == 10:
+#            return False
         # Go until one or no one left standing
         being_count = len(self.being_list)
+#        print(f"Being count turn {self.time}: {being_count}")
         beings_alive = 0
         for being_id in self.being_list:
             being = self.universe.get_object_by_id(being_id)
-#            print(f"encounter.py keep_going() current hit points for {being.name}: {being.current.hit_points}")
+            print(f"Current hit points for {being.name}: {being.current.hit_points}")
             if being.current.hit_points > 0:
                 beings_alive += 1
                 if beings_alive > 1:
@@ -184,21 +182,28 @@ class Encounter(Event):
         pass
 
     def resolve_actions(self):
-        for action in self.action_list:
+        finish = []
+        for action in self.pending_action_list:
             action = self.universe.get_event_by_id(action)
-#            print(f"encounter.pt resolve_actions() action {action.to_json()}")
             if action is not None:
-                action.resolve(self.time)
+                if action.end_time == self.time:
+                    action.resolve(self.difficulty_class)
+                    self.finished_action_list.append(action.id)
+                    finish.append(action.id)
+        for action_id in finish:
+            self.pending_action_list.remove(action_id)
     
     def update_environment(self):
         pass
 
     def is_being_occupied(self, being_id):
-        for action_id in self.action_list:
+        for action_id in self.pending_action_list:
             action = self.universe.get_event_by_id(action_id)
-            if action.actor_id == being_id and action.end_time > self.time \
-                and action.event_type != "delay":
-                return True
+            if action.actor_id == being_id:
+                if action.event_type == "delay":
+                    return False
+                if action.end_time > self.time:
+                    return True
         return False
 
     def choose_target_being(self, subject_being_id):
@@ -232,12 +237,20 @@ class Encounter(Event):
     def choose_fight_actions(self):
         for subject_being_id in self.being_list:
             subject_being = self.universe.get_object_by_id(subject_being_id)
+#            print(f"Choosing fight action for {subject_being.name}")
 
-            if self.is_being_occupied(subject_being_id):
-                break
+            if subject_being.is_dead():
+                print(f"{subject_being.name} is dead")
+                continue
 
             if subject_being.is_helpless():
-                break
+                print(f"{subject_being.name} is helpless")
+                continue
+
+            if self.is_being_occupied(subject_being_id):
+                print(f"{subject_being.name} is occupied")
+                continue
+
             action_dict = self.universe.get_action_dictionary()
             object_registry = self.universe.object_registry
 
@@ -252,26 +265,21 @@ class Encounter(Event):
                 target_id = None
                 target = None
                 # If the Action requires a target Being, choose the target
-#                print(f"Chosen action: {chosen_action}")
                 if action_definition["target_type"] == 'being':
                     target_id = self.choose_target_being(subject_being_id)
                     target = self.universe.get_object_by_id(target_id)
-#                    print(f"{subject_being.name} targets {target.name} with {chosen_action}")
                 # Otherwise if the Action requires a target Object, choose the target
                 elif action_definition["target_type"] == 'object':
                     target_id = self.choose_target_object(subject_being_id)
                     target = self.universe.get_object_by_id(target_id)
-#                    print(f"{subject_being.name} targets {target.name} with {chosen_action}")
                 # Otherwise if the Action requires a target Attack, choose the target
 #                 elif action_definition["target_type"] == 'attack':
 #                     target_id = self.choose_target_attack(subject_being_id)
 #                     #target = self.universe.get_object_by_id(target_id)
-#                     print(f"Target attack for {subject_being.name} is {target.name}")
                 # Otherwise if the Action requires a target Attack, choose the target
                 elif action_definition["target_type"] == 'weapon':
                     target_id = self.choose_target_weapon(subject_being_id)
                     target = self.universe.get_object_by_id(target_id)
-#                    print(f"Target weapon for {subject_being.name} is {target.name}")
                 # Otherwise no target is necessary
 
                 new_action = None
@@ -281,14 +289,12 @@ class Encounter(Event):
                 weapon = self.universe.get_object_by_id(weapon_id)
                 if "swing" in chosen_action:
                     name = f"{subject_being.name} swing t={self.time}"
-                    print(f"{subject_being.name} targets {target.name} with {chosen_action} using {weapon.name}")
                     new_action = Swing(self.universe, start_time=self.time, 
                         end_time=None, event_type="swing", actor_id=subject_being_id, 
                         target_id=target_id, instrument_id=weapon_id, strategy=None, 
                         location=None, name=name, parent_event_id=self.id)
                 elif "thrust" in chosen_action:
                     name = f"{subject_being.name} thrust at t={self.time}"
-                    print(f"{subject_being.name} targets {target.name} with {chosen_action} using {weapon.name}")
                     new_action = Thrust(self.universe, start_time=self.time, 
                         end_time=None, event_type="thrust", actor_id=subject_being_id, 
                         target_id=target_id, instrument_id=weapon_id, strategy=None, 
@@ -296,8 +302,9 @@ class Encounter(Event):
                 else:
                     pass
 
+                print(f"{subject_being.name} targets {target.name} with {chosen_action} using {weapon.name} ending at t={new_action.end_time}")
                 # Add Action to the Event History
-                self.action_list.append(new_action.id)
+                self.pending_action_list.append(new_action.id)
                 self.universe.add_event(new_action)
 
     def choose_actions(self):

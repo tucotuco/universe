@@ -31,11 +31,11 @@ class TestActionDefinition(unittest.TestCase):
         self.assertIsNot(self.def1, self.def2)
     
     def test_get_property_dict(self):
-        expected_dict = {'target_type': 'object', 'required_skill': 'skill1'}
+        expected_dict = {'target_type': 'object', 'required_skill': 'skill1', 'is_melee': False}
         self.assertEqual(self.def1.get_property_dict(), expected_dict)
     
     def test_to_json(self):
-        expected_json = json.dumps({'Action1': {'target_type': 'object', 'required_skill': 'skill1'}})
+        expected_json = json.dumps({'Action1': {'target_type': 'object', 'required_skill': 'skill1', 'is_melee': False}})
         self.assertEqual(self.def1.to_json(), expected_json)
 
 class TestActionDictionary(unittest.TestCase):
@@ -56,8 +56,8 @@ class TestActionDictionary(unittest.TestCase):
         action = ActionDefinition("sit")
         self.action_dict.add_action(action)
         self.assertEqual(len(self.action_dict.actions), 2)
-        self.assertEqual(self.action_dict.get_action_definition("punch"), {'target_type': 'being', 'required_skill': 'unarmed combat'})
-        self.assertEqual(self.action_dict.get_action_definition("sit"), {'target_type': 'object', 'required_skill': 'none'})
+        self.assertEqual(self.action_dict.get_action_definition("punch"), {'target_type': 'being', 'required_skill': 'unarmed combat', 'is_melee': False})
+        self.assertEqual(self.action_dict.get_action_definition("sit"), {'target_type': 'object', 'required_skill': 'none', 'is_melee': False})
         self.assertIsNone(self.action_dict.get_action_definition("kick"))
 
     def test_load_actions(self):
@@ -66,12 +66,12 @@ class TestActionDictionary(unittest.TestCase):
             self.action_dict.load_actions("test_file.tsv")
         self.assertIn("shoot", self.action_dict.actions)
         self.assertIn("feint unarmed", self.action_dict.actions)
-        self.assertEqual(self.action_dict.actions["shoot"], {'target_type': 'object', 'required_skill': 'none'})
-        self.assertEqual(self.action_dict.actions["feint unarmed"], {'target_type': 'being', 'required_skill': 'unarmed combat'})
+        self.assertEqual(self.action_dict.actions["shoot"], {'target_type': 'object', 'required_skill': 'none', 'is_melee': False})
+        self.assertEqual(self.action_dict.actions["feint unarmed"], {'target_type': 'being', 'required_skill': 'unarmed combat', 'is_melee': False})
 
     def test_load_actions2(self):
         self.action_dict.load_actions(self.actions_file)
-        self.assertEqual(len(self.action_dict.actions), 44)
+        self.assertEqual(len(self.action_dict.actions), 55)
         for action in self.action_dict.actions:
             action_dict = self.action_dict.actions[action]
             self.assertIsInstance(action_dict, dict)

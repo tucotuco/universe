@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "main.py 2023-12-28T12:07-03:00"
+__version__ = "main.py 2024-01-19T02:12-08:00"
 
 # TODO: Figure out what this will do and implement it. Requires complete refactor.
 
@@ -12,6 +12,7 @@ import os
 from identifiable import Identifiable
 from universe import Universe
 from library import Library
+from utils import roll_dice
 
 from actiondictionary import ActionDictionary
 from object import ObjectInstance, ObjectDefinition, ObjectRegistry
@@ -36,6 +37,7 @@ def test1(library, universe_output_file):
   # Make a another Being
   grak_id = encounter.make_being("Kobold", "Grak")
 
+  print(f"Being list: {encounter.being_list}")
   # Here you could modify the Beings' properties
 
   # Here you give the Beings possessions, arm them, armor them, etc.
@@ -55,10 +57,10 @@ def test1(library, universe_output_file):
   encounter.arm_being(grak_id, weapon_id, "right hand")
 
   tobe = tobes_universe.get_object_by_id(tobe_id)
-  print(f"Tobe: {tobe.to_json()}")
+#  print(f"Tobe: {tobe.to_json()}")
 
   grak = tobes_universe.get_object_by_id(grak_id)
-  print(f"Grak: {grak.to_json()}")
+#  print(f"Grak: {grak.to_json()}")
   encounter.run()
 
   tobes_universe.save_to_file(universe_output_file)
@@ -104,6 +106,11 @@ def main():
   library = Library()
     
   test1(library, f'{options.workspace}/{options.outputfile}')
+#   sum=0
+#   for i in range(1,100000):
+#       sum += roll_dice('1d8')
+# #      print(f"{roll_dice('1d8')}")
+#   print(f"sum={sum} mean = {sum/100000}")
 
 if __name__ == '__main__':
   main()

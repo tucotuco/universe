@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2023-12-29T01:13-03:00"
+__version__ = "being.py 2024-01-19T00:46-08:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make methods such as isArmored, isArmed, isShielded
@@ -424,6 +424,11 @@ class BeingInstance(ObjectInstance):
             return True
         return is_helpless()
 
+    def is_dead(self):
+        if self.get_hit_points() <= -10:
+            return True
+        return False
+
     def is_helpless(self):
         if self.is_paralyzed():
             return True
@@ -553,7 +558,7 @@ class BeingInstance(ObjectInstance):
         shielded = {}
         for body_location, object_id in self.get_body_parts().items():
             an_object = universe.get_object_by_id(object_id)
-            if an_object.current.obj_type in weapon_dict.get_objects_in_category('Shields') == True:
+            if an_object.current.obj_type in weapon_dict.get_objects_in_category('Shields'):
                 shielded[body_location]=object_id
         return shielded
     
@@ -619,7 +624,7 @@ class BeingInstance(ObjectInstance):
                 # Check to see if the Being has one unoccupied unarmed attack
                 # Includes: disarm unarmed, feint, unarmed, deflect unarmed, 
                 # parry unarmed
-                if has_free_hand == True:
+                if has_free_hand:
                     actions[action] = properties
             if action == 'break hold':
                 # TODO: implement break hold
@@ -630,7 +635,7 @@ class BeingInstance(ObjectInstance):
                 # Must be armed with a weapon that allows a swing attack and target must 
                 # be armed
                 pass
-#                 if isinstance(target, WeaponInstance) == False:
+#                 if not isinstance(target, WeaponInstance):
 #                     pass
 #                 for body_part, weapon in armed_with.items():
 #                     attack_types = weapon_dict.objects[weapon].attacks XXX
@@ -739,7 +744,7 @@ class BeingInstance(ObjectInstance):
                         actions[action] = properties
                         break
             elif action == 'stun':
-                if has_free_hand == True:
+                if has_free_hand:
                     actions[action] = properties
             elif action == 'swing at being':
                 # Could be armed or unarmed

@@ -3,87 +3,97 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_action.py 2023-04-02T11:39-03:00"
+__version__ = "test_action.py 2024-01-19T01:03-08:00"
 
 # TODO: Check comprehensiveness
 
 import unittest
 import sys
 import os
-import json
-
-from unittest.mock import patch
-from io import StringIO
 
 sys.path.insert(0, os.path.abspath('../src'))
-#print(f'{__version__}:{sys.path}')
 
-from action import ActionDefinition, ActionDictionary
+from action import Action, Swing, Thrust
+from being import BeingDefinition, BeingInstance
+from strategy import Strategy
+from universe import Universe
+from library import Library
 	
-class TestActionDefinition(unittest.TestCase):
+class TestAction(unittest.TestCase):
+
     def setUp(self):
-        self.def1 = ActionDefinition('Action1', 'object', 'skill1')
-        self.def2 = self.def1.copy()
-    
-    def test_copy(self):
-        self.assertEqual(self.def1.name, self.def2.name)
-        self.assertEqual(self.def1.required_skill, self.def2.required_skill)
-        self.assertIsNot(self.def1, self.def2)
-    
-    def test_get_property_dict(self):
-        expected_dict = {'target_type': 'object', 'required_skill': 'skill1'}
-        self.assertEqual(self.def1.get_property_dict(), expected_dict)
-    
-    def test_to_json(self):
-        expected_json = json.dumps({'Action1': {'target_type': 'object', 'required_skill': 'skill1'}})
-        self.assertEqual(self.def1.to_json(), expected_json)
+        self.universe = Universe(name="Test Universe", library=Library())
+        self.start_time = 0
+        self.end_time = 10
+        self.actor_id = self.universe.make_being("zombie", "Tobez")
+        self.target_id = self.universe.make_being("skeleton", "Gordo")
+        self.instrument_id = encounter.make_weapon_for_being(self.actor_id, "Longsword", "Loki")
+        encounter.arm_being(self.actor_id, self.instrument_id, "left hand")
+        self.strategy = Strategy()
+        self.location = None
+        self.parent_event_id = None
 
-class TestActionDictionary(unittest.TestCase):
-    def setUp(self):
-        self.actions_file = '../src/config/actions.tsv'
-        self.action_dict = ActionDictionary()
+        self.action = Action(self.universe, self.start_time, self.end_time, "action",
+                             self.actor_id, self.target_id, self.instrument_id, self.strategy,
+                             self.location, "Test Action", self.parent_event_id)
 
-    def test_add_action(self):
-        action = ActionDefinition("punch")
-        self.action_dict.add_action(action)
-        self.assertEqual(len(self.action_dict.actions), 1)
-        self.assertIn("punch", self.action_dict.actions)
-        self.assertIsNotNone(self.action_dict.actions["punch"])
+        self.swing = Swing(self.universe, self.start_time, self.end_time, "swing",
+                             self.actor_id, self.target_id, self.instrument_id, self.strategy,
+                             self.location, "Test Swing", self.parent_event_id)
 
-    def test_get_action_definition(self):
-        action = ActionDefinition("punch", 'being', 'unarmed combat')
-        self.action_dict.add_action(action)
-        action = ActionDefinition("sit")
-        self.action_dict.add_action(action)
-        self.assertEqual(len(self.action_dict.actions), 2)
-        self.assertEqual(self.action_dict.get_action_definition("punch"), {'target_type': 'being', 'required_skill': 'unarmed combat'})
-        self.assertEqual(self.action_dict.get_action_definition("sit"), {'target_type': 'object', 'required_skill': 'none'})
-        self.assertIsNone(self.action_dict.get_action_definition("kick"))
+        self.thrust = Thrust(self.universe, self.start_time, self.end_time, "thrust",
+                             self.actor_id, self.target_id, self.instrument_id, self.strategy,
+                             self.location, "Test Thrust", self.parent_event_id)
 
-    def test_load_actions(self):
-        action_dict_file = StringIO('name\ttarget_type\trequired_skill\nshoot\tobject\tnone\nfeint unarmed\tbeing\tunarmed combat')
-        with patch("builtins.open", return_value=action_dict_file):
-            self.action_dict.load_actions("test_file.tsv")
-        self.assertIn("shoot", self.action_dict.actions)
-        self.assertIn("feint unarmed", self.action_dict.actions)
-        self.assertEqual(self.action_dict.actions["shoot"], {'target_type': 'object', 'required_skill': 'none'})
-        self.assertEqual(self.action_dict.actions["feint unarmed"], {'target_type': 'being', 'required_skill': 'unarmed combat'})
+    def test_set_actor_id(self):
+        # Test setting a valid actor_id
+        new_actor_id = 5
+        self.action.set_actor_id(new_actor_id)
+        self.assertEqual(self.action.actor_id, new_actor_id)
 
-    def test_load_actions2(self):
-        self.action_dict.load_actions(self.actions_file)
-        self.assertEqual(len(self.action_dict.actions), 44)
-        for action in self.action_dict.actions:
-            action_dict = self.action_dict.actions[action]
-            self.assertIsInstance(action_dict, dict)
-        action = self.action_dict.actions['stun']
-#        print(f'action: {action}')
-        self.assertEqual(action.get('required_skill'), 'stun')
+    def test_set_target_id(self):
+        # Test setting a valid actor_id
+        new_target_id = 5
+        self.action.set_target_id(new_target_id)
+        self.assertEqual(self.action.target_id, new_target_id)
 
-    def test_load_from_dict(self):
-        action_dict = {"actions": {"punch": "unarmed combat"}}
-        self.action_dict.load_from_dict(action_dict)
-        self.assertIn("punch", self.action_dict.actions)
-        self.assertEqual(self.action_dict.actions["punch"], "unarmed combat")
+    def test_calculate_end_time(self):
+        self.assertEqual(self.action.calculate_end_time(5,6), 1)
+        self.assertEqual(self.action.calculate_end_time(5,5), 1)
+        self.assertEqual(self.action.calculate_end_time(5,4), 1)
+        self.assertEqual(self.action.calculate_end_time(5,3), 2)
+        self.assertEqual(self.action.calculate_end_time(5,1), 4)
+        self.assertEqual(self.action.calculate_end_time(5,0), 5)
+
+    def test_roll_hits(self):
+        # Test roll_hits method with various scenarios
+        self.universe.get_object_by_id.side_effect = [Mock(), Mock()]  # Mocking actor and target
+        self.action.parent_event_id = 4
+        parent_event_mock = Mock()
+        parent_event_mock.difficulty_class = 15
+        self.universe.get_event_by_id.return_value = parent_event_mock
+
+        roll = 15  
+        self.assertTrue(self.action.roll_hits(roll))
+
+        roll = 20  
+        self.assertTrue(self.action.roll_hits(roll))
+
+        roll = 14
+        self.assertFalse(self.action.roll_hits(roll))
+
+        roll = 1
+        self.assertFalse(self.action.roll_hits(roll))
+
+    def test_resolve(self):
+        # Since resolve is expected to be overridden in subclasses, you might test it differently
+        # or just check that it's correctly set up to be overridden
+        pass
+
+    # Add more tests for other methods as needed
+
+if __name__ == '__main__':
+    unittest.main()
 
 if __name__ == '__main__':
     unittest.main()

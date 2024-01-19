@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_utils.py 2023-04-23T18:34+02:00"
+__version__ = "test_utils.py 2023-01-03T14:43+02:00"
 
 # TODO: Check comprehensiveness
 
@@ -46,6 +46,12 @@ class TestRollDice(unittest.TestCase):
             result = roll_dice('1d20-5')
             self.assertLessEqual(result,15)
             self.assertGreaterEqual(result,-4)
+
+        i=0
+        for _ in range(1000):
+            result = roll_dice('1d8')
+            self.assertLessEqual(result,8)
+            self.assertGreaterEqual(result,1)
 
         i=0
         for _ in range(1000):

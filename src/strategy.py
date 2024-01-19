@@ -3,11 +3,13 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "strategy.py 2023-12-26T22:11-03:00"
+__version__ = "strategy.py 2024-01-17T09:24-08:00"
 
 # TODO:
 
 import math
+import json
+
 from utils import convert_to_numeric, convert_to_speed
        
 class Strategy():
@@ -29,6 +31,15 @@ class Strategy():
         Get an independent copy of the Strategy instance.
         '''
         return Strategy(self.attack, self.defense, self.timing, self.extra_damage)
+
+    def to_json(self):
+        data = {
+            "attack": self.attack,
+            "defense": self.defense,
+            "timing": self.timing,
+            "extra_damage": self.extra_damage
+        }
+        return json.dumps(data)
 
     def timing_adjustment(self):
         ''' 
