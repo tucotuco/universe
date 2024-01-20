@@ -3,18 +3,18 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "action.py 2024-01-19T01:24-8:00"
+__version__ = "action.py 2024-01-19T09:35-8:00"
 
-# TODO: Implement do_critical_hit(), do_critical_miss(), do_super_spectacular_miss()
-# TODO: do_spectacular_miss(), do_miss(), drop_weapon(),
-# Consolidate die roll stuff outside of do_damage and pass the results to do_damage, reuse for the other functions above.
+# TODO: Implement drop_weapon()
+# TODO: Implement damage stopped by armor in do_hit()
+# TODO: Implement damage stopped by armor in do_critical_miss()
+
 import json
 
 from utils import roll_dice, get_random_key
 from event import Event
 from object import ObjectInstance
 from strategy import Strategy
-
 
 class Action(Event):
     """
@@ -80,7 +80,14 @@ class Action(Event):
         """
         Set the actor_id of the Action, making sure that it is an ObjectInstance.
         """
-        self.actor_id = actor_id
+        self.actor_id = None
+        actor = self.universe.get_object_by_id(actor_id)
+        if actor is None:
+            print(f"Actor_id {actor_id} not found in Universe.")
+        elif not isinstance(actor, ObjectInstance):
+            print(f"Actor {actor_id} is not an ObjectInstance.")
+        else:
+            self.actor_id = actor_id
 
     def get_actor(self):
         """
@@ -88,31 +95,55 @@ class Action(Event):
         """
         return self.universe.get_object_by_id(self.actor_id)
 
+    def set_target_id(self, target_id):
+        # TODO: Allow a Location to be a target.
+        """
+        Set the target_id of the Action, making sure that it is an ObjectInstance.
+        """
+        self.target_id = None
+        target = self.universe.get_object_by_id(target_id)
+        if target is None:
+            print(f"Target_id {target_id} not found in Universe.")
+        elif not isinstance(actor, ObjectInstance):
+            print(f"Target {target_id} is not an ObjectInstance.")
+        else:
+            self.target_id = target_id
+
     def get_target(self):
         """
         Get the target for the Action.
         """
         return self.universe.get_object_by_id(self.target_id)
 
-    def set_target_id(self, target_id):
-        """
-        Set the target_id of the Action, making sure that it is either an ObjectInstance or
-        a Location.
-        """
-        self.target_id = target_id
-
     def set_instrument_id(self, instrument_id):
+        # TODO: Allow a Spell to be an instrument.
         """
         Set the instrument_id used by the actor, making sure that it is an ObjectInstance
         or other valid instrument (e.g., Spell).
         """
-        self.instrument_id = instrument_id
+        self.instrument_id = None
+        instrument = self.universe.get_object_by_id(instrument_id)
+        if instrument is None:
+            print(f"Instrument_id {instrument_id} not found in Universe.")
+        elif not isinstance(actor, ObjectInstance):
+            print(f"Instrument {instrument_id} is not an ObjectInstance.")
+        else:
+            self.instrument_id = instrument_id
+
+    def get_instrument(self):
+        """
+        Get the insturment used for the Action.
+        """
+        return self.universe.get_object_by_id(self.instrument_id)
 
     def set_strategy(self, strategy):
         """
         Set the strategy used by the actor, making sure that it is a Strategy or None.
         """
-        self.strategy = strategy
+        if isinstance(strategy, Strategy):
+            self.strategy = strategy
+        else:
+            self.strategy = Strategy()
 
     def calculate_end_time(self, action_timing, timing_adjustment):
         """
@@ -142,8 +173,6 @@ class Action(Event):
         Distribute damage from a successful critical hit.
         """
         # See if the attack hit a shield
-        #        print(f"Normal hit max_damage={max_damage} extra_damage={extra_damage} damage_roll={damage_roll} remaining_damage={remaining_damage}")
-
         target = self.universe.get_object_by_id(self.target_id)
         shields = target.shielded_with(self.universe)
         target_shield_location = get_random_key(shields)
@@ -160,6 +189,7 @@ class Action(Event):
                 # Damage shield
                 target_shield.damage(remaining_damage)
                 remaining_damage -= shield_size
+                print(f"Shield for {target.name} was hit for {remaining_damage} damage leaving {target_shiled.current.hit_points} hit points")
                 if remaining_damage < 0:
                     return
         # See if the remainder hits armor
@@ -179,42 +209,19 @@ class Action(Event):
 
         # Deliver any remaining damage to the target
         target.current.hit_points -= remaining_damage
-        print(
-            f"{target.name} was hit for {remaining_damage} damage leaving {target.current.hit_points} hit points"
-        )
+        print(f"{target.name} was hit for {remaining_damage} damage leaving {target.current.hit_points} hit points")
 
     def do_critical_miss(self, remaining_damage):
         """
         Critical miss - actor hits self
         """
         actor = self.universe.get_object_by_id(self.actor_id)
-        """
-        Distribute damage from an attack that hits self.
-        """
-        # See if the attack hit a shield
-        #        print(f"Normal hit max_damage={max_damage} extra_damage={extra_damage} damage_roll={damage_roll} remaining_damage={remaining_damage}")
 
-        target = self.universe.get_object_by_id(self.actor_id)
-        shields = target.shielded_with(self.universe)
-        target_shield_location = get_random_key(shields)
-        target_shield = shields.get(target_shield_location)
-        if target_shield is not None:
-            shield_size = target_shield.weapon_size
-            # If a roll on a d10 is less than or equal to the shield size+4, the attack
-            # hits the shield first and it will stop damage equal to the lesser of a) the
-            # damage done in the attack and, b) the shield size. For each hit on the
-            # shield,  the total damage in excess of the shield size is taken from the
-            # shield’s hit points.
-            shield_roll = roll_dice("1d10+0")
-            if shield_roll <= shield_size + 4:
-                # Damage shield
-                target_shield.damage(remaining_damage)
-                remaining_damage -= shield_size
-                if remaining_damage < 0:
-                    return
+        # Distribute damage from an attack that hits self.
+        # Critical misses to not hit shields
         # See if the remainder hits armor
-        target_armor = target.get_armor()
-        if target_armor is not None:
+        armor = actor.get_armor()
+        if armor is not None:
             # The amount of damage that gets through armor is the amount that got past a
             # shield (if any) minus the number in the damage column under the appropriate
             # penetration type (see the Armors Table). Critical hit damage (that part of
@@ -228,24 +235,8 @@ class Action(Event):
             pass
 
         # Deliver any remaining damage to the target
-        target.current.hit_points -= remaining_damage
-        print(
-            f"{target.name} hit self for {remaining_damage} damage leaving {target.current.hit_points} hit points"
-        )
-
-    def do_spectacular_miss(self):
-        """
-        Spectacular miss
-        """
-        actor = self.universe.get_object_by_id(self.actor_id)
-        print(f"{actor.name} spectacularly misses")
-
-    def do_miss(self):
-        """
-        Miss
-        """
-        actor = self.universe.get_object_by_id(self.actor_id)
-        print(f"{actor.name} misses")
+        actor.current.hit_points -= remaining_damage
+        print(f"{actor.name} hit self for {remaining_damage} damage leaving {actor.current.hit_points} hit points")
 
     def drop_weapon(self):
         """
@@ -260,14 +251,11 @@ class Action(Event):
         """
         target = self.universe.get_object_by_id(self.target_id)
         target.set_hit_points(-10)
-        print(
-            f"{target.name} fatally hit leaving {target.current.hit_points} hit points"
-        )
+        print(f"{target.name} fatally hit leaving {target.current.hit_points} hit points")
 
     def do_damage(self, max_damage, difficulty_class):
         actor = self.universe.get_object_by_id(self.actor_id)
         target = self.universe.get_object_by_id(self.target_id)
-        parent_event = self.universe.get_event_by_id(self.parent_event_id)
 
         roll = roll_dice("1d20")
         print(f"Roll to hit: {roll}")
@@ -278,9 +266,7 @@ class Action(Event):
             threat_roll = roll_dice("1d20")
             print(f"Threat roll: {threat_roll}")
             if threat_roll == 20:
-                saved = actor.makes_save(
-                    actor.current.abilities.CON, parent_event.difficulty_class
-                )
+                saved = actor.makes_save(actor.current.abilities.CON, difficulty_class)
                 if not saved:
                     # Fatal
                     print(f"*** Save failed, fatal hit: {threat_roll} ***")
@@ -313,26 +299,25 @@ class Action(Event):
             elif not self.roll_hits(roll, difficulty_class):
                 # Actor must make Reflex Saving Throw
                 saved = actor.makes_save(
-                    actor.current.abilities.DEX, parent_event.difficulty_class
+                    actor.current.abilities.DEX, difficulty_class
                 )
                 if not saved:
                     # Actor drops weapon
                     self.drop_weapon()
                 else:
                     # Spectacular miss
-                    self.do_spectacular_miss()
+                    print(f"{actor.name} misses spectacularly")
             else:
-                # Spectacular miss
-                self.do_miss()
+                # Miss
+                print(f"{actor.name} misses")
         elif self.roll_hits(roll, difficulty_class):
             # Normal hit
             die = f"1d{max_damage}+{extra_damage}"
             damage_roll = roll_dice(die)
-            #            print(f"{max_damage} {extra_damage} {damage_roll} {die}")
             self.do_hit(damage_roll)
         else:
             # No hit
-            self.do_miss()
+            print(f"{actor.name} misses")
 
 class Swing(Action):
     def __init__(
