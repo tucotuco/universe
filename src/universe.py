@@ -3,24 +3,24 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "universe.py 2024-01-09T13:51-03:00"
+__version__ = "universe.py 2024-02-04T16:53-08:00"
 
 # TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
 # TODO: Have save_to_file ignore dictionaries and object registry.
 # TODO: Have save_to_file save object registry separately.
-# TODO: add make_being() and other make() functions that have been built for encounter. Have encounter invoke them from here.
 # Create exceptions for make and arm methods if expectations aren't met.
 
 import json, sys
 
-from library import Library
+from armor import ArmorInstance
 from being import BeingInstance
+from encounter import Encounter
+from event import Event
+from identifiable import Identifiable
+from library import Library
 from object import ObjectInstance, ObjectRegistry
 from weapon import WeaponInstance
-from identifiable import Identifiable
-from event import Event
-from encounter import Encounter
 
 class Universe(Identifiable):
     '''
@@ -149,7 +149,7 @@ class Universe(Identifiable):
             return None
         being = BeingInstance(being_def, name)
         self.add_object(being)
-        print(f"Made {being_type} {name} (id={being.id})).")
+#XXX        print(f"Made {being_type} {name} (id={being.id})).")
         return being.id
     
     def make_object(self, object_type, name):
@@ -159,7 +159,7 @@ class Universe(Identifiable):
             return None
         obj = ObjectInstance(object_def, name)
         self.add_object(obj)
-        print(f"Made {object_type} {name} (id={obj.id})).")
+#XXX        print(f"Made {object_type} {name} (id={obj.id})).")
         return obj.id
 
     def make_weapon(self, weapon_type, name):
@@ -169,7 +169,7 @@ class Universe(Identifiable):
             return None
         weapon = WeaponInstance(weapon_def, name)
         self.add_object(weapon)
-        print(f"Made {weapon_type} {name} (id={weapon.id})).")
+#XXX        print(f"Made {weapon_type} {name} (id={weapon.id})).")
         return weapon.id
 
     def make_object_for_being(self, being_id, object_type, name):
@@ -182,7 +182,7 @@ class Universe(Identifiable):
             print(f"Unable to make object {name} with object_type {object_type}.")        
             return None
         being.add_possession(new_object_id)
-        print(f"Made {object_type} {name} ({new_object_id})) for {being.name}.")
+#XXX        print(f"Made {object_type} {name} ({new_object_id})) for {being.name}.")
         return new_object_id
 
     def make_weapon_for_being(self, being_id, weapon_type, name):
@@ -193,7 +193,7 @@ class Universe(Identifiable):
         new_weapon_id = self.make_weapon(weapon_type, name)
         if new_weapon_id is not None:
             being.weapons.append(new_weapon_id)
-            print(f"Made {weapon_type} {name} ({new_weapon_id})) for {being.name}.")
+#XXX            print(f"Made {weapon_type} {name} ({new_weapon_id})) for {being.name}.")
         return new_weapon_id
 
     def arm_being(self, being_id, weapon_id, body_location):
@@ -206,5 +206,26 @@ class Universe(Identifiable):
             print(f"Weapon {weapon_id} not found, being {being.name} not armed.")        
             return False
         being.set_body_part_holds_object(body_location, weapon_id)
-        print(f"Being {being.name} armed with {weapon.type} {weapon.name}.")        
+#XXX        print(f"Being {being.name} armed with {weapon.type} {weapon.name}.")        
         return True
+
+    def make_armor(self, armor_type, name):
+        armor_def = self.library.get_armor_definition(armor_type)
+        if armor_def is None:
+            print(f"Unable to make armor {name} with armor_type {armor_type}.")        
+            return None
+        armor = ArmorInstance(armor_def, name)
+        self.add_object(armor)
+#XXX        print(f"Made {armor_type} {name} (id={armor.id})).")
+        return armor.id
+
+    def make_armor_for_being(self, being_id, armor_type, name):
+        being = self.get_object_by_id(being_id)
+        if being is None or not isinstance(being, BeingInstance):
+            print(f"Being {being_id} not found, not armored.")
+            return False
+        new_armor_id = self.make_armor(armor_type, name)
+        if new_armor_id is not None:
+            being.set_armor(new_armor_id)
+#XXX            print(f"Made {armor_type} {name} ({new_armor_id})) for {being.name}.")
+        return new_armor_id

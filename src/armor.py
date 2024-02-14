@@ -3,10 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "armor.py 2023-12-27T13:09-03:00"
+__version__ = "armor.py 2024-02-05T13:56-03:00"
 
 # TODO: ArmorDefinitions will need widths and heights eventually
-# TODO: *** Implement damage_to_armor()
 # TODO: Write a script to figure out damage through each armor for each attack of each weapon
 
 import json
@@ -219,12 +218,12 @@ class ArmorInstance(ObjectInstance):
                 least_defense_hardness = phardness
         return least_defense_hardness
 
-    def damage_to_armor(self, damage, penetrations_types):
+    def damage_to_armor(self, damage, penetration_types):
         '''
         Calculate the amount of damage that would be done to the armor for a given 
         weapon penetration type.
         '''
-        hardness = worst_defense_hardness(penetration_types)
+        hardness = self.worst_defense_hardness(penetration_types)
         armor_damage = damage - hardness
         if armor_damage > 0:
             return armor_damage

@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_armor.py 2023-05-20T20:22-03:00"
+__version__ = "test_armor.py 2024-02-04T19:24-08:00"
 
 # TODO: Check comprehensiveness
 
@@ -68,6 +68,9 @@ class TestArmorInstance(unittest.TestCase):
         very_cold_clothing_def.set_tag('tag2', 'tag2_value')
         self.very_cold_clothing = ArmorInstance(very_cold_clothing_def, 'Cuddles')
 
+        normal_clothing_def = ArmorDefinition('Normal clothing', 1360, 4.5, 1, 4, 0, 0, 0, 0, 0, 0, 3)
+        self.normal_clothing = ArmorInstance(normal_clothing_def, 'Burr')
+
         chain_mail_def = ArmorDefinition('Chain mail', 30000, 40, 7, 6, 5, 3, 2, 5, 5, -1, 80)
         self.chain_mail = ArmorInstance(chain_mail_def, 'Chainy')
 
@@ -100,6 +103,25 @@ class TestArmorInstance(unittest.TestCase):
         self.assertDictEqual(self.very_cold_clothing.current.tags, 
             {'tag1': 'tag1_value', 'tag2': 'tag2_value'})
         self.assertEqual(self.very_cold_clothing.current.weapon_categories, [])
+
+        self.assertEqual(self.normal_clothing.type, 'ArmorInstance')
+        self.assertEqual(self.normal_clothing.name, 'Burr')
+        self.assertEqual(self.normal_clothing.current.obj_type, 'Normal clothing')
+        self.assertEqual(self.normal_clothing.current.weight, 4.5)
+        self.assertEqual(self.normal_clothing.current.Bh(), 1)
+        self.assertEqual(self.normal_clothing.current.Ph(), 4)
+        self.assertEqual(self.normal_clothing.current.Sh(), 0)
+        self.assertEqual(self.normal_clothing.current.Bd(), 0)
+        self.assertEqual(self.normal_clothing.current.Pd(), 0)
+        self.assertEqual(self.normal_clothing.current.Sd(), 0)
+        self.assertEqual(self.normal_clothing.current.armor_check_penalty, 0)
+        self.assertEqual(self.normal_clothing.current.dexterity_check_penalty, 0)
+        self.assertEqual(self.normal_clothing.current.hit_points, 3)
+        self.assertEqual(self.normal_clothing.current.length, 0)
+        self.assertEqual(self.normal_clothing.current.width, 0)
+        self.assertEqual(self.normal_clothing.current.height, 0)
+        self.assertEqual(self.normal_clothing.current.is_magical, False)
+        self.assertEqual(self.normal_clothing.current.weapon_categories, [])
 
         self.assertEqual(self.chain_mail.type, 'ArmorInstance')
         self.assertEqual(self.chain_mail.name, 'Chainy')
@@ -148,51 +170,73 @@ class TestArmorInstance(unittest.TestCase):
     def test_Bh(self):
         # Test that Bh method returns correct value
         self.assertEqual(self.very_cold_clothing.Bh(), 5)
+        self.assertEqual(self.normal_clothing.Bh(), 1)
 
     def test_Ph(self):
         # Test that Ph method returns correct value
         self.assertEqual(self.very_cold_clothing.Ph(), 6)
+        self.assertEqual(self.normal_clothing.Ph(), 4)
 
     def test_Sh(self):
         # Test that Sh method returns correct value
         self.assertEqual(self.very_cold_clothing.Sh(), 0)
+        self.assertEqual(self.normal_clothing.Sh(), 0)
 
     def test_Bd(self):
         # Test that Bd method returns correct value
         self.assertEqual(self.very_cold_clothing.Bd(), 1)
+        self.assertEqual(self.normal_clothing.Bd(), 0)
 
     def test_Pd(self):
         # Test that Pd method returns correct value
         self.assertEqual(self.very_cold_clothing.Pd(), 0)
+        self.assertEqual(self.normal_clothing.Pd(), 0)
 
     def test_Sd(self):
         # Test that Sd method returns correct value
         self.assertEqual(self.very_cold_clothing.Sd(), 1)
+        self.assertEqual(self.normal_clothing.Sd(), 0)
 
     def test_worst_defense_damage_stopped(self):
         test_damage_stopped = self.very_cold_clothing.worst_defense_hardness('B,P,S')
+        self.assertEqual(test_damage_stopped, 0)
+        test_damage_stopped = self.normal_clothing.worst_defense_hardness('B,P,S')
         self.assertEqual(test_damage_stopped, 0)
 
     def test_worst_defense_hardness(self):
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("B,P,S")
         self.assertEqual(test_defense_hardness, 0)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("B,P,S")
+        self.assertEqual(test_defense_hardness, 0)
 
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("B,P")
         self.assertEqual(test_defense_hardness, 5)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("B,P")
+        self.assertEqual(test_defense_hardness, 1)
 
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("B,S")
+        self.assertEqual(test_defense_hardness, 0)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("B,S")
         self.assertEqual(test_defense_hardness, 0)
 
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("P,S")
         self.assertEqual(test_defense_hardness, 0)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("P,S")
+        self.assertEqual(test_defense_hardness, 0)
 
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("B")
         self.assertEqual(test_defense_hardness, 5)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("B")
+        self.assertEqual(test_defense_hardness, 1)
 
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("P")
         self.assertEqual(test_defense_hardness, 6)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("P")
+        self.assertEqual(test_defense_hardness, 4)
 
         test_defense_hardness = self.very_cold_clothing.worst_defense_hardness("S")
+        self.assertEqual(test_defense_hardness, 0)
+        test_defense_hardness = self.normal_clothing.worst_defense_hardness("S")
         self.assertEqual(test_defense_hardness, 0)
 
     def test_damage_through(self):
@@ -202,6 +246,9 @@ class TestArmorInstance(unittest.TestCase):
         test_damage_through = self.very_cold_clothing.damage_through(damage, weapon, attack_type)
         self.assertEqual(test_damage_through, 0)
 
+        test_damage_through = self.normal_clothing.damage_through(damage, weapon, attack_type)
+        self.assertEqual(test_damage_through, 0)
+
         test_damage_through = self.chain_mail.damage_through(damage, weapon, attack_type)
         self.assertEqual(test_damage_through, 0)
 
@@ -209,11 +256,17 @@ class TestArmorInstance(unittest.TestCase):
         test_damage_through = self.very_cold_clothing.damage_through(damage, weapon, attack_type)
         self.assertEqual(test_damage_through, 9)
 
+        test_damage_through = self.normal_clothing.damage_through(damage, weapon, attack_type)
+        self.assertEqual(test_damage_through, 10)
+
         test_damage_through = self.chain_mail.damage_through(damage, weapon, attack_type)
         self.assertEqual(test_damage_through, 7)
 
         weapon = self.spear
         test_damage_through = self.very_cold_clothing.damage_through(damage, weapon, attack_type)
+        self.assertEqual(test_damage_through, 10)
+
+        test_damage_through = self.normal_clothing.damage_through(damage, weapon, attack_type)
         self.assertEqual(test_damage_through, 10)
 
         test_damage_through = self.chain_mail.damage_through(damage, weapon, attack_type)

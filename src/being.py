@@ -3,12 +3,13 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2024-01-19T00:46-08:00"
+__version__ = "being.py 2024-02-02T11:47-08:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make methods such as isArmored, isArmed, isShielded
 # TODO: Check for properties that need constraints and implement them (a finished example is experience)
 # TODO: Make ''' comments on classes and methods
+# TODO: Change self.armor to self.armor_id
 
 import json
 import random
@@ -404,7 +405,7 @@ class BeingInstance(ObjectInstance):
             del self.current.body_parts[body_location]
         return object
 
-    def get_armor(self):
+    def get_armor_id(self):
         return self.current.armor
 
     def set_armor(self, armor):
@@ -547,6 +548,12 @@ class BeingInstance(ObjectInstance):
             elif required_skill in self.current.get_skills():
                 actions[action] = properties
         return actions
+
+    def armored_with(self):
+        '''
+        Get the id of the armor the being is armored with.
+        '''
+        return self.get_armor_id()
 
     def shielded_with(self, universe):
         '''

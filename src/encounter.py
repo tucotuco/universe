@@ -3,18 +3,15 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "encounter.py 2024-01-19T01:24-08:00"
+__version__ = "encounter.py 2024-01-20T14:55-08:00"
 
-# TODO: Just about everything
 # TODO: Make ''' comments on classes and methods
-# TODO: Needs a DC setting that child Events can use to determine results.
-# TODO: Modify tests to accommodate difficulty_class
 
 import json
 import random
 
 from utils import convert_to_dc
-from action import Swing, Thrust
+from action import Action
 from event import Event
 from library import Library
 from being import BeingInstance
@@ -289,13 +286,13 @@ class Encounter(Event):
                 weapon = self.universe.get_object_by_id(weapon_id)
                 if "swing" in chosen_action:
                     name = f"{subject_being.name} swing t={self.time}"
-                    new_action = Swing(self.universe, start_time=self.time, 
+                    new_action = Action(self.universe, start_time=self.time, 
                         end_time=None, event_type="swing", actor_id=subject_being_id, 
                         target_id=target_id, instrument_id=weapon_id, strategy=None, 
                         location=None, name=name, parent_event_id=self.id)
                 elif "thrust" in chosen_action:
                     name = f"{subject_being.name} thrust at t={self.time}"
-                    new_action = Thrust(self.universe, start_time=self.time, 
+                    new_action = Action(self.universe, start_time=self.time, 
                         end_time=None, event_type="thrust", actor_id=subject_being_id, 
                         target_id=target_id, instrument_id=weapon_id, strategy=None, 
                         location=None, name=name, parent_event_id=self.id)
