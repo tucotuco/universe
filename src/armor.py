@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "armor.py 2024-02-05T13:56-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "armor.py 2024-02-14T06:27-03:00"
 
 # TODO: ArmorDefinitions will need widths and heights eventually
 # TODO: Write a script to figure out damage through each armor for each attack of each weapon

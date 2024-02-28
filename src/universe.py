@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "universe.py 2024-02-04T16:53-08:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "universe.py 2024-02-28T04:05-03:00"
 
 # TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
@@ -31,10 +31,12 @@ class Universe(Identifiable):
         self.library = None
         if isinstance(library, Library):
             self.library = library
+        else:
+            self.library = Library(config_path)
 
         self.object_registry = ObjectRegistry()
         self.event_history = []
-        first_event = Event(self, 0, name="History of the Universe")
+        first_event = Event(self, 0, name="Origin of the Universe")
         self.event_history.append(first_event)
 
     def to_json(self):
@@ -87,7 +89,7 @@ class Universe(Identifiable):
         else:
             raise ValueError(f"Unexpected type: {data['type']}")
 
-        for event_data in data["event_history"]["child_events"]:
+        for event_data in data["event_history"]:
             event_type = event_data.get("type", "Event")
             if event_type == "Event":
                 event = Event(**{k: v for k, v in event_data.items() if k != 'type'})

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "utils.py 2024-01-02T02:24-08:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "utils.py 2024-01-19T07:14-03:00"
 
 # TODO: Write test for experience_level()
 

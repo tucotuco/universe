@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "action.py 2024-02-14T01:24-8:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "action.py 2024-02-27T15:38-3:00"
 
 # TODO: Implement drop_weapon()
 # TODO: Update documentation to reflect that Shields also do not stop the extra critical hit damage (see do_critical_hit())
@@ -212,8 +212,12 @@ class Action(Event):
         """
         instrument = self.get_instrument()
         if self.event_type == 'swing':
+            if instrument.Sd() is None:
+                return 0
             return instrument.Sd()
         elif self.event_type == 'thrust':
+            if instrument.Td() is None:
+                return 0
             return instrument.Td()
         return 0
 
@@ -247,10 +251,10 @@ class Action(Event):
         shield_instance = self.universe.get_object_by_id(shield_id)
 #        print(f"{shield_instance.to_json()}")
         if shield_instance is None:
-            print(f"No shield instance in _resolve_damage_to_actor_shield()")
+#            print(f"No shield instance in _resolve_damage_to_actor_shield()")
             return damage
         if not isinstance(shield_instance, WeaponInstance):
-            print(f"Shield instance not a WeaponInstance in _resolve_damage_to_actor_shield()")
+#            print(f"Shield instance not a WeaponInstance in _resolve_damage_to_actor_shield()")
             return damage
         shield_size = shield_instance.get_weapon_size()
         # If a roll on a d10 is less than or equal to the shield size+4, the attack
@@ -387,7 +391,12 @@ class Action(Event):
         """
         normal_damage = self.damage_potential()
         extra_damage = self.strategy.extra_damage
-        damage_roll = roll_dice(f"1d{normal_damage}")
+        damage_roll = 0
+        try:
+            damage_roll = roll_dice(f"1d{normal_damage}")
+        except Exception as e:
+            instrument = self.get_instrument()
+            print(f"event type: {self.event_type} normal_damage: {normal_damage} SD: {instrument.Sd()} TD: {instrument.Td()}")
         remaining_damage = self._resolve_damage_to_target_shield(damage_roll + extra_damage)
         remaining_damage = self._resolve_damage_to_target_armor(remaining_damage)
         self.get_target().damage(remaining_damage)
@@ -400,8 +409,14 @@ class Action(Event):
         # critical) is not stopped by shields or armor.
         normal_damage = self.damage_potential()
         extra_damage = self.strategy.extra_damage
-        damage_roll = roll_dice(f"1d{normal_damage}")
-        critical_damage_roll = roll_dice(f"1d{normal_damage}")
+        damage_roll = 0
+        critical_damage_roll = 0
+        try:
+            damage_roll = roll_dice(f"1d{normal_damage}")
+            critical_damage_roll = roll_dice(f"1d{normal_damage}")
+        except Exception as e:
+            instrument = self.get_instrument()
+            print(f"event type: {self.event_type} normal_damage: {normal_damage} SD: {instrument.Sd()} TD: {instrument.Td()}")
         remaining_damage = self._resolve_damage_to_target_shield(damage_roll + extra_damage)
         remaining_damage = self._resolve_damage_to_target_armor(remaining_damage)
         self.get_target().damage(remaining_damage + critical_damage_roll)
@@ -419,11 +434,11 @@ class Action(Event):
 
     def do_miss(self):
         actor = self.get_actor()
-        print(f"{actor.name} missed")
+#        print(f"{actor.name} missed")
 
     def do_spectacular_miss(self):
         actor = self.get_actor()
-        print(f"{actor.name} missed spectacularly")
+#        print(f"{actor.name} missed spectacularly")
 
     def do_drop_weapon(self):
         """
@@ -433,7 +448,7 @@ class Action(Event):
         actor = self.get_actor()
         if actor is None:
             return
-        print(f"{actor.name} drops weapon (not implemented)")
+#        print(f"{actor.name} drops weapon (not implemented)")
 
     def do_fatal_hit(self):
         """
@@ -444,14 +459,16 @@ class Action(Event):
             return
         if target.hit_points() > -10:
             target.set_hit_points(-10)
-        print(f"{target.name} fatally hit leaving {target.current.hit_points} hit points")
+#        print(f"{target.name} fatally hit leaving {target.current.hit_points} hit points")
 
     # Utility Methods
     def calculate_end_time(self, action_timing, timing_adjustment):
         """
         Determine when the Action will finish.
         """
+        if action_timing is None:
+            return self.start_time + 1
         if timing_adjustment >= action_timing:
-            return self.start_time + 1  
+            return self.start_time + 1
         else: 
             return self.start_time + action_timing - timing_adjustment

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_actiondictionary.py 2023-04-22T12:29-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "test_actiondictionary.py 2024-02-28T02:27-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -71,7 +71,7 @@ class TestActionDictionary(unittest.TestCase):
 
     def test_load_actions2(self):
         self.action_dict.load_actions(self.actions_file)
-        self.assertEqual(len(self.action_dict.actions), 55)
+        self.assertEqual(len(self.action_dict.actions), 53)
         for action in self.action_dict.actions:
             action_dict = self.action_dict.actions[action]
             self.assertIsInstance(action_dict, dict)

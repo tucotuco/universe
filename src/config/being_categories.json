@@ -9,6 +9,9 @@
     "Kobolds": [
         "Kobold"
     ],
+    "Humanoids": [
+        "Human"
+    ],
     "Sphinx": [
         "Androsphinx", "Gymnosphinx"
     ],

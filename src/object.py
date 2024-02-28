@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "object.py 2023-12-27T13:14-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "object.py 2024-02-25T11:20-03:00"
 
 # TODO: Make size category function from largest of length, width, height
 # TODO: Make ''' comments on classes and methods
@@ -225,7 +225,7 @@ class ObjectInstance(Identifiable):
             self.parent_container_id = new_parent_container_id
 
     def damage(self, damage):
-        if damage > self.hit_points():
+        if damage > self.current.hit_points:
             self.current.hit_points = 0
         else:
             self.current.hit_points -= damage

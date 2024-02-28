@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "weapon.py 2023-12-28T13:16-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "weapon.py 2024-02-15T19:35-03:00"
 
 # TODO: WeaponDefinitions from file will need widths and heights eventually
 # TODO: Deprecate weapon_size in favor of a function based on actual size and size of wielder
@@ -108,6 +108,9 @@ class WeaponInstance(ObjectInstance):
         self.original = weapon_definition
         self.current = weapon_definition.copy()
 
+    def reset(self):
+        self.current = self.original.copy()
+
     def get_weapon_size(self):
         return self.current.weapon_size
 
@@ -147,6 +150,14 @@ class WeaponInstance(ObjectInstance):
         if attack_type == 'thrust':
             return self.Tp()
         return self.Rp()
+
+    def get_melee_types(self):
+        melee_types = []
+        if self.St() is not None:
+            melee_types.append("swing")
+        if self.Tt() is not None:
+            melee_types.append("thrust")
+        return melee_types
 
     def set_attack(self, attack_type, attack_attribute, new_value):
         try:

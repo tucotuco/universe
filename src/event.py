@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "event.py 2023-12-28T12:06-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "event.py 2024-02-28T04:10-03:00"
 
 # TODO: Redo unit tests for library parent
 
@@ -17,17 +17,14 @@ class Event(Identifiable):
     Something that happens at a place and time. Instances have unique identifiers.
     '''
     def __init__(self, universe, start_time, end_time=None, event_type='Event', location=None, 
-                 name=None, parent_event_id=None, id=None, child_events=None):
+                 name=None, parent_event_id=None, id=None):
         Identifiable.__init__(self, name, id)
         self.universe = universe
         self.event_type = event_type
         self.start_time = start_time
         self.end_time = end_time
         self.location = location
-        self.parent_event_id = None
-        parent_event = self.universe.get_event_by_id(parent_event_id)
-        if isinstance(parent_event, Event):
-            self.parent_event_id = parent_event_id
+        self.parent_event_id = parent_event_id
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -112,8 +109,8 @@ class Event(Identifiable):
         '''
         return self.start_time < other.start_time
 
-    def __len__(self):
-        return len(self.child_events)
+#    def __len__(self):
+#        return len(self.child_events)
 
     def equivalent_to(self, other):
         if self.name != other.name:

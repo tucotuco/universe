@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "being.py 2024-02-02T11:47-08:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "being.py 2024-02-28T02:18-03:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make methods such as isArmored, isArmed, isShielded
@@ -221,10 +221,11 @@ class BeingDefinition(ObjectDefinition):
     def set_body_part_holds_object(self, body_part, object_id):
         self.body_parts[body_part] = object_id
 
-    def body_part_remove_object(self, remove_object_id):
-        for body_part, object_id in self.body_parts.iter_items():
-            if remove_object_id == object_id:
-                del self.body_parts[body_part]
+    def body_part_remove_object(self, body_location):
+        the_object = self.body_parts.get(body_location)
+        if the_object is not None:
+            del self.body_parts[body_location]
+        return the_object
 
     def get_fatigue_level(self):
         return self.fatigue_level
@@ -252,6 +253,9 @@ class BeingInstance(ObjectInstance):
         self.possessions = []
         self.weapons = []
         self.strategy = Strategy()
+
+    def reset(self):
+        self.current = self.original.copy()
 
     def set_strategy(self, attack=0, defense=0, timing=0, extra_damage=0):
         self.strategy = Strategy(attack, defense, timing, extra_damage)
@@ -396,14 +400,14 @@ class BeingInstance(ObjectInstance):
     def get_body_parts(self):
         return self.current.body_parts
 
-    def set_body_part_holds_object(self, body_location, object):
-        self.current.body_parts[body_location] = object
+    def set_body_part_holds_object(self, body_location, the_object):
+        self.current.body_parts[body_location] = the_object
 
     def body_part_remove_object(self, body_location):
-        object = self.current.body_parts.get(body_location)
-        if object is not None:
+        the_object = self.current.body_parts.get(body_location)
+        if the_object is not None:
             del self.current.body_parts[body_location]
-        return object
+        return the_object
 
     def get_armor_id(self):
         return self.current.armor
@@ -512,7 +516,8 @@ class BeingInstance(ObjectInstance):
             action_definition = action_dict.get_action_definition(action)
 #            print(f"being.py: choose_melee_action: action_definition: {action_definition}")
             if action_definition.get("is_melee") == 'True':
-                options.append(action)
+                if self.melee_action_supported(universe) == True:
+                    options.append(action)
         if len(options) == 0:
             return None
         return random.choice(options)
@@ -522,7 +527,6 @@ class BeingInstance(ObjectInstance):
         Choose an action from among those currently possible
         '''        
         from universe import Universe
-#        actions_possible_now = self.currently_possible_actions(action_dict, weapon_dict)
         actions_possible_now = self.currently_possible_actions(universe)
         options = []
         for action in actions_possible_now:
@@ -531,12 +535,44 @@ class BeingInstance(ObjectInstance):
             return None
         return random.choice(options)
 
-    def possible_actions(self, action_dict):
+    def has_swing_weapon(self, universe):
+        '''
+        Determine if the Being has a weapon that can be used to swing.
+        '''
+        arms = self.armed_with(universe)
+#        print(f"arms: {arms}")
+        for body_part, weapon_id in arms.items():
+            weapon = universe.get_object_by_id(weapon_id)
+            if weapon is not None and "swing" in weapon.get_melee_types():
+                return True
+        return False
+
+    def has_thrust_weapon(self, universe):
+        '''
+        Determine if the Being has a weapon that can be used to thrust.
+        '''
+        for body_part, weapon_id in self.armed_with(universe).items():
+            weapon = universe.get_object_by_id(weapon_id)
+            if weapon is not None and "thrust" in weapon.get_melee_types():
+                return True
+        return False
+
+    def melee_action_supported(self, universe):
+        '''
+        Determine if the melee action is possible given the current weapons of the Being.
+        ''' 
+        if self.has_swing_weapon(universe):
+            return True
+        if self.has_thrust_weapon(universe):
+            return True
+        return False
+
+    def possible_actions(self, universe):
         '''
         Make an actions list based on the Being's skills
         '''
-        if not isinstance(action_dict, ActionDictionary):
-            return {}
+        from universe import Universe
+        action_dict = universe.get_action_dictionary()
         actions = {}
         for action, properties in action_dict:
 #            print(f"being.py: possible_actions(): {action}: {properties}")
@@ -565,7 +601,7 @@ class BeingInstance(ObjectInstance):
         shielded = {}
         for body_location, object_id in self.get_body_parts().items():
             an_object = universe.get_object_by_id(object_id)
-            if an_object.current.obj_type in weapon_dict.get_objects_in_category('Shields'):
+            if an_object is not None and an_object.current.obj_type in weapon_dict.get_objects_in_category('Shields'):
                 shielded[body_location]=object_id
         return shielded
     
@@ -579,28 +615,29 @@ class BeingInstance(ObjectInstance):
         armed = {}
         for body_location, object_id in self.get_body_parts().items():
             an_object = universe.get_object_by_id(object_id)
-            if weapon_dict.get_object_definition(an_object.current.obj_type) is not None:
+            if an_object is not None and weapon_dict.get_object_definition(an_object.current.obj_type) is not None:
                 armed[body_location]=object_id
 #        print(f"being.py: armed_with(): {armed}")
         return armed
 
     def choose_weapon(self, armed):
 #        print(f"being.py choose_weapon() armed: {armed}")
+        if armed is None or len(armed) == 0:
+            return None
         choice = random.choice(list(armed))
 #        print(f"being.py choose_weapon() choice: {choice}")
         return armed[choice]
     
-#    def currently_possible_actions(self, action_dict, weapon_dict, target=None):
     def currently_possible_actions(self, universe, target=None):
         '''
         Make an actions dictionary based on Being's current situation
         '''
         # TODO: implement multi-action. Could the same mechanism as an Encounter be nested?
         from universe import Universe
-        action_dict = universe.get_action_dictionary()
+#        action_dict = universe.get_action_dictionary()
         weapon_dict = universe.get_weapon_dictionary()
         
-        possible_actions = self.possible_actions(action_dict)
+        possible_actions = self.possible_actions(universe)
 #        print(f"being.py: currently_possible_actions() possible_actions: {possible_actions}")
 
 #        print(f"\ncurrently_possible_actions(): possible_actions = {possible_actions}")
@@ -608,10 +645,9 @@ class BeingInstance(ObjectInstance):
             return {}
         actions = {}
         has_free_hand = False
-        armed_with = []
-#        shielded_with = self.shielded_with(weapon_dict)
-        shielded_with = self.shielded_with(universe)
+        shields = self.shielded_with(universe)
         armed_with = self.armed_with(universe)
+        armored_with = self.armored_with()
 
         for body_location, weapon in self.get_body_parts().items():
             if weapon is None: # at least one hand unarmed
@@ -631,7 +667,7 @@ class BeingInstance(ObjectInstance):
                 # Check to see if the Being has one unoccupied unarmed attack
                 # Includes: disarm unarmed, feint, unarmed, deflect unarmed, 
                 # parry unarmed
-                if has_free_hand:
+                if has_free_hand == True:
                     actions[action] = properties
             if action == 'break hold':
                 # TODO: implement break hold
@@ -718,14 +754,6 @@ class BeingInstance(ObjectInstance):
                 # TODO: implement ready
                 # Must have object to ready
                 pass
-            elif action == 'shield bash being':
-                # Must be armed with a shield
-                if len(shielded_with) > 0:
-                    actions[action] = properties
-            elif action == 'shield bash object':
-                # Must be armed with a shield
-                if len(shielded_with) > 0:
-                    actions[action] = properties
             elif action == 'shoot being':
                 # Must be armed with a weapon of the bows category
                 for body_location, weapon in self.get_body_parts().items():
@@ -734,37 +762,64 @@ class BeingInstance(ObjectInstance):
                         break
             elif action == 'shoot object':
                 # Must be armed with a weapon of the bows category
-                for body_location, weapon in self.get_body_parts().items():
-                    if weapon in weapon_dict.get_objects_in_category('Bows'):
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and weapon.obj_type in weapon_dict.get_objects_in_category('Bows'):
                         actions[action] = properties
                         break
             elif action == 'launch at being':
                 # Must be armed with a weapon of the catapults category
-                for body_location, weapon in self.get_body_parts().items():
-                    if weapon in weapon_dict.get_objects_in_category('Catapults'):
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and weapon.obj_type in weapon_dict.get_objects_in_category('Catapults'):
                         actions[action] = properties
                         break
             elif action == 'launch at object':
                 # Must be armed with a weapon of the catapults category
-                for body_location, weapon in self.get_body_parts().items():
-                    if weapon in weapon_dict.get_objects_in_category('Catapults'):
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and weapon.obj_type in weapon_dict.get_objects_in_category('Catapults'):
                         actions[action] = properties
                         break
             elif action == 'stun':
-                if has_free_hand:
+                if has_free_hand == True:
                     actions[action] = properties
             elif action == 'swing at being':
+                has_swing_weapon = False
                 # Could be armed or unarmed
-                actions[action] = properties
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and "swing" in weapon.get_melee_types():
+                        has_swing_weapon = True
+                if has_swing_weapon == True:
+                    actions[action] = properties
             elif action == 'swing at object':
+                has_swing_weapon = False
                 # Could be armed or unarmed
-                actions[action] = properties
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and "swing" in weapon.get_melee_types():
+                        has_swing_weapon = True
+                if has_swing_weapon == True:
+                    actions[action] = properties
             elif action == 'thrust at being':
+                has_thrust_weapon = False
                 # Could be armed or unarmed
-                actions[action] = properties
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and "thrust" in weapon.get_melee_types():
+                        has_thrust_weapon = True
+                if has_thrust_weapon == True:
+                    actions[action] = properties
             elif action == 'thrust at object':
+                has_thrust_weapon = False
                 # Could be armed or unarmed
-                actions[action] = properties
+                for body_location, weapon_id in self.get_body_parts().items():
+                    weapon = universe.get_object_by_id(weapon_id)
+                    if weapon is not None and "thrust" in weapon.get_melee_types():
+                        has_thrust_weapon = True
+                if has_thrust_weapon == True:
+                    actions[action] = properties
             elif action == 'subdue':
                 # TODO: implement subdue
                 # Must be armed with a weapon that can do bludgeon penetration type
@@ -788,19 +843,47 @@ class BeingInstance(ObjectInstance):
                 pass
             elif action == 'two-handed swing at being':
                 # Must be armed with one hand free
-                if len(armed_with) > 0 and has_free_hand:
+                if len(armed_with) > 0 and has_free_hand == True:
+                    has_swing_weapon = False
+                    # Could be armed or unarmed
+                    for body_location, weapon_id in self.get_body_parts().items():
+                        weapon = universe.get_object_by_id(weapon_id)
+                        if weapon is not None and "swing" in weapon.get_melee_types():
+                            has_swing_weapon = True
+                    if has_swing_weapon == True:
                         actions[action] = properties
             elif action == 'two-handed swing at object':
                 # Must be armed with one hand free
-                if len(armed_with) > 0 and has_free_hand:
+                if len(armed_with) > 0 and has_free_hand == True:
+                    has_swing_weapon = False
+                    # Could be armed or unarmed
+                    for body_location, weapon_id in self.get_body_parts().items():
+                        weapon = universe.get_object_by_id(weapon_id)
+                        if weapon is not None and "swing" in weapon.get_melee_types():
+                            has_swing_weapon = True
+                    if has_swing_weapon == True:
                         actions[action] = properties
             elif action == 'two-handed thrust at being':
                 # Must be armed with one hand free
-                if len(armed_with) > 0 and has_free_hand:
+                if len(armed_with) > 0 and has_free_hand == True:
+                    has_thrust_weapon = False
+                    # Could be armed or unarmed
+                    for body_location, weapon_id in self.get_body_parts().items():
+                        weapon = universe.get_object_by_id(weapon_id)
+                        if weapon is not None and "thrust" in weapon.get_melee_types():
+                            has_thrust_weapon = True
+                    if has_thrust_weapon == True:
                         actions[action] = properties
             elif action == 'two-handed thrust at object':
                 # Must be armed with one hand free
-                if len(armed_with) > 0 and has_free_hand:
+                if len(armed_with) > 0 and has_free_hand == True:
+                    has_thrust_weapon = False
+                    # Could be armed or unarmed
+                    for body_location, weapon_id in self.get_body_parts().items():
+                        weapon = universe.get_object_by_id(weapon_id)
+                        if weapon is not None and "thrust" in weapon.get_melee_types():
+                            has_thrust_weapon = True
+                    if has_thrust_weapon == True:
                         actions[action] = properties
             elif action == 'undefended attack':
                 # TODO: implement undefended attack
@@ -812,7 +895,7 @@ class BeingInstance(ObjectInstance):
                 pass
             elif action == 'block':
                 # Must be armed with a shield
-                if len(shielded_with) > 0:
+                if shields is not None and len(shields) > 0:
                     actions[action] = properties
             elif action == 'disengage':
                 # TODO: implement disengage

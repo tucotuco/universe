@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_universe.py 2023-04-11T11:31-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "test_universe.py 2024-02-28T04:23-03:00"
 
 # TODO: Check comprehensiveness
 # TODO: For all classes, set consistent method order: __init__, copy, to_json, get/set combos
 # TODO: Test adding objects to the object registry and getting them back out of the loaded file
+# TODO: Test adding encounters to the event_history and getting them back out of the loaded file
 
 import unittest
 import uuid
@@ -18,25 +19,27 @@ import sys
 sys.path.insert(0, os.path.abspath('../src'))
 #print(f'{__version__}:{sys.path}')
 
-from universe import Universe
 from event import Event
 from encounter import Encounter
+from library import Library
+from universe import Universe
 
 class TestUniverse(unittest.TestCase):
     def setUp(self):
-        self.universe = Universe(name="Test Universe")
-        self.universe.new_universe(config_path='../src/config')
-        self.event1 = Event(100, 200, 'war', "France")
+        self.universe = Universe(name="Test Universe", library=Library(config_dir="../src/config"))
+        self.event1 = Event(self.universe, 100, 200, 'war', "France", "French Revolution")
+#universe, start_time, end_time=None, event_type='Event', location=None, name=None, parent_event_id=None, id=None
 #        print(f'event1: {self.event1.to_json()}')
-        self.event2 = Encounter(300, 400, "battle", "Florence")
+        self.event2 = Encounter(self.universe, 10, 300, 400, "battle", "Florence", "Battle of Florence")
+#universe, difficulty_class, start_time, end_time=None, event_type=None, location=None, name="", parent_event_id=None, id=None, initiated=False, map=None
 #        print(f'event2: {self.event2.to_json()}')
         self.universe.add_event(self.event1)
         self.universe.add_event(self.event2)
 
     def test_add_event(self):
-        self.assertEqual(len(self.universe.event_history.child_events), 2)
-        self.assertEqual(self.universe.event_history.child_events[0], self.event1)
-        self.assertEqual(self.universe.event_history.child_events[1], self.event2)
+        self.assertEqual(len(self.universe.event_history), 3)
+        self.assertEqual(self.universe.event_history[1], self.event1)
+        self.assertEqual(self.universe.event_history[2], self.event2)
 
     def test_to_json(self):
         json_str = self.universe.to_json()
@@ -44,17 +47,22 @@ class TestUniverse(unittest.TestCase):
         json_obj = json.loads(json_str)
         self.assertEqual(json_obj["name"], "Test Universe")
         self.assertEqual(json_obj["type"], "Universe")
-#        print(f'event history: {json_obj["event_history"]}')
-        child_events = json_obj["event_history"]["child_events"]
-        self.assertEqual(len(child_events), 2)
-        self.assertEqual(child_events[0]["event_type"], "war")
-        self.assertEqual(child_events[0]["location"], "France")
-        self.assertEqual(child_events[0]["start_time"], 100)
-        self.assertEqual(child_events[0]["end_time"], 200)
-        self.assertEqual(child_events[1]["event_type"], "battle")
-        self.assertEqual(child_events[1]["location"], "Florence")
-        self.assertEqual(child_events[1]["start_time"], 300)
-        self.assertEqual(child_events[1]["end_time"], 400)
+        print(f'{json_obj}')
+        self.assertEqual(len(self.universe.event_history), 3)
+        self.assertEqual(self.universe.event_history[0].event_type, "Event")
+        self.assertIsNone(self.universe.event_history[0].location)
+        self.assertEqual(self.universe.event_history[0].start_time, 0)
+        self.assertIsNone(self.universe.event_history[0].end_time)
+        self.assertEqual(self.universe.event_history[1].event_type, "war")
+        self.assertEqual(self.universe.event_history[1].location, "France")
+        self.assertEqual(self.universe.event_history[1].start_time, 100)
+        self.assertEqual(self.universe.event_history[1].end_time, 200)
+        self.assertEqual(self.universe.event_history[1].name, "French Revolution")
+        self.assertEqual(self.universe.event_history[2].event_type, "battle")
+        self.assertEqual(self.universe.event_history[2].location, "Florence")
+        self.assertEqual(self.universe.event_history[2].start_time, 300)
+        self.assertEqual(self.universe.event_history[2].end_time, 400)
+        self.assertEqual(self.universe.event_history[2].name, "Battle of Florence")
 
     def test_from_file_with_encounters(self):
         filename = "results/test_universe.json"
@@ -64,28 +72,27 @@ class TestUniverse(unittest.TestCase):
             os.remove(filename)
 
         saved_event_history = self.universe.event_history
-        saved_child_events = saved_event_history.child_events
-        saved_event0 = saved_child_events[0]
-        saved_event1 = saved_child_events[1]
-        self.assertIsInstance(saved_event_history, Event)
+        saved_event0 = saved_event_history[0]
+        saved_event1 = saved_event_history[1]
+        saved_event2 = saved_event_history[2]
         self.assertIsInstance(saved_event0, Event)
         self.assertIsInstance(saved_event1, Event)
-        self.assertIsInstance(saved_event1, Encounter)
-        self.assertEqual(len(saved_event_history), 2)
-        self.assertEqual(len(saved_event0), 0)
-        self.assertEqual(len(saved_event1), 0)
+        self.assertIsInstance(saved_event2, Event)
+        self.assertIsInstance(saved_event2, Encounter)
+        self.assertEqual(len(saved_event_history), 3)
 
         # Save the Universe to a file
         self.universe.save_to_file(filename)
         
         # Load the Universe from the file
-        loaded_universe = Universe("Loaded Universe")
+        loaded_universe = Universe("Loaded Universe", library=Library(config_dir="../src/config"))
         loaded_universe.load_from_file(filename)
         
         loaded_event_history = loaded_universe.event_history
-        loaded_child_events = loaded_event_history.child_events
-        loaded_event0 = loaded_child_events[0]
-        loaded_event1 = loaded_child_events[1]
+        print(f'{loaded_event_history}')
+        loaded_event0 = loaded_event_history[0]
+        loaded_event1 = loaded_event_history[1]
+        loaded_event2 = loaded_event_history[2]
 
         # assert that the loaded Universe is the same as the original Universe
         self.assertEqual(self.universe.id, loaded_universe.id)

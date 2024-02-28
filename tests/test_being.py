@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_being.py 2023-12-26T15:53-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "test_being.py 2024-02-28T02:20-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -14,27 +14,30 @@ import os
 
 sys.path.insert(0, os.path.abspath('../src'))
 
+from abilities import Abilities
 from actiondictionary import ActionDictionary
 from being import BeingDefinition, BeingInstance, BeingDictionary
-from weapon import WeaponDictionary
+from library import Library
 from speeds import Speed
-from abilities import Abilities
 from skill import SkillDictionary
 from states import StatesList
 from strategy import Strategy
+from universe import Universe
+from weapon import WeaponDictionary
 
 class TestBeingDefinition(unittest.TestCase):
     def setUp(self):
-        self.skills_file = '../src/config/skills.tsv'
-        self.weapons_file = '../src/config/weapons.tsv'
-        self.weapon_categories_file = '../src/config/weapon_categories.json'
-        self.skill_dictionary = SkillDictionary()
-        self.skill_dictionary.load_skills(self.skills_file)
-
-        self.weapon_dictionary = WeaponDictionary()
-        self.weapon_dictionary.load_objects(self.weapons_file)
-        self.weapon_dictionary.load_object_categories(self.weapon_categories_file)
-        self.skill_dictionary.add_weapon_skills(self.weapon_dictionary)
+        self.universe = Universe(name="Test Universe", library=Library(config_dir="../src/config"))
+#         self.skills_file = '../src/config/skills.tsv'
+#         self.weapons_file = '../src/config/weapons.tsv'
+#         self.weapon_categories_file = '../src/config/weapon_categories.json'
+#         self.skill_dictionary = SkillDictionary()
+#         self.skill_dictionary.load_skills(self.skills_file)
+# 
+#         self.weapon_dictionary = WeaponDictionary()
+#         self.weapon_dictionary.load_objects(self.weapons_file)
+#         self.weapon_dictionary.load_object_categories(self.weapon_categories_file)
+#         self.skill_dictionary.add_weapon_skills(self.weapon_dictionary)
 
         self.reset_being_def = BeingDefinition('Human', '6', '160', '5', '2d4', 'Chaotic Good', '9', '2')
 
@@ -114,34 +117,36 @@ class TestBeingDefinition(unittest.TestCase):
         self.assertEqual(self.being_def.INT(),7)
         self.assertEqual(self.being_def.WIS(),6)
         self.assertEqual(self.being_def.CHA(),5)
-        self.being_def.set_skill_level(self.skill_dictionary, 'ki', 6)
-        self.being_def.set_skill_level(self.skill_dictionary, 'bardiche', 1)
+        self.being_def.set_skill_level(self.universe.get_skill_dictionary(), 'ki', 6)
+        self.being_def.set_skill_level(self.universe.get_skill_dictionary(), 'bardiche', 1)
         self.assertEqual(self.being_def.get_skill_level('ki'), 6)
         self.assertIsNone(self.being_def.get_skill_level('astronomy'))
         self.assertEqual(len(self.being_def.get_states()),0)
 
     def test_set_and_body_part_remove_object(self):
         being = BeingDefinition(obj_type='humanoid', length=6, weight=180, hit_points=50, hit_dice='5d10', 
-                 alignment='neutral', armor_class=15, challenge_rating=2, body_parts={'left': 'dagger', 'right': 'sword'})
+                 alignment='neutral', armor_class=15, challenge_rating=2, body_parts={'left hand': 'dagger', 'right hand': 'sword'})
         # Test set_body_part_holds_object()
         being.set_body_part_holds_object('head', 'helmet')
         self.assertEqual(being.body_parts['head'], 'helmet')
         # Test body_part_remove_object()
-        removed_weapon = being.body_part_remove_object('left')
+        removed_weapon = being.body_part_remove_object('left hand')
         self.assertEqual(removed_weapon, 'dagger')
         self.assertNotIn('left', being.body_parts)
 
 class TestBeingInstance(unittest.TestCase):
     def setUp(self):
-        self.skills_file = '../src/config/skills.tsv'
-        self.skill_dictionary = SkillDictionary(self.skills_file)
+        self.universe = Universe(name="Test Universe", library=Library(config_dir="../src/config"))
 
-        self.weapons_file = '../src/config/weapons.tsv'
-        self.categories_file = '../src/config/weapon_categories.json'
-
-        self.weapon_dict = WeaponDictionary()
-        self.weapon_dict.load_object_categories(self.categories_file)
-        self.weapon_dict.load_objects(self.weapons_file)
+#         self.skills_file = '../src/config/skills.tsv'
+#         self.skill_dictionary = SkillDictionary(self.skills_file)
+# 
+#         self.weapons_file = '../src/config/weapons.tsv'
+#         self.categories_file = '../src/config/weapon_categories.json'
+# 
+#         self.weapon_dict = WeaponDictionary()
+#         self.weapon_dict.load_object_categories(self.categories_file)
+#         self.weapon_dict.load_objects(self.weapons_file)
 
         self.states_file = '../src/config/states.tsv'
         self.states_list = StatesList()
@@ -149,6 +154,7 @@ class TestBeingInstance(unittest.TestCase):
 
         self.being_def = BeingDefinition('Human', 6, 170, 7, '2d6', 'Neutral', 10, 1)
         self.being_inst = BeingInstance(self.being_def, name='Tobe')
+        self.universe.add_object(self.being_inst)
         self.assertEqual(self.being_inst.possessions, [])
 
         current_being_state = self.being_inst.current
@@ -320,42 +326,34 @@ class TestBeingInstance(unittest.TestCase):
 #         self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": "Small wooden shield"})
 
     def test_currently_possible_actions(self):
-        action_dict_file = '../src/config/actions.tsv'
-        action_dict = ActionDictionary()
-        action_dict.load_actions(action_dict_file)
+        action_dict = self.universe.get_action_dictionary()
+        skill_dict = self.universe.get_skill_dictionary()
+        weapon_dict = self.universe.get_weapon_dictionary()
 
-        skill_dict_file = '../src/config/skills.tsv'
-        skill_dict = SkillDictionary()
-        skill_dict.load_skills(skill_dict_file)
-
-        weapon_dict_file = '../src/config/weapons.tsv'
-        weapon_categories_file = '../src/config/weapon_categories.json'
-        weapon_dict = WeaponDictionary()
-        weapon_dict.load_objects(weapon_dict_file)
-        weapon_dict.load_object_categories(weapon_categories_file)
-
-        possible_actions = self.being_inst.possible_actions(action_dict)
+        possible_actions = self.being_inst.possible_actions(self.universe)
 #        print(f'possible: {possible_actions}')
         self.assertNotIn('stun', possible_actions)
         self.assertNotIn('parry (unarmed)', possible_actions)
         self.assertNotIn('parry (armed))', possible_actions)
-        self.assertEqual(len(possible_actions), 45)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 4)
+        self.assertEqual(len(possible_actions), 43)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
+        self.assertEqual(len(currently_possible), 0)
 
-        self.being_inst.set_weapon_skill_level(self.weapon_dict, 'Longsword', 4)
-        possible_actions = self.being_inst.possible_actions(action_dict)
+        self.being_inst.set_weapon_skill_level(weapon_dict, 'Longsword', 4)
+        possible_actions = self.being_inst.possible_actions(self.universe)
         self.assertIn('parry (armed)', possible_actions)
-        self.assertEqual(len(possible_actions), 48)
+        self.assertEqual(len(possible_actions), 46)
 
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
-        self.assertEqual(len(currently_possible), 4)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
+        self.assertEqual(len(currently_possible), 0)
 
         self.assertEqual(self.being_inst.current.body_parts, {})
-        self.being_inst.set_body_part_holds_object("right_arm", "Longsword")
-        self.being_inst.set_body_part_holds_object("left_arm", None)
-        self.assertEqual(self.being_inst.current.body_parts, {"right_arm": "Longsword", "left_arm": None})
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        weapon_id = self.universe.make_weapon_for_being(self.being_inst.id, "Longsword", "Longey")
+        weapon = self.universe.get_object_by_id(weapon_id)
+        self.universe.arm_being(self.being_inst.id, weapon_id, "right hand")
+        self.being_inst.set_body_part_holds_object("left hand", None)
+        self.assertEqual(self.being_inst.current.body_parts, {"right hand": weapon_id, "left hand": None})
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertIn('swing at being', currently_possible)
         self.assertIn('thrust at being', currently_possible)
         self.assertIn('two-handed swing at being', currently_possible)
@@ -367,42 +365,42 @@ class TestBeingInstance(unittest.TestCase):
         self.assertEqual(len(currently_possible), 8)
 
         self.being_inst.set_skill_level(skill_dict, 'stun', 4)
-        possible_actions = self.being_inst.possible_actions(action_dict)
+        possible_actions = self.being_inst.possible_actions(self.universe)
         self.assertIn('stun', possible_actions)
         self.assertNotIn('parry (unarmed)', possible_actions)
         self.assertIn('parry (armed)', possible_actions)
-        self.assertEqual(len(possible_actions), 49)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        self.assertEqual(len(possible_actions), 47)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertIn('stun', currently_possible)
         self.assertEqual(len(currently_possible), 9)        
         
         self.being_inst.set_hit_points(0)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 0)
         
         self.being_inst.set_hit_points(10)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 9)
         self.being_inst.set_fatigue_level(5)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 0)
 
         self.being_inst.set_fatigue_level(0)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 9)
         self.being_inst.paralyze(self.states_list)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 0)
         self.being_inst.un_paralyze(self.states_list)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 9)
         self.being_inst.stun(self.states_list)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 0)
         self.being_inst.un_stun(self.states_list)
-        currently_possible = self.being_inst.currently_possible_actions(action_dict, weapon_dict)
+        currently_possible = self.being_inst.currently_possible_actions(self.universe)
         self.assertEqual(len(currently_possible), 9)
-        chosen = self.being_inst.choose_action(action_dict, weapon_dict)
+        chosen = self.being_inst.choose_action(self.universe)
         self.assertIn(chosen, currently_possible)
 #        print(f'Chose: {chosen}')
 
@@ -446,6 +444,9 @@ class TestBeingDictionary(unittest.TestCase):
         "Cloud giant", "Fire giant", "Frost giant", "Hill giant", "Stone giant", 
         "Storm giant"
     ],
+    "Humanoids": [
+        "Human"
+    ],
     "Kobolds": [
         "Kobold"
     ],
@@ -458,7 +459,7 @@ class TestBeingDictionary(unittest.TestCase):
     ]
 }
         self.object_dict.load_objects(self.objects_file)
-        self.assertEqual(len(self.object_dict.objects), 26)
+        self.assertEqual(len(self.object_dict.objects), 27)
         for object in self.object_dict.objects:
             object_dict = self.object_dict.objects[object]
         self.assertIsInstance(object_dict, BeingDefinition)
@@ -471,7 +472,7 @@ class TestBeingDictionary(unittest.TestCase):
         self.assertEqual(object.hit_points, 199)
 
         self.object_dict.load_object_categories(self.categories_file)
-        self.assertEqual(len(self.object_dict.object_categories), 5)
+        self.assertEqual(len(self.object_dict.object_categories), 6)
         self.assertDictEqual(self.object_dict.object_categories, self.expected_categories)
 
     def test_all_objects_in_categories(self):

@@ -32,8 +32,6 @@ pin from below	being	none	False
 ready object	object	none	False
 ready weapon	weapon	none	False
 reverse	being	none	False
-shield bash being	being	none	True
-shield bash object	object	none	True
 shoot being	being	none	True
 shoot object	object	none	False
 stun	being	stun	True
