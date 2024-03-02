@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "encounter.py 2024-02-28T02:52-03:00"
+__version__ = "encounter.py 2024-03-02T03:34-03:00"
 
 # TODO: Make ''' comments on classes and methods
 
@@ -28,17 +28,34 @@ class Encounter(Event):
     '''
     def __init__(self, universe, difficulty_class, start_time, end_time=None, 
                  event_type=None, location=None, name="", parent_event_id=None, id=None, 
-                 initiated=False, map=None):
+                 time=None, being_list=None, non_being_object_list=None, 
+                 pending_action_list=None, finished_action_list=None, initiated=False, 
+                 map=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
         self.initiated = initiated
         self.map = map
-        self.time = start_time
-        self.being_list = [] # A list of ids of Beings involved in the Encounter
-        self.non_being_object_list = [] # A list of ids of Objects involved in the Encounter
-        self.pending_action_list = []
-        self.finished_action_list = []
+        if time is None:
+            self.time = start_time
+        else:
+            self.time = time
+        if being_list is None:
+            self.being_list = [] # A list of ids of Beings involved in the Encounter
+        else:
+            self.being_list = being_list
+        if being_list is None:
+            self.non_being_object_list = [] # A list of ids of Objects involved in the Encounter
+        else:
+            self.non_being_object_list = non_being_object_list
+        if pending_action_list is None:
+            self.pending_action_list = []
+        else:
+            self.pending_action_list = pending_action_list
+        if finished_action_list is None:
+            self.finished_action_list = []
+        else:
+            self.finished_action_list = finished_action_list
 
     def to_json(self):
         def handle_circular_refs(obj):

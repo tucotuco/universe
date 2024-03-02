@@ -3,13 +3,13 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "universe.py 2024-02-28T04:05-03:00"
+__version__ = "universe.py 2024-03-02T03:36-03:00"
 
 # TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
 # TODO: Have save_to_file ignore dictionaries and object registry.
 # TODO: Have save_to_file save object registry separately.
-# Create exceptions for make and arm methods if expectations aren't met.
+# TODO: Create exceptions for make and arm methods if expectations aren't met.
 
 import json, sys
 
@@ -27,7 +27,7 @@ class Universe(Identifiable):
     A container for a "world" and the Objects and Events that populate it.
     '''
     def __init__(self, name="", library=None, config_path="./config"):
-        Identifiable.__init__(self, name)
+        Identifiable.__init__(self, name, id="0")
         self.library = None
         if isinstance(library, Library):
             self.library = library
@@ -35,9 +35,9 @@ class Universe(Identifiable):
             self.library = Library(config_path)
 
         self.object_registry = ObjectRegistry()
-        self.event_history = []
-        first_event = Event(self, 0, name="Origin of the Universe")
-        self.event_history.append(first_event)
+        self.event_history = {}
+        first_event = Event(self, 0, name="Origin of the Universe", id="0")
+        self.event_history["0"]=first_event
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -51,7 +51,7 @@ class Universe(Identifiable):
             "id": self.id,
             "library_id": self.library.get_id(),
             "object_registry": self.object_registry,
-            "event_history": [event for event in self.event_history]
+            "event_history": self.event_history
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
 
@@ -59,10 +59,7 @@ class Universe(Identifiable):
         return self.event_history
 
     def get_event_by_id(self, event_id):
-        for event in self.event_history:
-            if event.id == event_id:
-              return event
-        return None
+        return self.event_history.get(event_id)
 
     def add_object(self, obj):
         if isinstance(obj, ObjectInstance):
@@ -73,7 +70,7 @@ class Universe(Identifiable):
 
     def add_event(self, event):
         if isinstance(event, Event):
-            self.event_history.append(event)
+            self.event_history[event.id]=event
 
     def save_to_file(self, filename):
         with open(filename, "w") as f:
@@ -89,7 +86,7 @@ class Universe(Identifiable):
         else:
             raise ValueError(f"Unexpected type: {data['type']}")
 
-        for event_data in data["event_history"]:
+        for event_id, event_data in data["event_history"].items():
             event_type = event_data.get("type", "Event")
             if event_type == "Event":
                 event = Event(**{k: v for k, v in event_data.items() if k != 'type'})

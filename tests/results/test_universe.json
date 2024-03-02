@@ -1,39 +1,39 @@
 {
   "type": "Universe",
   "name": "Test Universe",
-  "id": "381424ff-497c-4cda-8f78-979d6894135a",
-  "library_id": "86867c30-a596-4d44-a42e-6001cd9d77e7",
+  "id": "0",
+  "library_id": "4a9ac120-f376-465b-8375-5cf38dba044e",
   "object_registry": {
     "object_instances": {}
   },
-  "event_history": [
-    {
-      "id": "4f4f2127-f131-4700-8d17-8fe930897dd9",
+  "event_history": {
+    "0": {
+      "id": "0",
       "name": "Origin of the Universe",
       "type": "Event",
-      "universe": "381424ff-497c-4cda-8f78-979d6894135a",
+      "universe": "0",
       "event_type": "Event",
       "start_time": 0,
       "end_time": null,
       "location": null,
       "parent_event_id": null
     },
-    {
-      "id": "00cdf774-2087-48f5-9dc1-170d9ea9d37d",
+    "c4bbaa24-7d74-4ed9-a0fd-8fb4eecbbe1a": {
+      "id": "c4bbaa24-7d74-4ed9-a0fd-8fb4eecbbe1a",
       "name": "French Revolution",
       "type": "Event",
-      "universe": "381424ff-497c-4cda-8f78-979d6894135a",
+      "universe": "0",
       "event_type": "war",
       "start_time": 100,
       "end_time": 200,
       "location": "France",
       "parent_event_id": null
     },
-    {
-      "id": "cda6baaf-0143-431b-887f-c49ba58fb8bc",
+    "59302fae-9bca-494a-bb32-a88c0e40c42a": {
+      "id": "59302fae-9bca-494a-bb32-a88c0e40c42a",
       "name": "Battle of Florence",
       "type": "Encounter",
-      "universe": "381424ff-497c-4cda-8f78-979d6894135a",
+      "universe": "0",
       "event_type": "battle",
       "start_time": 300,
       "end_time": 400,
@@ -48,5 +48,5 @@
       "pending_action_list": [],
       "finished_action_list": []
     }
-  ]
+  }
 }
