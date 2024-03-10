@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "encounter.py 2024-03-02T03:34-03:00"
+__version__ = "encounter.py 2024-03-09T22:00-03:00"
 
 # TODO: Make ''' comments on classes and methods
 
@@ -21,7 +21,7 @@ from weapon import WeaponInstance
 
 # An Encounter is a container for the activity that occurs in a location over a period
 # of time. Each Encounter has a start time in seconds from a base epoch that anchors it 
-# in a broder historical context. 
+# in a broader historical context. 
 class Encounter(Event):
     '''
     A subtype of Event that captures the interactions of Beings.
@@ -122,6 +122,16 @@ class Encounter(Event):
 
     def arm_being(self, being_id, weapon_id, body_location):
         return self.universe.arm_being(being_id, weapon_id, body_location)
+
+    def make_armor_for_being(self, being_id, armor_type, name):
+        new_armor_id = self.universe.make_armor_for_being(being_id, armor_type, name)
+        if new_armor_id is None:
+            return None
+        self.non_being_object_list.append(new_armor_id)
+        return new_armor_id
+
+    def armor_being(self, being_id, armor_id):
+        return self.universe.armor_being(being_id, armor_id)
 
     def add_object(self, object_id):
         if object_id not in self.non_being_object_list:

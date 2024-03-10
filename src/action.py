@@ -3,10 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "action.py 2024-02-27T15:38-3:00"
+__version__ = "action.py 2024-03-03T10:16-3:00"
 
 # TODO: Implement drop_weapon()
-# TODO: Update documentation to reflect that Shields also do not stop the extra critical hit damage (see do_critical_hit())
 # TODO: Implement other options in damage_potential()
 # TODO: Implement Locations as possible targets
 # TODO: Implement Spells as instruments
@@ -14,6 +13,7 @@ __version__ = "action.py 2024-02-27T15:38-3:00"
 import json
 
 from armor import ArmorInstance
+from being import BeingInstance
 from event import Event
 from object import ObjectInstance
 from strategy import Strategy
@@ -22,8 +22,8 @@ from weapon import WeaponInstance
 
 class Action(Event):
     """
-    An Event with an ObjectInstance as the actor and an ObjectInstance or Location as a
-    target.
+    An Event with an ObjectInstance as the actor and an ObjectInstance or Location as an
+    optional target.
     """
 
     def __init__(
@@ -62,9 +62,10 @@ class Action(Event):
             elif self.event_type == 'thrust':
                 self.end_time = self.calculate_end_time(instrument.current.Tt(), self.strategy.timing_adjustment())
 
-    # JSON Serialization
     def to_json(self):
-
+        """
+        Serialize the Action as JSON.
+        """
         def handle_circular_refs(obj):
             if isinstance(obj, (Universe)):
                 return obj.id  # Return only the ID for Universe
@@ -80,7 +81,6 @@ class Action(Event):
         }
         return json.dumps(data, indent = 2)
 
-    # Action Resolution
     def resolve(self, difficulty_class):
         """
         Resolve the effects of this Action.
@@ -109,11 +109,9 @@ class Action(Event):
         self.actor_id = None
         actor = self.universe.get_object_by_id(actor_id)
         if actor is None:
-            print(f"Actor_id {actor_id} not found in Universe.")
-        elif not isinstance(actor, ObjectInstance):
-            print(f"Actor {actor_id} is not an ObjectInstance.")
-        else:
-            self.actor_id = actor_id
+            print("Ojo, eh! This shouldn't happen. set_actor_id() has no such actor.")
+            return
+        self.actor_id = actor_id
 
     def get_actor(self):
         """
@@ -127,6 +125,7 @@ class Action(Event):
         """
         actor = self.get_actor()
         if actor is None:
+            print("Ojo, eh! This shouldn't happen. get_actor_strategy() has no such actor.")
             return None
         return actor.strategy
 
@@ -136,8 +135,11 @@ class Action(Event):
         """
         actor = self.get_actor()
         if actor is None:
+            print("Ojo, eh! This shouldn't happen. get_actor_armor_id() has no such actor.")
             return None
-        return actor.get_armor_id()
+        if isinstance(actor, BeingInstance):
+            return actor.get_armor_id()
+        return None
 
     # Target Management
     def set_target_id(self, target_id):
@@ -147,11 +149,9 @@ class Action(Event):
         self.target_id = None
         target = self.universe.get_object_by_id(target_id)
         if target is None:
-            print(f"Target_id {target_id} not found in Universe.")
-        elif not isinstance(target, ObjectInstance):
-            print(f"Target {target_id} is not an ObjectInstance.")
-        else:
-            self.target_id = target_id
+            print("Ojo, eh! This shouldn't happen. set_target_id() has no such target.")
+            return
+        self.target_id = target_id
 
     def get_target(self):
         """
@@ -165,29 +165,33 @@ class Action(Event):
         """
         target = self.get_target()
         if target is None:
+            print("Ojo, eh! This shouldn't happen. get_target_strategy() has no such target.")
             return None
         return target.strategy
 
     def get_target_armor_id(self):
+        """
+        Get the id of the ArmorInstance used by the target in the Action.
+        """
         target = self.get_target()
         if target is None:
+            print("Ojo, eh! This shouldn't happen. get_target_armor_id() has no such target.")
             return None
-        return target.get_armor_id()
+        if isinstance(target, BeingInstance):
+            return target.get_armor_id()
+        return None
 
     # Instrument Management
     def set_instrument_id(self, instrument_id):
         """
-        Set the instrument_id used by the actor, making sure that it is an ObjectInstance
-        or other valid instrument (e.g., Spell).
+        Set the instrument_id used by the actor, making sure that it is a valid instrument type.
         """
         self.instrument_id = None
         instrument = self.universe.get_object_by_id(instrument_id)
         if instrument is None:
-            print(f"Instrument_id {instrument_id} not found in Universe.")
-        elif not isinstance(instrument, ObjectInstance):
-            print(f"Instrument {instrument_id} is not an ObjectInstance.")
-        else:
-            self.instrument_id = instrument_id
+            print("Ojo, eh! This shouldn't happen. set_instrument_id() has no such instrument.")
+            return
+        self.instrument_id = instrument_id
 
     def get_instrument(self):
         """
@@ -198,9 +202,10 @@ class Action(Event):
     # Strategy Management
     def set_strategy(self, strategy):
         """
-        Set the strategy used by the actor, making sure that it is a Strategy or None.
+        Set the strategy used by the actor. If none is given, make a default one.
         """
         if isinstance(strategy, Strategy):
+            print("Ojo, eh! This shouldn't happen. set_strategy() is not setting a Strategy, default new Strategy created.")
             self.strategy = strategy
         else:
             self.strategy = Strategy()
@@ -227,6 +232,8 @@ class Action(Event):
         """
         # See if damage hits a shield
         target = self.get_target()
+        if not isinstance(target, BeingInstance):
+            return damage
         shields = target.shielded_with(self.universe)
         target_shield_location = get_random_key(shields)
         target_shield_id = shields.get(target_shield_location)
@@ -238,6 +245,8 @@ class Action(Event):
         """
         # See if damage hits a shield
         actor = self.get_actor()
+        if not isinstance(actor, BeingInstance):
+            return damage
         shields = actor.shielded_with(self.universe)
         actor_shield_location = get_random_key(shields)
         actor_shield_id = shields.get(actor_shield_location)
@@ -321,6 +330,7 @@ class Action(Event):
         """
         actor = self.get_actor()
         if actor is None:
+            print("Ojo, eh! This shouldn't happen. roll_hits() has no actor.")
             return False
 
         # Get the attacker's attack level
@@ -338,26 +348,27 @@ class Action(Event):
         return roll + aal - ddl >= difficulty_class
 
     def hit_result(self, difficulty_class):
+        """
+        Determine the type of result from an attempt to hit.
+        """
         roll = roll_dice("1d20")
         actor = self.get_actor()
         if actor is None:
-            return "ACTOR_ERROR"
+            print("Ojo, eh! This shouldn't happen. hit_result() has no actor.")
+            return None
         if roll == 20:
             # The hit is a threat
             threat_roll = roll_dice("1d20")
             if threat_roll == 20:
                 saved = actor.makes_save(actor.current.abilities.CON, difficulty_class)
                 if not saved:
-                    # Fatal hit
                     return "fatal"
                 else:
                     # Revert from fatal hit to critical hit
                     return "critical"
             elif self.roll_hits(threat_roll, difficulty_class):
-                # Critical hit
                 return "critical"
             else:
-                # Normal hit
                 return "normal"
         elif roll == 1:
             # The attempt was a potentially dangerous failure
@@ -367,22 +378,16 @@ class Action(Event):
                 return "hit self"
             elif not self.roll_hits(roll, difficulty_class):
                 # Actor must make Reflex Saving Throw
-                saved = False
-                if actor is not None:
-                    saved = actor.makes_save(actor.current.abilities.DEX, difficulty_class)
+                saved = actor.makes_save(actor.current.abilities.DEX, difficulty_class)
                 if saved == False:
                     return "drop weapon"
                 else:
-                    # Spectacular miss
                     return "spectacular miss"
             else:
-                # Miss
                 return "miss"
         elif self.roll_hits(roll, difficulty_class):
-            # Normal hit
             return "normal"
         else:
-            # Miss
             return "miss"
 
     def do_normal_hit(self):
@@ -396,6 +401,7 @@ class Action(Event):
             damage_roll = roll_dice(f"1d{normal_damage}")
         except Exception as e:
             instrument = self.get_instrument()
+            print("Ojo, eh! This shouldn't happen. do_normal_hit() trying to roll 1d{normal_damage}.")
             print(f"event type: {self.event_type} normal_damage: {normal_damage} SD: {instrument.Sd()} TD: {instrument.Td()}")
         remaining_damage = self._resolve_damage_to_target_shield(damage_roll + extra_damage)
         remaining_damage = self._resolve_damage_to_target_armor(remaining_damage)
@@ -416,6 +422,7 @@ class Action(Event):
             critical_damage_roll = roll_dice(f"1d{normal_damage}")
         except Exception as e:
             instrument = self.get_instrument()
+            print("Ojo, eh! This shouldn't happen. do_critical_hit() trying to roll 1d{normal_damage}.")
             print(f"event type: {self.event_type} normal_damage: {normal_damage} SD: {instrument.Sd()} TD: {instrument.Td()}")
         remaining_damage = self._resolve_damage_to_target_shield(damage_roll + extra_damage)
         remaining_damage = self._resolve_damage_to_target_armor(remaining_damage)
@@ -433,29 +440,37 @@ class Action(Event):
         self.get_actor().damage(remaining_damage)
 
     def do_miss(self):
+        """
+        Resolve the effect of a miss.
+        """
         actor = self.get_actor()
 #        print(f"{actor.name} missed")
 
     def do_spectacular_miss(self):
+        """
+        Resolve the effect of a spectacular miss.
+        """
         actor = self.get_actor()
 #        print(f"{actor.name} missed spectacularly")
 
     def do_drop_weapon(self):
         """
-        Drop weapon
+        Resolve the effect of dropping a weapon used in the action.
         """
-        # TODO: do_drop_weapon() Not implemented
         actor = self.get_actor()
         if actor is None:
+            print("Ojo, eh! This shouldn't happen. do_drop_weapon() has no actor.")
             return
-#        print(f"{actor.name} drops weapon (not implemented)")
+        actor.drop_weapon(self.instrument_id)
+#        print(f"{actor.name} dropped weapon")
 
     def do_fatal_hit(self):
         """
-        Critical hit that kills the target outright
+        Resolve the effect of a critical hit that kills the target outright.
         """
         target = self.get_target()
         if target is None:
+            print("Ojo, eh! This shouldn't happen. do_fatal_hit() has no target.")
             return
         if target.hit_points() > -10:
             target.set_hit_points(-10)

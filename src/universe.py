@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "universe.py 2024-03-02T03:36-03:00"
+__version__ = "universe.py 2024-03-05T09:49-03:00"
 
 # TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
@@ -81,7 +81,6 @@ class Universe(Identifiable):
             data = json.load(f)
 
         if data["type"] == "Universe":
-#            print(f'name: {data["name"]}')
             self.name = data["name"]
         else:
             raise ValueError(f"Unexpected type: {data['type']}")
@@ -148,7 +147,6 @@ class Universe(Identifiable):
             return None
         being = BeingInstance(being_def, name)
         self.add_object(being)
-#XXX        print(f"Made {being_type} {name} (id={being.id})).")
         return being.id
     
     def make_object(self, object_type, name):
@@ -158,7 +156,6 @@ class Universe(Identifiable):
             return None
         obj = ObjectInstance(object_def, name)
         self.add_object(obj)
-#XXX        print(f"Made {object_type} {name} (id={obj.id})).")
         return obj.id
 
     def make_weapon(self, weapon_type, name):
@@ -168,7 +165,6 @@ class Universe(Identifiable):
             return None
         weapon = WeaponInstance(weapon_def, name)
         self.add_object(weapon)
-#XXX        print(f"Made {weapon_type} {name} (id={weapon.id})).")
         return weapon.id
 
     def make_object_for_being(self, being_id, object_type, name):
@@ -181,7 +177,6 @@ class Universe(Identifiable):
             print(f"Unable to make object {name} with object_type {object_type}.")        
             return None
         being.add_possession(new_object_id)
-#XXX        print(f"Made {object_type} {name} ({new_object_id})) for {being.name}.")
         return new_object_id
 
     def make_weapon_for_being(self, being_id, weapon_type, name):
@@ -192,7 +187,6 @@ class Universe(Identifiable):
         new_weapon_id = self.make_weapon(weapon_type, name)
         if new_weapon_id is not None:
             being.weapons.append(new_weapon_id)
-#XXX            print(f"Made {weapon_type} {name} ({new_weapon_id})) for {being.name}.")
         return new_weapon_id
 
     def arm_being(self, being_id, weapon_id, body_location):
@@ -205,7 +199,6 @@ class Universe(Identifiable):
             print(f"Weapon {weapon_id} not found, being {being.name} not armed.")        
             return False
         being.set_body_part_holds_object(body_location, weapon_id)
-#XXX        print(f"Being {being.name} armed with {weapon.type} {weapon.name}.")        
         return True
 
     def make_armor(self, armor_type, name):
@@ -215,7 +208,6 @@ class Universe(Identifiable):
             return None
         armor = ArmorInstance(armor_def, name)
         self.add_object(armor)
-#XXX        print(f"Made {armor_type} {name} (id={armor.id})).")
         return armor.id
 
     def make_armor_for_being(self, being_id, armor_type, name):
@@ -226,5 +218,16 @@ class Universe(Identifiable):
         new_armor_id = self.make_armor(armor_type, name)
         if new_armor_id is not None:
             being.set_armor(new_armor_id)
-#XXX            print(f"Made {armor_type} {name} ({new_armor_id})) for {being.name}.")
         return new_armor_id
+
+    def armor_being(self, being_id, armor_id):
+        being = self.get_object_by_id(being_id)
+        if being is None or not isinstance(being, BeingInstance):
+            print(f"Being {being_id} not found, not armored.")
+            return False
+        armor = self.get_object_by_id(armor_id)
+        if armor is None or not isinstance(armor, ArmorInstance):
+            print(f"Armor {armor_id} not found, being {being.name} not armored.")        
+            return False
+        being.set_armor(armor_id)
+        return True

@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "armor.py 2024-02-14T06:27-03:00"
+__version__ = "armor.py 2024-03-09T21:49-03:00"
 
 # TODO: ArmorDefinitions will need widths and heights eventually
 # TODO: Write a script to figure out damage through each armor for each attack of each weapon
@@ -198,8 +198,13 @@ class ArmorInstance(ObjectInstance):
         '''
         least_defense_damage = 1000
         for p in penetration_types.split(','):
-            pdamage = self.current.defenses[p]['d']
-#            print(f'damage stopped for pt {p} is {pdamage}')
+            try:
+                pdamage = self.current.defenses[p]['d']
+    #            print(f'damage stopped for pt {p} is {pdamage}')
+            except Exception as e:
+                # The penetration type is E (Entangle) only and the weapon does no damage
+#                print(f"defenses: {self.current.defenses}")
+                return 0
             if pdamage < least_defense_damage:
                 least_defense_damage = pdamage
         return least_defense_damage
@@ -212,7 +217,12 @@ class ArmorInstance(ObjectInstance):
         '''
         least_defense_hardness = 1000
         for p in penetration_types.split(','):
-            phardness = self.current.defenses[p]['h']
+            try:
+                phardness = self.current.defenses[p]['h']
+            except Exception as e:
+                # The penetration type is E (Entangle) only and the weapon does no damage
+#                print(f"defenses: {self.current.defenses}")
+                return 0
 #            print(f'hardness for pt {p} is {phardness}')
             if phardness < least_defense_hardness:
                 least_defense_hardness = phardness

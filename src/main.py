@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "main.py 2024-03-02T03:35-03:00"
+__version__ = "main.py 2024-03-09T22:09-03:00"
 
 # TODO: Make a clear method for populating Universe and Encounter with Beings and their possessions.
+# TODO: run weapons x vs weapon y, with each participant wearing armor z where z is each of leather,.chain, plate. that will swing wepping results greatly i bet. dagger more crappy, halberd more deadly.       
 
 import argparse
 import os
@@ -157,106 +158,7 @@ def test2(library, universe_output_file):
 
   print(f"Results:\n {results}")
 
-# def test3(library, universe_output_file):
-#   # Make the universe
-#   the_arena = Universe(name="The Arena", library=library)
-# 
-#   # Make equal contestants
-#   tobe_id = the_arena.make_being("Human", "Tobe")
-#   nottobe_id = the_arena.make_being("Human", "NotTobe")
-#   tobe = the_arena.get_object_by_id(tobe_id)
-#   nottobe = the_arena.get_object_by_id(nottobe_id)
-#   
-#   # Set up to capture results
-#   results = {}
-# 
-#   # Set up weapons
-#   weapon_a_name = 'Spear'
-#   weapon_b_name = 'Quarterstaff'
-#   if weapon_a_name == "Lasso" or weapon_a_name == "Net":
-#     print("{weapon_a_name} supports only the Entangle penetration type")
-#     exit()
-#   if weapon_b_name == "Lasso" or weapon_b_name == "Net":
-#     print("{weapon_b_name} supports only the Entangle penetration type")
-#     exit()
-# 
-#   # Make the first weapon
-#   tobe_weapon_id = the_arena.make_weapon(weapon_a_name, f"{weapon_a_name}")
-#   tobe_weapon = the_arena.get_object_by_id(tobe_weapon_id)
-# 
-#   # Arm the first contestant
-#   the_arena.arm_being(tobe_id, tobe_weapon.id, "right hand")
-# 
-#   # Continue if the first weapon does not support melee actions
-#   if tobe.melee_action_supported(the_arena) == False:
-#     print(f"{weapon_a_name} does not support melee actions")
-#     exit()
-# 
-#   # Make the second weapon
-#   nottobe_weapon_id = the_arena.make_weapon(weapon_b_name, f"{weapon_b_name}")
-#   nottobe_weapon = the_arena.get_object_by_id(nottobe_weapon_id)
-#       
-#   # Arm the second contestant
-#   the_arena.arm_being(nottobe_id, nottobe_weapon.id, "right hand")
-# 
-#   # Break if the second weapon does not support melee actions
-#   if nottobe.melee_action_supported(the_arena) == False:
-#     print(f"{weapon_b_name} does not support melee actions")
-#     exit()
-# 
-#   matchup = f"{tobe_weapon.name} vs. {nottobe_weapon.name}"
-#   print(f'{matchup}')
-#   results[matchup] = { "wins":0, "losses":0, "draws":0, "hp given":0, "hp taken":0, "turns":0}
-# 
-#   # Make an Encounter to play in
-#   encounter = Encounter(the_arena, difficulty_class=15, start_time=0, end_time=None, 
-#     event_type="Encounter", location=None, name=f"The Big Matchup")
-# 
-#   # Add the contestants to the match
-#   encounter.add_being(tobe_id)
-#   encounter.add_being(nottobe_id)
-# 
-#   # Add the match to the arena
-#   the_arena.add_event(encounter)
-# 
-#   i = 0
-#   for trial in range(1000):
-#     # Prime the encounter for the trial
-#     encounter.start_time = 0
-#     encounter.time = 0
-#     encounter.name = f"The Big Matchup {i}-{trial+1} {matchup}"
-#     encounter.pending_action_list = []
-#     encounter.finished_action_list = []
-# 
-#     # Prime the contestants for the trial
-#     tobe.set_hit_points(tobe.original.hit_points)
-#     nottobe.set_hit_points(nottobe.original.hit_points)
-# 
-#     # Prime the weapons for the trial
-#     tobe_weapon.hit_points = tobe_weapon.original.hit_points
-#     nottobe_weapon.hit_points = nottobe_weapon.original.hit_points
-# 
-#     # Run the match
-#     encounter.run()
-# 
-#     # Log the outcome
-#     hp_given = nottobe.original.hit_points - nottobe.hit_points()
-#     hp_taken = tobe.original.hit_points - tobe.hit_points()
-#     turns = encounter.time
-#     results[matchup]["hp given"] += hp_given
-#     results[matchup]["hp taken"] += hp_taken
-#     results[matchup]["turns"] += turns
-# 
-#     if hp_given > hp_taken:
-#       results[matchup]["wins"] +=1
-#     elif hp_given < hp_taken:
-#       results[matchup]["losses"] +=1
-#     else:
-#       results[matchup]["draws"] +=1
-# 
-#   print(f"Results:\n {results}")
-
-def test4(library, universe_output_file):
+def test3(library, universe_output_file):
   # Make the universe
   the_arena = Universe(name="The Arena", library=library)
 
@@ -302,7 +204,12 @@ def test4(library, universe_output_file):
 #      print(f"{weapon_b_name} does not support melee actions")
       continue
 
-    matchup = f"{tobe_weapon.name} vs. {nottobe_weapon.name}"
+    # Armor the first contestant
+    todays_armor = "Leather armor"
+    tobe_armor = the_arena.make_armor_for_being(tobe_id, f"{todays_armor}", f"Tobe's {todays_armor}")
+    nottobe_armor = the_arena.make_armor_for_being(nottobe_id, f"{todays_armor}", f"NotTobe's {todays_armor}")
+        
+    matchup = f"{tobe_weapon.name} vs. {nottobe_weapon.name} in {todays_armor}"
     print(f'{i} {matchup}')
 
     results[matchup] = { "wins":0, "losses":0, "draws":0, "hp given":0, "hp taken":0, "turns":0}
@@ -403,8 +310,7 @@ def main():
 
 #  test1(library, f'{options.workspace}/{options.outputfile}')
 #  test2(library, f'{options.workspace}/{options.outputfile}')
-#  test3(library, f'{options.workspace}/{options.outputfile}')
-  test4(library, f'{options.workspace}/{options.outputfile}')
+  test3(library, f'{options.workspace}/{options.outputfile}')
 
 if __name__ == '__main__':
   main()

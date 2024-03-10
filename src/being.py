@@ -3,13 +3,15 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "being.py 2024-02-28T02:18-03:00"
+__version__ = "being.py 2024-03-05T09:56-03:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
 # TODO: Make methods such as isArmored, isArmed, isShielded
 # TODO: Check for properties that need constraints and implement them (a finished example is experience)
 # TODO: Make ''' comments on classes and methods
 # TODO: Change self.armor to self.armor_id
+# TODO: Implement drop_weapon(object_id)
+# TODO: Arm Being on creation with natural weapons (e.g., arms, legs). Should go in weapons[]? Or should possible attacks look for natural weapons?
 
 import json
 import random
@@ -394,8 +396,11 @@ class BeingInstance(ObjectInstance):
     def add_weapon(self, weapon):
         self.weapons.append(weapon)
 
-    def remove_weapon(self, weapon_id):
-        self.weapons.remove(weapon_id)
+    def drop_weapon(self, weapon_id):
+        # TODO: Can't drop natural weapons
+        # TODO: Remove from weapons[] and remove from body_parts
+        pass
+        #self.weapons.remove(weapon_id)
 
     def get_body_parts(self):
         return self.current.body_parts
