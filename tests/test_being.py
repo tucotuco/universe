@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "test_being.py 2024-02-28T02:20-03:00"
+__version__ = "test_being.py 2024-03-15T10:53-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -35,7 +35,7 @@ class TestBeingDefinition(unittest.TestCase):
 #         self.skill_dictionary.load_skills(self.skills_file)
 # 
 #         self.weapon_dictionary = WeaponDictionary()
-#         self.weapon_dictionary.load_objects(self.weapons_file)
+#         self.weapon_dictionary.load(self.weapons_file)
 #         self.weapon_dictionary.load_object_categories(self.weapon_categories_file)
 #         self.skill_dictionary.add_weapon_skills(self.weapon_dictionary)
 
@@ -146,7 +146,7 @@ class TestBeingInstance(unittest.TestCase):
 # 
 #         self.weapon_dict = WeaponDictionary()
 #         self.weapon_dict.load_object_categories(self.categories_file)
-#         self.weapon_dict.load_objects(self.weapons_file)
+#         self.weapon_dict.load(self.weapons_file)
 
         self.states_file = '../src/config/states.tsv'
         self.states_list = StatesList()
@@ -458,7 +458,7 @@ class TestBeingDictionary(unittest.TestCase):
     "Ghost", "Wraith", "Mummy Lord", "Vampire", "Lich"
     ]
 }
-        self.object_dict.load_objects(self.objects_file)
+        self.object_dict.load(self.objects_file)
         self.assertEqual(len(self.object_dict.objects), 27)
         for object in self.object_dict.objects:
             object_dict = self.object_dict.objects[object]
@@ -477,7 +477,7 @@ class TestBeingDictionary(unittest.TestCase):
 
     def test_all_objects_in_categories(self):
         self.object_dict.load_object_categories(self.categories_file)
-        self.object_dict.load_objects(self.objects_file)
+        self.object_dict.load(self.objects_file)
         for object in self.object_dict.objects:
             object_dict = self.object_dict.objects[object]
             found = False
@@ -489,7 +489,7 @@ class TestBeingDictionary(unittest.TestCase):
     
     def test_all_categories_in_objects(self):
         self.object_dict.load_object_categories(self.categories_file)
-        self.object_dict.load_objects(self.objects_file)
+        self.object_dict.load(self.objects_file)
         for category_name, category in self.object_dict.object_categories.items():
             for object_name in category:
                 self.assertIn(object_name, self.object_dict.objects, 

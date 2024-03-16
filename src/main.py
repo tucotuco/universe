@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "main.py 2024-03-09T22:09-03:00"
+__version__ = "main.py 2024-03-15T22:50-03:00"
 
 # TODO: Make a clear method for populating Universe and Encounter with Beings and their possessions.
 # TODO: run weapons x vs weapon y, with each participant wearing armor z where z is each of leather,.chain, plate. that will swing wepping results greatly i bet. dagger more crappy, halberd more deadly.       
@@ -205,14 +205,14 @@ def test3(library, universe_output_file):
       continue
 
     # Armor the first contestant
-    todays_armor = "Leather armor"
+    todays_armor = "Full plate armor"
     tobe_armor = the_arena.make_armor_for_being(tobe_id, f"{todays_armor}", f"Tobe's {todays_armor}")
     nottobe_armor = the_arena.make_armor_for_being(nottobe_id, f"{todays_armor}", f"NotTobe's {todays_armor}")
         
-    matchup = f"{tobe_weapon.name} vs. {nottobe_weapon.name} in {todays_armor}"
+    matchup = f"{todays_armor},{tobe_weapon.name} vs. {todays_armor},{nottobe_weapon.name}"
     print(f'{i} {matchup}')
 
-    results[matchup] = { "wins":0, "losses":0, "draws":0, "hp given":0, "hp taken":0, "turns":0}
+    results[matchup] = {"armor1":f"{todays_armor}", "weapon1":f"{tobe_weapon.name}", "armor2":f"{todays_armor}", "weapon2":f"{nottobe_weapon.name}", "wins":0, "losses":0, "draws":0, "hp given":0, "hp taken":0, "turns":0}
 
     for trial in range(10):
       # Make an Encounter to play in
@@ -252,7 +252,7 @@ def test3(library, universe_output_file):
       nottobe_weapon.hit_points = nottobe_weapon.original.hit_points
 
   # Open a CSV file for writing
-  with open('../workspace/weapon_results.csv', 'w', newline='') as csvfile:
+  with open(f'../workspace/weapon_results_in_{todays_armor}.csv', 'w', newline='') as csvfile:
     # Define the header row
     fieldnames = ['Matchup'] + list(next(iter(results.values())).keys())  # Extract the keys from the first inner dictionary
 

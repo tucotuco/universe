@@ -3,10 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "armor.py 2024-03-09T21:49-03:00"
+__version__ = "armor.py 2024-03-15T22:47-03:00"
 
 # TODO: ArmorDefinitions will need widths and heights eventually
-# TODO: Write a script to figure out damage through each armor for each attack of each weapon
 
 import json
 from object import ObjectInstance, ObjectDefinition, ObjectDictionary
@@ -279,9 +278,9 @@ class ArmorDictionary(ObjectDictionary):
         ObjectDictionary.__init__(self)
 
         if dictionary_file is not None:
-            self.load_objects(dictionary_file)
+            self.load(dictionary_file)
 
-    def load_objects(self, filename):
+    def load(self, filename):
         '''
         Get ArmorDefinitions from a CSV file.
         '''

@@ -3,15 +3,13 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "being.py 2024-03-05T09:56-03:00"
+__version__ = "being.py 2024-03-15T22:47-03:00"
 
 # TODO: BeingDictionary should probably be saved and loaded as JSON.
-# TODO: Make methods such as isArmored, isArmed, isShielded
 # TODO: Check for properties that need constraints and implement them (a finished example is experience)
-# TODO: Make ''' comments on classes and methods
-# TODO: Change self.armor to self.armor_id
 # TODO: Implement drop_weapon(object_id)
-# TODO: Arm Being on creation with natural weapons (e.g., arms, legs). Should go in weapons[]? Or should possible attacks look for natural weapons?
+# TODO: Implement accumulation of Fatigue
+# TODO: Resolve issues surrounding default weapons if not armed with another weapon.
 
 import json
 import random
@@ -37,7 +35,7 @@ class BeingDefinition(ObjectDefinition):
                  max_speed=None, abilities=None, skills=None, senses=None, 
                  vulnerabilities=None, resistances=None, immunities=None, languages=None, 
                  psionics=None, spells=None, traits=None, states=None, actions=None, 
-                 reactions=None, body_parts=None, armor=None, fatigue_level=0):
+                 reactions=None, body_parts=None, armor_id=None, fatigue_level=0):
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
                          hit_points, is_magical, tags, weapon_categories)
         self.experience = convert_to_experience(experience)
@@ -62,7 +60,7 @@ class BeingDefinition(ObjectDefinition):
         # body_parts are expected to include a body location and the object or natural 
         # weapon in that location
         self.body_parts = body_parts or {}
-        self.armor = armor
+        self.armor_id = armor_id
         self.fatigue_level = 0
 
     def copy(self):
@@ -101,7 +99,7 @@ class BeingDefinition(ObjectDefinition):
             self.actions.copy(), 
             self.reactions.copy(),
             self.body_parts.copy(),
-            self.armor,
+            self.armor_id,
             self.fatigue_level)
         return new_being_definition
 
@@ -141,112 +139,206 @@ class BeingDefinition(ObjectDefinition):
             'actions': self.actions,
             'reactions': self.reactions,
             'body_parts': self.body_parts,
-            'armor': self.armor,
+            'armor_id': self.armor_id,
             'fatigue_level': self.fatigue_level
         }
         return json.dumps(data)
 
     def sprint(self):
+        '''
+        Get the maximum sprinting speed for this BeingDefinition.
+        '''
         return self.max_speed.sprint()
 
     def burrow(self):
+        '''
+        Get the maximum burrowing speed for this BeingDefinition.
+        '''
         return self.max_speed.burrow()
 
     def climb(self):
+        '''
+        Get the maximum climbing speed for this BeingDefinition.
+        '''
         return self.max_speed.climb()
 
     def fly(self):
+        '''
+        Get the maximum flying speed for this BeingDefinition.
+        '''
         return self.max_speed.fly()
 
     def swim(self):
+        '''
+        Get the maximum swimming speed for this BeingDefinition.
+        '''
         return self.max_speed.swim()
 
     def set_speed(self, speed=Speed()):
+        '''
+        
+        Set the speeds for this BeingDefinition.
+        '''
         if isinstance(speed, Speed):
             self.max_speed = speed
 
     def set_max_speed(self, speed_type, new_value):
+        '''
+        Set the maximum speed of the given type for this BeingDefinition.
+        '''
         self.max_speed.set_max_speed(speed_type, new_value)
 
     def get_abilities(self):
+        '''
+        Get the set of Abilities for this BeingDefinition.
+        '''
         return self.abilities.get_abilities()
 
     def STR(self):
+        '''
+        Get the strength ability for this BeingDefinition.
+        '''
         return self.abilities.STR()
 
     def DEX(self):
+        '''
+        Get the dexterity ability for this BeingDefinition.
+        '''
         return self.abilities.DEX()
 
     def CON(self):
+        '''
+        Get the constitution ability for this BeingDefinition.
+        '''
         return self.abilities.CON()
 
     def INT(self):
+        '''
+        Get the intelligence ability for this BeingDefinition.
+        '''
         return self.abilities.INT()
 
     def WIS(self):
+        '''
+        Get the wisdom ability for this BeingDefinition.
+        '''
         return self.abilities.WIS()
 
     def CHA(self):
+        '''
+        Get the charisma ability for this BeingDefinition.
+        '''
         return self.abilities.CHA()
 
     def set_ability(self, ability, new_value):
+        '''
+        Set the given ability to a new value for this BeingDefinition.
+        '''
         self.abilities.set_ability(ability, new_value)
 
     def set_abilities(self, abilities=Abilities()):
+        '''
+        Set the set of Abilities for this BeingDefinition.
+        '''
         if isinstance(abilities, Abilities):
             self.abilities = abilities
 
     def get_skills(self):
+        '''
+        Get the set of Skills for this BeingDefinition.
+        '''
         return self.skills.get_skills()
 
     def get_skill_level(self, skill_name):
+        '''
+        Get the skill level for a given skill for this BeingDefinition.
+        '''
         return self.skills.get_skill_level(skill_name)
 
     def set_skill_level(self, skill_dictionary, skill_name, level=0):
+        '''
+        Set the skill level for a given skill for this BeingDefinition.
+        '''
         self.skills.set_skill_level(skill_dictionary, skill_name, level)
 
     def get_weapon_skills(self):
+        '''
+        Get the set of weapon skills for this BeingDefinition.
+        '''
         return self.skills.get_weapon_skills()
 
     def get_weapon_skill_level(self, weapon_name):
+        '''
+        Get the skill level for a given weapon for this BeingDefinition.
+        '''
         return self.skills.get_weapon_skill_level(weapon_name)
 
     def get_max_weapon_skill_level(self):
+        '''
+        Get the highest level of the weapon skill levels for this BeingDefinition.
+        '''
         return self.skills.get_max_weapon_skill_level()
 
     def set_weapon_skill_level(self, weapon_dict, weapon_name, level=0):
+        '''
+        Set the weapon skill level for a given weapon for this BeingDefinition.
+        '''
         self.skills.set_weapon_skill_level(weapon_dict, weapon_name, level)
 
     def get_body_parts(self):
+        '''
+        Get the dictionary of body parts for this BeingDefinition.
+        '''
         return self.body_parts
 
     def set_body_part_holds_object(self, body_part, object_id):
+        '''
+        Set the object "held" by a body part for this BeingDefinition.
+        '''
         self.body_parts[body_part] = object_id
 
-    def body_part_remove_object(self, body_location):
-        the_object = self.body_parts.get(body_location)
-        if the_object is not None:
-            del self.body_parts[body_location]
-        return the_object
+    def body_part_remove_object(self, body_part):
+        '''
+        Remove an object "held" by the given body part for this BeingDefinition.
+        '''
+        object_id = self.body_parts.get(body_part)
+        if object_id is not None:
+            del self.body_parts[body_part]
+        return object_id
 
     def get_fatigue_level(self):
+        '''
+        Get the defined fatigue level for this BeingDefinition.
+        '''
         return self.fatigue_level
         
     def set_fatigue_level(self, new_fatigue_level):
+        '''
+        Set the defined fatigue level for this BeingDefinition.
+        '''
         self.fatigue_level = convert_to_fatigue(new_fatigue_level)
         
     def get_states(self):
+        '''
+        Get the physical and mental States for this BeingDefinition.
+        '''
         return self.states.get_states()
         
     def get_state(self, state_name):
+        '''
+        Get the given physical and mental State for this BeingDefinition.
+        '''
         return self.states.get_state(state_name)
         
     def set_state(self, state_list, state_name, value):
+        '''
+        Set the given physical and mental State for this BeingDefinition.
+        '''
         self.states.set_state(state_list, state_name, value)
 
 class BeingInstance(ObjectInstance):
     ''' 
-    An ObjectInstance based on a BeingDefinition.
+    An ObjectInstance that is a Being based on a BeingDefinition.
     '''
     def __init__(self, being_definition, name=None):
         ObjectInstance.__init__(self, being_definition, name)
@@ -257,189 +349,357 @@ class BeingInstance(ObjectInstance):
         self.strategy = Strategy()
 
     def reset(self):
+        '''
+        Set all of the current values of the BeingInstance to their original values.
+        '''
         self.current = self.original.copy()
 
     def set_strategy(self, attack=0, defense=0, timing=0, extra_damage=0):
+        '''
+        Set the melee Strategy of the BeingInstance.
+        '''
         self.strategy = Strategy(attack, defense, timing, extra_damage)
 
     def get_experience(self):
+        '''
+        Get the current amount of experience accumulated by the BeingInstance.
+        '''
         return self.current.experience
 
     def set_experience(self, new_experience):
+        '''
+        Set the current amount of experience accumulated by the BeingInstance.
+        '''
         self.current.experience = convert_to_experience(new_experience)
 
     def add_experience(self, experience):
+        '''
+        Add the given amount of experience to the current amount of experience accumulated by the BeingInstance.
+        '''
         self.current.experience += convert_to_numeric(experience)
         self.current.experience = convert_to_experience(self.current.experience)
 
     def get_fatigue_level(self):
+        '''
+        Get the current fatigue level of the BeingInstance.
+        '''
         return self.current.fatigue_level
 
     def set_fatigue_level(self, new_fatigue_level):
+        '''
+        Set the current fatigue level of the BeingInstance.
+        '''
         self.current.fatigue_level = convert_to_fatigue(new_fatigue_level)
 
     def add_fatigue_level(self, fatigue_change):
+        '''
+        Add an amount to the current fatigue level of the BeingInstance.
+        '''
         self.current.fatigue += convert_to_numeric(fatigue_change)
         self.current.fatigue = convert_to_fatigue(self.current.fatigue)
 
     def get_hit_points(self):
+        '''
+        Get the current hit points of the BeingInstance.
+        '''
         return self.current.hit_points
 
     def set_hit_points(self, new_hit_points):
+        '''
+        Set the current hit points of the BeingInstance.
+        '''
         self.current.hit_points = convert_to_numeric(new_hit_points)
 
     def add_hit_points(self, hit_points):
+        '''
+        Add an amount to the current hit points of the BeingInstance.
+        '''
         self.current.hit_points += convert_to_numeric(hit_points)
 
     def get_hit_dice(self):
+        '''
+        Get the current hit dice of the BeingInstance.
+        '''
         return self.current.hit_dice
 
     def get_alignment(self):
+        '''
+        Get the alignment of the BeingInstance.
+        '''
         return self.current.alignment
 
     def set_alignment(self, new_alignment):
+        '''
+        Set the alignment of the BeingInstance.
+        '''
         self.alignment = new_alignment
 
     def get_armor_class(self):
+        '''
+        Get the armor class of the BeingInstance.
+        '''
         return self.current.armor_class
 
     def set_armor_class(self, new_armor_class):
+        '''
+        Set the armor class of the BeingInstance.
+        '''
         # TODO: make convert_to_armor_class method in utils
         self.current_armor_class = convert_to_numeric(new_armor_class)
 
     def get_challenge_rating(self):
+        '''
+        Get the challenge rating of the BeingInstance.
+        '''
         # TODO: make convert_to_challenge_rating method in utils
         return self.current.challenge_rating
 
     def sprint(self):
+        '''
+        Get the current maximum sprinting speed for this BeingInstance.
+        '''
         return self.current.max_speed.sprint()
 
     def burrow(self):
+        '''
+        Get the current maximum burrowing speed for this BeingInstance.
+        '''
         return self.current.max_speed.burrow()
 
     def climb(self):
+        '''
+        Get the current maximum climbing speed for this BeingInstance.
+        '''
         return self.current.max_speed.climb()
 
     def fly(self):
+        '''
+        Get the current maximum flying speed for this BeingInstance.
+        '''
         return self.current.max_speed.fly()
 
     def swim(self):
+        '''
+        Get the current maximum swimming speed for this BeingInstance.
+        '''
         return self.current.max_speed.swim()
 
     def set_max_speed(self, speed_type, new_value):
+        '''
+        Set the current maximum speed of the given type for this BeingInstance.
+        '''
         self.current.max_speed.set_max_speed(speed_type, new_value)
 
     def get_abilities(self):
+        '''
+        Get the current set of Abilities for this BeingInstance.
+        '''
         return self.current.abilities.get_abilities()
 
     def STR(self):
+        '''
+        Get the current strength for this BeingInstance.
+        '''
         return self.current.abilities.STR()
 
     def DEX(self):
+        '''
+        Get the current dexterity for this BeingInstance.
+        '''
         return self.current.abilities.DEX()
 
     def CON(self):
+        '''
+        Get the current constitution for this BeingInstance.
+        '''
         return self.current.abilities.CON()
 
     def INT(self):
+        '''
+        Get the current intelligence for this BeingInstance.
+        '''
         return self.current.abilities.INT()
 
     def WIS(self):
+        '''
+        Get the current wisdom for this BeingInstance.
+        '''
         return self.current.abilities.WIS()
 
     def CHA(self):
+        '''
+        Get the current charisma for this BeingInstance.
+        '''
         return self.current.abilities.CHA()
 
     def set_ability(self, ability, new_value):
+        '''
+        Set the current value of the given ability to a new value for this BeingInstance.
+        '''
         self.current.set_ability(ability, new_value)
 
     def get_skills(self):
+        '''
+        Get the current set of Skills for this BeingInstance.
+        '''
         return self.current.get_skills()
 
     def get_weapon_skills(self):
+        '''
+        Get the current set of weapon skills for this BeingInstance.
+        '''
         return self.current.get_weapon_skills()
 
     def get_skill_level(self, skill_name):
+        '''
+        Get the current skill level for a given skill for this BeingInstance.
+        '''
         return self.current.get_skill_level(skill_name)
 
     def set_skill_level(self, skill_dictionary, skill_name, level=0):
+        '''
+        Set the current skill level for a given skill for this BeingInstance.
+        '''
         self.current.set_skill_level(skill_dictionary, skill_name, level)
 
     def get_weapon_skill_level(self, weapon_name):
+        '''
+        Get the current skill level for a given weapon for this BeingInstance.
+        '''
         return self.current.get_weapon_skill_level(weapon_name)
 
     def get_max_weapon_skill_level(self):
+        '''
+        Get the highest level of the current weapon skill levels for this BeingInstance.
+        '''
         return self.current.get_max_weapon_skill_level()
 
     def set_weapon_skill_level(self, weapon_dictionary, weapon_name, level=0):
+        '''
+        Set the current weapon skill level for a given weapon for this BeingInstance.
+        '''
         self.current.set_weapon_skill_level(weapon_dictionary, weapon_name, level)
 
     def fitness(self):
+        '''
+        Get the current fitness for this BeingInstance.
+        '''
         return self.current.fitness
 
     def set_fitness(self, new_fitness):
+        '''
+        Set the current fitness for this BeingInstance.
+        '''
         self.current.fitness += convert_to_numeric(new_fitness)
         if self.current.fitness < 0:
             self.current.fitness = 0
 
     def add_fitness(self, add_fitness):
+        '''
+        Add the given amount of fitness to the current amount of fitness of the BeingInstance.
+        '''
         self.current.fitness += convert_to_numeric(add_fitness)
         if self.current.fitness < 0:
             self.current.fitness = 0
 
     def add_possession(self, added_possession): 
+        '''
+        Add an object to the list of possessions of the BeingInstance.
+        '''
         self.possessions.append(added_possession)
 
     def remove_possession(self, possession_id):
+        '''
+        Remove an object from the list of possessions of the BeingInstance.
+        '''
         self.possessions.remove(possession_id)
 
     def add_weapon(self, weapon):
+        '''
+        Add a weapon to the list of weapons of the BeingInstance.
+        '''
         self.weapons.append(weapon)
 
     def drop_weapon(self, weapon_id):
-        # TODO: Can't drop natural weapons
+        '''
+        Remove a weapon from the body part of the BeingInstance it armed and from its weapon list.
+        '''
+        # TODO: Can't drop natural weapons. Dropping last non-natural weapon leaves Being armed with natural weapons.
         # TODO: Remove from weapons[] and remove from body_parts
         pass
         #self.weapons.remove(weapon_id)
 
     def get_body_parts(self):
+        '''
+        Get the dictionary of body parts for this BeingInstance.
+        '''
         return self.current.body_parts
 
-    def set_body_part_holds_object(self, body_location, the_object):
-        self.current.body_parts[body_location] = the_object
+    def set_body_part_holds_object(self, body_location, object_id):
+        '''
+        Set the object "held" by a body part for this BeingInstance.
+        '''
+        self.current.body_parts[body_location] = object_id
 
     def body_part_remove_object(self, body_location):
-        the_object = self.current.body_parts.get(body_location)
-        if the_object is not None:
+        '''
+        Remove an object "held" by the given body part for this BeingInstance.
+        '''
+        object_id = self.current.body_parts.get(body_location)
+        if object_id is not None:
             del self.current.body_parts[body_location]
-        return the_object
+        return object_id
 
     def get_armor_id(self):
-        return self.current.armor
+        '''
+        Get the id of the armor for this BeingInstance.
+        '''
+        return self.current.armor_id
 
-    def set_armor(self, armor):
-        self.current.armor = armor
+    def set_armor_id(self, armor_id):
+        '''
+        Set the id of the armor for this BeingInstance.
+        '''
+        self.current.armor_id = armor_id
 
     def get_states(self):
+        '''
+        Get the current physical and mental States for this BeingInstance.
+        '''
         return self.current.states.get_states()
         
     def get_state(self, state_name):
+        '''
+        Get the current given physical and mental State for this BeingInstance.
+        '''
         return self.current.states.get_state(state_name)
         
     def set_state(self, state_list, state_name, value):
+        '''
+        Set the current given physical and mental State for this BeingInstance.
+        '''
         self.current.states.set_state(state_list, state_name, value)
 
     def is_immobilized(self):
+        '''
+        Assess whether this BeingInstance is immobilized.
+        '''
         if is_pinned():
             return True
         return is_helpless()
 
     def is_dead(self):
+        '''
+        Assess whether this BeingInstance is dead.
+        '''
         if self.get_hit_points() <= -10:
             return True
         return False
 
     def is_helpless(self):
+        '''
+        Assess whether this BeingInstance is helpless.
+        '''
         if self.is_paralyzed():
             return True
         if self.is_stunned():
@@ -453,6 +713,9 @@ class BeingInstance(ObjectInstance):
         return False
 
     def is_pinned(self):
+        '''
+        Assess whether this BeingInstance is pinned.
+        '''
         if len(self.current.get_states()) == 0:
             return False
         if self.current.get_state('pinned') is None:
@@ -460,14 +723,23 @@ class BeingInstance(ObjectInstance):
         return self.current.get_state('pinned')
 
     def pin(self, state_list):
+        '''
+        Set this pinned state of the BeingInstance to True.
+        '''
         self.current.set_state(state_list, 'pinned', True)
 
     def un_pin(self, state_list):
+        '''
+        Set this pinned state of the BeingInstance to False.
+        '''
         if self.current.get_state('pinned') is None:
             return
         self.current.set_state(state_list, 'pinned', False)
 
     def is_paralyzed(self):
+        '''
+        Assess whether this BeingInstance is paralyzed.
+        '''
         if len(self.current.get_states()) == 0:
             return False
         if self.current.get_state('paralyzed') is None:
@@ -475,14 +747,23 @@ class BeingInstance(ObjectInstance):
         return self.current.get_state('paralyzed')
 
     def paralyze(self, state_list):
+        '''
+        Set the state of paralysis of the BeingInstance to True.
+        '''
         self.current.set_state(state_list, 'paralyzed', True)
 
     def un_paralyze(self, state_list):
+        '''
+        Set the state of paralysis of the BeingInstance to False.
+        '''
         if self.current.get_state('paralyzed') is None:
             return
         self.current.set_state(state_list, 'paralyzed', False)
 
     def is_stunned(self):
+        '''
+        Assess whether this BeingInstance is stunned.
+        '''
         if len(self.current.get_states()) == 0:
             return False
         if self.current.get_state('stunned') is None:
@@ -490,14 +771,23 @@ class BeingInstance(ObjectInstance):
         return self.current.get_state('stunned')
 
     def stun(self, state_list):
+        '''
+        Set the stunned state of the BeingInstance to True.
+        '''
         self.current.set_state(state_list, 'stunned', True)
 
     def un_stun(self, state_list):
+        '''
+        Set the stunned state of the BeingInstance to False.
+        '''
         if self.current.get_state('stunned') is None:
             return
         self.current.set_state(state_list, 'stunned', False)
 
     def makes_save(self, ability_score, difficulty_class):
+        '''
+        Assess whether a saving throw for this BeingInstance is successful.
+        '''
         roll = roll_dice('1d20')
         if roll == 1:
             return False
@@ -510,7 +800,7 @@ class BeingInstance(ObjectInstance):
 
     def choose_melee_action(self, universe):
         '''
-        Choose a melee action from among those currently possible
+        Choose a melee action from among those currently possible for the BeingInstance.
         '''        
         from universe import Universe
         actions_possible_now = self.currently_possible_actions(universe)
@@ -529,7 +819,7 @@ class BeingInstance(ObjectInstance):
 
     def choose_action(self, universe):
         '''
-        Choose an action from among those currently possible
+        Choose an action from among those currently possible for the BeingInstance.
         '''        
         from universe import Universe
         actions_possible_now = self.currently_possible_actions(universe)
@@ -542,8 +832,9 @@ class BeingInstance(ObjectInstance):
 
     def has_swing_weapon(self, universe):
         '''
-        Determine if the Being has a weapon that can be used to swing.
+        Determine if the BeingInstance is armed with a weapon that can be used to swing.
         '''
+        # TODO: Accommodate natural weapons
         arms = self.armed_with(universe)
 #        print(f"arms: {arms}")
         for body_part, weapon_id in arms.items():
@@ -554,18 +845,30 @@ class BeingInstance(ObjectInstance):
 
     def has_thrust_weapon(self, universe):
         '''
-        Determine if the Being has a weapon that can be used to thrust.
+        Determine if the BeingInstance is armed with a weapon that can be used to thrust.
         '''
+        # TODO: Accommodate natural weapons
         for body_part, weapon_id in self.armed_with(universe).items():
             weapon = universe.get_object_by_id(weapon_id)
             if weapon is not None and "thrust" in weapon.get_melee_types():
                 return True
         return False
 
+    def has_entangle_weapon(self, universe):
+        '''
+        Determine if the BeingInstance is armed with a weapon that can be used to entangle.
+        '''
+        # TODO: Accommodate natural weapons
+        for body_part, weapon_id in self.armed_with(universe).items():
+            weapon = universe.get_object_by_id(weapon_id)
+            if weapon is not None and "entangle" in weapon.get_melee_types():
+                return True
+        return False
+
     def melee_action_supported(self, universe):
         '''
-        Determine if the melee action is possible given the current weapons of the Being.
-        ''' 
+        Determine if a melee action is possible given the weapons with which the the BeingInstance is armed.
+        '''
         if self.has_swing_weapon(universe):
             return True
         if self.has_thrust_weapon(universe):
@@ -574,7 +877,7 @@ class BeingInstance(ObjectInstance):
 
     def possible_actions(self, universe):
         '''
-        Make an actions list based on the Being's skills
+        Make a list of actions that are possible based on the skills of the BeingInstance.
         '''
         from universe import Universe
         action_dict = universe.get_action_dictionary()
@@ -592,13 +895,13 @@ class BeingInstance(ObjectInstance):
 
     def armored_with(self):
         '''
-        Get the id of the armor the being is armored with.
+        Get the id of the armor of the BeingInstance.
         '''
         return self.get_armor_id()
 
     def shielded_with(self, universe):
         '''
-        Get a dictionary of body locations that have shields on them.
+        Get a dictionary of body parts of the BeingInstance that have shields on them.
         '''
         from universe import Universe
 
@@ -612,20 +915,23 @@ class BeingInstance(ObjectInstance):
     
     def armed_with(self, universe):
         '''
-        Get a dictionary of body locations that have weapons in which the Being has skill.
+        Get a dictionary of body parts of the BeingInstance that "hold" a weapon.
         '''
         from universe import Universe
 
         weapon_dict = universe.get_weapon_dictionary()
         armed = {}
         for body_location, object_id in self.get_body_parts().items():
-            an_object = universe.get_object_by_id(object_id)
-            if an_object is not None and weapon_dict.get_object_definition(an_object.current.obj_type) is not None:
+            the_object = universe.get_object_by_id(object_id)
+            if the_object is not None and weapon_dict.get_object_definition(the_object.current.obj_type) is not None:
                 armed[body_location]=object_id
 #        print(f"being.py: armed_with(): {armed}")
         return armed
 
     def choose_weapon(self, armed):
+        '''
+        Select a weapon from among those "held" by the BeingInstance.
+        '''
 #        print(f"being.py choose_weapon() armed: {armed}")
         if armed is None or len(armed) == 0:
             return None
@@ -635,7 +941,7 @@ class BeingInstance(ObjectInstance):
     
     def currently_possible_actions(self, universe, target=None):
         '''
-        Make an actions dictionary based on Being's current situation
+        Make an dictionary of actions that are currently possible based on the current circumstances of the BeingInstance.
         '''
         # TODO: implement multi-action. Could the same mechanism as an Encounter be nested?
         from universe import Universe
@@ -927,12 +1233,12 @@ class BeingDictionary(ObjectDictionary):
         ObjectDictionary.__init__(self)
 
         if dictionary_file is not None:
-            self.load_beings(dictionary_file)
+            self.load(dictionary_file)
 
-    def load_beings(self, filename):
-        self.load_objects(filename)
-
-    def load_objects(self, filename):
+    def load(self, filename):
+        '''
+        Get predefined BeingDefinitions from a CSV file.
+        '''
         p = True
         with open(filename, 'r') as f:
             lines = f.readlines()

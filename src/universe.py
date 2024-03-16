@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "universe.py 2024-03-05T09:49-03:00"
+__version__ = "universe.py 2024-03-15T22:51-03:00"
 
 # TODO: redo unit tests
 # TODO: Make ''' comments on classes and methods
@@ -217,7 +217,7 @@ class Universe(Identifiable):
             return False
         new_armor_id = self.make_armor(armor_type, name)
         if new_armor_id is not None:
-            being.set_armor(new_armor_id)
+            being.set_armor_id(new_armor_id)
         return new_armor_id
 
     def armor_being(self, being_id, armor_id):
@@ -229,5 +229,5 @@ class Universe(Identifiable):
         if armor is None or not isinstance(armor, ArmorInstance):
             print(f"Armor {armor_id} not found, being {being.name} not armored.")        
             return False
-        being.set_armor(armor_id)
+        being.set_armor_id(armor_id)
         return True

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "object.py 2024-02-25T11:20-03:00"
+__version__ = "object.py 2024-03-15T22:50-03:00"
 
 # TODO: Make size category function from largest of length, width, height
 # TODO: Make ''' comments on classes and methods
@@ -239,7 +239,7 @@ class ObjectDictionary:
         self.objects = {}
 
         if dictionary_file is not None:
-            self.load_objects(dictionary_file)
+            self.load(dictionary_file)
 
     def to_json(self):
         '''
@@ -279,9 +279,9 @@ class ObjectDictionary:
         '''
         self.objects = obj_dict
             
-    def load_objects(self, filename):
+    def load(self, filename):
         '''
-        Get ObjectDefinitions from a CSV file.
+        Get predefined ObjectDefinitions from a CSV file.
         '''
         p = True
         with open(filename, 'r') as f:

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_weapon.py 2023-04-30T18:02-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "test_weapon.py 2024-03-15T22:54-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -231,8 +231,8 @@ class TestWeaponDictionary(unittest.TestCase):
         self.assertEqual(len(self.weapon_dict.object_categories), 19)
         self.assertDictEqual(self.weapon_dict.object_categories, self.expected_categories)
 
-    def test_load_objects(self):
-        self.weapon_dict.load_objects(self.weapons_file)
+    def test_load(self):
+        self.weapon_dict.load(self.weapons_file)
         self.assertEqual(len(self.weapon_dict.objects), 141)
         for weapon in self.weapon_dict.objects:
             weapon_dict = self.weapon_dict.objects[weapon]
@@ -251,7 +251,7 @@ class TestWeaponDictionary(unittest.TestCase):
 
     def test_all_weapons_in_categories(self):
         self.weapon_dict.load_object_categories(self.categories_file)
-        self.weapon_dict.load_objects(self.weapons_file)
+        self.weapon_dict.load(self.weapons_file)
         for weapon in self.weapon_dict.objects:
             weapon_dict = self.weapon_dict.objects[weapon]
             found = False
@@ -263,7 +263,7 @@ class TestWeaponDictionary(unittest.TestCase):
     
     def test_all_categories_in_weapons(self):
         self.weapon_dict.load_object_categories(self.categories_file)
-        self.weapon_dict.load_objects(self.weapons_file)
+        self.weapon_dict.load(self.weapons_file)
         for category_name, category in self.weapon_dict.object_categories.items():
             for weapon_name in category:
                 self.assertIn(weapon_name, self.weapon_dict.objects, 

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_object.py 2023-12-26T17:00-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "test_object.py 2024-03-15T22:54-03:00"
 
 # TODO: Check comprehensiveness
 # TODO: Make sure an ObjectInstance is inside one and only one ObjectInstance as it's immediate container
@@ -249,7 +249,7 @@ class TestObjectDictionary(unittest.TestCase):
             "Barge", "Canoe (small)"
         ]
         }
-        self.object_dict.load_objects(self.objects_file)
+        self.object_dict.load(self.objects_file)
         self.assertEqual(len(self.object_dict.objects), 27)
         for object in self.object_dict.objects:
             object_dict = self.object_dict.objects[object]
@@ -268,7 +268,7 @@ class TestObjectDictionary(unittest.TestCase):
 
     def test_all_objects_in_categories(self):
         self.object_dict.load_object_categories(self.categories_file)
-        self.object_dict.load_objects(self.objects_file)
+        self.object_dict.load(self.objects_file)
         for object in self.object_dict.objects:
             object_dict = self.object_dict.objects[object]
             found = False
@@ -280,7 +280,7 @@ class TestObjectDictionary(unittest.TestCase):
     
     def test_all_categories_in_objects(self):
         self.object_dict.load_object_categories(self.categories_file)
-        self.object_dict.load_objects(self.objects_file)
+        self.object_dict.load(self.objects_file)
         for category_name, category in self.object_dict.object_categories.items():
             for object_name in category:
                 self.assertIn(object_name, self.object_dict.objects, 

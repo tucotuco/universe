@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_armor.py 2024-02-04T19:24-08:00"
+__version__ = "test_armor.py 2024-03-15T22:52-08:00"
 
 # TODO: Check comprehensiveness
 
@@ -298,7 +298,7 @@ class TestArmorDictionary(unittest.TestCase):
 
     def test_worst_defense(self):
         armor_dict = ArmorDictionary()
-        armor_dict.load_objects(self.armors_file)
+        armor_dict.load(self.armors_file)
         for armor in armor_dict.objects:
             a = ArmorInstance(armor_dict.objects[armor], armor)	
             self.assertGreater(len(a.worst_defense()), 0) 
@@ -313,7 +313,7 @@ class TestArmorDictionary(unittest.TestCase):
         self.assertDictEqual(self.dictionary.object_categories, self.expected_categories)
 
     def test_load_armors(self):
-        self.dictionary.load_objects(self.armors_file)
+        self.dictionary.load(self.armors_file)
         self.assertEqual(len(self.dictionary.objects), 20)
         for armor in self.dictionary.objects:
             armor_dict = self.dictionary.objects[armor]
@@ -335,7 +335,7 @@ class TestArmorDictionary(unittest.TestCase):
 
     def test_all_armors_in_categories(self):
         self.dictionary.load_object_categories(self.categories_file)
-        self.dictionary.load_objects(self.armors_file)
+        self.dictionary.load(self.armors_file)
         for armor in self.dictionary.objects:
             armor_dict = self.dictionary.objects[armor]
             found = False
@@ -347,16 +347,11 @@ class TestArmorDictionary(unittest.TestCase):
     
     def test_all_categories_in_armors(self):
         self.dictionary.load_object_categories(self.categories_file)
-        self.dictionary.load_objects(self.armors_file)
+        self.dictionary.load(self.armors_file)
         for category_name, category in self.dictionary.object_categories.items():
             for armor_name in category:
                 self.assertIn(armor_name, self.dictionary.objects, 
                               f"ArmorDefinition {armor_name} in category {category_name} not found in armors list")
-
-#    def test_show_armordict(self):
-#        self.dictionary.load_armor_categories(self.categories_file)
-#        self.dictionary.load_armors(self.armors_file)
-#        print(f'{self.dictionary.to_json()}')
 
 if __name__ == '__main__':
     unittest.main()

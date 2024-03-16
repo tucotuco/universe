@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "weapon.py 2024-02-15T19:35-03:00"
+__version__ = "weapon.py 2024-03-15T22:52-03:00"
 
 # TODO: WeaponDefinitions from file will need widths and heights eventually
 # TODO: Deprecate weapon_size in favor of a function based on actual size and size of wielder
@@ -188,9 +188,9 @@ class WeaponDictionary(ObjectDictionary):
         ObjectDictionary.__init__(self)
 
         if dictionary_file is not None:
-            self.load_objects(dictionary_file)
+            self.load(dictionary_file)
 
-    def load_objects(self, filename):
+    def load(self, filename):
         p = True
         with open(filename, 'r') as f:
             lines = f.readlines()
