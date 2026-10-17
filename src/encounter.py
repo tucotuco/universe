@@ -10,6 +10,7 @@ __version__ = "encounter.py 2024-03-09T22:00-03:00"
 import json
 import math
 import random
+from dataclasses import dataclass
 
 from utils import convert_to_dc
 from action import Action
@@ -20,6 +21,30 @@ from object import ObjectInstance
 from perception import RangePerception
 from strategy import Strategy
 from weapon import WeaponInstance
+
+
+@dataclass(frozen=True)
+class EncounterInitiation:
+    """The minimal decision that turns an encounter context into an active encounter.
+
+    Awareness is a prerequisite but is not itself sufficient: a participating Being
+    must decide to act toward an Entity it is aware of.  ``intent`` is deliberately
+    lightweight scaffolding (for example ``approach``, ``flee``, ``communicate``, or
+    ``attack``); later Agent decision systems can replace how that intent is chosen.
+    """
+
+    actor_id: str
+    target_id: str
+    intent: str
+    time: float
+
+    def to_dict(self):
+        return {
+            "actor_id": self.actor_id,
+            "target_id": self.target_id,
+            "intent": self.intent,
+            "time": self.time,
+        }
 
 # An Encounter is a container for the activity that occurs in a location over a period
 # of time. Each Encounter has a start time in seconds from a base epoch that anchors it 
@@ -32,7 +57,7 @@ class Encounter(Event):
                  event_type=None, location=None, name="", parent_event_id=None, id=None, 
                  time=None, being_list=None, non_being_object_list=None, 
                  pending_action_list=None, finished_action_list=None, initiated=False, 
-                 map=None, awareness=None):
+                 map=None, awareness=None, initiation=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
@@ -66,6 +91,12 @@ class Encounter(Event):
         if awareness is not None:
             for observer_id, target_ids in awareness.items():
                 self.awareness[observer_id] = set(target_ids)
+        if isinstance(initiation, EncounterInitiation):
+            self.initiation = initiation
+        elif isinstance(initiation, dict):
+            self.initiation = EncounterInitiation(**initiation)
+        else:
+            self.initiation = None
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -83,6 +114,9 @@ class Encounter(Event):
             "parent_event_id": self.parent_event_id,
             "location": self.location,
             "difficulty_class": self.difficulty_class,
+            "initiated": self.initiated,
+            "time": self.time,
+            "initiation": None if self.initiation is None else self.initiation.to_dict(),
             "map": self.map,
             "being_list": self.being_list,
             "object_list": self.non_being_object_list,
@@ -327,6 +361,40 @@ class Encounter(Event):
         real-world perception.
         """
         return self.perceive(observer_being_id, RangePerception(max_distance))
+
+    def decide_to_act(self, actor_being_id, target_entity_id, intent="act"):
+        """Initiate this Encounter when an aware Being decides to act.
+
+        Awareness is required but does not itself initiate the Encounter.  The
+        target may be any participating Entity, allowing a Being to react to an
+        object as well as another Being.  The first successful decision is retained
+        as the initiation record; later decisions belong to the Encounter cycle.
+
+        Returns the :class:`EncounterInitiation` record on success, otherwise
+        ``None``.
+        """
+        if self.initiated:
+            return None
+        if self.get_being(actor_being_id) is None:
+            return None
+        if self.get_entity(target_entity_id) is None:
+            return None
+        if not self.is_aware(actor_being_id, target_entity_id):
+            return None
+        if not isinstance(intent, str):
+            raise TypeError("intent must be a string")
+        intent = intent.strip()
+        if not intent:
+            raise ValueError("intent must not be empty")
+
+        self.initiation = EncounterInitiation(
+            actor_id=actor_being_id,
+            target_id=target_entity_id,
+            intent=intent,
+            time=self.time,
+        )
+        self.initiated = True
+        return self.initiation
 
     # Load an Encounter from storage.
 #    def load(self):
