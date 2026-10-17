@@ -106,5 +106,22 @@ class CellAddress:
             and other.path[: self.level] == self.path
         )
 
+    def common_ancestor(self, other: Union[str, "CellAddress"]) -> Optional["CellAddress"]:
+        """Return the deepest cell that contains both addresses.
+
+        Root icosahedral faces have no represented common parent, so cells on
+        different root faces return ``None``.
+        """
+        other = CellAddress.parse(other)
+        if self.face != other.face:
+            return None
+
+        common_length = 0
+        for left, right in zip(self.path, other.path):
+            if left != right:
+                break
+            common_length += 1
+        return CellAddress(self.face, self.path[:common_length])
+
     def __str__(self) -> str:
         return self.face_label + "".join(str(child) for child in self.path)

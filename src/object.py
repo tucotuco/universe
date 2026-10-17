@@ -10,6 +10,7 @@ __version__ = "object.py 2024-03-15T22:50-03:00"
 import json
 
 from identifiable import Identifiable
+from spatial.state import CartesianPosition, SpatialState
 from utils import convert_to_numeric
 
 class ObjectDefinition:
@@ -99,13 +100,16 @@ class ObjectInstance(Identifiable):
     indicate its original state and current values that are in effect at the time they are 
     accessed. Instances have unique identifiers.
     '''
-    def __init__(self, object_definition, name=None, id=None):
+    def __init__(self, object_definition, name=None, id=None, spatial_state=None):
         Identifiable.__init__(self, name, id)
         self.top_facing = 0 # up 
         self.front_facing = 1 # whichever horizontal orientation (1-6 on hex) 1 refers to
         self.original = object_definition
         self.current = object_definition.copy() or None
         self.parent_container_id = None
+        self.spatial_state = None
+        if spatial_state is not None:
+            self.set_spatial_state(spatial_state)
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -123,9 +127,49 @@ class ObjectInstance(Identifiable):
             "front_facing": self.front_facing,
             "original": self.original,
             "current": self.current,
-            "parent_container_id": self.parent_container_id
+            "parent_container_id": self.parent_container_id,
+            "spatial_state": self.spatial_state
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
+
+    def get_spatial_state(self):
+        return self.spatial_state
+
+    def set_spatial_state(self, spatial_state):
+        if spatial_state is not None and not isinstance(spatial_state, SpatialState):
+            raise TypeError("spatial_state must be a SpatialState or None")
+        self.spatial_state = spatial_state
+
+    def get_position(self):
+        if self.spatial_state is None:
+            return None
+        return self.spatial_state.position
+
+    def set_position(self, position):
+        if not isinstance(position, CartesianPosition):
+            raise TypeError("position must be a CartesianPosition")
+        if self.spatial_state is None:
+            self.spatial_state = SpatialState(position)
+        else:
+            self.spatial_state.set_position(position)
+
+    def spatial_cell(self, grid, level, origin=None):
+        if self.spatial_state is None:
+            return None
+        return self.spatial_state.cell(grid, level, origin)
+
+    def spatial_relation_to(self, other):
+        """Return the current continuous spatial relation to another object.
+
+        ``None`` is returned while either object has not yet been placed.
+        The relation is derived from current positions and is not stored.
+        """
+        if not isinstance(other, ObjectInstance):
+            raise TypeError("other must be an ObjectInstance")
+        if self.spatial_state is None or other.spatial_state is None:
+            return None
+        from spatial.relation import SpatialRelation
+        return SpatialRelation(self.get_position(), other.get_position())
 
     def obj_type(self):
         return self.current.obj_type
