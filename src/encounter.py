@@ -12,6 +12,8 @@ import math
 import random
 from dataclasses import dataclass
 
+from spatial.state import CartesianPosition
+
 from utils import convert_to_dc
 from action import Action
 from event import Event
@@ -45,6 +47,20 @@ class EncounterInitiation:
             "intent": self.intent,
             "time": self.time,
         }
+
+@dataclass(frozen=True)
+class EncounterStep:
+    """Outcome of one bounded Encounter simulation step.
+
+    Movement is applied from a simultaneous position snapshot.  Actions are
+    resolved at the end of the step using the existing Event/Action timeline.
+    """
+
+    start_time: float
+    end_time: float
+    moved_entity_ids: tuple
+    completed_action_ids: tuple
+
 
 # An Encounter is a container for the activity that occurs in a location over a period
 # of time. Each Encounter has a start time in seconds from a base epoch that anchors it 
@@ -123,7 +139,9 @@ class Encounter(Event):
             "awareness": {
                 observer_id: sorted(target_ids)
                 for observer_id, target_ids in self.awareness.items()
-            }
+            },
+            "pending_action_list": self.pending_action_list,
+            "finished_action_list": self.finished_action_list,
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
 
@@ -396,6 +414,106 @@ class Encounter(Event):
         self.initiated = True
         return self.initiation
 
+    def schedule_action(self, action):
+        """Add an existing resolvable Action/Event to the Encounter timeline.
+
+        Decisions and action construction are external for this first cycle.
+        The caller supplies a resolvable Event with a start/end time and a
+        participating Being actor; no automatic combat choice is made.
+        """
+        if not self.initiated:
+            raise RuntimeError("Encounter must be initiated before scheduling actions")
+        if not isinstance(action, Event) or not callable(getattr(action, "resolve", None)):
+            raise TypeError("action must be a resolvable Event")
+        if action.universe is not self.universe:
+            raise ValueError("action must belong to this Universe")
+        if self.get_being(getattr(action, "actor_id", None)) is None:
+            raise ValueError("action actor must be a participating Being")
+        target_id = getattr(action, "target_id", None)
+        if target_id is not None and self.get_entity(target_id) is None:
+            raise ValueError("action target must be a participating Entity")
+        if action.parent_event_id not in (None, self.id):
+            raise ValueError("action belongs to a different parent Event")
+        if (not isinstance(action.start_time, (int, float))
+                or not isinstance(action.end_time, (int, float))
+                or not math.isfinite(action.start_time)
+                or not math.isfinite(action.end_time)
+                or action.start_time < self.time
+                or action.end_time < action.start_time):
+            raise ValueError("action times must be finite and start no earlier than now")
+        if self.end_time is not None and action.end_time > self.end_time:
+            raise ValueError("action would finish after the Encounter end time")
+        if action.id in self.pending_action_list or action.id in self.finished_action_list:
+            raise ValueError("action is already scheduled or completed")
+        registered = self.universe.get_event_by_id(action.id)
+        if registered is not None and registered is not action:
+            raise ValueError("an Event with this id already exists")
+        action.parent_event_id = self.id
+        self.universe.add_event(action)
+        self.pending_action_list.append(action.id)
+        return action.id
+
+    def step(self, duration=1.0, velocities=None):
+        """Advance one explicit Encounter interval without automatic combat AI.
+
+        ``velocities`` maps participating Entity ids to continuous Cartesian
+        velocity triples, expressed per unit of Encounter time.  All new
+        positions are computed from the same starting snapshot.  This is a
+        kinematic placeholder, not a collision, speed-limit, or terrain model.
+        Action decisions are made externally through ``schedule_action``.
+        """
+        if not self.initiated:
+            raise RuntimeError("Encounter must be initiated before stepping")
+        try:
+            duration = float(duration)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("duration must be numeric") from exc
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("duration must be finite and positive")
+        start = self.time
+        end = start + duration
+        if not math.isfinite(end):
+            raise ValueError("Encounter time overflow")
+        if self.end_time is not None and end > self.end_time:
+            raise ValueError("step would exceed the Encounter end time")
+        if velocities is None:
+            velocities = {}
+        if not hasattr(velocities, "items"):
+            raise TypeError("velocities must be a mapping of Entity ids to 3D vectors")
+
+        destinations = []
+        for entity_id, vector in velocities.items():
+            entity = self.get_entity(entity_id)
+            if entity is None:
+                raise ValueError("moving Entity must participate in the Encounter")
+            previous = entity.get_position()
+            if previous is None:
+                raise ValueError("moving Entity must have a continuous position")
+            try:
+                vx, vy, vz = vector
+            except (TypeError, ValueError) as exc:
+                raise TypeError("velocity must be a three-component vector") from exc
+            try:
+                vx, vy, vz = float(vx), float(vy), float(vz)
+            except (TypeError, ValueError) as exc:
+                raise TypeError("velocity components must be numeric") from exc
+            if not all(math.isfinite(v) for v in (vx, vy, vz)):
+                raise ValueError("velocity components must be finite")
+            destinations.append((entity_id, entity, CartesianPosition(
+                previous.x + vx * duration,
+                previous.y + vy * duration,
+                previous.z + vz * duration,
+            )))
+
+        for _, entity, destination in destinations:
+            entity.set_position(destination)
+        completed = self.resolve_actions(as_of=end)
+        self.update_environment()  # Hook intentionally has no model yet.
+        self.time = end
+        return EncounterStep(start, end,
+                             tuple(entity_id for entity_id, _, _ in destinations),
+                             tuple(completed))
+
     # Load an Encounter from storage.
 #    def load(self):
 
@@ -485,17 +603,29 @@ class Encounter(Event):
         # If not immobile
         pass
 
-    def resolve_actions(self):
-        finish = []
-        for action in self.pending_action_list:
-            action = self.universe.get_event_by_id(action)
-            if action is not None:
-                if action.end_time == self.time:
-                    action.resolve(self.difficulty_class)
-                    self.finished_action_list.append(action.id)
-                    finish.append(action.id)
-        for action_id in finish:
-            self.pending_action_list.remove(action_id)
+    def resolve_actions(self, as_of=None):
+        """Resolve registered actions due by ``as_of`` in timeline order.
+
+        Legacy combat Action.resolve() remains responsible for combat effects.
+        Effects are applied serially for now; simultaneous-effect resolution is
+        a separate future enhancement.
+        """
+        if as_of is None:
+            as_of = self.time
+        due = []
+        for index, action_id in enumerate(self.pending_action_list):
+            action = self.universe.get_event_by_id(action_id)
+            if action is None:
+                continue
+            if action.end_time is not None and action.end_time <= as_of:
+                due.append((action.end_time, index, action))
+        completed = []
+        for _, _, action in sorted(due, key=lambda item: (item[0], item[1])):
+            action.resolve(self.difficulty_class)
+            self.pending_action_list.remove(action.id)
+            self.finished_action_list.append(action.id)
+            completed.append(action.id)
+        return completed
     
     def update_environment(self):
         pass
