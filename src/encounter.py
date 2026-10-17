@@ -25,7 +25,7 @@ from weapon import WeaponInstance
 # in a broader historical context. 
 class Encounter(Event):
     '''
-    A subtype of Event that captures the interactions of Beings.
+    A subtype of Event that captures interactions among Encounter entities.
     '''
     def __init__(self, universe, difficulty_class, start_time, end_time=None, 
                  event_type=None, location=None, name="", parent_event_id=None, id=None, 
@@ -45,7 +45,7 @@ class Encounter(Event):
             self.being_list = [] # A list of ids of Beings involved in the Encounter
         else:
             self.being_list = being_list
-        if being_list is None:
+        if non_being_object_list is None:
             self.non_being_object_list = [] # A list of ids of Objects involved in the Encounter
         else:
             self.non_being_object_list = non_being_object_list
@@ -57,8 +57,8 @@ class Encounter(Event):
             self.finished_action_list = []
         else:
             self.finished_action_list = finished_action_list
-        # Awareness is directed encounter state: observer id -> ids currently known
-        # to that observer.  It is deliberately distinct from physical proximity;
+        # Awareness is directed encounter state: observer Being id -> Entity ids
+        # currently known to that observer.  It is deliberately distinct from physical proximity;
         # later sight, hearing, memory, concealment, and other perception systems can
         # decide when awareness should be added or removed.
         self.awareness = {}
@@ -151,23 +151,45 @@ class Encounter(Event):
         if being_id not in self.being_list:
             self.being_list.append(being_id)
 
+    def entity_ids(self):
+        """Return ids of all participating Encounter entities in stable order.
+
+        At present, spatially participating entities are ``ObjectInstance`` objects:
+        Beings first, followed by non-Being Objects.  The method deliberately exposes
+        an entity-level view so later Entity subclasses need not change spatial APIs.
+        """
+        result = []
+        for entity_id in self.being_list + self.non_being_object_list:
+            if entity_id not in result:
+                result.append(entity_id)
+        return result
+
+    def get_entity(self, entity_id):
+        """Return a participating spatial Entity, or ``None`` if unavailable."""
+        if entity_id not in self.entity_ids():
+            return None
+        entity = self.universe.get_object_by_id(entity_id)
+        if not isinstance(entity, ObjectInstance):
+            return None
+        return entity
+
     def get_being(self, being_id):
         """Return a participating Being, or ``None`` if it is unavailable."""
         if being_id not in self.being_list:
             return None
-        being = self.universe.get_object_by_id(being_id)
+        being = self.get_entity(being_id)
         if not isinstance(being, BeingInstance):
             return None
         return being
 
-    def distance_between_beings(self, first_being_id, second_being_id):
-        """Return continuous 3D distance between two participating Beings.
+    def distance_between_entities(self, first_entity_id, second_entity_id):
+        """Return continuous 3D distance between two participating entities.
 
-        ``None`` is returned if either Being is not part of this Encounter or has
+        ``None`` is returned if either entity is not part of this Encounter or has
         not yet been placed in continuous space.
         """
-        first = self.get_being(first_being_id)
-        second = self.get_being(second_being_id)
+        first = self.get_entity(first_entity_id)
+        second = self.get_entity(second_entity_id)
         if first is None or second is None:
             return None
         relation = first.spatial_relation_to(second)
@@ -175,67 +197,112 @@ class Encounter(Event):
             return None
         return relation.distance
 
-    def within_distance(self, first_being_id, second_being_id, max_distance):
-        """Return whether two participating, placed Beings are within a distance.
+    def distance_between_beings(self, first_being_id, second_being_id):
+        """Return continuous 3D distance between two participating Beings."""
+        if self.get_being(first_being_id) is None or self.get_being(second_being_id) is None:
+            return None
+        return self.distance_between_entities(first_being_id, second_being_id)
 
-        Distance is measured in the units of their shared continuous Cartesian
-        reference frame; no grid or cell relation is used.
-        """
+    @staticmethod
+    def _validate_max_distance(max_distance):
         try:
             max_distance = float(max_distance)
         except (TypeError, ValueError) as exc:
             raise TypeError("max_distance must be numeric") from exc
         if not math.isfinite(max_distance) or max_distance < 0.0:
             raise ValueError("max_distance must be a finite non-negative number")
-        distance = self.distance_between_beings(first_being_id, second_being_id)
+        return max_distance
+
+    def entity_within(self, first_entity_id, second_entity_id, max_distance):
+        """Return whether two participating, placed entities are within a distance.
+
+        Distance is measured in the units of their shared continuous Cartesian
+        reference frame; no grid or cell relation is used.
+        """
+        max_distance = self._validate_max_distance(max_distance)
+        distance = self.distance_between_entities(first_entity_id, second_entity_id)
         return distance is not None and distance <= max_distance
 
-    def beings_within(self, subject_being_id, max_distance):
-        """Return participating Being ids within ``max_distance`` of a subject.
+    def within_distance(self, first_entity_id, second_entity_id, max_distance):
+        """Compatibility alias for :meth:`entity_within`."""
+        return self.entity_within(first_entity_id, second_entity_id, max_distance)
 
-        The subject itself is excluded.  Unplaced Beings are ignored.  Encounter
-        order is preserved, making this useful as a deterministic candidate list
-        for later perception rules.
+    def entities_within(self, subject_entity_id, max_distance):
+        """Return participating entity ids within ``max_distance`` of a subject.
+
+        The subject itself is excluded. Unplaced entities are ignored. Encounter
+        order is preserved for deterministic downstream perception or interaction
+        processing.
         """
-        if self.get_being(subject_being_id) is None:
+        if self.get_entity(subject_entity_id) is None:
             return []
         result = []
-        for being_id in self.being_list:
-            if being_id == subject_being_id:
+        for entity_id in self.entity_ids():
+            if entity_id == subject_entity_id:
                 continue
-            if self.within_distance(subject_being_id, being_id, max_distance):
-                result.append(being_id)
+            if self.entity_within(subject_entity_id, entity_id, max_distance):
+                result.append(entity_id)
         return result
 
-    def mark_aware(self, observer_being_id, target_being_id):
-        """Record directed awareness of one participating Being by another."""
-        if observer_being_id == target_being_id:
+    def beings_within(self, subject_entity_id, max_distance):
+        """Return nearby participating Being ids."""
+        return [
+            entity_id for entity_id in self.entities_within(subject_entity_id, max_distance)
+            if isinstance(self.get_entity(entity_id), BeingInstance)
+        ]
+
+    def objects_within(self, subject_entity_id, max_distance):
+        """Return nearby participating non-Being Object ids."""
+        return [
+            entity_id for entity_id in self.entities_within(subject_entity_id, max_distance)
+            if not isinstance(self.get_entity(entity_id), BeingInstance)
+        ]
+
+    def mark_aware(self, observer_being_id, target_entity_id):
+        """Record directed awareness of an Encounter entity by a Being."""
+        if observer_being_id == target_entity_id:
             return False
-        if self.get_being(observer_being_id) is None or self.get_being(target_being_id) is None:
+        if self.get_being(observer_being_id) is None or self.get_entity(target_entity_id) is None:
             return False
         targets = self.awareness.setdefault(observer_being_id, set())
         before = len(targets)
-        targets.add(target_being_id)
+        targets.add(target_entity_id)
         return len(targets) != before
 
-    def clear_awareness(self, observer_being_id, target_being_id):
+    def clear_awareness(self, observer_being_id, target_entity_id):
         """Remove directed awareness, returning whether stored state changed."""
         targets = self.awareness.get(observer_being_id)
-        if targets is None or target_being_id not in targets:
+        if targets is None or target_entity_id not in targets:
             return False
-        targets.remove(target_being_id)
+        targets.remove(target_entity_id)
         if not targets:
             del self.awareness[observer_being_id]
         return True
 
-    def is_aware(self, observer_being_id, target_being_id):
-        """Return whether directed awareness is currently recorded."""
-        return target_being_id in self.awareness.get(observer_being_id, set())
+    def is_aware(self, observer_being_id, target_entity_id):
+        """Return whether directed awareness of an entity is recorded."""
+        return target_entity_id in self.awareness.get(observer_being_id, set())
+
+    def aware_entities(self, observer_being_id):
+        """Return participating entity ids currently known to the observer."""
+        if self.get_being(observer_being_id) is None:
+            return []
+        targets = self.awareness.get(observer_being_id, set())
+        return [entity_id for entity_id in self.entity_ids() if entity_id in targets]
 
     def aware_beings(self, observer_being_id):
         """Return participating Being ids currently known to the observer."""
-        targets = self.awareness.get(observer_being_id, set())
-        return [being_id for being_id in self.being_list if being_id in targets]
+        return [
+            entity_id for entity_id in self.aware_entities(observer_being_id)
+            if isinstance(self.get_entity(entity_id), BeingInstance)
+        ]
+
+    def aware_objects(self, observer_being_id):
+        """Return participating non-Being Object ids currently known to the observer."""
+        return [
+            entity_id for entity_id in self.aware_entities(observer_being_id)
+            if not isinstance(self.get_entity(entity_id), BeingInstance)
+        ]
 
     # Load an Encounter from storage.
 #    def load(self):
