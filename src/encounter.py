@@ -186,7 +186,10 @@ class Encounter(Event):
 #       return self.do_one_round()
 
         # Go until one or no one left standing
-        return self.last_one_standing()
+#        return self.last_one_standing()
+
+        # Go until one or no one left running
+        return self.last_one_running()
 
     def do_one_round(self):
         # Do just one round
@@ -204,6 +207,19 @@ class Encounter(Event):
             if being.current.hit_points > 0:
                 beings_alive += 1
                 if beings_alive > 1:
+                    return True
+        return False
+
+    def last_one_running(self):
+        # Go until one or no one is not exhausted
+        being_count = len(self.being_list)
+        beings_exhausted = 0
+        for being_id in self.being_list:
+            being = self.universe.get_object_by_id(being_id)
+            print(f"Current fatigue for {being.name}: {being.current.fatigue_level}")
+            if being.current.fatigue_level > 4: # Fatigue level 4 is exhausted
+                beings_exhausted += 1
+                if beings_exhausted > 1:
                     return True
         return False
 

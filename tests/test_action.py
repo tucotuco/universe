@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
 __version__ = "test_action.py 2024-02-14T01:23-08:00"
 
 import unittest

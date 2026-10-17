@@ -3,12 +3,9 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "being.py 2024-03-15T22:47-03:00"
+__version__ = "being.py 2024-03-25T22:55-03:00"
 
-# TODO: BeingDictionary should probably be saved and loaded as JSON.
-# TODO: Check for properties that need constraints and implement them (a finished example is experience)
 # TODO: Implement drop_weapon(object_id)
-# TODO: Implement accumulation of Fatigue
 # TODO: Resolve issues surrounding default weapons if not armed with another weapon.
 
 import json
@@ -35,7 +32,7 @@ class BeingDefinition(ObjectDefinition):
                  max_speed=None, abilities=None, skills=None, senses=None, 
                  vulnerabilities=None, resistances=None, immunities=None, languages=None, 
                  psionics=None, spells=None, traits=None, states=None, actions=None, 
-                 reactions=None, body_parts=None, armor_id=None, fatigue_level=0):
+                 reactions=None, body_parts=None, armor_id=None):
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
                          hit_points, is_magical, tags, weapon_categories)
         self.experience = convert_to_experience(experience)
@@ -61,7 +58,6 @@ class BeingDefinition(ObjectDefinition):
         # weapon in that location
         self.body_parts = body_parts or {}
         self.armor_id = armor_id
-        self.fatigue_level = 0
 
     def copy(self):
         '''
@@ -99,8 +95,7 @@ class BeingDefinition(ObjectDefinition):
             self.actions.copy(), 
             self.reactions.copy(),
             self.body_parts.copy(),
-            self.armor_id,
-            self.fatigue_level)
+            self.armor_id)
         return new_being_definition
 
     def to_json(self):
@@ -139,9 +134,8 @@ class BeingDefinition(ObjectDefinition):
             'actions': self.actions,
             'reactions': self.reactions,
             'body_parts': self.body_parts,
-            'armor_id': self.armor_id,
-            'fatigue_level': self.fatigue_level
-        }
+            'armor_id': self.armor_id
+            }
         return json.dumps(data)
 
     def sprint(self):
@@ -230,6 +224,12 @@ class BeingDefinition(ObjectDefinition):
         '''
         return self.abilities.CHA()
 
+    def FIT(self):
+        '''
+        Get the fitness ability for this BeingDefinition.
+        '''
+        return self.abilities.FIT()
+
     def set_ability(self, ability, new_value):
         '''
         Set the given ability to a new value for this BeingDefinition.
@@ -306,18 +306,6 @@ class BeingDefinition(ObjectDefinition):
             del self.body_parts[body_part]
         return object_id
 
-    def get_fatigue_level(self):
-        '''
-        Get the defined fatigue level for this BeingDefinition.
-        '''
-        return self.fatigue_level
-        
-    def set_fatigue_level(self, new_fatigue_level):
-        '''
-        Set the defined fatigue level for this BeingDefinition.
-        '''
-        self.fatigue_level = convert_to_fatigue(new_fatigue_level)
-        
     def get_states(self):
         '''
         Get the physical and mental States for this BeingDefinition.
@@ -347,12 +335,19 @@ class BeingInstance(ObjectInstance):
         self.possessions = []
         self.weapons = []
         self.strategy = Strategy()
+        self.fatigue_level = 0
+        self.effective_fitness = self.current.FIT()
+        self.exertion = Exertion()
 
     def reset(self):
         '''
         Set all of the current values of the BeingInstance to their original values.
         '''
         self.current = self.original.copy()
+        self.strategy = Strategy()
+        self.fatigue_level = 0
+        self.effective_fitness = self.current.FIT()
+        self.exertion = Exertion()
 
     def set_strategy(self, attack=0, defense=0, timing=0, extra_damage=0):
         '''
@@ -383,20 +378,30 @@ class BeingInstance(ObjectInstance):
         '''
         Get the current fatigue level of the BeingInstance.
         '''
-        return self.current.fatigue_level
+        return self.fatigue_level
 
     def set_fatigue_level(self, new_fatigue_level):
         '''
-        Set the current fatigue level of the BeingInstance.
+        Set the fatigue level of the BeingInstance.
         '''
-        self.current.fatigue_level = convert_to_fatigue(new_fatigue_level)
+        self.fatigue_level = convert_to_fatigue(new_fatigue_level)
 
     def add_fatigue_level(self, fatigue_change):
         '''
-        Add an amount to the current fatigue level of the BeingInstance.
+        Add an amount to the fatigue level of the BeingInstance.
         '''
-        self.current.fatigue += convert_to_numeric(fatigue_change)
-        self.current.fatigue = convert_to_fatigue(self.current.fatigue)
+        self.fatigue_level += convert_to_numeric(fatigue_change)
+        self.fatigue_level = convert_to_fatigue(self.fatigue_level)
+
+    def exertion_state_change(self):
+        '''
+        Update Exertion based on change in state.
+        '''
+        # !!!TODO: implement exertion_state_change()
+        activity_level
+        load_level
+        fatigue_level
+        fitness_level
 
     def get_hit_points(self):
         '''
@@ -532,6 +537,12 @@ class BeingInstance(ObjectInstance):
         '''
         return self.current.abilities.CHA()
 
+    def FIT(self):
+        '''
+        Get the current fitness for this BeingInstance.
+        '''
+        return self.current.abilities.FIT()
+
     def set_ability(self, ability, new_value):
         '''
         Set the current value of the given ability to a new value for this BeingInstance.
@@ -579,28 +590,6 @@ class BeingInstance(ObjectInstance):
         Set the current weapon skill level for a given weapon for this BeingInstance.
         '''
         self.current.set_weapon_skill_level(weapon_dictionary, weapon_name, level)
-
-    def fitness(self):
-        '''
-        Get the current fitness for this BeingInstance.
-        '''
-        return self.current.fitness
-
-    def set_fitness(self, new_fitness):
-        '''
-        Set the current fitness for this BeingInstance.
-        '''
-        self.current.fitness += convert_to_numeric(new_fitness)
-        if self.current.fitness < 0:
-            self.current.fitness = 0
-
-    def add_fitness(self, add_fitness):
-        '''
-        Add the given amount of fitness to the current amount of fitness of the BeingInstance.
-        '''
-        self.current.fitness += convert_to_numeric(add_fitness)
-        if self.current.fitness < 0:
-            self.current.fitness = 0
 
     def add_possession(self, added_possession): 
         '''

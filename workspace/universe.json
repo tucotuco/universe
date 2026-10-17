@@ -1,0 +1,768 @@
+{
+  "type": "Universe",
+  "name": "Tobe's Universe",
+  "id": "0",
+  "library_id": "cf9d290e-1059-4095-b897-5654bff18ce8",
+  "object_registry": {
+    "object_instances": {
+      "7558f5cf-af7b-4882-9a44-bb5d6ff1abba": {
+        "id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+        "name": "Tobe",
+        "type": "BeingInstance",
+        "top_facing": 0,
+        "front_facing": 1,
+        "original": {
+          "obj_type": "Half-elf",
+          "length": 5.5,
+          "width": 0,
+          "height": 0,
+          "weight": 140,
+          "cost": 0,
+          "hardness": 0,
+          "hit_points": 11,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "experience": 0,
+          "hit_dice": "1d8",
+          "alignment": "Neutral",
+          "armor_class": 11,
+          "challenge_rating": 1,
+          "max_speed": {
+            "speeds": {
+              "ambulate": 0,
+              "burrow": 0,
+              "climb": 0,
+              "fly": 0,
+              "swim": 0
+            }
+          },
+          "abilities": {
+            "abilities": {
+              "STR": 10,
+              "DEX": 10,
+              "CON": 10,
+              "INT": 10,
+              "WIS": 10,
+              "CHA": 10
+            }
+          },
+          "skills": {
+            "skills": {},
+            "weapon_skills": {}
+          },
+          "senses": {},
+          "vulnerabilities": {},
+          "resistances": {},
+          "immunities": {},
+          "languages": {},
+          "psionics": {},
+          "spells": {},
+          "traits": {},
+          "states": {
+            "states": {}
+          },
+          "actions": {},
+          "reactions": {},
+          "body_parts": {},
+          "armor": null,
+          "fatigue_level": 0
+        },
+        "current": {
+          "obj_type": "Half-elf",
+          "length": 5.5,
+          "width": 0,
+          "height": 0,
+          "weight": 140,
+          "cost": 0,
+          "hardness": 0,
+          "hit_points": 0,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "experience": 0,
+          "hit_dice": "1d8",
+          "alignment": "Neutral",
+          "armor_class": 11,
+          "challenge_rating": 1,
+          "max_speed": {
+            "speeds": {
+              "ambulate": 0,
+              "burrow": 0,
+              "climb": 0,
+              "fly": 0,
+              "swim": 0
+            }
+          },
+          "abilities": {
+            "abilities": {
+              "STR": 10,
+              "DEX": 10,
+              "CON": 10,
+              "INT": 10,
+              "WIS": 10,
+              "CHA": 10
+            }
+          },
+          "skills": {
+            "skills": {},
+            "weapon_skills": {}
+          },
+          "senses": {},
+          "vulnerabilities": {},
+          "resistances": {},
+          "immunities": {},
+          "languages": {},
+          "psionics": {},
+          "spells": {},
+          "traits": {},
+          "states": {
+            "states": {}
+          },
+          "actions": {},
+          "reactions": {},
+          "body_parts": {
+            "right hand": "870b0540-deed-415e-99ea-2546f7edbb64"
+          },
+          "armor": null,
+          "fatigue_level": 0
+        },
+        "parent_container_id": null,
+        "possessions": [
+          "d3c31493-ce90-4744-b0f8-27e3dfd490e3"
+        ],
+        "weapons": [
+          "870b0540-deed-415e-99ea-2546f7edbb64"
+        ],
+        "strategy": {
+          "attack": 0,
+          "defense": 0,
+          "timing": 0,
+          "extra_damage": 0
+        }
+      },
+      "77d0eefe-7188-4d26-a21e-8a41fe2b7420": {
+        "id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+        "name": "Grak",
+        "type": "BeingInstance",
+        "top_facing": 0,
+        "front_facing": 1,
+        "original": {
+          "obj_type": "Kobold",
+          "length": 2.5,
+          "width": 0,
+          "height": 0,
+          "weight": 70,
+          "cost": 0,
+          "hardness": 0,
+          "hit_points": 3,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "experience": 0,
+          "hit_dice": "1d6",
+          "alignment": "Lawful evil",
+          "armor_class": 13,
+          "challenge_rating": 1,
+          "max_speed": {
+            "speeds": {
+              "ambulate": 0,
+              "burrow": 0,
+              "climb": 0,
+              "fly": 0,
+              "swim": 0
+            }
+          },
+          "abilities": {
+            "abilities": {
+              "STR": 10,
+              "DEX": 10,
+              "CON": 10,
+              "INT": 10,
+              "WIS": 10,
+              "CHA": 10
+            }
+          },
+          "skills": {
+            "skills": {},
+            "weapon_skills": {}
+          },
+          "senses": {},
+          "vulnerabilities": {},
+          "resistances": {},
+          "immunities": {},
+          "languages": {},
+          "psionics": {},
+          "spells": {},
+          "traits": {},
+          "states": {
+            "states": {}
+          },
+          "actions": {},
+          "reactions": {},
+          "body_parts": {},
+          "armor": null,
+          "fatigue_level": 0
+        },
+        "current": {
+          "obj_type": "Kobold",
+          "length": 2.5,
+          "width": 0,
+          "height": 0,
+          "weight": 70,
+          "cost": 0,
+          "hardness": 0,
+          "hit_points": 3,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "experience": 0,
+          "hit_dice": "1d6",
+          "alignment": "Lawful evil",
+          "armor_class": 13,
+          "challenge_rating": 1,
+          "max_speed": {
+            "speeds": {
+              "ambulate": 0,
+              "burrow": 0,
+              "climb": 0,
+              "fly": 0,
+              "swim": 0
+            }
+          },
+          "abilities": {
+            "abilities": {
+              "STR": 10,
+              "DEX": 10,
+              "CON": 10,
+              "INT": 10,
+              "WIS": 10,
+              "CHA": 10
+            }
+          },
+          "skills": {
+            "skills": {},
+            "weapon_skills": {}
+          },
+          "senses": {},
+          "vulnerabilities": {},
+          "resistances": {},
+          "immunities": {},
+          "languages": {},
+          "psionics": {},
+          "spells": {},
+          "traits": {},
+          "states": {
+            "states": {}
+          },
+          "actions": {},
+          "reactions": {},
+          "body_parts": {
+            "right hand": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9"
+          },
+          "armor": null,
+          "fatigue_level": 0
+        },
+        "parent_container_id": null,
+        "possessions": [],
+        "weapons": [
+          "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9"
+        ],
+        "strategy": {
+          "attack": 0,
+          "defense": 0,
+          "timing": 0,
+          "extra_damage": 0
+        }
+      },
+      "d3c31493-ce90-4744-b0f8-27e3dfd490e3": {
+        "id": "d3c31493-ce90-4744-b0f8-27e3dfd490e3",
+        "name": "Tobe's rock",
+        "type": "ObjectInstance",
+        "top_facing": 0,
+        "front_facing": 1,
+        "original": {
+          "obj_type": "Rock",
+          "length": 1,
+          "width": 1,
+          "height": 1,
+          "weight": 1,
+          "cost": 0,
+          "hardness": 5,
+          "hit_points": 5,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": []
+        },
+        "current": {
+          "obj_type": "Rock",
+          "length": 0.002,
+          "width": 0.002,
+          "height": 0.002,
+          "weight": 0.002,
+          "cost": 0,
+          "hardness": 5,
+          "hit_points": 5,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": []
+        },
+        "parent_container_id": null
+      },
+      "870b0540-deed-415e-99ea-2546f7edbb64": {
+        "id": "870b0540-deed-415e-99ea-2546f7edbb64",
+        "name": "Loki",
+        "type": "WeaponInstance",
+        "top_facing": 0,
+        "front_facing": 1,
+        "original": {
+          "obj_type": "Longsword",
+          "length": 3.5,
+          "width": 0,
+          "height": 0,
+          "weight": 6,
+          "cost": 3600,
+          "hardness": 10,
+          "hit_points": 6,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "attacks": {
+            "R": {
+              "t": 6,
+              "d": 7,
+              "p": "P"
+            },
+            "S": {
+              "t": 6,
+              "d": 8,
+              "p": "S"
+            },
+            "T": {
+              "t": 5,
+              "d": 7,
+              "p": "P"
+            }
+          },
+          "weapon_size": "M"
+        },
+        "current": {
+          "obj_type": "Longsword",
+          "length": 3.5,
+          "width": 0,
+          "height": 0,
+          "weight": 6,
+          "cost": 3600,
+          "hardness": 10,
+          "hit_points": 6,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "attacks": {
+            "R": {
+              "t": 6,
+              "d": 7,
+              "p": "P"
+            },
+            "S": {
+              "t": 6,
+              "d": 8,
+              "p": "S"
+            },
+            "T": {
+              "t": 5,
+              "d": 7,
+              "p": "P"
+            }
+          },
+          "weapon_size": "M"
+        },
+        "parent_container_id": null
+      },
+      "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9": {
+        "id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+        "name": "Pilfer",
+        "type": "WeaponInstance",
+        "top_facing": 0,
+        "front_facing": 1,
+        "original": {
+          "obj_type": "Short sword",
+          "length": 2.5,
+          "width": 0,
+          "height": 0,
+          "weight": 3.5,
+          "cost": 2000,
+          "hardness": 10,
+          "hit_points": 5,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "attacks": {
+            "R": {
+              "t": 5,
+              "d": 5,
+              "p": "P"
+            },
+            "S": {
+              "t": 5,
+              "d": 5,
+              "p": "S"
+            },
+            "T": {
+              "t": 4,
+              "d": 5,
+              "p": "P"
+            }
+          },
+          "weapon_size": "S"
+        },
+        "current": {
+          "obj_type": "Short sword",
+          "length": 2.5,
+          "width": 0,
+          "height": 0,
+          "weight": 3.5,
+          "cost": 2000,
+          "hardness": 10,
+          "hit_points": 5,
+          "is_magical": false,
+          "tags": {},
+          "weapon_categories": [],
+          "attacks": {
+            "R": {
+              "t": 5,
+              "d": 5,
+              "p": "P"
+            },
+            "S": {
+              "t": 5,
+              "d": 5,
+              "p": "S"
+            },
+            "T": {
+              "t": 4,
+              "d": 5,
+              "p": "P"
+            }
+          },
+          "weapon_size": "S"
+        },
+        "parent_container_id": null
+      }
+    }
+  },
+  "event_history": {
+    "0": {
+      "id": "0",
+      "name": "Origin of the Universe",
+      "type": "Event",
+      "universe": "0",
+      "event_type": "Event",
+      "start_time": 0,
+      "end_time": null,
+      "location": null,
+      "parent_event_id": null
+    },
+    "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8": {
+      "id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "name": "Tobe's Big Day",
+      "type": "Encounter",
+      "universe": "0",
+      "event_type": "Encounter",
+      "start_time": 0,
+      "end_time": null,
+      "location": null,
+      "parent_event_id": null,
+      "difficulty_class": 15,
+      "initiated": false,
+      "map": null,
+      "time": 29,
+      "being_list": [
+        "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+        "77d0eefe-7188-4d26-a21e-8a41fe2b7420"
+      ],
+      "non_being_object_list": [
+        "d3c31493-ce90-4744-b0f8-27e3dfd490e3",
+        "870b0540-deed-415e-99ea-2546f7edbb64",
+        "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9"
+      ],
+      "pending_action_list": [
+        "3c46289c-bb32-4a45-bfa2-7e9657558124",
+        "e4ce54c2-f7e6-40ed-afa1-101bed8d0dcf"
+      ],
+      "finished_action_list": [
+        "6e38853b-a30d-4def-b5a2-d5cc99a7b3dc",
+        "7913963b-4b20-4e03-82b5-7b7fef6f1a34",
+        "8d92bf48-7236-48af-ba73-dd7845e9505c",
+        "79940eb0-2511-4fd7-867c-bdd19bc54196",
+        "37e9532e-e217-405d-8a56-d6ad7e9dcaa1",
+        "c59b3bd4-17a0-4b6e-8a21-6a07c38a0277",
+        "a337255c-518c-4bb8-9342-aae89e00d2d7",
+        "e17f3969-5000-46a6-a4e3-2ed61513a524",
+        "5bf059de-1cf3-4ef8-a6ee-bdeed4b5b9c3",
+        "01021fc2-ea9f-4567-be2b-a34ed6a2eaec",
+        "771be839-e93f-41de-b163-9ebc6d06b11c"
+      ]
+    },
+    "7913963b-4b20-4e03-82b5-7b7fef6f1a34": {
+      "id": "7913963b-4b20-4e03-82b5-7b7fef6f1a34",
+      "name": "Tobe swing t=0",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 0,
+      "end_time": 6,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "target_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "instrument_id": "870b0540-deed-415e-99ea-2546f7edbb64",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "6e38853b-a30d-4def-b5a2-d5cc99a7b3dc": {
+      "id": "6e38853b-a30d-4def-b5a2-d5cc99a7b3dc",
+      "name": "Grak swing t=0",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 0,
+      "end_time": 5,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "8d92bf48-7236-48af-ba73-dd7845e9505c": {
+      "id": "8d92bf48-7236-48af-ba73-dd7845e9505c",
+      "name": "Grak swing t=5",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 5,
+      "end_time": 10,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "79940eb0-2511-4fd7-867c-bdd19bc54196": {
+      "id": "79940eb0-2511-4fd7-867c-bdd19bc54196",
+      "name": "Tobe thrust at t=6",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "thrust",
+      "start_time": 6,
+      "end_time": 11,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "target_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "instrument_id": "870b0540-deed-415e-99ea-2546f7edbb64",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "37e9532e-e217-405d-8a56-d6ad7e9dcaa1": {
+      "id": "37e9532e-e217-405d-8a56-d6ad7e9dcaa1",
+      "name": "Grak swing t=10",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 10,
+      "end_time": 15,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "c59b3bd4-17a0-4b6e-8a21-6a07c38a0277": {
+      "id": "c59b3bd4-17a0-4b6e-8a21-6a07c38a0277",
+      "name": "Tobe thrust at t=11",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "thrust",
+      "start_time": 11,
+      "end_time": 16,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "target_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "instrument_id": "870b0540-deed-415e-99ea-2546f7edbb64",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "a337255c-518c-4bb8-9342-aae89e00d2d7": {
+      "id": "a337255c-518c-4bb8-9342-aae89e00d2d7",
+      "name": "Grak thrust at t=15",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "thrust",
+      "start_time": 15,
+      "end_time": 19,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "e17f3969-5000-46a6-a4e3-2ed61513a524": {
+      "id": "e17f3969-5000-46a6-a4e3-2ed61513a524",
+      "name": "Tobe thrust at t=16",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "thrust",
+      "start_time": 16,
+      "end_time": 21,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "target_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "instrument_id": "870b0540-deed-415e-99ea-2546f7edbb64",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "5bf059de-1cf3-4ef8-a6ee-bdeed4b5b9c3": {
+      "id": "5bf059de-1cf3-4ef8-a6ee-bdeed4b5b9c3",
+      "name": "Grak thrust at t=19",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "thrust",
+      "start_time": 19,
+      "end_time": 23,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "01021fc2-ea9f-4567-be2b-a34ed6a2eaec": {
+      "id": "01021fc2-ea9f-4567-be2b-a34ed6a2eaec",
+      "name": "Tobe swing t=21",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 21,
+      "end_time": 27,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "target_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "instrument_id": "870b0540-deed-415e-99ea-2546f7edbb64",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "771be839-e93f-41de-b163-9ebc6d06b11c": {
+      "id": "771be839-e93f-41de-b163-9ebc6d06b11c",
+      "name": "Grak swing t=23",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 23,
+      "end_time": 28,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "3c46289c-bb32-4a45-bfa2-7e9657558124": {
+      "id": "3c46289c-bb32-4a45-bfa2-7e9657558124",
+      "name": "Tobe swing t=27",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "swing",
+      "start_time": 27,
+      "end_time": 33,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "target_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "instrument_id": "870b0540-deed-415e-99ea-2546f7edbb64",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "e4ce54c2-f7e6-40ed-afa1-101bed8d0dcf": {
+      "id": "e4ce54c2-f7e6-40ed-afa1-101bed8d0dcf",
+      "name": "Grak thrust at t=28",
+      "type": "Action",
+      "universe": "0",
+      "event_type": "thrust",
+      "start_time": 28,
+      "end_time": 32,
+      "location": null,
+      "parent_event_id": "b97c4bd4-1578-49bc-88dc-c0ab4fa69ed8",
+      "actor_id": "77d0eefe-7188-4d26-a21e-8a41fe2b7420",
+      "target_id": "7558f5cf-af7b-4882-9a44-bb5d6ff1abba",
+      "instrument_id": "5b29bb88-ddd6-4fa7-861f-7f40bd3d57d9",
+      "strategy": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    }
+  }
+}

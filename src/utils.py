@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "utils.py 2024-01-19T07:14-03:00"
+__version__ = "utils.py 2024-03-29T02:05-03:00"
 
 # TODO: Write test for experience_level()
 
@@ -70,6 +70,13 @@ def convert_to_numeric(value):
         except ValueError:
             return None
 
+def convert_to_integer(value):
+    converted_value = convert_to_numeric(value)
+    try:
+        int_value = int(converted_value)
+        return int_value
+    except (TypeError, ValueError):
+        return None
 
 def convert_to_boolean(value):
     """
@@ -184,3 +191,11 @@ def convert_to_dc(value):
             return 30
         return n
     return 0
+
+def ability_check(ability_value):
+    """
+    Determine if an ability check is successful.
+    """
+    if ability_value > roll_dice("1d20"):
+        return True
+    return False

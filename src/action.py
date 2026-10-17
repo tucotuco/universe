@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "action.py 2024-03-03T10:16-3:00"
+__version__ = "action.py 2024-03-26T08:36-3:00"
 
 # TODO: Implement drop_weapon()
 # TODO: Implement other options in damage_potential()
@@ -38,7 +38,7 @@ class Action(Event):
         strategy=None,
         location=None,
         name=None,
-        parent_event_id=None,
+        parent_event_id=None
     ):
         Event.__init__(
             self,
@@ -48,7 +48,7 @@ class Action(Event):
             event_type,
             location,
             name,
-            parent_event_id,
+            parent_event_id
         )
         self.actor_id = actor_id
         self.target_id = target_id

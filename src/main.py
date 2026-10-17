@@ -5,7 +5,6 @@ __copyright__ = "Copyright 2024 Rauthiflor LLC"
 __version__ = "main.py 2024-03-15T22:50-03:00"
 
 # TODO: Make a clear method for populating Universe and Encounter with Beings and their possessions.
-# TODO: run weapons x vs weapon y, with each participant wearing armor z where z is each of leather,.chain, plate. that will swing wepping results greatly i bet. dagger more crappy, halberd more deadly.       
 
 import argparse
 import os
@@ -269,6 +268,37 @@ def test3(library, universe_output_file):
         row.update(inner_dict)  # Update the row with the values from the inner dictionary
         writer.writerow(row)
 
+def test_fatigue(library, universe_output_file):
+  # TODO: Step through time second by second until the exertion check has to be made 
+  # and report the result, tracking exertion and fatigue in combat conditions
+  
+  # Make the universe
+  the_universe = Universe(name="The Training Grounds", library=library)
+
+  # Set up to capture results
+  results = {}
+
+  # Make a Being
+  tobe_id = the_arena.make_being("Human", "Tobe")
+  kobe_id = the_arena.make_being("Kobold", "Kobe")
+  
+  # Make an Encounter to play in
+  encounter = Encounter(the_arena, difficulty_class=15, start_time=0, end_time=None, 
+  event_type="Encounter", location=None, name=f"Run 'til you drop", parent_event_id="0", 
+  id=None, initiated=False, map=None)
+
+  # Add the contestants to the race
+  encounter.add_being(tobe_id)
+  encounter.add_being(kobe_id)
+
+  # Add the race to the Universe
+  the_universe.add_event(encounter)
+
+  # Run the race
+  encounter.run()
+    
+  # Check for Fatigue and report when it changes
+
 def _getoptions():
   ''' Parse command line options and return them.'''
   parser = argparse.ArgumentParser()
@@ -306,11 +336,12 @@ def main():
     except OSError as error:
       print(f"Error creating directory {options.workspace}: {error}")
 
-  library = Library()
+  the_library = Library()
 
-#  test1(library, f'{options.workspace}/{options.outputfile}')
-#  test2(library, f'{options.workspace}/{options.outputfile}')
-  test3(library, f'{options.workspace}/{options.outputfile}')
+#  test1(the_library, f'{options.workspace}/{options.outputfile}')
+#  test2(the_library, f'{options.workspace}/{options.outputfile}')
+#  test3(the_library, f'{options.workspace}/{options.outputfile}')
+  test_fatigue(the_library, f'{options.workspace}/{options.outputfile}')
 
 if __name__ == '__main__':
   main()

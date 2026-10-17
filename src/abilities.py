@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "abilities.py 2023-03-30T01:38:08-03:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "abilities.py 2024-03-25T22:50-03:00"
 
 # TODO:
 
@@ -21,6 +21,7 @@ class Abilities():
         self.abilities['INT'] = convert_to_ability(intelligence)
         self.abilities['WIS'] = convert_to_ability(wisdom)
         self.abilities['CHA'] = convert_to_ability(charisma)
+        self.abilities['FIT'] = convert_to_ability(constitution)
 
     def copy(self):
         '''
@@ -30,39 +31,45 @@ class Abilities():
                          self.INT(), self.WIS(), self.CHA())
     def STR(self):
         '''
-        Set the value of the Strength ability.
+        Get the value of the Strength ability.
         '''
         return self.abilities.get('STR')
 
     def DEX(self):
         '''
-        Set the value of the Dexterity ability.
+        Get the value of the Dexterity ability.
         '''
         return self.abilities.get('DEX')
 
     def CON(self):
         '''
-        Set the value of the Constitution ability.
+        Get the value of the Constitution ability.
         '''
         return self.abilities.get('CON')
 
     def INT(self):
         '''
-        Set the value of the Intelligence ability.
+        Get the value of the Intelligence ability.
         '''
         return self.abilities.get('INT')
 
     def WIS(self):
         '''
-        Set the value of the Wisdom ability.
+        Get the value of the Wisdom ability.
         '''
         return self.abilities.get('WIS')
 
     def CHA(self):
         '''
-        Set the value of the Charisma ability.
+        Get the value of the Charisma ability.
         '''
         return self.abilities.get('CHA')
+
+    def FIT(self):
+        '''
+        Get the value of the Fitness ability.
+        '''
+        return self.abilities.get('FIT')
 
     def get_abilities(self):
         '''
@@ -78,5 +85,5 @@ class Abilities():
             return
         v = convert_to_ability(new_value)
         a = ability[:3].upper()
-        if v >= 0 and a in ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']:
+        if v >= 0 and a in ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA', 'FIT']:
             self.abilities[a] = v

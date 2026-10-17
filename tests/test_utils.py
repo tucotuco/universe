@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "John Wieczorek"
-__copyright__ = "Copyright 2023 Rauthiflor LLC"
-__version__ = "test_utils.py 2023-01-03T14:43+02:00"
+__copyright__ = "Copyright 2024 Rauthiflor LLC"
+__version__ = "test_utils.py 2024-03-29T02:11-03:00"
 
 # TODO: Check comprehensiveness
 
@@ -16,9 +16,9 @@ sys.path.insert(0, os.path.abspath('../src'))
 
 from utils import get_random_key
 from utils import roll_dice
-from utils import convert_to_numeric, convert_to_boolean, convert_to_dc
-from utils import convert_to_ability, convert_to_speed, convert_to_experience
-from utils import convert_to_fatigue
+from utils import convert_to_numeric, convert_to_integer, convert_to_boolean
+from utils import convert_to_dc, convert_to_ability, convert_to_speed
+from utils import convert_to_experience, convert_to_fatigue, ability_check
 
 class TestGetRandomKey(unittest.TestCase):
     def test_with_empty_dict(self):
@@ -127,13 +127,33 @@ class TestConvertToNumeric(unittest.TestCase):
 
     def test_other_type(self):
         self.assertIsNone(convert_to_numeric("abc"""))
-            
-    def test_already_int(self):
-        self.assertEqual(convert_to_numeric(10), 10)
-        
-    def test_already_float(self):
-        self.assertEqual(convert_to_numeric(3.14), 3.14)
 
+class TestConvertToInteger(unittest.TestCase):
+    def test_int(self):
+        self.assertEqual(convert_to_integer(5), 5)
+
+    def test_float(self):
+        self.assertEqual(convert_to_integer(3.14), 3)
+
+    def test_bool(self):
+        self.assertEqual(convert_to_integer(True), 1)
+        self.assertEqual(convert_to_integer(False), 0)
+
+    def test_str_int(self):
+        self.assertEqual(convert_to_integer("10"), 10)
+
+    def test_str_float(self):
+        self.assertEqual(convert_to_integer("3.14"), 3)
+
+    def test_empty_str(self):
+        self.assertIsNone(convert_to_integer(""))
+
+    def test_none(self):
+        self.assertIsNone(convert_to_integer(None))
+
+    def test_other_type(self):
+        self.assertIsNone(convert_to_integer("abc"""))
+        
 class TestConvertToBoolean(unittest.TestCase):
     def test_int(self):
         self.assertEqual(convert_to_boolean(5), None)
@@ -306,6 +326,10 @@ class TestConvertToDC(unittest.TestCase):
 
     def test_other_str(self):
         self.assertEqual(convert_to_dc("whatever"), 0)
+
+    def test_ability_check(self):
+        self.assertFalse(ability_check(1))
+        self.assertTrue(ability_check(20))
 
     def test_none(self):
         self.assertEqual(convert_to_dc(None), 0)

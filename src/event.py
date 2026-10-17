@@ -3,7 +3,7 @@
 
 __author__ = "John Wieczorek"
 __copyright__ = "Copyright 2024 Rauthiflor LLC"
-__version__ = "event.py 2024-02-28T04:10-03:00"
+__version__ = "event.py 2024-03-26T10:42-03:00"
 
 # TODO: Redo unit tests for library parent
 
@@ -11,6 +11,7 @@ import heapq
 import json
 
 from identifiable import Identifiable
+from utils import convert_to_numeric
 
 class Event(Identifiable):
     '''
@@ -21,8 +22,8 @@ class Event(Identifiable):
         Identifiable.__init__(self, name, id)
         self.universe = universe
         self.event_type = event_type
-        self.start_time = start_time
-        self.end_time = end_time
+        self.start_time = convert_to_numeric(start_time)
+        self.end_time = convert_to_numeric(end_time)
         self.location = location
         self.parent_event_id = parent_event_id
 
