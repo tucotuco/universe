@@ -17,6 +17,7 @@ from event import Event
 from library import Library
 from being import BeingInstance
 from object import ObjectInstance
+from perception import RangePerception
 from strategy import Strategy
 from weapon import WeaponInstance
 
@@ -303,6 +304,29 @@ class Encounter(Event):
             entity_id for entity_id in self.aware_entities(observer_being_id)
             if not isinstance(self.get_entity(entity_id), BeingInstance)
         ]
+
+    def perceive(self, observer_being_id, perception_model):
+        """Apply a perception model and convert successful observations to awareness.
+
+        The model determines what is perceptible; Encounter owns the directed
+        awareness state.  Returned observations retain the explicit basis used by
+        the model so callers can inspect why awareness was acquired.
+        """
+        if not hasattr(perception_model, "detect"):
+            raise TypeError("perception_model must provide a detect() method")
+        observations = perception_model.detect(self, observer_being_id)
+        for observation in observations:
+            self.mark_aware(observation.observer_id, observation.target_id)
+        return observations
+
+    def perceive_within(self, observer_being_id, max_distance):
+        """Use the temporary range-only perception model for an observer.
+
+        This convenience method is scaffolding for the first perception bridge;
+        it should not be interpreted as a claim that proximity alone implies
+        real-world perception.
+        """
+        return self.perceive(observer_being_id, RangePerception(max_distance))
 
     # Load an Encounter from storage.
 #    def load(self):
