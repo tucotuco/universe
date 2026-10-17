@@ -8,6 +8,7 @@ __version__ = "encounter.py 2024-03-09T22:00-03:00"
 # TODO: Make ''' comments on classes and methods
 
 import json
+import math
 import random
 
 from utils import convert_to_dc
@@ -30,7 +31,7 @@ class Encounter(Event):
                  event_type=None, location=None, name="", parent_event_id=None, id=None, 
                  time=None, being_list=None, non_being_object_list=None, 
                  pending_action_list=None, finished_action_list=None, initiated=False, 
-                 map=None):
+                 map=None, awareness=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
@@ -56,6 +57,14 @@ class Encounter(Event):
             self.finished_action_list = []
         else:
             self.finished_action_list = finished_action_list
+        # Awareness is directed encounter state: observer id -> ids currently known
+        # to that observer.  It is deliberately distinct from physical proximity;
+        # later sight, hearing, memory, concealment, and other perception systems can
+        # decide when awareness should be added or removed.
+        self.awareness = {}
+        if awareness is not None:
+            for observer_id, target_ids in awareness.items():
+                self.awareness[observer_id] = set(target_ids)
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -63,9 +72,6 @@ class Encounter(Event):
                 return obj.id  # Return only the ID for Universe and Event instances
             return obj.__dict__
 
-        parent_event_id = None
-        if isinstance(self.parent_event, Event):
-            parent_event_id = self.parent_event.get_id()
         data = {
             "type": self.type,
             "event_type": self.event_type,
@@ -73,12 +79,16 @@ class Encounter(Event):
             "universe_id": self.universe.get_id(),
             "start_time": self.start_time,
             "end_time": self.end_time,
-            "parent_event_id": parent_event_id,
+            "parent_event_id": self.parent_event_id,
             "location": self.location,
             "difficulty_class": self.difficulty_class,
             "map": self.map,
             "being_list": self.being_list,
-            "object_list": self.non_being_object_list
+            "object_list": self.non_being_object_list,
+            "awareness": {
+                observer_id: sorted(target_ids)
+                for observer_id, target_ids in self.awareness.items()
+            }
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
 
@@ -140,6 +150,92 @@ class Encounter(Event):
     def add_being(self, being_id):
         if being_id not in self.being_list:
             self.being_list.append(being_id)
+
+    def get_being(self, being_id):
+        """Return a participating Being, or ``None`` if it is unavailable."""
+        if being_id not in self.being_list:
+            return None
+        being = self.universe.get_object_by_id(being_id)
+        if not isinstance(being, BeingInstance):
+            return None
+        return being
+
+    def distance_between_beings(self, first_being_id, second_being_id):
+        """Return continuous 3D distance between two participating Beings.
+
+        ``None`` is returned if either Being is not part of this Encounter or has
+        not yet been placed in continuous space.
+        """
+        first = self.get_being(first_being_id)
+        second = self.get_being(second_being_id)
+        if first is None or second is None:
+            return None
+        relation = first.spatial_relation_to(second)
+        if relation is None:
+            return None
+        return relation.distance
+
+    def within_distance(self, first_being_id, second_being_id, max_distance):
+        """Return whether two participating, placed Beings are within a distance.
+
+        Distance is measured in the units of their shared continuous Cartesian
+        reference frame; no grid or cell relation is used.
+        """
+        try:
+            max_distance = float(max_distance)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("max_distance must be numeric") from exc
+        if not math.isfinite(max_distance) or max_distance < 0.0:
+            raise ValueError("max_distance must be a finite non-negative number")
+        distance = self.distance_between_beings(first_being_id, second_being_id)
+        return distance is not None and distance <= max_distance
+
+    def beings_within(self, subject_being_id, max_distance):
+        """Return participating Being ids within ``max_distance`` of a subject.
+
+        The subject itself is excluded.  Unplaced Beings are ignored.  Encounter
+        order is preserved, making this useful as a deterministic candidate list
+        for later perception rules.
+        """
+        if self.get_being(subject_being_id) is None:
+            return []
+        result = []
+        for being_id in self.being_list:
+            if being_id == subject_being_id:
+                continue
+            if self.within_distance(subject_being_id, being_id, max_distance):
+                result.append(being_id)
+        return result
+
+    def mark_aware(self, observer_being_id, target_being_id):
+        """Record directed awareness of one participating Being by another."""
+        if observer_being_id == target_being_id:
+            return False
+        if self.get_being(observer_being_id) is None or self.get_being(target_being_id) is None:
+            return False
+        targets = self.awareness.setdefault(observer_being_id, set())
+        before = len(targets)
+        targets.add(target_being_id)
+        return len(targets) != before
+
+    def clear_awareness(self, observer_being_id, target_being_id):
+        """Remove directed awareness, returning whether stored state changed."""
+        targets = self.awareness.get(observer_being_id)
+        if targets is None or target_being_id not in targets:
+            return False
+        targets.remove(target_being_id)
+        if not targets:
+            del self.awareness[observer_being_id]
+        return True
+
+    def is_aware(self, observer_being_id, target_being_id):
+        """Return whether directed awareness is currently recorded."""
+        return target_being_id in self.awareness.get(observer_being_id, set())
+
+    def aware_beings(self, observer_being_id):
+        """Return participating Being ids currently known to the observer."""
+        targets = self.awareness.get(observer_being_id, set())
+        return [being_id for being_id in self.being_list if being_id in targets]
 
     # Load an Encounter from storage.
 #    def load(self):

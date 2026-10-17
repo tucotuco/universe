@@ -13,6 +13,7 @@ import random
 
 from abilities import Abilities
 from actiondictionary import ActionDictionary
+from exertion import Exertion
 from object import ObjectDefinition, ObjectInstance, ObjectDictionary
 from skill import Skills
 from speeds import Speed
