@@ -519,6 +519,27 @@ class Encounter(Event):
         self.pending_action_list.append(action.id)
         return action.id
 
+    def record_skill_use(self, action_id, skill_name, experience=0, outcome=None):
+        """Attribute documented practice to a Being after a completed Action.
+
+        Action prerequisites are not evidence that a skill was exercised. The
+        caller supplies the skill and experience awarded by the actual resolver.
+        Duplicate awards for the same action/skill are rejected by the Being.
+        """
+        if action_id not in self.finished_action_list:
+            raise ValueError('skill use requires a completed Encounter action')
+        action = self.universe.get_event_by_id(action_id)
+        if not isinstance(action, Action):
+            raise ValueError('action_id must refer to an Action')
+        if action.actor_id not in self.being_list:
+            raise ValueError('the acting Being must participate in the Encounter')
+        actor = self.universe.get_object_by_id(action.actor_id)
+        if not isinstance(actor, BeingInstance):
+            raise ValueError('only Beings can exercise skills at this stage')
+        return actor.record_skill_use(
+            self.universe.get_skill_dictionary(), skill_name, experience,
+            action_id=action_id, time=action.end_time, outcome=outcome)
+
     def step(self, duration=1.0, velocities=None, velocity_frame="global"):
         """Advance one explicit Encounter interval without automatic combat AI.
 

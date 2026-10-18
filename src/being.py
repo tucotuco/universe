@@ -9,13 +9,15 @@ __version__ = "being.py 2024-03-25T22:55-03:00"
 # TODO: Resolve issues surrounding default weapons if not armed with another weapon.
 
 import json
+import math
 import random
 
 from abilities import Abilities
 from actiondictionary import ActionDictionary
+from experience import SkillUse, level_from_practice
 from exertion import Exertion
 from object import ObjectDefinition, ObjectInstance, ObjectDictionary
-from skill import Skills
+from skill import SkillDictionary, Skills
 from speeds import Speed
 from states import States
 from strategy import Strategy
@@ -339,6 +341,75 @@ class BeingInstance(ObjectInstance):
         self.fatigue_level = 0
         self.effective_fitness = self.current.FIT()
         self.exertion = Exertion()
+        # Practice is instance-specific; the BeingDefinition remains a template.
+        self.skill_experience = {}
+        self.skill_use_history = []
+        self._skill_practice_baselines = {}
+
+    def to_json(self):
+        """Include personal skill-use evidence in the existing instance snapshot."""
+        data = json.loads(super().to_json())
+        data['skill_experience'] = self.skill_experience.copy()
+        data['skill_practice_baselines'] = self._skill_practice_baselines.copy()
+        data['skill_use_history'] = [entry.to_dict() for entry in self.skill_use_history]
+        return json.dumps(data)
+
+    def get_skill_experience(self, skill_name):
+        """Experience earned through recorded use of one skill."""
+        return self.skill_experience.get(skill_name, 0)
+
+    def record_skill_use(self, skill_dictionary, skill_name, experience=0,
+                         action_id=None, time=None, outcome=None):
+        """Record an exercised skill and update its progressive level.
+
+        The action resolver must decide which skill was actually exercised and
+        the nonnegative experience award.  Ordinary untrained skills may be
+        attempted. Extraordinary skills must already have a positive level.
+        Non-progressive skills retain history but never advance by practice.
+        """
+        if not isinstance(skill_dictionary, SkillDictionary):
+            raise TypeError('skill_dictionary must be a SkillDictionary')
+        definition = skill_dictionary.get_skill_definition(skill_name)
+        if definition is None:
+            raise ValueError('unknown skill: %r' % (skill_name,))
+        if isinstance(experience, bool) or not isinstance(experience, int) or experience < 0:
+            raise ValueError('experience must be a nonnegative integer')
+        if action_id is not None and (not isinstance(action_id, str) or not action_id):
+            raise ValueError('action_id must be a nonempty string or None')
+        if time is not None and (isinstance(time, bool)
+                                 or not isinstance(time, (int, float))
+                                 or not math.isfinite(time)):
+            raise ValueError('time must be finite or None')
+        if outcome is not None and not isinstance(outcome, str):
+            raise TypeError('outcome must be a string or None')
+        if action_id is not None and any(
+                use.action_id == action_id and use.skill_name == skill_name
+                for use in self.skill_use_history):
+            raise ValueError('skill use has already been recorded for this action')
+        before = self.get_skill_level(skill_name)
+        if before is None:
+            before = self.get_weapon_skill_level(skill_name)
+        before = before or 0
+        if not definition['is_ordinary'] and before == 0:
+            raise ValueError('skill requires prior training: %r' % (skill_name,))
+
+        baseline = self._skill_practice_baselines.get(skill_name, before)
+        total = self.get_skill_experience(skill_name) + experience
+        after = before
+        if definition['is_progressive']:
+            after = max(before, level_from_practice(baseline, total))
+        # Do not call set_weapon_skill_level: category propagation is an
+        # independent policy and should not be implicitly triggered by practice.
+        if after > before:
+            if skill_name in self.current.skills.weapon_skills:
+                self.current.skills.weapon_skills[skill_name] = after
+            else:
+                self.current.skills.skills[skill_name] = after
+        self._skill_practice_baselines.setdefault(skill_name, before)
+        self.skill_experience[skill_name] = total
+        entry = SkillUse(skill_name, experience, before, after, action_id, time, outcome)
+        self.skill_use_history.append(entry)
+        return entry
 
     def reset(self):
         '''
@@ -349,6 +420,9 @@ class BeingInstance(ObjectInstance):
         self.fatigue_level = 0
         self.effective_fitness = self.current.FIT()
         self.exertion = Exertion()
+        self.skill_experience.clear()
+        self.skill_use_history.clear()
+        self._skill_practice_baselines.clear()
 
     def set_strategy(self, attack=0, defense=0, timing=0, extra_damage=0):
         '''
