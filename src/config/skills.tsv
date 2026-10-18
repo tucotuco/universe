@@ -17,6 +17,7 @@ quick-draw	True	False
 ride	True	True
 run	True	True
 shield	True	False
+spot	True	True
 stun	False	True
 terrestrial combat	True	False
 throw	True	True

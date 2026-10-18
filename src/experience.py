@@ -1,10 +1,12 @@
 """Minimal evidence-based skill practice and progression for Universe.
 
-An action determines which skills were actually exercised and how much
-experience to award.  Recording an exercise does not infer use from an
-Action's *required* skill, which is merely a prerequisite.
+An action determines which skills were actually exercised, how much experience
+to award, and optional direct observations. Recording practice does not infer
+use from an Action's *required* skill, which is merely a prerequisite.
 """
 from dataclasses import dataclass
+
+from perception import Perception
 
 
 @dataclass(frozen=True)
@@ -26,14 +28,15 @@ class SkillExercise:
 
 @dataclass(frozen=True)
 class ActionResolution:
-    """An Action resolver's account of its result and skills actually used.
+    """An Action resolver's outcome, actual skill use, and observations.
 
     An Action's required_skill is a prerequisite, not practice evidence.
-    No skill is credited merely because an Action completed successfully.
+    Observations are declarative; Encounter validates and applies awareness.
     """
 
     outcome: str
     skill_exercises: tuple = ()
+    observations: tuple = ()
 
     def __post_init__(self):
         if not isinstance(self.outcome, str) or not self.outcome.strip():
@@ -48,10 +51,20 @@ class ActionResolution:
         if len(names) != len(set(names)):
             raise ValueError("a skill may be recorded only once per Action")
         object.__setattr__(self, "skill_exercises", exercises)
+        try:
+            observations = tuple(self.observations)
+        except TypeError as exc:
+            raise TypeError("observations must be iterable") from exc
+        if any(not isinstance(observation, Perception) for observation in observations):
+            raise TypeError("observations must contain Perception records")
+        object.__setattr__(self, "observations", observations)
 
     def to_dict(self):
-        return {"outcome": self.outcome,
+        data = {"outcome": self.outcome,
                 "skill_exercises": [item.to_dict() for item in self.skill_exercises]}
+        if self.observations:
+            data["observations"] = [vars(item).copy() for item in self.observations]
+        return data
 
 
 

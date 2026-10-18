@@ -32,3 +32,18 @@ This short record is maintained with the code; it should not require separate us
   gait model, or terrain model is implied.
 - Distance traveled along a curving or returning route and verification of actual
   running gait remain deferred until movement histories / movement modes exist.
+
+## Provisional observational skill
+
+- Add `spot` as an **explicitly new**, ordinary progressive skill in the
+  existing skill catalog; the original Encounter draft had spotting *checks*,
+  not an independently progressive spotting skill. This choice is provisional.
+- `SpotAction` uses a bounded modeled 3D geometric-path gate and an adjustable
+  d20 check (current `spot` rank versus Encounter difficulty). It deliberately
+  does not claim to model light, terrain, eyesight, or complete visibility.
+- An unsuccessful attempt still exercises the capability; XP is an explicit
+  scenario amount, not a general learning rule. The Action returns an
+  observation **only on success**, and the Encounter commits directed awareness
+  after skill-use validation. Thus progression can improve later performance.
+- Explicit die rolls support deterministic tests/replay. Configurable check
+  distributions and generalized sensory checks remain future work.

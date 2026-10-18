@@ -727,12 +727,21 @@ class Encounter(Event):
                 # Preflight the entire award set before updating any skill.
                 # A resolver returning None retains legacy, no-award behavior.
                 if not isinstance(action, Action):
-                    if resolution.skill_exercises:
-                        raise ValueError("Only Actions can report exercised skills")
+                    if resolution.skill_exercises or resolution.observations:
+                        raise ValueError("Only Actions can report exercised skills or observations")
                 else:
                     actor = self.get_being(action.actor_id)
                     if actor is None:
                         raise ValueError("Resolving Action has no participating Being")
+                    # Observations are declarative consequences. Validate them
+                    # before applying experience, so invalid observations cannot
+                    # cause partial practice awards or spurious awareness.
+                    for observation in resolution.observations:
+                        if observation.observer_id != action.actor_id:
+                            raise ValueError("Action observation must belong to its actor")
+                        if (observation.target_id == action.actor_id or
+                                self.get_entity(observation.target_id) is None):
+                            raise ValueError("Action observation target must be another Encounter Entity")
                     skills = self.universe.get_skill_dictionary()
                     for exercise in resolution.skill_exercises:
                         actor.validate_skill_use(
@@ -744,6 +753,8 @@ class Encounter(Event):
                             skills, exercise.skill_name, exercise.experience,
                             action_id=action.id, time=action.end_time,
                             outcome=resolution.outcome)
+                    for observation in resolution.observations:
+                        self.mark_aware(observation.observer_id, observation.target_id)
                     action.resolution = resolution
             self.pending_action_list.remove(action.id)
             self.finished_action_list.append(action.id)
