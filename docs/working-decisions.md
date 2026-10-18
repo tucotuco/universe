@@ -47,3 +47,17 @@ This short record is maintained with the code; it should not require separate us
   after skill-use validation. Thus progression can improve later performance.
 - Explicit die rolls support deterministic tests/replay. Configurable check
   distributions and generalized sensory checks remain future work.
+
+## Integrated Encounter demonstration
+
+- `examples/integrated_encounter.py` is a deterministic four-second scenario
+  exercising movement, opaque Entity geometry, geometric sightline checks,
+  scheduled Actions, directed awareness, and two independent skill histories.
+- All physical geometry is provisional Encounter input, not automatically
+  generated terrain. It is suitable as future constraint input when world
+  generation and terrain refinement are developed.
+- Fixed rolls and deliberately illustrative XP awards validate causal order;
+  they do not constitute realistic visual perception, Agent choice, physical
+  running mechanics, or a general experience-award policy.
+- Next priorities: richer Agent-relative Event/Experience history and actual
+  capability-aware Agent decisions; terrain synthesis remains deferred.
