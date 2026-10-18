@@ -15,6 +15,7 @@ import random
 
 from object import ObjectDefinition, ObjectInstance
 from spatial.state import CartesianPosition
+from conditional_attributes import ConditionalAttributes
 
 
 def _vec(value, name):
@@ -108,6 +109,16 @@ class StatisticalGroup(ObjectInstance):
         # not the member's current learned capability. Freeze configuration
         # so later caller edits cannot retrospectively rewrite that cohort.
         self._formation_traits = deepcopy(config.get("formation_traits", {}))
+        attribute_specs = deepcopy(config.get("formation_attributes", {}))
+        if not isinstance(attribute_specs, dict) or set(attribute_specs) - {"adults"}:
+            raise ValueError("formation attributes currently support adults only")
+        adult_specs = attribute_specs.get("adults", {})
+        traits = self._formation_traits.get("adults", {})
+        self._conditional_attributes = ConditionalAttributes(
+            adult_specs,
+            lambda member_id, attribute: self._rng("formation_attribute", member_id, attribute),
+            external_names=traits.keys(),
+        )
 
     def _rng(self, *parts):
         token = "|".join(map(str, (self.seed, self.id, *parts)))
@@ -230,6 +241,39 @@ class StatisticalGroup(ObjectInstance):
             "unresolved_qualified": unresolved_qualified,
             "unresolved_other": committed_adults - len(realized) - unresolved_qualified,
         }
+
+    def formation_attribute(self, household, category, index, attribute):
+        """Commit a correlated formation fact without realizing a Being/member.
+
+        Fixed formation quotas, when configured, are already committed facts
+        that may serve as conditions for sampling other characteristics.
+        These original attributes never change when a Being later develops.
+        """
+        if category != "adults":
+            raise NotImplementedError("conditional attributes currently support adults")
+        if (isinstance(household, bool) or not isinstance(household, int)
+                or not 0 <= household < self.household_count
+                or isinstance(index, bool) or not isinstance(index, int)
+                or not 0 <= index < self.household(household)["adults"]):
+            raise IndexError("adult identity outside committed cohort")
+        identity = f"{self.id}/{household}/adults/{index}"
+        traits = self._formation_traits.get("adults", {})
+        external = {name: identity in self._adult_formation_assignments(name)
+                    for name in traits}
+        return self._conditional_attributes.resolve(identity, attribute, external)
+
+    def committed_formation_attributes(self, household, category, index):
+        """Return previously realized attributes without generating details."""
+        if category != "adults":
+            raise NotImplementedError("conditional attributes currently support adults")
+        # Validate the identity without triggering sampling or Being creation.
+        if (isinstance(household, bool) or not isinstance(household, int)
+                or not 0 <= household < self.household_count
+                or isinstance(index, bool) or not isinstance(index, int)
+                or not 0 <= index < self.household(household)["adults"]):
+            raise IndexError("adult identity outside committed cohort")
+        return self._conditional_attributes.committed(
+            f"{self.id}/{household}/adults/{index}")
 
     def _initial_skills_for_adult(self, member_id, skill_dictionary):
         """Select formation-time attributes before a Being is registered."""

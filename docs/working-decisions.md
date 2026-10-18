@@ -281,3 +281,27 @@ This short record is maintained with the code; it should not require separate us
   traits, proper time-stamped composition, births/deaths/membership transitions,
   skill acquisition histories predating realization, and inference over
   unresolved evolving members remain deferred.
+
+## Correlated formation attributes experiment (2026-10)
+
+- `formation_attributes.adults` allows a small declarative chain of CDF-based
+  **formation-time** characteristics. Each characteristic can depend on at most
+  one previously defined or recursively resolved characteristic, or an existing
+  fixed-quota `formation_traits.adults` membership status. Missing conditional
+  branches and cycles are rejected; other joint probability models remain deferred.
+- Attributes are sampled with per-identity/per-attribute keyed randomness and
+  committed only when requested (together with required parents), **without**
+  creating a `GroupMember` or `BeingInstance`. Request order cannot change the
+  sampled individual reality. Inspecting committed values samples nothing.
+- The example (`age_band -> role -> years_in_role`) is illustrative, not a
+  demographic or causal claim. It also conditions age on the group's prior
+  exact `trained_spotter` quota. The original cohort and later learned skills
+  remain separate. A generated attribute is *private objective state*, never
+  automatically an observer's knowledge.
+- Formation attribute commitments currently remain accessible through their
+  originating group. Before membership transfer is implemented, these need
+  durable individual provenance so leaving one's group cannot erase one's past.
+- **Group membership design preference:** Groups are Entities that own membership
+  relations. An inverse index for Being-to-Groups queries may eventually be
+  derived but is not the authoritative source. Membership criteria, transitions,
+  overlapping memberships and time validity remain deferred.
