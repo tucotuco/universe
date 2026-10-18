@@ -122,3 +122,37 @@ This short record is maintained with the code; it should not require separate us
   introduce a general kinship graph or infer skills from family relationships.
 - Initial skill ranks and positions are scenario configuration, not yet sampled
   from Being-generation distributions; field observations do not award XP.
+
+## Action-mediated statistical-group observation (2026-10)
+
+- The earlier `FieldObserver.observe()` experiment remains a **controlled-error**
+  reference, not a realistic simulation. New `ObserveGroupAction` uses the
+  existing Encounter schedule/resolve timeline, `spot` capability, experience
+  history, and directed awareness, rather than bypassing Action resolution.
+- The model tests observation feasibility (here only modeled distance) before
+  rolling. Impossible/out-of-range attempts create neither fabricated evidence
+  nor skill practice. Feasible failed checks *can* earn experience, and both
+  success and failure awards are configurable; a later policy may consider
+  difficulty, novelty, degree of success, and skill-specific learning rates.
+- `SampledGroupObservation` converts *objective aggregate counts* into noisy
+  evidence via seeded stochastic errors. Skill rank improves expected sensor
+  precision. `FieldInterpreter` sees only that imperfect evidence and uses
+  current skill to judge dubious classifications. Skilled conclusions are not
+  guaranteed correct. These are **proxy sensing models**, not geometric LOS,
+  physical optics, illumination, terrain, or actual individual detection.
+- Successful completed Actions attach raw evidence and historical interpretation
+  to the Action event and to the observing Being's BeliefLedger. The Encounter
+  commits ordinary directed awareness and records skill-use XP. Failed checks
+  produce skill-use history but no observed group composition. Evidence may
+  commit group totals, while leaving all individual Beings unrealized.
+- Reproducible sampling uses a scenario-controlled seed and stable observer
+  key, independently of generated Action UUIDs and shared random sequences.
+  The seed is *experimental*, not yet a general counterfactual-consistent
+  stochastic world/physics mechanism.
+- Communication still shares source observations and interpretations with
+  provenance; it does not copy authoritative state. Evidence combination and
+  discrepancy detection remain provisional (not calibrated Bayesian belief).
+- This increment adds a completion hook for Actions to publish their evidence
+  only after Encounter accepts Action resolution. Full transactional handling
+  of arbitrary third-party completion hooks, generalized event-sourced history,
+  adaptive investigation policy, and teacher/student learning are deferred.

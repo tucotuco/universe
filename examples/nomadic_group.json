@@ -23,5 +23,19 @@
   "scouts": {
     "son": {"name": "Son, apprentice hunter", "spot_level": 1, "position": [0, -650, 0]},
     "father": {"name": "Father, veteran hunter", "spot_level": 6, "position": [250, -275, 0]}
+  },
+  "action_observation": {
+    "seed": 62,
+    "experience": {"success": 12, "failure": 18},
+    "sensor": {
+      "coarse_range_m": 1000,
+      "detailed_range_m": 450,
+      "coarse_count_sigma": {"humans": 3, "livestock": 5, "dogs": 2.5},
+      "detailed_count_sigma": {"humans": 1.5, "livestock": 2.5, "dogs": 1.2},
+      "coarse_position_sigma_m": 40,
+      "detailed_position_sigma_m": 12,
+      "skill_precision_gain": 0.25,
+      "max_ambiguous_dogs": 2
+    }
   }
 }

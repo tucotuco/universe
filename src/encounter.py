@@ -758,6 +758,9 @@ class Encounter(Event):
                     action.resolution = resolution
             self.pending_action_list.remove(action.id)
             self.finished_action_list.append(action.id)
+            on_completed = getattr(action, 'on_completed', None)
+            if on_completed is not None:
+                on_completed(self)
             completed.append(action.id)
         return completed
     
