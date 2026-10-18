@@ -99,3 +99,26 @@ This short record is maintained with the code; it should not require separate us
   Stable seed + CDF configuration reproduces composition and member offsets;
   restoring evolved state from a saved snapshot, and cross-scale consistent
   motion/history refinement, remain future work.
+
+## Observer skill and interpretation: father / son experiment (2026-10)
+
+- Group CDF/household machinery is reusable within the nomadic-group schema,
+  **not yet** a fully generic recursive group composition engine.
+- Raw observational evidence and observer-specific *interpretation* must be
+  distinct; a Being's `spot` rank affects interpretation of ambiguous cues,
+  never changes underlying group composition or rewrites original evidence.
+- The provisional policy discounts dubious category candidates in proportion
+  to Spotting rank, reaching full discount at a configurable expert threshold.
+  Cue reliability is unknown: higher rank does not guarantee correct beliefs.
+- Interpretations record the skill and rank used at the time, permitting
+  historical reconstruction even after the Being gains further experience.
+- Communicated evidence retains source identity and original interpretation;
+  recipients do not silently re-run it using their own current skill.
+  Broader models for teaching, trust, testimony, and skill acquisition follow.
+- Reinterpretation of earlier observations after learning or from new
+  communicated context is desirable, but is not implemented by this initial
+  one-interpretation-per-sighting demonstration.
+- Parent–child relationship is scenario metadata only for now; this does not
+  introduce a general kinship graph or infer skills from family relationships.
+- Initial skill ranks and positions are scenario configuration, not yet sampled
+  from Being-generation distributions; field observations do not award XP.

@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from encounter import Encounter
 from field_observation import BeliefLedger, FieldObserver
+from field_interpretation import FieldInterpreter
 from library import Library
 from spatial.state import CartesianPosition
 from statistical_group import StatisticalGroup
@@ -27,26 +28,33 @@ def run_scenario(config=None):
     group = StatisticalGroup(config["group_name"], config["group_id"],
                              config, seed=config["seed"])
     world.add_object(group)
-    alpha_id = world.make_being("Human", "Scout Alpha")
-    beta_id = world.make_being("Human", "Scout Beta")
+    son_config = config["scouts"]["son"]
+    father_config = config["scouts"]["father"]
+    alpha_id = world.make_being("Human", son_config["name"])
+    beta_id = world.make_being("Human", father_config["name"])
     alpha = world.get_object_by_id(alpha_id)
     beta = world.get_object_by_id(beta_id)
-    alpha.set_position(CartesianPosition(0, -650, 0))
-    beta.set_position(CartesianPosition(250, -275, 0))
+    alpha.set_skill_level(world.get_skill_dictionary(), "spot", son_config["spot_level"])
+    beta.set_skill_level(world.get_skill_dictionary(), "spot", father_config["spot_level"])
+    alpha.set_position(CartesianPosition(*son_config["position"]))
+    beta.set_position(CartesianPosition(*father_config["position"]))
 
     encounter = Encounter(world, difficulty_class=10, start_time=0)
     for scout_id in (alpha_id, beta_id):
         encounter.add_being(scout_id)
     encounter.add_object(group.id)
     observer = FieldObserver(**config["observation"])
+    interpreter = FieldInterpreter(**config["interpretation"])
     beliefs = {alpha_id: BeliefLedger(alpha_id), beta_id: BeliefLedger(beta_id)}
 
     # At t=0, composition is statistical and nobody has been materialized.
     initially_unrealized = (group._counts is None, group.materialized_count)
     first = observer.observe(encounter, alpha_id, group, "alpha-t0",
-                             count_bias={"dogs": 2}, position_error=(12, -10, 0))
+                             count_bias={"dogs": 2}, position_error=(12, -10, 0),
+                             dubious_candidates={"dogs": 2})
     assert first is not None
-    beliefs[alpha_id].learn(first)
+    son_first = interpreter.interpret(first, alpha)
+    beliefs[alpha_id].learn(first, interpretation=son_first)
     assert encounter.decide_to_act(alpha_id, group.id, "continue observing") is not None
 
     # Propagate physical state (constant acceleration), alongside Encounter time.
@@ -56,12 +64,16 @@ def run_scenario(config=None):
 
     # The same Scout observes again; a persistent classification bias can survive.
     second = observer.observe(encounter, alpha_id, group, "alpha-t100",
-                              count_bias={"dogs": 3}, position_error=(4, -3, 0))
+                              count_bias={"dogs": 4}, position_error=(4, -3, 0),
+                             dubious_candidates={"dogs": 3})
     third = observer.observe(encounter, beta_id, group, "beta-t100",
-                             count_bias={"dogs": -1}, position_error=(-3, 2, 0))
+                             count_bias={"dogs": 2}, position_error=(-3, 2, 0),
+                             dubious_candidates={"dogs": 2})
     assert second is not None and third is not None
-    beliefs[alpha_id].learn(second)
-    beliefs[beta_id].learn(third)
+    son_second = interpreter.interpret(second, alpha)
+    father_third = interpreter.interpret(third, beta)
+    beliefs[alpha_id].learn(second, interpretation=son_second)
+    beliefs[beta_id].learn(third, interpretation=father_third)
     alpha_velocity_estimate = beliefs[alpha_id].estimated_velocity(group.id)
     alpha_prediction = beliefs[alpha_id].predict_position(group.id, 160)
 
@@ -79,7 +91,11 @@ def run_scenario(config=None):
 
     return {
         "world": world, "encounter": encounter, "group": group,
-        "scouts": (alpha, beta), "beliefs": beliefs,
+        "scouts": (alpha, beta), "son": alpha, "father": beta,
+        "family": {"relationship": "father_of", "parent_id": beta.id,
+                   "child_id": alpha.id},
+        "beliefs": beliefs,
+        "interpretations": (son_first, son_second, father_third),
         "observations": (first, second, third),
         "initially_unrealized": initially_unrealized,
         "shared": (shared_a, shared_b), "conflicts": targets,
@@ -99,8 +115,12 @@ if __name__ == "__main__":
     for observation in result["observations"]:
         print(f"{observation.id}, t={observation.time:g}, {observation.mode}:",
               {key: report.interval for key, report in observation.reports.items()})
-    print("Scout Alpha inferred velocity (m/s):", result["estimated_velocity"])
-    print("Scout Alpha predicted center at t=160:", result["alpha_prediction"])
+    print("Observer Spotting ranks: son", result["son"].get_skill_level("spot"),
+          "father", result["father"].get_skill_level("spot"))
+    print("Interpreted dog counts (son t0, son t100, father t100):",
+          [interpretation.reports["dogs"].estimate for interpretation in result["interpretations"]])
+    print("Son inferred velocity (m/s):", result["estimated_velocity"])
+    print("Son predicted center at t=160:", result["alpha_prediction"])
     print("Evidence shared (new unique observations):", result["shared"])
     print("Unresolved conflicting reports:", result["conflicts"])
     print("Members materialized:", group.materialized_count,

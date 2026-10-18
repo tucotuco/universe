@@ -117,8 +117,18 @@ class TestObserverAndBelief(unittest.TestCase):
         self.assertEqual(result["counts"]["dogs"], 7)
         self.assertEqual((first.reports["dogs"].estimate,
                           second.reports["dogs"].estimate,
-                          third.reports["dogs"].estimate), (9, 10, 6))
+                          third.reports["dogs"].estimate), (9, 11, 9))
         self.assertEqual(group.counts()["dogs"], 7)
+        self.assertEqual((result["son"].get_skill_level("spot"),
+                          result["father"].get_skill_level("spot")), (1, 6))
+        self.assertEqual(result["family"],
+                         {"relationship": "father_of", "parent_id": result["father"].id,
+                          "child_id": result["son"].id})
+        interpreted = result["interpretations"]
+        self.assertEqual(tuple(i.reports["dogs"].estimate for i in interpreted),
+                         (9, 10, 7))
+        self.assertEqual(tuple(i.rejected_candidates["dogs"] for i in interpreted),
+                         (0, 1, 2))
         self.assertEqual(result["shared"], (1, 2))
         self.assertIn(("dogs", "alpha-t100", "beta-t100"), result["conflicts"])
         self.assertEqual(result["estimated_velocity"], (-0.08, -2.68, 0.0))
@@ -141,6 +151,12 @@ class TestObserverAndBelief(unittest.TestCase):
         self.assertEqual(len(alpha_ledger.evidence), 3)
         self.assertEqual(alpha_ledger.communication_log,
                          [(third.id, beta.id)])
+        self.assertEqual(alpha_ledger.interpretation_for(third.id),
+                         result["interpretations"][2])
+        self.assertEqual(beta_ledger.interpretation_for(second.id),
+                         result["interpretations"][1])
+        self.assertEqual(alpha_ledger.interpretation_for(third.id).observer_id,
+                         beta.id)
         self.assertEqual(beta_ledger.estimated_velocity(result["group"].id), None)
         self.assertNotEqual(alpha_ledger.count_estimate(result["group"].id, "dogs"),
                             result["counts"]["dogs"])

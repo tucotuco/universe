@@ -6,7 +6,7 @@ perception and inference policies can replace this provisional instrument.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 
 from perception import RangePerception
@@ -40,6 +40,9 @@ class FieldObservation:
     position_uncertainty_m: float
     reports: dict[str, CountReport]
     mode: str
+    dubious_candidates: dict[str, int] = field(default_factory=dict)
+    # Raw, potentially misclassified candidate counts. These cues suggest
+    # suspect candidates; they do not reveal objective species identity.
 
 
 class FieldObserver:
@@ -52,7 +55,8 @@ class FieldObserver:
         self.detailed_range_m = float(detailed_range_m)
 
     def observe(self, encounter, observer_id, group, observation_id, *,
-                count_bias=None, position_error=(0, 0, 0)):
+                count_bias=None, position_error=(0, 0, 0),
+                dubious_candidates=None):
         """Generate imperfect evidence; sampling objective counts cannot copy guesses.
 
         The observer must be a placed Being close enough to notice the group.
@@ -71,6 +75,11 @@ class FieldObserver:
             key: CountReport(max(0, truth[key] + int(count_bias.get(key, 0))), uncertainty)
             for key in ("humans", "livestock", "dogs")
         }
+        dubious_candidates = {} if dubious_candidates is None else dict(dubious_candidates)
+        for category, count in dubious_candidates.items():
+            if category not in reports or isinstance(count, bool) or not isinstance(count, int) \
+                    or count < 0 or count > reports[category].estimate:
+                raise ValueError("dubious candidate count must fit a reported category")
         error = tuple(float(v) for v in position_error)
         if len(error) != 3 or not all(math.isfinite(v) for v in error):
             raise ValueError("position_error must be a finite three-vector")
@@ -78,7 +87,8 @@ class FieldObserver:
             group.get_position().as_tuple(), error)))
         return FieldObservation(observation_id, observer_id, group.id,
                                 encounter.time, location, 15.0 if detailed else 80.0,
-                                reports, "detailed_range_proxy" if detailed else "coarse_range_proxy")
+                                reports, "detailed_range_proxy" if detailed else "coarse_range_proxy",
+                                dubious_candidates)
 
 
 class BeliefLedger:
@@ -90,33 +100,52 @@ class BeliefLedger:
     def __init__(self, observer_id):
         self.observer_id = observer_id
         self._evidence = {}
+        self._interpretations = {}
         self.communication_log = []
 
     @property
     def evidence(self):
         return tuple(self._evidence.values())
 
-    def learn(self, observation, *, communicated_by=None):
+    def interpretation_for(self, observation_id):
+        return self._interpretations.get(observation_id)
+
+    def _reports_for(self, observation):
+        interpretation = self._interpretations.get(observation.id)
+        return interpretation.reports if interpretation is not None else observation.reports
+
+    def learn(self, observation, *, communicated_by=None, interpretation=None):
         if not isinstance(observation, FieldObservation):
             raise TypeError("evidence must be a FieldObservation")
+        if interpretation is not None:
+            from field_interpretation import FieldInterpretation
+            if not isinstance(interpretation, FieldInterpretation) or \
+                    interpretation.observation_id != observation.id or \
+                    interpretation.observer_id != observation.observer_id:
+                raise ValueError("interpretation must belong to the original observer and evidence")
         if observation.id in self._evidence:
-            if self._evidence[observation.id] != observation:
+            if (self._evidence[observation.id] != observation or
+                    (interpretation is not None and
+                     self._interpretations.get(observation.id) != interpretation)):
                 raise ValueError("observation ID conflicts with existing evidence")
             return False
         self._evidence[observation.id] = observation
+        if interpretation is not None:
+            self._interpretations[observation.id] = interpretation
         if communicated_by is not None:
             self.communication_log.append((observation.id, communicated_by))
         return True
 
     def share_from(self, other):
         """Exchange original evidence, not an assertion that the other's belief is fact."""
-        return sum(self.learn(e, communicated_by=other.observer_id)
+        return sum(self.learn(e, communicated_by=other.observer_id,
+                              interpretation=other.interpretation_for(e.id))
                    for e in other.evidence)
 
     def count_estimate(self, group_id, category):
         """Uncalibrated weighted evidence summary; *not* a posterior distribution."""
-        reports = [e.reports[category] for e in self.evidence
-                   if e.group_id == group_id and category in e.reports]
+        reports = [self._reports_for(e)[category] for e in self.evidence
+                   if e.group_id == group_id and category in self._reports_for(e)]
         if not reports:
             return None
         weights = [1 / (1 + report.uncertainty)**2 for report in reports]
@@ -128,9 +157,10 @@ class BeliefLedger:
         conflicts = []
         for i, first in enumerate(group_evidence):
             for other in group_evidence[i + 1:]:
-                for key in sorted(first.reports.keys() & other.reports.keys()):
-                    lo1, hi1 = first.reports[key].interval
-                    lo2, hi2 = other.reports[key].interval
+                a, b = self._reports_for(first), self._reports_for(other)
+                for key in sorted(a.keys() & b.keys()):
+                    lo1, hi1 = a[key].interval
+                    lo2, hi2 = b[key].interval
                     if hi1 < lo2 or hi2 < lo1:
                         conflicts.append((key, first.id, other.id))
         return conflicts

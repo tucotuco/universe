@@ -18,5 +18,10 @@
       "dogs_cdf": [[0, 0.1], [1, 0.65], [2, 1.0]]
     }
   },
-  "observation": {"coarse_range_m": 1000, "detailed_range_m": 450}
+  "observation": {"coarse_range_m": 1000, "detailed_range_m": 450},
+  "interpretation": {"skill_name": "spot", "expert_level": 5},
+  "scouts": {
+    "son": {"name": "Son, apprentice hunter", "spot_level": 1, "position": [0, -650, 0]},
+    "father": {"name": "Father, veteran hunter", "spot_level": 6, "position": [250, -275, 0]}
+  }
 }
