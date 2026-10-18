@@ -216,6 +216,71 @@ class StatisticalGroup(ObjectInstance):
         self._realized_beings[member.id] = being
         return being
 
+    def aggregate_state(self):
+        """Live, *derived* group view of known individual state.
+
+        ``counts()`` is the committed composition at realization, not an
+        automatically revised living population. Unresolved members have no
+        fabricated health or activity state. Health categories below overlap:
+        incapacitated and injured are subsets of known_living, not additional
+        members. Calling this does not cache or copy a Being's mutable state.
+        """
+        composition = self.counts()
+        categories = {}
+        for category in self.CATEGORIES:
+            categories[category] = dict(
+                committed=composition[category],
+                realized=0,
+                unresolved=composition[category],
+                known_living=0,
+                known_dead=0,
+                known_incapacitated=0,
+                known_injured=0,
+            )
+        members_by_id = {member.id: member for member in self._members.values()}
+        for member_id, being in self._realized_beings.items():
+            # The corresponding GroupMember fixes cohort membership even if
+            # the Being has moved or otherwise changed in the Encounter.
+            member = members_by_id.get(member_id)
+            if member is None:
+                raise RuntimeError("realized Being has no committed group member")
+            summary = categories[member.category]
+            summary['realized'] += 1
+            summary['unresolved'] -= 1
+            hp = being.get_hit_points()
+            if being.is_dead():
+                summary['known_dead'] += 1
+            else:
+                summary['known_living'] += 1
+                if hp <= 0:
+                    summary['known_incapacitated'] += 1
+                if hp < being.original.hit_points:
+                    summary['known_injured'] += 1
+        return {'composition': composition, 'categories': categories}
+
+    def known_skill_state(self, skill_name):
+        """Realized members' current capability, not a whole-group estimate.
+
+        Unresolved member skills are genuinely unknown; do not interpret the
+        known levels or earned experience as a representative group average.
+        """
+        if not isinstance(skill_name, str) or not skill_name:
+            raise ValueError("skill_name must be a nonempty string")
+        known = {}
+        for member_id, being in sorted(self._realized_beings.items()):
+            level = being.get_skill_level(skill_name)
+            if level is None:
+                level = being.get_weapon_skill_level(skill_name)
+            known[member_id] = {
+                'level': level or 0,
+                'practice_experience': being.get_skill_experience(skill_name),
+            }
+        return {
+            'skill': skill_name,
+            'known': known,
+            'unresolved_adults': self.counts()['adults'] - len(known),
+        }
+
     def member_position(self, member):
         if member.id not in {m.id for m in self._members.values()}:
             raise ValueError("member is not realized within this group")

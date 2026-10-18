@@ -231,3 +231,27 @@ This short record is maintained with the code; it should not require separate us
   precision. These, aggregate updates from births/deaths/departures, proper
   lifecycle/serialization of the group's committed state, and higher-resolution
   historical back-stories remain deferred.
+
+## Realized Being -> aggregate consequence projection (2026-10)
+
+- The group's `counts()` describes its **committed baseline composition**, not a
+  live count of healthy, present, or surviving individuals. A dead Being does
+  not disappear from its historical cohort or retroactively change the CDF draw.
+- `aggregate_state()` is a fresh, derived view of realized member status;
+  unrealized members remain explicitly unresolved (not assumed alive or dead).
+  Injured/incapacitated classifications overlap living status and are not
+  additive population categories. Health status follows the legacy Being
+  threshold of `hit_points <= -10` for death; these are game-system semantics,
+  not a biological or general mortality model.
+- `known_skill_state(skill)` exposes only realized members' current capability
+  and recorded practice, **not** an inferred distribution for the entire group.
+  Learning by an individual never updates the CDF of its uninstantiated peers.
+- The demonstration uses a clearly labeled *scripted* health-change Action to
+  show Encounter event -> individual state -> aggregate view. It is not a
+  damage, combat, healing, or event-sourcing implementation. Event IDs persist
+  in the Encounter; full state-transition histories and reconstruction do not.
+- Deferred: arrivals/departures, birth/death changing active membership,
+  moving bodies vs traveling group, group health distributions and uncertainty,
+  historical population snapshots, causal state-change provenance and durable
+  serialization/restore of the evolved group. Avoid silently treating baseline
+  composition as current active membership before those policies exist.
