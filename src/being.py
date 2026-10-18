@@ -358,15 +358,9 @@ class BeingInstance(ObjectInstance):
         """Experience earned through recorded use of one skill."""
         return self.skill_experience.get(skill_name, 0)
 
-    def record_skill_use(self, skill_dictionary, skill_name, experience=0,
-                         action_id=None, time=None, outcome=None):
-        """Record an exercised skill and update its progressive level.
-
-        The action resolver must decide which skill was actually exercised and
-        the nonnegative experience award.  Ordinary untrained skills may be
-        attempted. Extraordinary skills must already have a positive level.
-        Non-progressive skills retain history but never advance by practice.
-        """
+    def validate_skill_use(self, skill_dictionary, skill_name, experience=0,
+                           action_id=None, time=None, outcome=None):
+        """Validate proposed practice without changing a Being's state."""
         if not isinstance(skill_dictionary, SkillDictionary):
             raise TypeError('skill_dictionary must be a SkillDictionary')
         definition = skill_dictionary.get_skill_definition(skill_name)
@@ -393,6 +387,23 @@ class BeingInstance(ObjectInstance):
         if not definition['is_ordinary'] and before == 0:
             raise ValueError('skill requires prior training: %r' % (skill_name,))
 
+
+    def record_skill_use(self, skill_dictionary, skill_name, experience=0,
+                         action_id=None, time=None, outcome=None):
+        """Record an exercised skill and update its progressive level.
+
+        The action resolver must decide which skill was actually exercised and
+        the nonnegative experience award.  Ordinary untrained skills may be
+        attempted. Extraordinary skills must already have a positive level.
+        Non-progressive skills retain history but never advance by practice.
+        """
+        self.validate_skill_use(skill_dictionary, skill_name, experience,
+                                action_id=action_id, time=time, outcome=outcome)
+        definition = skill_dictionary.get_skill_definition(skill_name)
+        before = self.get_skill_level(skill_name)
+        if before is None:
+            before = self.get_weapon_skill_level(skill_name)
+        before = before or 0
         baseline = self._skill_practice_baselines.get(skill_name, before)
         total = self.get_skill_experience(skill_name) + experience
         after = before

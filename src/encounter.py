@@ -19,6 +19,7 @@ from spatial.visibility import trace_sightline
 from utils import convert_to_dc
 from action import Action
 from event import Event
+from experience import ActionResolution
 from library import Library
 from being import BeingInstance
 from object import ObjectInstance
@@ -716,7 +717,29 @@ class Encounter(Event):
                 due.append((action.end_time, index, action))
         completed = []
         for _, _, action in sorted(due, key=lambda item: (item[0], item[1])):
-            action.resolve(self.difficulty_class)
+            resolution = action.resolve(self.difficulty_class)
+            if isinstance(resolution, ActionResolution):
+                # Preflight the entire award set before updating any skill.
+                # A resolver returning None retains legacy, no-award behavior.
+                if not isinstance(action, Action):
+                    if resolution.skill_exercises:
+                        raise ValueError("Only Actions can report exercised skills")
+                else:
+                    actor = self.get_being(action.actor_id)
+                    if actor is None:
+                        raise ValueError("Resolving Action has no participating Being")
+                    skills = self.universe.get_skill_dictionary()
+                    for exercise in resolution.skill_exercises:
+                        actor.validate_skill_use(
+                            skills, exercise.skill_name, exercise.experience,
+                            action_id=action.id, time=action.end_time,
+                            outcome=resolution.outcome)
+                    for exercise in resolution.skill_exercises:
+                        actor.record_skill_use(
+                            skills, exercise.skill_name, exercise.experience,
+                            action_id=action.id, time=action.end_time,
+                            outcome=resolution.outcome)
+                    action.resolution = resolution
             self.pending_action_list.remove(action.id)
             self.finished_action_list.append(action.id)
             completed.append(action.id)

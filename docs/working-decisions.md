@@ -15,6 +15,7 @@ This short record is maintained with the code; it should not require separate us
 
 ## Next work
 
-- Determine how resolved Actions declare **actual exercised skills**, success and difficulty, and an experience-award policy, without conflating them with action prerequisites.
+- Actions may return `ActionResolution(outcome, skill_exercises)` to record actual skill exercise and resolver-assigned XP automatically when completed; legacy Action resolvers returning `None` yield no automatic experience. Rewards and result classifications are not inferred from prerequisites or success; policy-based awards remain deferred.
+- Later: define configurable award policies based on exercised capability, effort, and outcome, without imposing arbitrary values at this stage.
 - Model richer Event and Agent-relative Experience histories, then decide how experience relates to abilities, weapon-category transfer, learning and temporary capability modifiers.
 - Eventually add context-constrained entity generation, scalable statistical groups and resolution-on-demand detail.

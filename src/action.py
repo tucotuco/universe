@@ -54,6 +54,7 @@ class Action(Event):
         self.target_id = target_id
         self.instrument_id = instrument_id
         self.strategy = strategy or Strategy()
+        self.resolution = None  # Set only after successful structured resolution.
         self.end_time = self.calculate_end_time(0, self.strategy.timing_adjustment())
         instrument = self.get_instrument()
         if instrument is not None:
@@ -77,7 +78,8 @@ class Action(Event):
             "actor_id": self.actor_id,
             "target_id": self.target_id,
             "instrument_id": self.instrument_id,
-            "strategy": json.loads(self.strategy.to_json())
+            "strategy": json.loads(self.strategy.to_json()),
+            "resolution": None if self.resolution is None else self.resolution.to_dict()
         }
         return json.dumps(data, indent = 2)
 

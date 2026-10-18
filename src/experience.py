@@ -8,6 +8,55 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class SkillExercise:
+    """One explicitly exercised skill and its resolver-assigned XP award."""
+
+    skill_name: str
+    experience: int = 0
+
+    def __post_init__(self):
+        if not isinstance(self.skill_name, str) or not self.skill_name.strip():
+            raise ValueError("skill_name must be a nonempty string")
+        if isinstance(self.experience, bool) or not isinstance(self.experience, int) or self.experience < 0:
+            raise ValueError("experience must be a nonnegative integer")
+
+    def to_dict(self):
+        return {"skill_name": self.skill_name, "experience": self.experience}
+
+
+@dataclass(frozen=True)
+class ActionResolution:
+    """An Action resolver's account of its result and skills actually used.
+
+    An Action's required_skill is a prerequisite, not practice evidence.
+    No skill is credited merely because an Action completed successfully.
+    """
+
+    outcome: str
+    skill_exercises: tuple = ()
+
+    def __post_init__(self):
+        if not isinstance(self.outcome, str) or not self.outcome.strip():
+            raise ValueError("outcome must be a nonempty string")
+        try:
+            exercises = tuple(self.skill_exercises)
+        except TypeError as exc:
+            raise TypeError("skill_exercises must be iterable") from exc
+        if any(not isinstance(item, SkillExercise) for item in exercises):
+            raise TypeError("skill_exercises must contain SkillExercise objects")
+        names = [item.skill_name for item in exercises]
+        if len(names) != len(set(names)):
+            raise ValueError("a skill may be recorded only once per Action")
+        object.__setattr__(self, "skill_exercises", exercises)
+
+    def to_dict(self):
+        return {"outcome": self.outcome,
+                "skill_exercises": [item.to_dict() for item in self.skill_exercises]}
+
+
+
+
+@dataclass(frozen=True)
 class SkillUse:
     """An Agent-relative history entry linked to a completed Action where possible."""
 
