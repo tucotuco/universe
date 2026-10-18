@@ -13,6 +13,7 @@ import random
 from dataclasses import dataclass
 
 from spatial.state import CartesianPosition
+from spatial.frame import LocalFrame, LocalPosition
 
 from utils import convert_to_dc
 from action import Action
@@ -73,12 +74,13 @@ class Encounter(Event):
                  event_type=None, location=None, name="", parent_event_id=None, id=None, 
                  time=None, being_list=None, non_being_object_list=None, 
                  pending_action_list=None, finished_action_list=None, initiated=False, 
-                 map=None, awareness=None, initiation=None):
+                 map=None, awareness=None, initiation=None, local_frame=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
         self.initiated = initiated
         self.map = map
+        self.set_local_frame(local_frame)
         if time is None:
             self.time = start_time
         else:
@@ -134,6 +136,7 @@ class Encounter(Event):
             "time": self.time,
             "initiation": None if self.initiation is None else self.initiation.to_dict(),
             "map": self.map,
+            "local_frame": None if self.local_frame is None else self.local_frame.to_dict(),
             "being_list": self.being_list,
             "object_list": self.non_being_object_list,
             "awareness": {
@@ -234,6 +237,36 @@ class Encounter(Event):
         if not isinstance(being, BeingInstance):
             return None
         return being
+
+    def set_local_frame(self, frame):
+        """Set or clear the Encounter's optional local *view* of physical space.
+
+        Setting a frame does not transform or change any Entity's persistent
+        global position. A local frame is required only by local-coordinate
+        accessors and locally expressed movement commands.
+        """
+        if frame is not None and not isinstance(frame, LocalFrame):
+            raise TypeError("local_frame must be a LocalFrame or None")
+        self.local_frame = frame
+
+    def entity_local_position(self, entity_id):
+        """Return local coordinates for a placed Encounter Entity.
+
+        Unplaced or nonparticipating entities yield ``None``. LocalPosition is
+        deliberately distinct from the global CartesianPosition type.
+        """
+        if self.local_frame is None:
+            raise RuntimeError("Encounter has no local frame")
+        entity = self.get_entity(entity_id)
+        if entity is None or entity.get_position() is None:
+            return None
+        return self.local_frame.to_local(entity.get_position())
+
+    def global_position(self, local_position):
+        """Convert an Encounter-local position to global 3D coordinates."""
+        if self.local_frame is None:
+            raise RuntimeError("Encounter has no local frame")
+        return self.local_frame.to_global(local_position)
 
     def distance_between_entities(self, first_entity_id, second_entity_id):
         """Return continuous 3D distance between two participating entities.
@@ -453,12 +486,14 @@ class Encounter(Event):
         self.pending_action_list.append(action.id)
         return action.id
 
-    def step(self, duration=1.0, velocities=None):
+    def step(self, duration=1.0, velocities=None, velocity_frame="global"):
         """Advance one explicit Encounter interval without automatic combat AI.
 
         ``velocities`` maps participating Entity ids to continuous Cartesian
-        velocity triples, expressed per unit of Encounter time.  All new
-        positions are computed from the same starting snapshot.  This is a
+        velocity triples, expressed per unit of Encounter time.  By default
+        velocities are global; ``velocity_frame="local"`` interprets them in
+        the Encounter's local frame, converting them to global vectors first.
+        All new positions are computed from the same starting snapshot. This is a
         kinematic placeholder, not a collision, speed-limit, or terrain model.
         Action decisions are made externally through ``schedule_action``.
         """
@@ -476,6 +511,10 @@ class Encounter(Event):
             raise ValueError("Encounter time overflow")
         if self.end_time is not None and end > self.end_time:
             raise ValueError("step would exceed the Encounter end time")
+        if velocity_frame not in ("global", "local"):
+            raise ValueError("velocity_frame must be 'global' or 'local'")
+        if velocity_frame == "local" and self.local_frame is None:
+            raise RuntimeError("Encounter has no local frame")
         if velocities is None:
             velocities = {}
         if not hasattr(velocities, "items"):
@@ -499,6 +538,8 @@ class Encounter(Event):
                 raise TypeError("velocity components must be numeric") from exc
             if not all(math.isfinite(v) for v in (vx, vy, vz)):
                 raise ValueError("velocity components must be finite")
+            if velocity_frame == "local":
+                vx, vy, vz = self.local_frame.vector_to_global((vx, vy, vz))
             destinations.append((entity_id, entity, CartesianPosition(
                 previous.x + vx * duration,
                 previous.y + vy * duration,

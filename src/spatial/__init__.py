@@ -7,6 +7,7 @@ is an equal-area hierarchical triangular grid on a sphere.
 
 from spatial.cell import CellAddress
 from spatial.isea import ISEAGrid
+from spatial.frame import LocalFrame, LocalPosition
 from spatial.relation import SpatialRelation
 from spatial.state import CartesianPosition, SpatialState
 
@@ -14,6 +15,8 @@ __all__ = [
     "CartesianPosition",
     "CellAddress",
     "ISEAGrid",
+    "LocalFrame",
+    "LocalPosition",
     "SpatialRelation",
     "SpatialState",
 ]
