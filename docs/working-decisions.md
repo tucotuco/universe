@@ -210,3 +210,24 @@ This short record is maintained with the code; it should not require separate us
 - Do not mistake interval nonoverlap or a relative half-width heuristic for
   Bayesian confidence. Correlated testimony, transmission reliability,
   unobserved group turnover, and observation costs are deferred.
+
+
+## Statistical group -> Being realization (2026-10)
+
+- A statistical group may commit composition counts and selected stable member
+  identities without constructing every individual. `realize_being()` upgrades
+  one adult human identity into a genuine `BeingInstance` registered with the
+  Universe. It preserves the pre-existing identifier, initial placement,
+  population totals, and repeated-reference identity. Existing Encounter
+  Actions can then change that Being's skills and experience.
+- For this initial bridge, `materialized_count` still counts lightweight member
+  identities; `realized_being_count` distinguishes full Being instances.
+- Group motion translates its realized members, preserving any prior relative
+  position changes from Encounter actions. Group membership/detachment and
+  reconciliation of aggregate footprints after independent movement are not
+  implemented; the footprint is a provisional bound, not hard collision geometry.
+- Children, livestock, and dogs require appropriate Being definitions and
+  attribute-generation rules; mapping them to an adult Human would be false
+  precision. These, aggregate updates from births/deaths/departures, proper
+  lifecycle/serialization of the group's committed state, and higher-resolution
+  historical back-stories remain deferred.

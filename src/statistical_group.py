@@ -101,6 +101,8 @@ class StatisticalGroup(ObjectInstance):
         self._households = {}
         self._counts = None
         self._members = {}
+        # A GroupMember records stable identity; only selected members become Beings.
+        self._realized_beings = {}
 
     def _rng(self, *parts):
         token = "|".join(map(str, (self.seed, self.id, *parts)))
@@ -159,9 +161,68 @@ class StatisticalGroup(ObjectInstance):
                 category, index, offset)
         return self._members[key]
 
+    @property
+    def realized_being_count(self):
+        """Number of members promoted to full BeingInstances, not identities."""
+        return len(self._realized_beings)
+
+    def realize_being(self, universe, household, category, index, name=None):
+        """Promote one *adult human* to the existing Universe Being model.
+
+        Identity and initial placement come from the group's committed member
+        key, not from a fresh random draw. Subsequent calls return the same
+        mutable BeingInstance so its actions, skills, and history survive.
+        The other members remain statistical. Other categories require their
+        own appropriate biological/age definitions and are not silently mapped
+        to an adult Human.
+        """
+        from being import BeingInstance
+        from universe import Universe
+
+        if not isinstance(universe, Universe) or universe.get_object_by_id(self.id) is not self:
+            raise ValueError("the statistical group must be registered in this Universe")
+        if category not in self.CATEGORIES:
+            raise ValueError("unknown population category")
+        if category != "adults":
+            raise NotImplementedError("Being definitions for children and animals are not yet configured")
+        # Validate first, without creating a member or changing population counts.
+        if not isinstance(household, int) or isinstance(household, bool):
+            raise TypeError("household must be an integer index")
+        if not isinstance(index, int) or isinstance(index, bool):
+            raise TypeError("member index must be an integer")
+        if not 0 <= index < self.household(household)[category]:
+            raise IndexError("member index outside established household count")
+        identifier = f"{self.id}/{household}/{category}/{index}"
+        existing_being = self._realized_beings.get(identifier)
+        if existing_being is not None:
+            if universe.get_object_by_id(identifier) is not existing_being:
+                raise ValueError("realized Being is missing or replaced in Universe registry")
+            if name is not None and name != existing_being.name:
+                raise ValueError("a realized Being cannot be renamed by materialization")
+            return existing_being
+        if universe.get_object_by_id(identifier) is not None:
+            raise ValueError("member identity conflicts with an existing Universe Entity")
+        definition = universe.get_being_definition("Human")
+        if definition is None:
+            raise ValueError("the Universe has no Human BeingDefinition")
+
+        member = self.member(household, category, index)
+        being = BeingInstance(definition, name=name or f"Member {household}:{index}")
+        being.id = member.id  # stable identity predates the Being's full realization
+        being.set_position(self.member_position(member))
+        universe.add_object(being)
+        if universe.get_object_by_id(member.id) is not being:
+            raise RuntimeError("could not register realized Being")
+        self._realized_beings[member.id] = being
+        return being
+
     def member_position(self, member):
         if member.id not in {m.id for m in self._members.values()}:
             raise ValueError("member is not realized within this group")
+        # Once a Being is realized its continuous position is authoritative:
+        # Encounter actions may change it relative to the group's original offset.
+        if member.id in self._realized_beings:
+            return self._realized_beings[member.id].get_position()
         return CartesianPosition(*(c + v for c, v in zip(self.get_position().as_tuple(),
                                                           member.offset)))
 
@@ -173,7 +234,15 @@ class StatisticalGroup(ObjectInstance):
         new_position = tuple(p + v * duration + .5 * a * duration**2
                              for p, v, a in zip(self.get_position().as_tuple(),
                                                 self.velocity, self.acceleration))
+        old_position = self.get_position().as_tuple()
+        delta = tuple(new - old for new, old in zip(new_position, old_position))
         self.set_position(CartesianPosition(*new_position))
+        # Shared group translation carries realized members without replacing
+        # their individually updated Encounter positions or moving unresolved
+        # members into the Universe registry. Detachment is deferred.
+        for being in self._realized_beings.values():
+            previous = being.get_position().as_tuple()
+            being.set_position(CartesianPosition(*(p + d for p, d in zip(previous, delta))))
         self.velocity = tuple(v + a * duration for v, a in zip(self.velocity,
                                                                self.acceleration))
         self.time += duration
