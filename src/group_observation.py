@@ -33,7 +33,8 @@ class SampledGroupObservation:
     def __init__(self, coarse_range_m, detailed_range_m, *,
                  coarse_count_sigma=None, detailed_count_sigma=None,
                  coarse_position_sigma_m=40.0, detailed_position_sigma_m=12.0,
-                 skill_precision_gain=0.25, max_ambiguous_dogs=2):
+                 skill_precision_gain=0.25, max_ambiguous_dogs=2,
+                 focus_precision_factor=0.5):
         if not 0 < detailed_range_m <= coarse_range_m:
             raise ValueError('observation ranges must be ordered positive distances')
         self.coarse_range_m = float(coarse_range_m)
@@ -48,6 +49,12 @@ class SampledGroupObservation:
         if type(max_ambiguous_dogs) is not int or max_ambiguous_dogs < 0:
             raise ValueError('max_ambiguous_dogs must be a nonnegative integer')
         self.max_ambiguous_dogs = max_ambiguous_dogs
+        if (isinstance(focus_precision_factor, bool) or
+                not isinstance(focus_precision_factor, (int, float)) or
+                not math.isfinite(focus_precision_factor) or
+                not 0 < focus_precision_factor <= 1):
+            raise ValueError('focus precision factor must lie in (0, 1]')
+        self.focus_precision_factor = float(focus_precision_factor)
         if not math.isfinite(self.skill_precision_gain) or self.skill_precision_gain < 0:
             raise ValueError('skill_precision_gain must be finite and nonnegative')
         for value in list(self.position_sigmas.values()) + [x for d in self.count_sigmas.values() for x in d.values()]:
@@ -57,22 +64,28 @@ class SampledGroupObservation:
             if set(sigmas) != {'humans', 'livestock', 'dogs'}:
                 raise ValueError('count noise requires humans, livestock, dogs')
 
-    def sample(self, group, observer_id, time, distance, level, observation_id, rng):
+    def sample(self, group, observer_id, time, distance, level, observation_id, rng,
+               focus_category=None):
         if not isinstance(group, StatisticalGroup):
             raise TypeError('requires a StatisticalGroup')
         if distance is None or distance > self.coarse_range_m:
             raise ValueError('observation outside modeled range')
         if type(level) is not int or level < 0:
             raise ValueError('spot level must be a nonnegative integer')
+        if focus_category not in (None, 'humans', 'livestock', 'dogs'):
+            raise ValueError('unknown observation focus category')
         detail = 'detailed' if distance <= self.detailed_range_m else 'coarse'
         factor = 1 / math.sqrt(1 + level * self.skill_precision_gain)
         truths = group.counts()  # May commit *aggregate counts*, never individuals.
         reports = {}
         false_positives = rng.randint(0, self.max_ambiguous_dogs if detail == 'coarse' else min(1, self.max_ambiguous_dogs))
         for category in ('humans', 'livestock', 'dogs'):
-            noise = round(rng.gauss(0, self.count_sigmas[detail][category] * factor))
+            sigma = self.count_sigmas[detail][category] * factor
+            if category == focus_category:
+                sigma *= self.focus_precision_factor
+            noise = round(rng.gauss(0, sigma))
             estimate = max(0, truths[category] + noise + (false_positives if category == 'dogs' else 0))
-            uncertainty = max(1, math.ceil(2 * self.count_sigmas[detail][category] * factor))
+            uncertainty = max(1, math.ceil(2 * sigma))
             reports[category] = CountReport(estimate, uncertainty)
         # A few genuine dogs may also look dubious. Expertise isn't an oracle.
         ambiguous_true = int(truths['dogs'] > 0 and rng.random() < .15)
@@ -84,7 +97,7 @@ class SampledGroupObservation:
         return FieldObservation(
             observation_id, observer_id, group.id, time, reported_position,
             max(1., 2 * position_sigma), reports,
-            f'sampled_{detail}_range_proxy', {'dogs': dubious})
+            f'sampled_{detail}_range_proxy', {'dogs': dubious}, focus_category)
 
 
 class ObserveGroupAction(Action):
@@ -99,7 +112,7 @@ class ObserveGroupAction(Action):
 
     def __init__(self, universe, actor_id, target_id, start_time, *, duration=1,
                  seed=0, observation=None, interpretation=None, experience=None,
-                 ledger=None, random_key=None):
+                 ledger=None, random_key=None, focus_category=None):
         if type(seed) is not int:
             raise TypeError('seed must be an integer')
         if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
@@ -125,6 +138,9 @@ class ObserveGroupAction(Action):
                 raise ValueError('experience policy requires success and failure')
         if ledger is not None and (not isinstance(ledger, BeliefLedger) or ledger.observer_id != actor_id):
             raise ValueError('ledger must belong to the observing Being')
+        if focus_category not in (None, 'humans', 'livestock', 'dogs'):
+            raise ValueError('focus must be a supported observed count category')
+        self.focus_category = focus_category
         self.ledger = ledger
         self._encounter = None
         self.roll = None
@@ -172,7 +188,7 @@ class ObserveGroupAction(Action):
             return ActionResolution('failure', (SkillExercise('spot', self.experience_policy['failure']),))
         self.field_observation = self.observer.sample(
             group, self.actor_id, self.end_time, distance, self.skill_level_used,
-            self.id, self._rng('evidence'))
+            self.id, self._rng('evidence'), focus_category=self.focus_category)
         self.field_interpretation = self.interpreter.interpret(self.field_observation, actor)
         signal = Perception(self.actor_id, self.target_id, 'sampled_group_observation',
                             distance, self.observer.coarse_range_m)
@@ -187,7 +203,8 @@ class ObserveGroupAction(Action):
 
     def to_json(self):
         record = json.loads(super().to_json())
-        record.update({'seed': self.seed, 'random_key': self.random_key, 'roll': self.roll,
+        record.update({'seed': self.seed, 'random_key': self.random_key,
+                       'focus_category': self.focus_category, 'roll': self.roll,
                        'skill_level_used': self.skill_level_used,
                        'field_observation': None if self.field_observation is None else asdict(self.field_observation),
                        'field_interpretation': None if self.field_interpretation is None else asdict(self.field_interpretation)})

@@ -41,6 +41,7 @@ class FieldObservation:
     reports: dict[str, CountReport]
     mode: str
     dubious_candidates: dict[str, int] = field(default_factory=dict)
+    focus_category: str | None = None
     # Raw, potentially misclassified candidate counts. These cues suggest
     # suspect candidates; they do not reveal objective species identity.
 
@@ -108,6 +109,25 @@ class BeliefRevision:
     trigger_observation_id: str
 
 
+
+@dataclass(frozen=True)
+class InquiryProposal:
+    """An Agent's evidence-based decision to seek clarification, not a fact."""
+    observer_id: str
+    group_id: str
+    category: str
+    reason: str  # conflicting_reports or uncertain_estimate
+    evidence_ids: tuple[str, ...]
+    time: float
+
+
+@dataclass(frozen=True)
+class InquiryRecord:
+    """Provenance linking an inquiry decision to the Action it motivated."""
+    proposal: InquiryProposal
+    action_id: str
+
+
 @dataclass(frozen=True)
 class EvidenceReassessment:
     """A later reading of one's own evidence; original interpretation survives."""
@@ -138,6 +158,7 @@ class BeliefLedger:
         self._current_reassessments = {}
         self._belief_history = []
         self.communication_log = []
+        self._inquiry_history = []
 
     @property
     def evidence(self):
@@ -152,6 +173,41 @@ class BeliefLedger:
     def reassessments(self):
         return tuple(self._reassessments)
 
+    @property
+    def inquiry_history(self):
+        return tuple(self._inquiry_history)
+
+    def record_inquiry(self, proposal, action_id):
+        """Record a scheduled response to specific evidence, not its success.
+
+        Scheduling is the caller's responsibility; record only after the
+        Encounter has accepted the Action. This method cannot see group truth.
+        """
+        if not isinstance(proposal, InquiryProposal) or proposal.observer_id != self.observer_id:
+            raise ValueError("inquiry must belong to this Agent")
+        if not isinstance(action_id, str) or not action_id:
+            raise ValueError("inquiry must reference an Action ID")
+        if proposal.reason not in ("conflicting_reports", "uncertain_estimate"):
+            raise ValueError("unsupported inquiry reason")
+        if _valid_history_time(proposal.time) is None:
+            raise ValueError("inquiry must have a concrete decision time")
+        if not proposal.evidence_ids or len(set(proposal.evidence_ids)) != len(proposal.evidence_ids):
+            raise ValueError("inquiry must cite distinct existing evidence")
+        for evidence_id in proposal.evidence_ids:
+            evidence = self._evidence.get(evidence_id)
+            if evidence is None or evidence.group_id != proposal.group_id:
+                raise ValueError("inquiry must cite known evidence for its group")
+            if proposal.time < evidence.time:
+                raise ValueError("inquiry cannot predate its evidence")
+        if not any(proposal.category in self.reports_for_observation(evidence_id)
+                   for evidence_id in proposal.evidence_ids):
+            raise ValueError("inquiry category must appear in cited evidence")
+        if any(record.action_id == action_id for record in self._inquiry_history):
+            raise ValueError("inquiry Action is already recorded")
+        record = InquiryRecord(proposal, action_id)
+        self._inquiry_history.append(record)
+        return record
+
     def interpretation_for(self, observation_id):
         """Original interpretation at the time of observation; never revised."""
         return self._interpretations.get(observation_id)
@@ -164,6 +220,12 @@ class BeliefLedger:
     def _reports_for(self, observation):
         interpretation = self.current_interpretation_for(observation.id)
         return interpretation.reports if interpretation is not None else observation.reports
+
+    def reports_for_observation(self, observation_id):
+        """Current interpreted reports, without exposing internal ledger storage."""
+        if observation_id not in self._evidence:
+            raise KeyError(observation_id)
+        return dict(self._reports_for(self._evidence[observation_id]))
 
     def learn(self, observation, *, communicated_by=None, interpretation=None,
               at_time=None):
@@ -256,6 +318,7 @@ class BeliefLedger:
             "reassessments": [asdict(entry) for entry in self.reassessments],
             "belief_history": [asdict(entry) for entry in self.belief_history],
             "communication_log": list(self.communication_log),
+            "inquiry_history": [asdict(entry) for entry in self.inquiry_history],
         }
 
     def count_estimate(self, group_id, category):

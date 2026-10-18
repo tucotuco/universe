@@ -187,3 +187,26 @@ This short record is maintained with the code; it should not require separate us
   father-to-son teaching Action. Skill advancement enables a fresh, fallible
   reading of older evidence, yielding a new belief while retaining the
   original Experience and interpretation.
+
+
+## Evidence-driven observations (2026-10)
+
+- Fixed random seeds in `group_observation_encounter.py` exist for repeatable
+  tests and comparisons. They do **not** make the sampling model nonrandom.
+  Different configured seeds can produce different results; a seed is not a
+  claim about physical reality or a substitute for uncertainty calibration.
+- Before general decision-making, test a narrow and inspectable policy:
+  conflict among recorded reports motivates a targeted inquiry; otherwise
+  substantial *reported* relative uncertainty may motivate one. This heuristic
+  reads only an Agent's BeliefLedger, never objective counts.
+- Keep decision provenance (what discrepancy/evidence motivated an Action)
+  distinct from original evidence, skill-dependent interpretations, and
+  belief revisions. Planning an inquiry does not itself change a belief.
+- A focused ObserveGroupAction reduces the **modeled noise** in the selected
+  count category, without making it infallible. It still uses the existing
+  Encounter timeline, feasibility/skill check, and experience recording.
+  A failed follow-up can leave the discrepancy unresolved. There is no
+  automatic repetition or general planner; that belongs to later work.
+- Do not mistake interval nonoverlap or a relative half-width heuristic for
+  Bayesian confidence. Correlated testimony, transmission reliability,
+  unobserved group turnover, and observation costs are deferred.
