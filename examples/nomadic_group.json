@@ -1,0 +1,22 @@
+{
+  "seed": 8101,
+  "group_id": "nomadic-party",
+  "group_name": "Nomadic families and herd",
+  "motion": {
+    "position": [0, 0, 0],
+    "velocity": [0, -3, 0],
+    "acceleration": [0, 0.005, 0],
+    "max_acceleration_mps2": 0.03,
+    "footprint_radius_m": 45
+  },
+  "composition": {
+    "households_cdf": [[2, 0.15], [3, 0.75], [4, 1.0]],
+    "per_household": {
+      "adults_cdf": [[1, 0.2], [2, 0.9], [3, 1.0]],
+      "children_cdf": [[0, 0.15], [1, 0.55], [2, 0.85], [3, 1.0]],
+      "livestock_cdf": [[2, 0.1], [4, 0.5], [7, 0.85], [10, 1.0]],
+      "dogs_cdf": [[0, 0.1], [1, 0.65], [2, 1.0]]
+    }
+  },
+  "observation": {"coarse_range_m": 1000, "detailed_range_m": 450}
+}

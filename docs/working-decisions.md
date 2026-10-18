@@ -61,3 +61,41 @@ This short record is maintained with the code; it should not require separate us
   running mechanics, or a general experience-award policy.
 - Next priorities: richer Agent-relative Event/Experience history and actual
   capability-aware Agent decisions; terrain synthesis remains deferred.
+
+## Statistical group / field observation experiment (2026-10)
+
+- `StatisticalGroup` is an *aggregate Entity*, not a fully populated list of
+  `BeingInstance`s. It participates in an existing Encounter via the
+  `ObjectInstance` interface; the general Agent/Entity hierarchy is not being
+  redesigned in this experiment.
+- Group and household counts are drawn reproducibly from configuration CDFs.
+  Household composition is internally resolved to calculate group totals, but
+  individual identities and positions remain undefined until requested.
+  A selected member currently becomes a lightweight `GroupMember` record,
+  **not yet** a full Being with generated skills or back-story.
+- Global Cartesian position, bounded footprint, velocity, and acceleration
+  are objective aggregate state. Motion uses a provisional constant-acceleration
+  step; reachable future group-center regions are conservative acceleration
+  bounds, not probability densities, navigation plans, or terrain constraints.
+  Members currently retain their offsets from the moving group center.
+- **Reality / Observation / Belief are distinct.** Observations may cause
+  objective count resolution but cannot set counts. Observer bias may persist
+  across sightings; belief holds original evidence with provenance, including
+  errors. Communication shares evidence IDs (deduplicated), not objective fact.
+  Contradictory reports remain available as targets for follow-up observation.
+- The example's `FieldObserver` is a *range-gated instrument scaffold* using
+  controlled count and position errors. It is **not** a visual-detection model.
+  The current `Encounter.perceive(RangePerception)` registers awareness on
+  proximity alone for this test. Terrain, occlusion, group footprint visibility,
+  illumination, and Scouts' perception capabilities are not simulated here.
+- Repeated position observations yield an illustrative estimated velocity and
+  linear belief prediction, distinct from the objective future reachable region.
+  Count summaries assume a closed group over the 100-second demonstration;
+  confidence weighting is **not** a validated Bayesian posterior, nor does it
+  correct for correlated sensor biases. Future work must consider population
+  turnover, uncertainty propagation, misidentification of groups, fabricated
+  reports, and evidence dependencies.
+- No general history/serialization of aggregate realization is implemented yet.
+  Stable seed + CDF configuration reproduces composition and member offsets;
+  restoring evolved state from a saved snapshot, and cross-scale consistent
+  motion/history refinement, remain future work.
