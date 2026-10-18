@@ -12,6 +12,7 @@ from spatial.geometry import AxisAlignedBox, Bounds3D, Geometry3D, Sphere, geome
 from spatial.occlusion import VisualOcclusion
 from spatial.relation import SpatialRelation
 from spatial.state import CartesianPosition, SpatialState
+from spatial.visibility import SightlineIntersection, SightlineResult, trace_sightline
 
 __all__ = [
     "AxisAlignedBox",
@@ -24,6 +25,9 @@ __all__ = [
     "LocalPosition",
     "SpatialRelation",
     "SpatialState",
+    "SightlineIntersection",
+    "SightlineResult",
+    "trace_sightline",
     "Sphere",
     "VisualOcclusion",
     "geometry_from_dict",

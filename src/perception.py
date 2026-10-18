@@ -76,3 +76,35 @@ class RangePerception:
                 )
             )
         return results
+
+
+class GeometricPathPerception(RangePerception):
+    """Opt-in, deliberately incomplete line-of-sight perception scaffold.
+
+    Reports targets *with explicit physical geometry* only when their reference
+    point is within range and the sightline has no modeled obstruction,
+    unknown-opacity intersection, or unmodeled candidate Entities. This is not visual detection: illumination, terrain, target
+    surfaces, eye points, and unmodeled Entities are not simulated. In
+    particular, incomplete geometry cannot justify claims of real visibility.
+    """
+
+    mode = "geometric_path_only"
+
+    def detect(self, spatial_context, observer_id):
+        if spatial_context.get_being(observer_id) is None:
+            return []
+        observations = []
+        for candidate in super().detect(spatial_context, observer_id):
+            target = spatial_context.get_entity(candidate.target_id)
+            if target is None or target.geometry is None:
+                continue
+            sightline = spatial_context.line_of_sight(observer_id, candidate.target_id)
+            if sightline is not None and sightline.clear:
+                observations.append(Perception(
+                    observer_id=observer_id,
+                    target_id=candidate.target_id,
+                    mode=self.mode,
+                    distance=candidate.distance,
+                    threshold=self.max_distance,
+                ))
+        return observations

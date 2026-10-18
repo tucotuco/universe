@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from spatial.state import CartesianPosition
 from spatial.frame import LocalFrame, LocalPosition
+from spatial.visibility import trace_sightline
 
 from utils import convert_to_dc
 from action import Action
@@ -21,7 +22,7 @@ from event import Event
 from library import Library
 from being import BeingInstance
 from object import ObjectInstance
-from perception import RangePerception
+from perception import RangePerception, GeometricPathPerception
 from strategy import Strategy
 from weapon import WeaponInstance
 
@@ -267,6 +268,38 @@ class Encounter(Event):
         if self.local_frame is None:
             raise RuntimeError("Encounter has no local frame")
         return self.local_frame.to_global(local_position)
+
+    def line_of_sight(self, source_entity_id, target_entity_id, *,
+                      source_point=None, target_point=None):
+        """Evaluate a single global 3D segment against Encounter Entity geometry.
+
+        Default endpoints are the Entities' reference positions, NOT eye/target
+        surface points. Callers may provide explicit CartesianPosition endpoints
+        (for example an eye or an exposed point). Source and target volumes are
+        excluded. A "clear" result describes only the modeled geometry; this
+        does not model terrain, lighting, or other sensory constraints.
+        Returns None if an Entity or required position is unavailable.
+        """
+        source = self.get_entity(source_entity_id)
+        target = self.get_entity(target_entity_id)
+        if source is None or target is None or source_entity_id == target_entity_id:
+            return None
+        if source_point is not None and not isinstance(source_point, CartesianPosition):
+            raise TypeError("source_point must be a CartesianPosition")
+        if target_point is not None and not isinstance(target_point, CartesianPosition):
+            raise TypeError("target_point must be a CartesianPosition")
+        start = source.get_position() if source_point is None else source_point
+        end = target.get_position() if target_point is None else target_point
+        if start is None or end is None or start == end:
+            return None
+        candidates = ((entity_id, self.get_entity(entity_id))
+                      for entity_id in self.entity_ids())
+        return trace_sightline(start, end, candidates,
+                               exclude_ids=(source_entity_id, target_entity_id))
+
+    def perceive_geometric_paths(self, observer_being_id, max_distance):
+        """Opt-in path-only perception; not a physical vision model."""
+        return self.perceive(observer_being_id, GeometricPathPerception(max_distance))
 
     def distance_between_entities(self, first_entity_id, second_entity_id):
         """Return continuous 3D distance between two participating entities.
