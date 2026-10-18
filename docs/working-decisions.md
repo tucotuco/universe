@@ -13,9 +13,22 @@ This short record is maintained with the code; it should not require separate us
 - Being-instance skill-use records capture history and per-skill earned experience. The initial progression curve follows the Encounter draft's increasing cost by rank; its awards and future replacement with configurable policies remain explicit.
 - Ordinary skills can be practiced from rank zero. Extraordinary skills need prior training. Non-progressive skills can be used and recorded, but not improved by progressive-rank practice.
 
-## Next work
+## Implemented Action-to-practice bridge
 
 - Actions may return `ActionResolution(outcome, skill_exercises)` to record actual skill exercise and resolver-assigned XP automatically when completed; legacy Action resolvers returning `None` yield no automatic experience. Rewards and result classifications are not inferred from prerequisites or success; policy-based awards remain deferred.
+
+## Next work
 - Later: define configurable award policies based on exercised capability, effort, and outcome, without imposing arbitrary values at this stage.
 - Model richer Event and Agent-relative Experience histories, then decide how experience relates to abilities, weapon-category transfer, learning and temporary capability modifiers.
 - Eventually add context-constrained entity generation, scalable statistical groups and resolution-on-demand detail.
+
+## First concrete noncombat Action
+
+- `RunAction` is an intentionally provisional motion-based activity: the Encounter
+  applies movement; the Action measures straight-line displacement from its
+  scheduling position and reports `success`, `partial`, or `no_movement`.
+- Only nonzero displacement counts as exercised `run`. Experience is set per
+  activity by its caller and attributed to that Action; no automatic award policy,
+  gait model, or terrain model is implied.
+- Distance traveled along a curving or returning route and verification of actual
+  running gait remain deferred until movement histories / movement modes exist.

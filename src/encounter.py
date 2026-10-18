@@ -515,6 +515,11 @@ class Encounter(Event):
         registered = self.universe.get_event_by_id(action.id)
         if registered is not None and registered is not action:
             raise ValueError("an Event with this id already exists")
+        # Optional start hook lets an activity observe state from the precise
+        # moment it is scheduled. Legacy Actions need no such hook.
+        on_schedule = getattr(action, 'on_schedule', None)
+        if on_schedule is not None:
+            on_schedule(self)
         action.parent_event_id = self.id
         self.universe.add_event(action)
         self.pending_action_list.append(action.id)
