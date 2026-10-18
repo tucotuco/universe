@@ -11,6 +11,8 @@ import json
 
 from identifiable import Identifiable
 from spatial.state import CartesianPosition, SpatialState
+from spatial.geometry import Geometry3D
+from spatial.occlusion import VisualOcclusion
 from utils import convert_to_numeric
 
 class ObjectDefinition:
@@ -100,7 +102,8 @@ class ObjectInstance(Identifiable):
     indicate its original state and current values that are in effect at the time they are 
     accessed. Instances have unique identifiers.
     '''
-    def __init__(self, object_definition, name=None, id=None, spatial_state=None):
+    def __init__(self, object_definition, name=None, id=None, spatial_state=None,
+                 geometry=None, visual_occlusion=None):
         Identifiable.__init__(self, name, id)
         self.top_facing = 0 # up 
         self.front_facing = 1 # whichever horizontal orientation (1-6 on hex) 1 refers to
@@ -108,8 +111,14 @@ class ObjectInstance(Identifiable):
         self.current = object_definition.copy() or None
         self.parent_container_id = None
         self.spatial_state = None
+        self.geometry = None
+        self.visual_occlusion = None  # unknown; not automatically transparent or opaque
         if spatial_state is not None:
             self.set_spatial_state(spatial_state)
+        if geometry is not None:
+            self.set_geometry(geometry)
+        if visual_occlusion is not None:
+            self.set_visual_occlusion(visual_occlusion)
 
     def to_json(self):
         def handle_circular_refs(obj):
@@ -128,9 +137,55 @@ class ObjectInstance(Identifiable):
             "original": self.original,
             "current": self.current,
             "parent_container_id": self.parent_container_id,
-            "spatial_state": self.spatial_state
+            "spatial_state": self.spatial_state,
+            "geometry": self.geometry.to_dict() if self.geometry is not None else None,
+            "visual_occlusion": (self.visual_occlusion.to_dict()
+                                 if self.visual_occlusion is not None else None)
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
+
+    def set_geometry(self, geometry):
+        """Assign physical extent; None means geometry has not been modeled.
+
+        Definition dimensions are deliberately *not* interpreted as world-space
+        dimensions: historical configuration units and body orientation are
+        not yet specified. Beings inherit this capability from ObjectInstance.
+        """
+        if geometry is not None and not isinstance(geometry, Geometry3D):
+            raise TypeError("geometry must be a Geometry3D or None")
+        self.geometry = geometry
+
+    def set_visual_occlusion(self, visual_occlusion):
+        """Set a physical Entity's nominal visual opacity independently of shape."""
+        if visual_occlusion is not None and not isinstance(visual_occlusion, VisualOcclusion):
+            raise TypeError("visual_occlusion must be a VisualOcclusion or None")
+        self.visual_occlusion = visual_occlusion
+
+    def spatial_bounds(self):
+        """Return global bounds, or None until both shape and position exist."""
+        if self.geometry is None or self.get_position() is None:
+            return None
+        return self.geometry.bounds(self.get_position())
+
+    def occupies_point(self, position):
+        """Test physical occupancy in continuous global 3D coordinates."""
+        if not isinstance(position, CartesianPosition):
+            raise TypeError("position must be a CartesianPosition")
+        if self.geometry is None or self.get_position() is None:
+            return False
+        return self.geometry.contains(position, self.get_position())
+
+    def segment_intersection(self, start, end):
+        """Geometric intersection interval; does NOT imply visual obstruction.
+
+        Returns None when no geometry or position is assigned. A later
+        visibility evaluator may use this together with ``visual_occlusion``.
+        """
+        if not isinstance(start, CartesianPosition) or not isinstance(end, CartesianPosition):
+            raise TypeError("segment endpoints must be CartesianPosition values")
+        if self.geometry is None or self.get_position() is None:
+            return None
+        return self.geometry.segment_interval(start, end, self.get_position())
 
     def get_spatial_state(self):
         return self.spatial_state

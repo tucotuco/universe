@@ -8,15 +8,23 @@ is an equal-area hierarchical triangular grid on a sphere.
 from spatial.cell import CellAddress
 from spatial.isea import ISEAGrid
 from spatial.frame import LocalFrame, LocalPosition
+from spatial.geometry import AxisAlignedBox, Bounds3D, Geometry3D, Sphere, geometry_from_dict
+from spatial.occlusion import VisualOcclusion
 from spatial.relation import SpatialRelation
 from spatial.state import CartesianPosition, SpatialState
 
 __all__ = [
+    "AxisAlignedBox",
+    "Bounds3D",
     "CartesianPosition",
+    "Geometry3D",
     "CellAddress",
     "ISEAGrid",
     "LocalFrame",
     "LocalPosition",
     "SpatialRelation",
     "SpatialState",
+    "Sphere",
+    "VisualOcclusion",
+    "geometry_from_dict",
 ]
