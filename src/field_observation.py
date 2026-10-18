@@ -6,7 +6,7 @@ perception and inference policies can replace this provisional instrument.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 import math
 
 from perception import RangePerception
@@ -91,6 +91,39 @@ class FieldObserver:
                                 dubious_candidates)
 
 
+@dataclass(frozen=True)
+class BeliefRevision:
+    """A dated snapshot of one Agent's estimate, not a claim about reality.
+
+    ``time=None`` means the acquisition time was not supplied. Revision order
+    always follows the ledger append order; it is not an inferred world time.
+    """
+    group_id: str
+    category: str
+    estimate: float
+    evidence_ids: tuple[str, ...]
+    trigger: str  # observation, communication, or reinterpretation
+    time: float | None
+    disputed: bool
+    trigger_observation_id: str
+
+
+@dataclass(frozen=True)
+class EvidenceReassessment:
+    """A later reading of one's own evidence; original interpretation survives."""
+    observation_id: str
+    time: float | None
+    interpretation: object  # FieldInterpretation; avoid module import cycle
+
+
+def _valid_history_time(time):
+    if time is None:
+        return None
+    if isinstance(time, bool) or not isinstance(time, (int, float)) or not math.isfinite(time):
+        raise ValueError("history time must be finite or None")
+    return float(time)
+
+
 class BeliefLedger:
     """An Agent's evidence with provenance; never edits the observed Entity.
 
@@ -101,22 +134,44 @@ class BeliefLedger:
         self.observer_id = observer_id
         self._evidence = {}
         self._interpretations = {}
+        self._reassessments = []
+        self._current_reassessments = {}
+        self._belief_history = []
         self.communication_log = []
 
     @property
     def evidence(self):
         return tuple(self._evidence.values())
 
+    @property
+    def belief_history(self):
+        """Chronological acquisition/reassessment snapshots (append-only)."""
+        return tuple(self._belief_history)
+
+    @property
+    def reassessments(self):
+        return tuple(self._reassessments)
+
     def interpretation_for(self, observation_id):
+        """Original interpretation at the time of observation; never revised."""
         return self._interpretations.get(observation_id)
 
+    def current_interpretation_for(self, observation_id):
+        """Owner's most recent re-reading, else source's original reading."""
+        return self._current_reassessments.get(observation_id,
+                                                self.interpretation_for(observation_id))
+
     def _reports_for(self, observation):
-        interpretation = self._interpretations.get(observation.id)
+        interpretation = self.current_interpretation_for(observation.id)
         return interpretation.reports if interpretation is not None else observation.reports
 
-    def learn(self, observation, *, communicated_by=None, interpretation=None):
+    def learn(self, observation, *, communicated_by=None, interpretation=None,
+              at_time=None):
         if not isinstance(observation, FieldObservation):
             raise TypeError("evidence must be a FieldObservation")
+        at_time = _valid_history_time(at_time)
+        if at_time is not None and at_time < observation.time:
+            raise ValueError("cannot acquire evidence before it was observed")
         if interpretation is not None:
             from field_interpretation import FieldInterpretation
             if not isinstance(interpretation, FieldInterpretation) or \
@@ -134,13 +189,74 @@ class BeliefLedger:
             self._interpretations[observation.id] = interpretation
         if communicated_by is not None:
             self.communication_log.append((observation.id, communicated_by))
+        self._record_belief(observation.group_id,
+                            "communication" if communicated_by is not None else "observation",
+                            observation.time if at_time is None and communicated_by is None else at_time,
+                            observation.id)
         return True
 
-    def share_from(self, other):
-        """Exchange original evidence, not an assertion that the other's belief is fact."""
+    def share_from(self, other, *, at_time=None):
+        """Exchange source evidence/interpretations, preserving source provenance."""
+        if not isinstance(other, BeliefLedger):
+            raise TypeError("can share only another BeliefLedger")
+        at_time = _valid_history_time(at_time)
         return sum(self.learn(e, communicated_by=other.observer_id,
-                              interpretation=other.interpretation_for(e.id))
+                              interpretation=other.interpretation_for(e.id),
+                              at_time=at_time)
                    for e in other.evidence)
+
+    def _record_belief(self, group_id, trigger, time, observation_id):
+        relevant = [e for e in self.evidence if e.group_id == group_id]
+        categories = sorted(set().union(*(self._reports_for(e).keys() for e in relevant)))
+        conflicts = {category for category, _, _ in self.discrepancies(group_id)}
+        for category in categories:
+            sources = tuple(e.id for e in relevant if category in self._reports_for(e))
+            self._belief_history.append(BeliefRevision(
+                group_id, category, self.count_estimate(group_id, category),
+                sources, trigger, time, category in conflicts, observation_id))
+
+    def reconsider(self, observation_id, observer, interpreter, *, at_time=None):
+        """Reinterpret an original personal observation using present skill.
+
+        Neither raw evidence nor historical/source interpretation changes.
+        Shared evidence cannot be presented as one's own sighting. No XP is
+        awarded merely for reading evidence again.
+        """
+        at_time = _valid_history_time(at_time)
+        observation = self._evidence.get(observation_id)
+        if observation is None:
+            raise KeyError(observation_id)
+        if observer.id != self.observer_id or observation.observer_id != observer.id:
+            raise ValueError("only the original observer may reconsider own evidence")
+        if at_time is not None and at_time < observation.time:
+            raise ValueError("reassessment cannot precede observation")
+        from field_interpretation import FieldInterpreter
+        if not isinstance(interpreter, FieldInterpreter):
+            raise TypeError("interpreter must be a FieldInterpreter")
+        new = interpreter.interpret(observation, observer)
+        if new == self.current_interpretation_for(observation_id):
+            return False
+        self._current_reassessments[observation_id] = new
+        self._reassessments.append(EvidenceReassessment(observation_id, at_time, new))
+        self._record_belief(observation.group_id, "reinterpretation", at_time,
+                            observation_id)
+        return True
+
+    def to_dict(self):
+        """Portable representation of evidence and all belief change provenance.
+
+        The source observation and initial interpretation are retained even if
+        the present assessment has changed. This is an export, not a loader.
+        """
+        return {
+            "observer_id": self.observer_id,
+            "evidence": [asdict(e) for e in self.evidence],
+            "original_interpretations": {
+                key: asdict(value) for key, value in self._interpretations.items()},
+            "reassessments": [asdict(entry) for entry in self.reassessments],
+            "belief_history": [asdict(entry) for entry in self.belief_history],
+            "communication_log": list(self.communication_log),
+        }
 
     def count_estimate(self, group_id, category):
         """Uncalibrated weighted evidence summary; *not* a posterior distribution."""

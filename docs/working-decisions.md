@@ -156,3 +156,34 @@ This short record is maintained with the code; it should not require separate us
   only after Encounter accepts Action resolution. Full transactional handling
   of arbitrary third-party completion hooks, generalized event-sourced history,
   adaptive investigation policy, and teacher/student learning are deferred.
+
+## Evolving beliefs and immutable evidence provenance (2026-10)
+
+- Distinguish *objective group reality*, *Agent-relative source observations*,
+  *source interpretations at the skill level of the original observer*, and
+  *later evolving beliefs*. Reconsideration never edits historical evidence or
+  its original interpretation.
+- `BeliefLedger` now records append-only `BeliefRevision` snapshots as new
+  evidence arrives, when it is communicated, or after a Being explicitly
+  reinterprets **its own** prior observation at a later skill level. Revisions
+  retain triggering observation ID, contributors, time when known, and
+  unresolved report discrepancies. The ledger can export evidence, original
+  interpretations, reassessments, and belief history as JSON-compatible data.
+- Communication passes **sourced evidence and the source interpretation**;
+  it does not overwrite a recipient's knowledge or make a report objectively
+  true. It does not automatically train the recipient. Later reinterpretation
+  belongs to the original observer and is not retroactively attributed to the
+  observation's earlier time or skill.
+- Current count estimates remain simple uncertainty-weighted aggregates, not
+  Bayesian posterior inference or calibrated confidence. Repeated correlated
+  evidence and potentially changing group composition have not yet been
+  addressed; snapshots preserve conflicting reports instead of pretending
+  uncertainty necessarily decreases. Fully resolved spatial occupancy of
+  individual Beings will require instantiating those individuals; statistical
+  distributions can represent a group's aggregate footprint/density without
+  resolving members.
+- The guided practice award in `group_belief_revision.py` is an **explicit
+  test input** to the existing skill-progression mechanism, not yet a simulated
+  father-to-son teaching Action. Skill advancement enables a fresh, fallible
+  reading of older evidence, yielding a new belief while retaining the
+  original Experience and interpretation.

@@ -80,8 +80,8 @@ def run_scenario(config=None, seed=None):
 
     # Communication transmits original evidence and its source interpretation.
     exchanged = (
-        ledgers['son'].share_from(ledgers['father']),
-        ledgers['father'].share_from(ledgers['son']),
+        ledgers['son'].share_from(ledgers['father'], at_time=encounter.time),
+        ledgers['father'].share_from(ledgers['son'], at_time=encounter.time),
     )
     discrepancies = ledgers['son'].discrepancies(group.id)
     predicted = ledgers['son'].predict_position(group.id, 160)
