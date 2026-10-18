@@ -255,3 +255,29 @@ This short record is maintained with the code; it should not require separate us
   historical population snapshots, causal state-change provenance and durable
   serialization/restore of the evolved group. Avoid silently treating baseline
   composition as current active membership before those policies exist.
+
+## Fixed-quota conditional refinement experiment (2026-10)
+
+- An optional `formation_traits.adults.<trait>.count` establishes a **fixed,
+  formation-time quota** for one characteristic of the original adult cohort.
+  A keyed, reproducible ranking assigns that trait to exactly that many member
+  identities independently of the order in which Beings are realized.
+  `initial_skills` may assign a starting level on becoming a Being; the original
+  quota and assignments do not change if skills later improve or members die.
+- `formation_trait_state()` reveals only the aggregate committed quota and
+  its residual among unresolved members. It does not create their identities
+  or presume their **current** skills. `known_skill_state()` continues to show
+  only realized Beings' current capabilities. Such private generator state is
+  **not** automatically known by observing Agents.
+- **Model distinction:** this fixed quota is sampling without replacement.
+  Realizing one qualified member reduces the number of qualifications remaining
+  among unresolved members. Independent Bernoulli sampling at a fixed
+  probability would **not** carry this conservation law. The same distinction
+  eventually applies to correlated composition, household relationships, etc.
+- This is an experiment in coherent original-cohort refinement, **not**
+  general conditional inference. Cohort-specific quota counts, exactly assigned
+  starting skill levels, a linear-size keyed ranking, and adult-human support
+  are illustrative restrictions. Large-scale weighted assignments, correlated
+  traits, proper time-stamped composition, births/deaths/membership transitions,
+  skill acquisition histories predating realization, and inference over
+  unresolved evolving members remain deferred.

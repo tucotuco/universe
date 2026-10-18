@@ -8,6 +8,7 @@ not change the underlying realization.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 import hashlib
 import math
 import random
@@ -103,6 +104,10 @@ class StatisticalGroup(ObjectInstance):
         self._members = {}
         # A GroupMember records stable identity; only selected members become Beings.
         self._realized_beings = {}
+        # A formation-time quota is a commitment about the original cohort,
+        # not the member's current learned capability. Freeze configuration
+        # so later caller edits cannot retrospectively rewrite that cohort.
+        self._formation_traits = deepcopy(config.get("formation_traits", {}))
 
     def _rng(self, *parts):
         token = "|".join(map(str, (self.seed, self.id, *parts)))
@@ -161,6 +166,91 @@ class StatisticalGroup(ObjectInstance):
                 category, index, offset)
         return self._members[key]
 
+    def _adult_formation_assignments(self, trait_name):
+        """Return latent, stable member IDs satisfying one exact cohort quota.
+
+        Uses keyed pseudo-random priorities rather than realization order.
+        Enumerating candidate keys does NOT instantiate GroupMembers/Beings.
+        The whole-cohort sort is intentionally limited to this small experiment;
+        a scalable exact-quota selector will be needed for enormous groups.
+        """
+        specifications = self._formation_traits
+        if not isinstance(specifications, dict) or set(specifications) - {"adults"}:
+            raise ValueError("formation traits currently support adults only")
+        traits = specifications.get("adults", {})
+        if not isinstance(traits, dict) or trait_name not in traits:
+            raise ValueError("unknown adult formation trait")
+        spec = traits[trait_name]
+        if not isinstance(spec, dict):
+            raise ValueError("formation trait specification must be a mapping")
+        quota = spec.get("count")
+        if isinstance(quota, bool) or not isinstance(quota, int) or quota < 0:
+            raise ValueError("formation trait count must be a nonnegative integer")
+        initial_skills = spec.get("initial_skills", {})
+        if not isinstance(initial_skills, dict) or any(
+            not isinstance(name, str) or not name
+            or isinstance(level, bool) or not isinstance(level, int) or level < 0
+            for name, level in initial_skills.items()
+        ):
+            raise ValueError("initial_skills must be nonnegative integer skill levels")
+        candidates = [
+            f"{self.id}/{household}/adults/{index}"
+            for household in range(self.household_count)
+            for index in range(self.household(household)["adults"])
+        ]
+        if quota > len(candidates):
+            raise ValueError("formation trait quota exceeds committed adult cohort")
+        ranked = sorted(candidates, key=lambda identifier: (
+            self._rng("formation_trait", trait_name, identifier).random(), identifier
+        ))
+        return frozenset(ranked[:quota])
+
+    def formation_trait_state(self, trait_name):
+        """Original adult trait quota conditioned on realized identities.
+
+        No unresolved member is instantiated. The unresolved qualified count is
+        an exact constraint, not an estimate of current skill or health.
+        """
+        qualified = self._adult_formation_assignments(trait_name)
+        realized = set(self._realized_beings)
+        if not realized.issubset({
+            f"{self.id}/{household}/adults/{index}"
+            for household in range(self.household_count)
+            for index in range(self.household(household)["adults"])
+        }):
+            raise RuntimeError("realized member is outside original adult cohort")
+        committed_adults = self.counts()["adults"]
+        realized_qualified = len(realized & qualified)
+        unresolved_qualified = len(qualified) - realized_qualified
+        return {
+            "trait": trait_name,
+            "committed_qualified": len(qualified),
+            "realized_qualified": realized_qualified,
+            "realized_other": len(realized) - realized_qualified,
+            "unresolved_qualified": unresolved_qualified,
+            "unresolved_other": committed_adults - len(realized) - unresolved_qualified,
+        }
+
+    def _initial_skills_for_adult(self, member_id, skill_dictionary):
+        """Select formation-time attributes before a Being is registered."""
+        skills = {}
+        traits = self._formation_traits.get("adults", {})
+        if not isinstance(traits, dict):
+            raise ValueError("adult formation traits must be a mapping")
+        for trait_name, spec in sorted(traits.items()):
+            # Check every configured quota, even if this member is not selected.
+            # This prevents malformed formation specifications staying hidden.
+            assigned = self._adult_formation_assignments(trait_name)
+            for name in spec.get("initial_skills", {}):
+                if skill_dictionary.get_skill_definition(name) is None:
+                    raise ValueError(f"unknown formation skill: {name}")
+            if member_id in assigned:
+                for name, level in spec.get("initial_skills", {}).items():
+                    if name in skills and skills[name] != level:
+                        raise ValueError("conflicting initial skill levels across traits")
+                    skills[name] = level
+        return skills
+
     @property
     def realized_being_count(self):
         """Number of members promoted to full BeingInstances, not identities."""
@@ -205,11 +295,17 @@ class StatisticalGroup(ObjectInstance):
         definition = universe.get_being_definition("Human")
         if definition is None:
             raise ValueError("the Universe has no Human BeingDefinition")
+        # Validate the entire formation rule before creating or registering an
+        # individual. Traits constrain initial capabilities, not lifetime state.
+        initial_skills = self._initial_skills_for_adult(
+            identifier, universe.get_skill_dictionary())
 
         member = self.member(household, category, index)
         being = BeingInstance(definition, name=name or f"Member {household}:{index}")
         being.id = member.id  # stable identity predates the Being's full realization
         being.set_position(self.member_position(member))
+        for skill_name, level in initial_skills.items():
+            being.set_skill_level(universe.get_skill_dictionary(), skill_name, level)
         universe.add_object(being)
         if universe.get_object_by_id(member.id) is not being:
             raise RuntimeError("could not register realized Being")
