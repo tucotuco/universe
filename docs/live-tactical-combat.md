@@ -66,16 +66,17 @@ contract. This distinction is deliberate and tested.
 
 ## Remaining limitations
 
-Personal facing, impact contact geometry, action interrupts, body-specific
+Personal facing, impact contact geometry, body-specific
 reach, actual vision/hearing, collision detection, environmental features,
 opponent uncertainty and autonomous tactics are not established. Reach is
 currently an explicit number in Encounter units, rather than a verified
 conversion from the weapon lengths in the combat draft. The initial protective
 body envelope is a `Sphere` used only for geometric-path detection.
 
-The session is in-memory and single-process. The seed makes the local dice
-sequence reproducible but does not define general Universe-wide RNG or save
-semantics. Movement and guard are not yet separately recorded as persisted
+The initial session was in-memory and single-process. See
+`combat-controls-and-persistence.md` for the subsequent versioned, checked
+command journal. That journal does not establish general Universe-wide RNG or
+save semantics. Movement and guard are not yet separately recorded as persisted
 Action Events, whereas melee strikes and their XP are.
 
 ## Validation

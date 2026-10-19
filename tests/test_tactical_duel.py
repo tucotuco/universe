@@ -42,11 +42,13 @@ class TestTacticalDuel(unittest.TestCase):
             game.choose('look behind')
         self.assertEqual(game.encounter.time, 0)
         game.choose('thrust')
-        with self.assertRaisesRegex(ValueError, 'in progress'):
-            game.choose('thrust')
-        with self.assertRaisesRegex(ValueError, 'unfinished'):
-            game.choose('guard')
-        self.assertEqual(game.encounter.time, 1)
+        game.choose('swing')
+        self.assertEqual(len(game.encounter.cancelled_action_list), 1)
+        self.assertEqual(game.state()['player']['pending']['motion'], 'swing')
+        game.choose('guard')
+        self.assertEqual(len(game.encounter.cancelled_action_list), 2)
+        self.assertIsNone(game.state()['player']['pending'])
+        self.assertEqual(game.encounter.time, 3)
 
     def test_movement_is_from_real_encounter_and_disables_out_of_range_attacks(self):
         game = TacticalDuel(17)

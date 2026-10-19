@@ -75,7 +75,8 @@ class Encounter(Event):
     def __init__(self, universe, difficulty_class, start_time, end_time=None, 
                  event_type=None, location=None, name="", parent_event_id=None, id=None, 
                  time=None, being_list=None, non_being_object_list=None, 
-                 pending_action_list=None, finished_action_list=None, initiated=False, 
+                 pending_action_list=None, finished_action_list=None,
+                 cancelled_action_list=None, initiated=False,
                  map=None, awareness=None, initiation=None, local_frame=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
@@ -103,6 +104,7 @@ class Encounter(Event):
             self.finished_action_list = []
         else:
             self.finished_action_list = finished_action_list
+        self.cancelled_action_list = list(cancelled_action_list or [])  # recorded aborted Actions
         # Awareness is directed encounter state: observer Being id -> Entity ids
         # currently known to that observer.  It is deliberately distinct from physical proximity;
         # later sight, hearing, memory, concealment, and other perception systems can
@@ -147,6 +149,7 @@ class Encounter(Event):
             },
             "pending_action_list": self.pending_action_list,
             "finished_action_list": self.finished_action_list,
+            "cancelled_action_list": self.cancelled_action_list,
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
 
@@ -524,6 +527,23 @@ class Encounter(Event):
         self.universe.add_event(action)
         self.pending_action_list.append(action.id)
         return action.id
+
+    def cancel_action(self, action_id, *, reason='interrupted'):
+        """Withdraw a pending Action, retaining the Event as evidence of intent.
+
+        It has no resolution, completion, damage, or practice award.  Repeated
+        cancellation or attempts to cancel a finished action are rejected.
+        """
+        if action_id not in self.pending_action_list:
+            raise ValueError('action is not pending')
+        action = self.universe.get_event_by_id(action_id)
+        if not isinstance(action, Action):
+            raise ValueError('only pending Actions may be canceled')
+        self.pending_action_list.remove(action_id)
+        action.canceled_at = self.time
+        action.cancellation_reason = reason
+        self.cancelled_action_list.append(action_id)
+        return action
 
     def record_skill_use(self, action_id, skill_name, experience=0, outcome=None):
         """Attribute documented practice to a Being after a completed Action.

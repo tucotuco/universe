@@ -28,6 +28,8 @@ class MeleeResult:
     actor_hp_after: float
     target_hp_before: float
     target_hp_after: float
+    target_armor_damage: float = 0
+    actor_armor_damage: float = 0
 
     def to_dict(self):
         return asdict(self)
@@ -120,6 +122,15 @@ class MeleeStrike(Action):
                 self.instrument_id in actor.armed_with(self.universe).values(),
                 status, distance)
 
+    def roll_hits(self, roll, difficulty_class):
+        # Use the Being's established Exertion fatigue adjustment. This affects
+        # attack accuracy, not the underlying random number or skill history.
+        fatigue = self.get_actor().get_fatigue_level()
+        adjustment = self.get_actor().exertion.fatigue_levels[fatigue]['ability_adjustment']
+        if adjustment is None:
+            return False
+        return super().roll_hits(roll, difficulty_class - adjustment)
+
     def resolve(self, difficulty_class):
         if self.combat_result is not None:
             raise RuntimeError('melee Action already resolved')
@@ -127,10 +138,15 @@ class MeleeStrike(Action):
         target = self.get_target()
         before_actor = actor.get_hit_points()
         before_target = target.get_hit_points()
+        actor_armor = self.universe.get_object_by_id(actor.get_armor_id())
+        target_armor = self.universe.get_object_by_id(target.get_armor_id())
+        armor_before = (target_armor.hit_points() if target_armor else None)
+        actor_armor_before = (actor_armor.hit_points() if actor_armor else None)
         eligible = self._simultaneous_eligibility
         if eligible is None:
             eligible = self.capture_simultaneous_eligibility()
         actor_ready, target_ready, weapon_ready, status, distance = eligible
+        actor_ready = actor_ready and actor.get_fatigue_level() < 5
         attempted = False
         if not actor_ready:
             outcome = 'unable_to_act'
@@ -154,7 +170,9 @@ class MeleeStrike(Action):
             self.id, self.end_time, self.actor_id, self.target_id,
             self.instrument_id, self.event_type, outcome, distance,
             before_actor, actor.get_hit_points(),
-            before_target, target.get_hit_points())
+            before_target, target.get_hit_points(),
+            0 if armor_before is None else max(0, armor_before - target_armor.hit_points()),
+            0 if actor_armor_before is None else max(0, actor_armor_before - actor_armor.hit_points()))
         return ActionResolution(outcome, skill_exercises=exercises)
 
     def to_json(self):
