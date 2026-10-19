@@ -68,7 +68,7 @@ class TestCombatReactions(unittest.TestCase):
 
     def _ready_incoming_strike(self):
         game = TacticalDuel(17)
-        for _ in range(5):
+        for _ in range(2):
             game.choose('wait')
         self.assertEqual(game._pending(game.foe).end_time, 6)
         return game
@@ -76,8 +76,14 @@ class TestCombatReactions(unittest.TestCase):
     def test_parry_deflects_simultaneous_impact_and_both_exercise_weapons(self):
         game = self._ready_incoming_strike()
         before = game.player.get_hit_points()
+        state = game.choose('parry')
+        defense = game._pending(game.player)
+        self.assertEqual(defense.ready_at, 5)
+        self.assertEqual(defense.end_time, 6)
+        self.assertEqual(defense.target_action_id, game._pending(game.foe).id)
+        for _ in range(2): game.choose('wait')
         with patch('melee_defense.roll_dice', side_effect=[20, 1]):
-            state = game.choose('parry')
+            state = game.choose('wait')
         self.assertEqual(game.player.get_hit_points(), before)
         results = game.history[-1]['results']
         self.assertIn('parried', [r['outcome'] for r in results])
@@ -92,8 +98,10 @@ class TestCombatReactions(unittest.TestCase):
 
     def test_failed_parry_still_earns_practice_and_cannot_block(self):
         game = self._ready_incoming_strike()
+        game.choose('parry')
+        for _ in range(2): game.choose('wait')
         with patch('melee_defense.roll_dice', side_effect=[1, 20]):
-            game.choose('parry')
+            game.choose('wait')
         self.assertIn('failed', [r['outcome'] for r in game.history[-1]['results']])
         self.assertNotIn('parried', [r['outcome'] for r in game.history[-1]['results']])
         self.assertEqual(game.player.get_skill_experience('Dagger'), 10)
@@ -103,6 +111,9 @@ class TestCombatReactions(unittest.TestCase):
         game.foe.set_position(CartesianPosition(1.9, 0, 0))
         before = game.player.get_position()
         state = game.choose('dodge')
+        self.assertAlmostEqual(game.player.get_position().x, before.x)
+        for _ in range(2): state = game.choose('wait')
+        state = game.choose('wait')
         self.assertAlmostEqual(game.player.get_position().x, before.x - .5)
         self.assertEqual(state['player_cues']['movement'], '←')
         self.assertEqual(game.player.get_skill_experience('tumble'), 10)
@@ -112,11 +123,13 @@ class TestCombatReactions(unittest.TestCase):
 
     def test_reaction_without_imminent_strike_gains_no_experience(self):
         game = TacticalDuel(17)
-        game.choose('parry')
+        with self.assertRaisesRegex(ValueError, 'No currently perceived incoming attack'):
+            game.choose('parry')
+        with self.assertRaisesRegex(ValueError, 'No currently perceived incoming attack'):
+            game.choose('dodge')
         self.assertEqual(game.player.get_skill_experience('Dagger'), 0)
-        self.assertIn('no_threat', [r['outcome'] for r in game.history[-1]['results']])
-        game.choose('dodge')
         self.assertEqual(game.player.get_skill_experience('tumble'), 0)
+        self.assertEqual(game.encounter.time, 0)
 
     def test_unarmed_parry_rejected_without_interrupting_attack(self):
         game = TacticalDuel(17)
@@ -144,7 +157,8 @@ class TestCombatReactions(unittest.TestCase):
     def test_reactions_survive_checked_save_replay_and_resume(self):
         game = self._ready_incoming_strike()
         game.choose('parry')
-        game.choose('dodge')
+        for _ in range(2): game.choose('wait')
+        # Save while a named defensive action is pending, too.
         session = game.to_session()
         restored = TacticalDuel.from_session(json.loads(json.dumps(session)))
         self.assertEqual(restored._journal_signature(), game._journal_signature())
@@ -152,6 +166,8 @@ class TestCombatReactions(unittest.TestCase):
                          game.player.get_skill_experience('Dagger'))
         self.assertEqual(restored.player.get_skill_experience('tumble'),
                          game.player.get_skill_experience('tumble'))
+        self.assertEqual(restored._pending(restored.player).target_action_id,
+                         restored._pending(restored.foe).id)
         for command in ('wait', 'northwest'):
             restored.choose(command)
             game.choose(command)

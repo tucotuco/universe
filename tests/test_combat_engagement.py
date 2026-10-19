@@ -120,7 +120,7 @@ class TestCombatEngagement(unittest.TestCase):
         game.choose('thrust', {'attack': 1, 'defense': 0, 'timing': 1, 'extra_damage': 0})
         game.choose('north')
         session = game.to_session()
-        self.assertEqual(session['version'], 2)
+        self.assertEqual(session['version'], TacticalDuel.SESSION_VERSION)
         self.assertEqual(len(session['foe_actions']), 2)
         self.assertTrue(session['foe_actions'][0]['pending'])
         self.assertEqual(session['foe_actions'][0]['pending']['motion'], 'swing')

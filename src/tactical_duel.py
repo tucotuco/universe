@@ -30,7 +30,7 @@ class TacticalDuel:
     DODGE_PER_SECOND = .5
     SENSE_DISTANCE = 3.0
     REACH = 2.0
-    SESSION_VERSION = 2
+    SESSION_VERSION = 3
     EFFORT_FIELDS = ('attack', 'defense', 'timing', 'extra_damage')
 
     def __init__(self, seed=17):
@@ -124,8 +124,14 @@ class TacticalDuel:
         return strike, interrupted
 
     def _react(self, kind):
+        if not self._perceived[self.player.id]:
+            raise ValueError('No currently perceived incoming attack to defend against')
+        incoming = self._pending(self.foe)
+        if not isinstance(incoming, MeleeStrike) or incoming.target_id != self.player.id:
+            raise ValueError('No currently perceived incoming attack to defend against')
         defense = MeleeDefense(self.encounter, self.player.id, self.foe.id,
-                                kind=kind, weapon_id=self.player_weapon if kind == 'parry' else None)
+                               kind=kind, target_action_id=incoming.id,
+                               weapon_id=self.player_weapon if kind == 'parry' else None)
         defense.on_schedule(self.encounter)  # validate before interrupting
         interrupted = self._interrupt(self.player)
         self.encounter.schedule_action(defense)
@@ -229,15 +235,8 @@ class TacticalDuel:
             defense, interrupted = self._react(command)
             if strategy is not None:
                 self.player.set_strategy(defense=strategy.defense)
-            description = f'Scout begins a timed {command} reaction (due {defense.end_time:g}s).'
-            if command == 'dodge':
-                src, dst = self.player.get_position(), self.foe.get_position()
-                dx, dy = src.x - dst.x, src.y - dst.y
-                norm = math.hypot(dx, dy)
-                if norm == 0:
-                    dx, dy, norm = 1, 0, 1
-                velocities[self.player.id] = (dx * self.DODGE_PER_SECOND / norm,
-                                               dy * self.DODGE_PER_SECOND / norm, 0)
+            description = (f'Scout begins {command} against the designated incoming strike '
+                           f'(ready {defense.ready_at:g}s, impact {defense.end_time:g}s).')
         elif command == 'cancel':
             interrupted = self._interrupt(self.player)
             if self._guard_active():
@@ -254,6 +253,19 @@ class TacticalDuel:
             description = 'Scout waits one second.'
         if interrupted is not None:
             description = f'Scout interrupts a {interrupted.event_type}. ' + description
+        # Dodge displacement occurs when the targeted strike resolves, not when
+        # the dodge is declared. Normal movement may continue during preparation.
+        dodge = self._pending(self.player)
+        if (isinstance(dodge, MeleeDefense) and dodge.kind == 'dodge'
+                and dodge.end_time <= self.encounter.time + 1):
+            src, dst = self.player.get_position(), self.foe.get_position()
+            dx, dy = src.x - dst.x, src.y - dst.y
+            norm = math.hypot(dx, dy)
+            if norm == 0:
+                dx, dy, norm = 1, 0, 1
+            vx, vy, vz = velocities.get(self.player.id, (0, 0, 0))
+            velocities[self.player.id] = (vx + dx * self.DODGE_PER_SECOND / norm,
+                                          vy + dy * self.DODGE_PER_SECOND / norm, vz)
         foe_velocities, foe_decision = self._foe_choice()
         velocities.update(foe_velocities)
         step = self.encounter.step(1, velocities=velocities)
@@ -356,7 +368,7 @@ class TacticalDuel:
                              'foe_activity': foe_activity,
                              'foe_choice': foe_decision, 'foe_cue': foe_cue,
                              'foe_observed': self._perceived[self.player.id],
-                             'player_moved': command in self.DIRECTION or command == 'dodge',
+                             'player_moved': self.player.id in velocities,
                              'player_movement': list(velocities[self.player.id]) if self.player.id in velocities else None,
                              'foe_moved': self.foe.id in foe_velocities,
                              'results': results, 'fatigue_events': fatigue_events})
@@ -409,6 +421,9 @@ class TacticalDuel:
             self.encounter, player.id, self.foe.id, self.player_weapon,
             motion='thrust', reach=self.REACH)._status(self.encounter)
             if enemy_visible else (None, None))
+        perceived_strike = self._pending(self.foe) if enemy_visible else None
+        can_target_strike = isinstance(perceived_strike, MeleeStrike) and (
+            perceived_strike.target_id == self.player.id)
         foe_data = being_state(self.foe) if audit else (
             {'name': self.foe.name,
              'position': list(self.foe.get_position().as_tuple()),
@@ -446,7 +461,7 @@ class TacticalDuel:
             command = self.commands[-1] if self.commands else None
             if isinstance(command, dict):
                 command = command['command']
-            if command == 'dodge' and latest.get('player_movement'):
+            if latest.get('player_movement') and command not in self.DIRECTION:
                 vx, vy, _ = latest['player_movement']
                 angle = math.atan2(vy, vx)
                 dirs = ['east', 'northeast', 'north', 'northwest', 'west',
@@ -477,6 +492,8 @@ class TacticalDuel:
                           'status': reach_status,
                           'in_range': reach_status == 'in_reach'} if enemy_visible else None,
                 'effort_pool': player.get_weapon_skill_level('Dagger') or 0,
+                'perceived_incoming_attack': (bool(can_target_strike) if not audit else
+                                              bool(isinstance(self._pending(self.foe), MeleeStrike))),
                 'player_cues': {'attack': ('↯' if player_data['pending'] and
                                           player_data['pending']['motion'] in ('parry', 'dodge') else
                                           '⚔' if player_data['pending'] else ('✦' if player_just_struck else '')),
@@ -574,11 +591,11 @@ class TacticalDuel:
             raise ValueError('Invalid session structure')
         version = payload.get('version')
         expected = {'format', 'version', 'seed', 'commands', 'checks'}
-        if version == cls.SESSION_VERSION:
+        if version in (2, cls.SESSION_VERSION):
             expected.update(('foe_decisions', 'foe_actions'))
         if not {'format', 'version', 'seed', 'commands', 'checks'} <= set(payload):
             raise ValueError('Invalid session structure')
-        if payload['format'] != 'universe.tactical-duel' or version not in (1, cls.SESSION_VERSION):
+        if payload['format'] != 'universe.tactical-duel' or version not in (1, 2, cls.SESSION_VERSION):
             raise ValueError('Unsupported session format/version')
         if set(payload) != expected:
             raise ValueError('Invalid session structure')
@@ -588,7 +605,7 @@ class TacticalDuel:
         if (not isinstance(commands, list) or not isinstance(checks, list)
                 or len(commands) != len(checks) or len(commands) > 100000):
             raise ValueError('Invalid session history')
-        if version == cls.SESSION_VERSION:
+        if version in (2, cls.SESSION_VERSION):
             foes = payload['foe_decisions']
             foe_actions = payload['foe_actions']
             if (not isinstance(foes, list) or len(foes) != len(commands) or

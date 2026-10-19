@@ -1,8 +1,7 @@
-"""Timed, event-backed parry and dodge reactions in the one-on-one Encounter.
+"""Attack-specific, timed parry and dodge in the one-on-one Encounter.
 
-A reaction protects against strikes completing at the same instant. A dodge
-also moves the actor in physical space through the Encounter's kinematic step.
-There is no claim yet of general multi-attacker or facing geometry.
+The defender selects one pending strike. A reaction must be ready when that
+strike resolves; neither a later strike nor an unspecified attacker is protected.
 """
 
 from action import Action
@@ -15,7 +14,7 @@ class MeleeDefense(Action):
     # For same-time Events, resolve the defense before incoming strikes.
     resolution_priority = -1
 
-    def __init__(self, encounter, actor_id, attacker_id, *, kind, weapon_id=None):
+    def __init__(self, encounter, actor_id, attacker_id, *, kind, target_action_id, weapon_id=None):
         if kind not in ('parry', 'dodge'):
             raise ValueError('defensive reaction must be parry or dodge')
         self.encounter = encounter
@@ -23,11 +22,14 @@ class MeleeDefense(Action):
         self.defended_action_ids = ()
         self.success = False
         self.result = None
+        self.target_action_id = target_action_id
+        self.ready_at = None
         self.threat_at_schedule = ()
         super().__init__(encounter.universe, encounter.time, None, kind,
                          actor_id, attacker_id, weapon_id,
                          parent_event_id=encounter.id)
-        self.end_time = encounter.time + 1
+        # Set from the designated strike and applicable preparation time.
+        self.end_time = encounter.time
 
     def on_schedule(self, encounter):
         from melee_combat import MeleeStrike
@@ -46,13 +48,27 @@ class MeleeDefense(Action):
             if not isinstance(weapon, WeaponInstance) or (
                     self.instrument_id not in actor.armed_with(encounter.universe).values()):
                 raise ValueError('parry requires a held weapon')
-        threats = []
-        for action_id in encounter.pending_action_list:
-            attack = encounter.universe.get_event_by_id(action_id)
-            if (isinstance(attack, MeleeStrike) and attack.actor_id == attacker.id
-                    and attack.target_id == actor.id and attack.end_time == self.end_time):
-                threats.append((attack.id, attack._status(encounter)[0] == 'in_reach'))
-        self.threat_at_schedule = tuple(threats)
+        strike = encounter.universe.get_event_by_id(self.target_action_id)
+        if (not isinstance(strike, MeleeStrike)
+                or strike.id not in encounter.pending_action_list
+                or strike.actor_id != attacker.id or strike.target_id != actor.id):
+            raise ValueError('defense must designate one pending incoming attack')
+        if self.kind == 'parry':
+            weapon = self.get_instrument()
+            # Existing weapon definitions specify separate swing/thrust timings.
+            # Use the faster attack motion, less one second, as the first
+            # concrete interpretation of draft parry timing.
+            times = [t for t in (weapon.St(), weapon.Tt()) if t is not None]
+            preparation = max(1, min(times) - 1)
+        else:
+            preparation = 2
+        self.ready_at = encounter.time + preparation
+        if self.ready_at > strike.end_time:
+            raise ValueError('defense cannot be ready before the designated attack impacts')
+        # Remain committed to this strike until its impact, even if prepared
+        # earlier. The action is not a reusable defense against other strikes.
+        self.end_time = strike.end_time
+        self.threat_at_schedule = ((strike.id, strike._status(encounter)[0] == 'in_reach'),)
 
     def resolve(self, difficulty_class):
         from melee_combat import MeleeStrike
@@ -60,21 +76,20 @@ class MeleeDefense(Action):
         attacker = self.get_target()
         if self.result is not None:
             raise RuntimeError('defensive reaction already resolved')
-        incoming = []
-        for action_id in self.encounter.pending_action_list:
-            strike = self.universe.get_event_by_id(action_id)
-            if (isinstance(strike, MeleeStrike) and strike.actor_id == attacker.id
-                    and strike.target_id == actor.id and strike.end_time == self.end_time):
-                incoming.append(strike)
+        strike = self.universe.get_event_by_id(self.target_action_id)
         if actor.is_helpless() or (self.kind == 'parry' and
                 self.instrument_id not in actor.armed_with(self.universe).values()):
             self.result = 'unable_to_defend'
             return ActionResolution(self.result)
-        # An impending attack is required for XP, even when moving away
-        # from it made the strike fail reach by the time of resolution.
-        threatened = [strike for strike in incoming if (
-            strike._status(self.encounter)[0] == 'in_reach' or
-            (self.kind == 'dodge' and (strike.id, True) in self.threat_at_schedule))]
+        # A canceled or already-finished designated attack cannot be replaced
+        # by a different strike, even from the same attacker.
+        if (strike.id not in self.encounter.pending_action_list or
+                strike.actor_id != attacker.id or strike.target_id != actor.id or
+                strike.end_time != self.end_time):
+            self.result = 'no_threat'
+            return ActionResolution(self.result)
+        threatened = [strike] if (strike._status(self.encounter)[0] == 'in_reach' or
+            (self.kind == 'dodge' and (strike.id, True) in self.threat_at_schedule)) else []
         if not threatened:
             self.result = 'no_threat'
             return ActionResolution(self.result)
