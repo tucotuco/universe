@@ -305,3 +305,34 @@ This short record is maintained with the code; it should not require separate us
   relations. An inverse index for Being-to-Groups queries may eventually be
   derived but is not the authoritative source. Membership criteria, transitions,
   overlapping memberships and time validity remain deferred.
+
+## Group-owned current membership and transfer experiment (2026-10)
+
+- A `StatisticalGroup` owns current membership: realized native members minus
+  departed natives, plus realized arrivals from other Groups. Beings do not
+  maintain an authoritative list of Groups. An inverse membership lookup may be
+  derived later, but is not required for this experiment.
+- `counts()` remains the **original committed formation composition**, including
+  formation quotas and conditional CDF draws. `current_counts()` is a distinct
+  derived view that reflects transfers. `aggregate_state()` exposes both; known
+  health and capabilities count only current realized members, while uninstantiated
+  cohort members remain unresolved. Death does not automatically remove membership.
+- `transfer_being_to()` supports *realized adult Beings* already registered in the
+  same Universe. Both registered Groups must be at the same simulation time, and
+  the transfer takes effect at that time. Full preflight validation precedes both
+  membership updates; one immutable `MembershipTransfer` record is stored in both
+  Groups' in-memory histories. Transfers back to the origin and through an
+  intermediate Group preserve the Being object and the origin Group's formation
+  facts; no additional individual is generated.
+- Membership **does not imply current physical presence**. Joining another Group
+  does not teleport or automatically attach the Being to that Group's motion.
+  Departure detaches it from automatic original-Group motion; returning does
+  not reattach automatically. A future movement/attachment model should make
+  physical accompanying explicit.
+- Current membership is separate from historical provenance, but transfer records
+  are not yet `Universe` Events and membership state cannot yet be restored from
+  saved JSON. This is an in-memory refinement/consistency experiment, not a
+  general social membership system. Membership rules, overlapping affiliations,
+  household restructuring, transfer of unrealized individuals, age transitions,
+  births/deaths changing population, dynamic statistical regeneration, movement
+  following rules, and serializable historical reconstruction remain deferred.

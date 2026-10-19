@@ -72,6 +72,25 @@ class ReachableRegion:
     time: float
 
 
+@dataclass(frozen=True)
+class MembershipTransfer:
+    """One historical transfer, referenced by both Group-owned journals.
+
+    Time is expressed in the shared Universe simulation time convention.
+    Membership and spatial presence are deliberately independent.
+    """
+    time: float
+    being_id: str
+    category: str
+    source_group_id: str
+    destination_group_id: str
+
+    def to_dict(self):
+        return dict(time=self.time, being_id=self.being_id,
+                    category=self.category, source_group_id=self.source_group_id,
+                    destination_group_id=self.destination_group_id)
+
+
 class StatisticalGroup(ObjectInstance):
     """An Encounter ObjectInstance whose internal population is still statistical.
 
@@ -105,6 +124,15 @@ class StatisticalGroup(ObjectInstance):
         self._members = {}
         # A GroupMember records stable identity; only selected members become Beings.
         self._realized_beings = {}
+        # Original cohort is immutable; current membership is a separate layer.
+        # Departures from the original cohort never delete historical provenance.
+        self._departed_member_ids = set()
+        # Arrivals are already realized Beings, indexed by stable global identity.
+        self._incoming_beings = {}  # member_id -> (BeingInstance, category)
+        self.membership_history = []
+        # Group motion is not implied by affiliation. Pre-existing native members
+        # accompany the group until they depart; arrivals do not automatically do so.
+        self._motion_attached_native_ids = set()
         # A formation-time quota is a commitment about the original cohort,
         # not the member's current learned capability. Freeze configuration
         # so later caller edits cannot retrospectively rewrite that cohort.
@@ -354,37 +382,125 @@ class StatisticalGroup(ObjectInstance):
         if universe.get_object_by_id(member.id) is not being:
             raise RuntimeError("could not register realized Being")
         self._realized_beings[member.id] = being
+        self._motion_attached_native_ids.add(member.id)
         return being
+
+    def _current_realized_members(self):
+        """Current realized members, keyed by identity, with their categories.
+
+        This is not a full listing of members: unresolved original-cohort people
+        remain represented by aggregate counts rather than individual objects.
+        """
+        native = {member.id: member.category for member in self._members.values()}
+        current = {
+            identity: (being, native[identity])
+            for identity, being in self._realized_beings.items()
+            if identity not in self._departed_member_ids
+        }
+        for identity, entry in self._incoming_beings.items():
+            if identity in current:
+                raise RuntimeError("duplicate current Group membership")
+            current[identity] = entry
+        return current
+
+    def has_realized_member(self, being_or_id):
+        """Test current membership of an *already realized* Being only."""
+        identity = getattr(being_or_id, "id", being_or_id)
+        return identity in self._current_realized_members()
+
+    def current_counts(self):
+        """Current membership counts, separate from formation-time counts().
+
+        Membership transitions affect adults only in this experiment. An adult
+        arrival/departure does not itself establish or dissolve a household.
+        """
+        counts = self.counts()
+        counts['adults'] += (len(self._incoming_beings)
+                             - len(self._departed_member_ids))
+        counts['humans'] = counts['adults'] + counts['children']
+        return counts
+
+    def transfer_being_to(self, universe, being, destination, time=None):
+        """Transfer a realized adult between Group-owned memberships.
+
+        One validated operation changes both groups, and the *same immutable*
+        transfer record appears in both journals. The Being's registry entry,
+        identity, history, skills, and 3D position are not modified. This first
+        experiment does not implement eligibility or overlapping membership.
+        """
+        from being import BeingInstance
+        from universe import Universe
+        if (not isinstance(universe, Universe)
+                or not isinstance(destination, StatisticalGroup)
+                or destination is self
+                or universe.get_object_by_id(self.id) is not self
+                or universe.get_object_by_id(destination.id) is not destination):
+            raise ValueError("source and destination must be distinct registered Groups in the same Universe")
+        if (not isinstance(being, BeingInstance)
+                or universe.get_object_by_id(being.id) is not being):
+            raise ValueError("Being must exist in the shared Universe registry")
+        source_members = self._current_realized_members()
+        entry = source_members.get(being.id)
+        if entry is None or entry[0] is not being:
+            raise ValueError("Being is not a current realized member of source Group")
+        if destination.has_realized_member(being):
+            raise ValueError("Being is already a current member of destination Group")
+        category = entry[1]
+        if category != "adults":
+            raise NotImplementedError("membership transfer currently supports adult Beings only")
+        if self.time != destination.time:
+            raise ValueError("Groups must have the same current simulation time for transfer")
+        now = self.time if time is None else float(time)
+        if not math.isfinite(now) or now != self.time:
+            raise ValueError("transfer must occur at the Groups' current simulation time")
+        # Preflight: receiving the Being must correspond to either a returning
+        # native member or a new incoming member, never an identity collision.
+        returning = being.id in destination._realized_beings
+        if returning and being.id not in destination._departed_member_ids:
+            raise ValueError("destination's native identity is not departed")
+        if returning and destination._realized_beings[being.id] is not being:
+            raise ValueError("returning Being identity conflicts with destination history")
+        record = MembershipTransfer(now, being.id, category, self.id, destination.id)
+        # Commit both membership changes only after the complete preflight.
+        if being.id in self._realized_beings:
+            self._departed_member_ids.add(being.id)
+        else:
+            del self._incoming_beings[being.id]
+        self._motion_attached_native_ids.discard(being.id)
+        if returning:
+            destination._departed_member_ids.remove(being.id)
+        else:
+            destination._incoming_beings[being.id] = (being, category)
+        self.membership_history.append(record)
+        destination.membership_history.append(record)
+        return record
 
     def aggregate_state(self):
         """Live, *derived* group view of known individual state.
 
-        ``counts()`` is the committed composition at realization, not an
-        automatically revised living population. Unresolved members have no
-        fabricated health or activity state. Health categories below overlap:
+        ``counts()`` is the committed original composition; ``current_counts()``
+        reflects membership transfers. Neither assumes that dead members have
+        departed. Unresolved members have no fabricated health/activity state.
+        Health categories overlap:
         incapacitated and injured are subsets of known_living, not additional
         members. Calling this does not cache or copy a Being's mutable state.
         """
         composition = self.counts()
+        current = self.current_counts()
         categories = {}
         for category in self.CATEGORIES:
             categories[category] = dict(
                 committed=composition[category],
+                current=current[category],
                 realized=0,
-                unresolved=composition[category],
+                unresolved=current[category],
                 known_living=0,
                 known_dead=0,
                 known_incapacitated=0,
                 known_injured=0,
             )
-        members_by_id = {member.id: member for member in self._members.values()}
-        for member_id, being in self._realized_beings.items():
-            # The corresponding GroupMember fixes cohort membership even if
-            # the Being has moved or otherwise changed in the Encounter.
-            member = members_by_id.get(member_id)
-            if member is None:
-                raise RuntimeError("realized Being has no committed group member")
-            summary = categories[member.category]
+        for member_id, (being, category) in self._current_realized_members().items():
+            summary = categories[category]
             summary['realized'] += 1
             summary['unresolved'] -= 1
             hp = being.get_hit_points()
@@ -396,18 +512,20 @@ class StatisticalGroup(ObjectInstance):
                     summary['known_incapacitated'] += 1
                 if hp < being.original.hit_points:
                     summary['known_injured'] += 1
-        return {'composition': composition, 'categories': categories}
+        return {'composition': composition, 'current_composition': current,
+                'categories': categories}
 
     def known_skill_state(self, skill_name):
         """Realized members' current capability, not a whole-group estimate.
 
         Unresolved member skills are genuinely unknown; do not interpret the
         known levels or earned experience as a representative group average.
+        Only current Group members are included, not historical departures.
         """
         if not isinstance(skill_name, str) or not skill_name:
             raise ValueError("skill_name must be a nonempty string")
         known = {}
-        for member_id, being in sorted(self._realized_beings.items()):
+        for member_id, (being, category) in sorted(self._current_realized_members().items()):
             level = being.get_skill_level(skill_name)
             if level is None:
                 level = being.get_weapon_skill_level(skill_name)
@@ -418,7 +536,7 @@ class StatisticalGroup(ObjectInstance):
         return {
             'skill': skill_name,
             'known': known,
-            'unresolved_adults': self.counts()['adults'] - len(known),
+            'unresolved_adults': self.current_counts()['adults'] - len(known),
         }
 
     def member_position(self, member):
@@ -442,10 +560,10 @@ class StatisticalGroup(ObjectInstance):
         old_position = self.get_position().as_tuple()
         delta = tuple(new - old for new, old in zip(new_position, old_position))
         self.set_position(CartesianPosition(*new_position))
-        # Shared group translation carries realized members without replacing
-        # their individually updated Encounter positions or moving unresolved
-        # members into the Universe registry. Detachment is deferred.
-        for being in self._realized_beings.values():
+        # Only members explicitly attached to the group's ongoing movement
+        # accompany it. Transfer never teleports a Being or assumes presence.
+        for identity in self._motion_attached_native_ids:
+            being = self._realized_beings[identity]
             previous = being.get_position().as_tuple()
             being.set_position(CartesianPosition(*(p + d for p, d in zip(previous, delta))))
         self.velocity = tuple(v + a * duration for v, a in zip(self.velocity,
