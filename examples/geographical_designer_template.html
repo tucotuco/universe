@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Universe · Geographical Requirements Designer</title>
+<style>
+:root{color-scheme:dark;--bg:#0c1721;--panel:#142531;--line:#304655;--muted:#a6b9c4;--ink:#e7f0ee;--accent:#8ed3b2;--warning:#eec38b}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 2%,#1b3b3c,var(--bg) 65%);font:15px/1.45 system-ui,Arial,sans-serif;color:var(--ink)}
+main{max-width:1450px;margin:0 auto;padding:20px 24px 35px}.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:11px;color:var(--accent);font-weight:bold}h1{font-size:30px;margin:4px 0}h2{font-size:17px;margin:0 0 10px}p{margin:6px 0;color:var(--muted)}.subtitle{max-width:1000px}.layout{display:grid;grid-template-columns:minmax(500px,1fr) 300px;gap:14px;margin-top:19px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}.map-panel{grid-column:1}.actions{grid-column:2;grid-row:1/3;align-self:start}.profile-panel{grid-column:1}.footer{grid-column:1/3}.section-title{display:flex;align-items:center;justify-content:space-between;gap:10px}.tag{background:#304b4a;color:#c5ead7;border-radius:20px;padding:4px 9px;font-size:11px;white-space:nowrap}.tag.preview{background:#51432c;color:#ffe2b1}.panel-header{font-size:13px;color:var(--muted);margin-bottom:10px}.canvas-wrap{position:relative;max-width:100%;border:1px solid #36535b;background:#0b1c23;border-radius:9px;overflow:hidden}canvas{display:block;width:100%;height:auto;cursor:crosshair}.legend{display:flex;align-items:center;gap:12px;margin-top:9px;font-size:12px;color:var(--muted);flex-wrap:wrap}.legend .ramp{height:10px;flex:1;min-width:130px;border-radius:5px;background:linear-gradient(90deg,#bcd1ab,#5d9975,#3c755e,#5a6049,#8a816b,#c5bb96,#f1e5d0)}.swatch{display:inline-block;width:12px;height:12px;border:2px solid #86d5ad;vertical-align:middle;margin-right:4px}.footnote{font-size:12px;color:var(--muted)}button{background:#304c52;color:var(--ink);border:1px solid #557678;padding:9px 12px;border-radius:7px;font-weight:650;cursor:pointer}button:hover:not(:disabled){background:#406a6c}button.primary{background:#266758;border-color:#409a7f}button:disabled{opacity:.38;cursor:not-allowed}input{background:#0e1e27;color:var(--ink);border:1px solid #47616b;padding:8px;border-radius:6px;width:100%;font:inherit}input[type=checkbox]{width:auto}input[type=range]{padding:0;accent-color:#95d5ad}label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}.row{display:flex;gap:7px}.row>*{flex:1;min-width:0}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.buttons .full{grid-column:1/3}.rule{border:0;border-top:1px solid var(--line);margin:14px 0}.metric{font-size:23px;font-weight:bold;color:#d8efca;margin:3px 0}.value{background:#0d2027;padding:10px;border-radius:8px;margin:10px 0;font-size:12px;overflow-wrap:anywhere}.error{color:#ffc8ae;min-height:18px}.conditions{max-height:120px;overflow:auto;font-size:12px;color:var(--muted)}.conditions div{padding:5px 0;border-bottom:1px solid #36505c}.chart{height:auto;cursor:default}.details{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.details strong{color:#e6eddf}@media(max-width:930px){.layout{grid-template-columns:1fr}.map-panel,.actions,.profile-panel,.footer{grid-column:1;grid-row:auto}main{padding:13px}.actions{display:block}}@media(max-width:530px){.row{flex-direction:column}h1{font-size:24px}}
+</style></head><body><main>
+<div class="eyebrow">Universe / resolution on demand / geography lab</div>
+<h1>Discover a landscape</h1>
+<p class="subtitle">An established mountain headwater drains to an ocean outlet. Ask about any place, propose local relief, and commit only the tile needed. Neighboring tiles and the river remain consistent even when explored out of order.</p>
+<div class="layout">
+<section class="panel map-panel"><div class="section-title"><h2>Continuous regional terrain</h2><span id="mapStatus" class="tag">ESTABLISHED BASELINE</span></div>
+<div class="panel-header">Coordinates: eastward 0–8 km · northward −2 to +2 km · elevations in meters. Click the map to select a location and its refinement tile.</div>
+<div class="canvas-wrap"><canvas id="terrain" width="1000" height="500" role="img" aria-label="Interactive shaded elevation map with river, tile boundaries, and coastline"></canvas></div>
+<div class="legend"><span>Sea level · 0 m</span><span class="ramp"></span><span>Mountain · 1500+ m</span><span><i class="swatch"></i>committed tile</span></div>
+<p class="footnote">Uncommitted tiles show the regional baseline, <em>not</em> a realized detailed landscape. Relief is always continuous at tile boundaries and zero along the established river bed.</p>
+<div id="selected" class="value">Select a location on the map.</div></section>
+<section class="panel actions"><h2>Geographical inquiry</h2>
+<div class="row"><div><label for="x">East (km)</label><input id="x" type="number" min="0" max="8" step=".05" value="3"></div><div><label for="y">North (km)</label><input id="y" type="number" min="-2" max="2" step=".05" value="-1"></div></div>
+<div class="buttons"><button id="inspect" class="full">Inspect established elevation</button></div>
+<div id="answer" class="value">No inquiry yet.</div>
+<hr class="rule"><h2>Refine selected tile</h2>
+<label><input id="manual" type="checkbox"> Specify local relief amplitude (m)</label>
+<input type="range" id="relief" min="-45" max="45" step="1" value="20">
+<div id="reliefValue" class="footnote">Sample an admissible candidate</div>
+<div class="buttons"><button id="preview">Preview</button><button id="another">Another candidate</button><button id="commit" class="primary full" disabled>Commit selected terrain</button></div>
+<div id="proposal" class="value">No pending preview. Current reality unchanged.</div>
+<hr class="rule"><h2>Impose an elevation fact</h2>
+<p class="footnote">Constrain the selected point without specifying the entire tile. Rejected if incompatible with already established terrain.</p>
+<div class="row"><div><label for="target">Elevation (m)</label><input type="number" id="target" value="875"></div><div><label for="tolerance">Tolerance (m)</label><input type="number" id="tolerance" min="0" value="5"></div></div>
+<div class="buttons"><button id="addConstraint" class="full">Establish condition</button></div>
+<div id="conditions" class="conditions"></div>
+<hr class="rule"><div class="buttons"><button id="export" class="full">Export committed world (JSON)</button></div>
+<div id="feedback" class="error" role="status"></div>
+</section>
+<section class="panel profile-panel"><h2>Established river profile</h2>
+<div class="panel-header">The river channel connects mountain headwater to sea-level outlet. Its elevation declines downstream regardless of how the surrounding terrain is refined.</div>
+<div class="canvas-wrap"><canvas id="profile" class="chart" width="1000" height="205" role="img" aria-label="River bed elevation from headwaters to ocean"></canvas></div>
+<div class="details"><span><strong>Source</strong> (0, 0) · <span id="sourceValue">1400 m</span></span><span><strong>Outlet</strong> (8, 0) · 0 m</span><span><strong>River</strong> continuously connected · downhill</span></div></section>
+<section class="panel footer"><p class="footnote"><strong>Boundary of this experiment.</strong> A continuous procedural valley and shared-edge local relief demonstrate spatially compatible selective refinement, not realistic erosion, watershed topology, tectonics, coast generation, general drainage enforcement, or multi-resolution refinement within the same tile. Parameters and coarse geometry are already established; later discovery concerns bounded local relief. The world is objective, while the designer's preview remains uncommitted.</p></section>
+</div></main>
+<script>
+'use strict';
+const $ = id=>document.getElementById(id);
+let world=null, map=null, pending=null, selected={x_km:3,y_km:-1},candidate=0;
+const fmt=x=>Number(x).toFixed(1);
+async function api(path, data={}){let r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});let j=await r.json();if(!r.ok)throw Error(j.error||'Request failed');return j}
+const say=s=>{$('feedback').textContent=s};
+const selectedTile=()=>[Math.min(3,Math.floor(selected.x_km/2)),Math.min(1,Math.floor((selected.y_km+2)/2))];
+function invalidate(){pending=null;$('commit').disabled=true;$('mapStatus').className='tag';$('mapStatus').textContent='ESTABLISHED BASELINE';$('proposal').textContent='No pending preview. Current reality unchanged.'}
+function color(z){let t=Math.max(0,Math.min(1,z/1650));let stops=[[188,209,171],[93,153,117],[60,117,94],[108,117,84],[156,141,110],[233,220,186]];let k=t*(stops.length-1),a=stops[Math.floor(k)],b=stops[Math.min(stops.length-1,Math.floor(k)+1)],f=k-Math.floor(k);return `rgb(${a.map((n,i)=>Math.round(n*(1-f)+b[i]*f)).join(',')})`}
+function drawMap(){if(!map)return;const canvas=$('terrain'),g=canvas.getContext('2d'),W=canvas.width,H=canvas.height;let data=map.heights_m,nx=map.width,ny=map.height;g.clearRect(0,0,W,H);
+const w=W/(nx-1),h=H/(ny-1);for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++){const avg=(data[j][i]+data[j][i+1]+data[j+1][i]+data[j+1][i+1])/4;g.fillStyle=color(avg);g.fillRect(i*w,H-(j+1)*h,w+1,h+1)}
+g.lineWidth=2;g.strokeStyle='#304353';for(let i=1;i<4;i++){g.beginPath();g.moveTo(i*W/4,0);g.lineTo(i*W/4,H);g.stroke()}g.beginPath();g.moveTo(0,H/2);g.lineTo(W,H/2);g.stroke();
+for(const t of (map.committed_tiles||[])){g.strokeStyle='#a7edbc';g.lineWidth=4;g.strokeRect(t[0]*W/4,(1-t[1])*H/2,W/4,H/2)}
+if(map.preview_tile){let t=map.preview_tile;g.fillStyle='rgba(246,205,130,.14)';g.fillRect(t[0]*W/4,(1-t[1])*H/2,W/4,H/2);g.strokeStyle='#f3c77e';g.lineWidth=4;g.strokeRect(t[0]*W/4,(1-t[1])*H/2,W/4,H/2)}
+g.lineWidth=6;g.lineCap='round';g.strokeStyle='#153f63';g.beginPath();for(let i=0;i<map.river.length;i++){const p=map.river[i],x=p.x_km/8*W,y=(2-p.y_km)/4*H;if(i)g.lineTo(x,y);else g.moveTo(x,y)}g.stroke();g.lineWidth=2.5;g.strokeStyle='#8bd5f2';g.stroke();
+g.strokeStyle='#e9f8f4';g.lineWidth=2;g.beginPath();g.moveTo(W-1,0);g.lineTo(W-1,H);g.stroke();g.fillStyle='#ffffff';g.font='bold 15px system-ui';g.fillText('HEADWATERS',12,25);g.textAlign='right';g.fillText('OCEAN',W-15,H-15);g.textAlign='left';
+let x=selected.x_km/8*W,y=(2-selected.y_km)/4*H;g.beginPath();g.arc(x,y,8,0,2*Math.PI);g.fillStyle='#fff';g.fill();g.lineWidth=3;g.strokeStyle='#173b40';g.stroke();
+}
+function drawProfile(){if(!map)return;const c=$('profile'),g=c.getContext('2d'),W=c.width,H=c.height,pts=map.river;g.clearRect(0,0,W,H);g.fillStyle='#0c202b';g.fillRect(0,0,W,H);g.strokeStyle='#345463';g.lineWidth=1;for(let i=1;i<5;i++){let y=H*i/5;g.beginPath();g.moveTo(0,y);g.lineTo(W,y);g.stroke()}g.beginPath();for(let i=0;i<pts.length;i++){const p=pts[i],x=p.x_km/8*W,y=H-15-p.bed_m/Math.max(1,(world?.source_elevation_m||1400)*1.12)*(H-30);if(i)g.lineTo(x,y);else g.moveTo(x,y)}g.strokeStyle='#bcebc1';g.lineWidth=3;g.stroke();g.fillStyle='#dbece5';g.font='16px system-ui';g.fillText(`${fmt(world?.source_elevation_m||1400)} m · headwaters`,16,22);g.textAlign='right';g.fillText('0 m · ocean',W-16,H-20);g.textAlign='left'}
+async function refresh(){world=await(await fetch('/api/state')).json();map=await api('map');$('sourceValue').textContent=fmt(world.source_elevation_m)+' m';drawMap();drawProfile();updateConditions()}
+function updateConditions(){$('conditions').replaceChildren();for(let c of world.conditions){let p=document.createElement('div');p.textContent=`(${fmt(c.x_km)}, ${fmt(c.y_km)}): ${fmt(c.target_m)} ± ${fmt(c.tolerance_m)} m`;$('conditions').append(p)}if(!world.conditions.length)$('conditions').textContent='No additional point-elevation commitments.'}
+async function inspect(){try{let res=await api('inspect',selected);$('selected').textContent=`Point (${fmt(res.x_km)}, ${fmt(res.y_km)}) km · Tile [${res.tile.join(', ')}] · ${res.resolved?'established':'unresolved local detail'}`;$('answer').textContent=res.resolved?`Established elevation: ${fmt(res.elevation_m)} m`:`Coarse estimate: ${fmt(res.coarse_estimate_m)} m · exact detail unresolved`;say('')}catch(e){say(e.message)}}
+function setPoint(x,y){selected={x_km:Math.max(0,Math.min(8,x)),y_km:Math.max(-2,Math.min(2,y))};$('x').value=selected.x_km.toFixed(2);$('y').value=selected.y_km.toFixed(2);invalidate();refresh().then(inspect).catch(e=>say(e.message))}
+$('terrain').addEventListener('click',e=>{let r=$('terrain').getBoundingClientRect();setPoint((e.clientX-r.left)/r.width*8,2-(e.clientY-r.top)/r.height*4)});
+for(let id of ['x','y'])$(id).addEventListener('change',()=>setPoint(Number($('x').value),Number($('y').value)));
+$('inspect').onclick=()=>inspect();$('manual').onchange=()=>{invalidate();displayManual()};$('relief').oninput=()=>{invalidate();displayManual()};
+function displayManual(){$('reliefValue').textContent=$('manual').checked?`Use ${$('relief').value} m local relief (before spatial taper)`:'Sample an admissible candidate'}
+async function preview(next){try{if(next)candidate++;let p=await api('preview',{tile:selectedTile(),candidate_index:candidate,amplitude_m:$('manual').checked?Number($('relief').value):null});pending=p.proposal;map=p.map;$('commit').disabled=false;$('mapStatus').textContent='UNCOMMITTED PREVIEW';$('mapStatus').className='tag preview';$('proposal').textContent=`Tile [${pending.tile.join(', ')}]: ${fmt(pending.amplitude_m)} m amplitude · candidate ${pending.candidate_index}. World revision ${pending.revision} unchanged.`;drawMap();say('Preview only—no objective terrain modified.')}catch(e){invalidate();say(e.message)}}
+$('preview').onclick=()=>preview(false);$('another').onclick=()=>preview(true);
+$('commit').onclick=async()=>{try{if(!pending)throw Error('Nothing to commit');let r=await api('commit');pending=null;world=r.world;map=r.map;invalidate();updateConditions();drawMap();drawProfile();await inspect();say(`Committed tile [${r.committed.tile.join(', ')}]. Other tiles remain unresolved.`)}catch(e){say(e.message)}};
+$('addConstraint').onclick=async()=>{try{let r=await api('condition',{...selected,target_m:Number($('target').value),tolerance_m:Number($('tolerance').value)});world=r.world;map=r.map;invalidate();updateConditions();drawMap();await inspect();say('World-level elevation condition established.')}catch(e){say(e.message)}};
+$('export').onclick=async()=>{try{let data=await(await fetch('/api/state')).json(),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='universe-geographical-world.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),500)}catch(e){say(e.message)}};
+refresh().then(inspect).catch(e=>say(e.message));
+</script></body></html>
