@@ -1,0 +1,23 @@
+# Melee impact rules, action continuity, and defensive reactions
+
+This increment follows the 542-test combat engagement/effort checkpoint. It changes attack scheduling, implements bounded one-second parry/dodge reactions, and makes active actions visible in the Scout log and UI. `Encounter`, `Action`, `BeingInstance`, held Weapons and ordinary `SkillUse` remain authoritative.
+
+## Reach at impact only
+
+An aware attacker holding a compatible weapon can schedule a swing/thrust even if the target is currently out of reach or behind an obstruction. The attack takes its usual time and can be canceled/replaced during preparation. **Only at resolution**, after the interval's movement, does `MeleeStrike` check target readiness, equipment availability, reach and the physical path. An out-of-reach or blocked strike causes no attack roll, hit, damage or weapon XP. By contrast, an attempted strike that misses or is successfully parried/dodged still earns its normal weapon XP. Awareness at scheduling remains a separate precondition, not a reach check.
+
+Guard is a *sustained Being strategy* (`defense` effort), not an unfinished one-second Action. Movement and waiting do not end it; beginning an attack/reaction or explicitly canceling replaces it. Attacks remain scheduled while moving. The browser now reports `Guarding (sustained)`, pending attack/reaction with due time, or the action completed in the current second; the event log reports the Scout's current activity independently from movement. Movement, attack, guard and reaction cues occupy distinct map positions. If a Swing completes during a step, the UI says so instead of ambiguously showing `Idle`.
+
+## Parry and Dodge — a constrained initial model
+
+`MeleeDefense` is a one-second, scheduled, cancelable `Action`. Both reactions interrupt the Being's currently unfinished Action; they do not cancel automatically when the Being moves. Defensive reactions resolve before strikes with the same completion time. Strikes whose prerequisites were frozen before the simultaneous batch can be deflected by a timely reaction. This is still **not** a comprehensive model of simultaneous effects across many combatants.
+
+- **Parry:** requires awareness and a currently held weapon, both before and when executing. Against an incoming strike due that second and within reach, the defender makes a provisional d20 contest using weapon skill plus allocated defensive effort, against the attacker's weapon skill plus offensive effort. Success stops damage and records a `parried` strike. Failure allows the usual strike roll. The defender earns 10 XP in the parrying weapon type for an actual threatened attempt (success *or* failure), and the attacker earns normal weapon XP when an attack was attempted.
+- **Dodge:** moves 0.5 Encounter units directly away from the known attacker during its one-second Action. If that movement takes the defender out of reach, the strike fails at impact without attacking. If still reachable, a provisional d20 contest using `tumble` skill plus defensive effort can result in a `dodged` strike. A genuine imminent threat at preparation earns 10 `tumble` XP whether the dodge succeeds or fails. This is a provisional burst displacement; collision, body orientation, balance, acceleration limits and added exertion costs need future models.
+- **No threat:** selecting a reaction when there is no incoming strike due in its one-second window produces `no_threat`, and awards no XP. Reactions do not grant indefinite or reusable defense windows. The Raider currently has no policy to initiate its own parry or dodge.
+
+The interface permits allocation of defense effort to either reaction (bounded by available weapon skill points in this prototype); other allocation fields must be zero. Fatigue continues via the existing combat Exertion clock. Reaction outcomes and SkillUse histories are saved/reconstructed by the existing version-2 command journal; no new persistence format is introduced. Old command journals remain structurally supported under unchanged engine rules, with reconstruction validation rejecting divergent outcomes.
+
+## Remaining boundaries
+
+No facing, anatomically grounded defensive arcs, weapon-length collision geometry, complex movement collisions, feints, blocking, shields used as parrying instruments, multi-attacker allocation, full simultaneous consequences or complete fatigue accounting. The visual model's reach ring is a provisional reference-point distance. Perceptions remain narrower than objective audit state. This milestone establishes scheduling, physical displacement, a contest, actual practice XP and historical traceability—not a finished tactical combat model.

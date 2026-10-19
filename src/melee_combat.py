@@ -61,6 +61,7 @@ class MeleeStrike(Action):
         self.hit_type = None
         self.combat_result = None
         self._simultaneous_eligibility = None
+        self.defended_by = None
         super().__init__(encounter.universe, encounter.time, None, motion,
                          actor_id, target_id, weapon_id, strategy=strategy,
                          parent_event_id=encounter.id)
@@ -101,9 +102,8 @@ class MeleeStrike(Action):
             raise ValueError('weapon does not support requested attack motion')
         if self.damage_potential() is None or self.damage_potential() <= 0:
             raise ValueError('non-damaging attack not implemented')
-        status, _ = self._status(encounter)
-        if status != 'in_reach':
-            raise ValueError('cannot schedule melee: ' + status)
+        # Reach/path are evaluated at impact only; actors may wind up while
+        # approaching a target, or anticipate movement into reach.
 
     def hit_result(self, difficulty_class):
         self.hit_type = super().hit_result(difficulty_class)
@@ -156,6 +156,9 @@ class MeleeStrike(Action):
             outcome = 'weapon_unavailable'
         elif status != 'in_reach':
             outcome = status
+        elif self.defended_by is not None:
+            outcome = 'parried' if self.universe.get_event_by_id(self.defended_by).kind == 'parry' else 'dodged'
+            attempted = True
         else:
             super().resolve(difficulty_class)
             outcome = self.hit_type

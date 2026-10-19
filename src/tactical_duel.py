@@ -13,6 +13,7 @@ from pathlib import Path
 
 from exertion import Exertion
 from melee_combat import MeleeStrike
+from melee_defense import MeleeDefense
 from perception import GeometricPathPerception
 from strategy import Strategy
 from spatial.geometry import Sphere
@@ -24,8 +25,9 @@ class TacticalDuel:
         'southeast': (1, -1), 'south': (0, -1), 'southwest': (-1, -1),
         'west': (-1, 0), 'northwest': (-1, 1),
     }
-    COMMANDS = ('thrust', 'swing', 'guard', 'cancel', *DIRECTION, 'wait')
+    COMMANDS = ('thrust', 'swing', 'parry', 'dodge', 'guard', 'cancel', *DIRECTION, 'wait')
     WALK_PER_SECOND = .25
+    DODGE_PER_SECOND = .5
     SENSE_DISTANCE = 3.0
     REACH = 2.0
     SESSION_VERSION = 2
@@ -121,6 +123,23 @@ class TacticalDuel:
                                strategy.timing, strategy.extra_damage)
         return strike, interrupted
 
+    def _react(self, kind):
+        defense = MeleeDefense(self.encounter, self.player.id, self.foe.id,
+                                kind=kind, weapon_id=self.player_weapon if kind == 'parry' else None)
+        defense.on_schedule(self.encounter)  # validate before interrupting
+        interrupted = self._interrupt(self.player)
+        self.encounter.schedule_action(defense)
+        return defense, interrupted
+
+    def _guard_active(self):
+        # Guard is a sustained Being strategy, not a pending timed Action.
+        # Derive its mode from commands; movement and waiting do not end it.
+        for recorded in reversed(self.commands):
+            command, _ = self._decode_command(recorded)
+            if command not in self.DIRECTION and command != 'wait':
+                return command == 'guard'
+        return False
+
     def _foe_choice(self):
         if self._pending(self.foe) or self.foe.is_helpless():
             return {}, 'Raider continues or cannot act.'
@@ -184,10 +203,10 @@ class TacticalDuel:
             raise ValueError('Unknown tactical command.')
         if self.ended():
             raise ValueError('Combat has ended.')
-        if effort is not None and command not in ('thrust', 'swing', 'guard'):
+        if effort is not None and command not in ('thrust', 'swing', 'guard', 'parry', 'dodge'):
             raise ValueError('Effort may be allocated only for attacks and Guard')
         strategy = self._effort_strategy(self.player, effort) if effort is not None else None
-        if command == 'guard' and strategy is not None and (
+        if command in ('guard', 'parry', 'dodge') and strategy is not None and (
                 strategy.attack or strategy.timing or strategy.extra_damage):
             raise ValueError('Guard currently accepts only defensive effort')
         self._observe()
@@ -206,9 +225,26 @@ class TacticalDuel:
             self.player.set_strategy(defense=defense)
             description = f'Scout adopts a defensive stance ({defense} effort).'
 
+        elif command in ('parry', 'dodge'):
+            defense, interrupted = self._react(command)
+            if strategy is not None:
+                self.player.set_strategy(defense=strategy.defense)
+            description = f'Scout begins a timed {command} reaction (due {defense.end_time:g}s).'
+            if command == 'dodge':
+                src, dst = self.player.get_position(), self.foe.get_position()
+                dx, dy = src.x - dst.x, src.y - dst.y
+                norm = math.hypot(dx, dy)
+                if norm == 0:
+                    dx, dy, norm = 1, 0, 1
+                velocities[self.player.id] = (dx * self.DODGE_PER_SECOND / norm,
+                                               dy * self.DODGE_PER_SECOND / norm, 0)
         elif command == 'cancel':
             interrupted = self._interrupt(self.player)
-            description = 'Scout abandons unfinished action.' if interrupted else 'Scout has no pending action.'
+            if self._guard_active():
+                self.player.set_strategy()
+                description = 'Scout drops Guard stance.'
+            else:
+                description = 'Scout abandons unfinished action.' if interrupted else 'Scout has no pending action.'
         elif command in self.DIRECTION:
             dx, dy = self.DIRECTION[command]
             scale = self.WALK_PER_SECOND / math.hypot(dx, dy)
@@ -287,6 +323,15 @@ class TacticalDuel:
                             'text': f'{callout}{attacker} {result.motion}: {result.outcome} — ' + '; '.join(details),
                             'player_text': player_text,
                             'outcome': result.outcome, 'xp': xp, 'damage': hp_loss, 'hit': landed})
+        for action_id in step.completed_action_ids:
+            reaction = self.world.get_event_by_id(action_id)
+            if isinstance(reaction, MeleeDefense):
+                xp = sum(ex.experience for ex in reaction.resolution.skill_exercises)
+                label = 'Scout' if reaction.actor_id == self.player.id else 'Raider'
+                text = f'{label} {reaction.kind}: {reaction.result}; +{xp} {"Dagger" if reaction.kind == "parry" else "tumble"} XP'
+                results.append({'actor': reaction.actor_id, 'target': reaction.target_id,
+                                'text': text, 'player_text': text, 'outcome': reaction.result,
+                                'xp': xp, 'damage': 0, 'hit': False})
         foe_pending_now = self._pending(self.foe)
         foe_activity = {'decision': foe_decision,
                         'movement': list(foe_velocities[self.foe.id])
@@ -296,11 +341,23 @@ class TacticalDuel:
                                      'due': foe_pending_now.end_time}),
                         'completed': [r['outcome'] for r in results
                                       if r['actor'] == self.foe.id]}
+        player_pending_now = self._pending(self.player)
+        activity = ('preparing ' + player_pending_now.event_type +
+                    f' (due {player_pending_now.end_time:g}s)' if player_pending_now else
+                    'guarding' if command == 'guard' or (
+                        command in self.DIRECTION or command == 'wait') and self._guard_active()
+                    else 'no pending action')
+        completed_player_actions = [self.world.get_event_by_id(a) for a in step.completed_action_ids
+                                    if self.world.get_event_by_id(a).actor_id == self.player.id]
+        if player_pending_now is None and completed_player_actions:
+            activity = f'completed {completed_player_actions[-1].event_type} this second'
         self.history.append({'time': step.end_time, 'player_choice': description,
+                             'player_activity': activity,
                              'foe_activity': foe_activity,
                              'foe_choice': foe_decision, 'foe_cue': foe_cue,
                              'foe_observed': self._perceived[self.player.id],
-                             'player_moved': command in self.DIRECTION,
+                             'player_moved': command in self.DIRECTION or command == 'dodge',
+                             'player_movement': list(velocities[self.player.id]) if self.player.id in velocities else None,
                              'foe_moved': self.foe.id in foe_velocities,
                              'results': results, 'fatigue_events': fatigue_events})
         self.commands.append(command if effort is None else {'command': command, 'effort': dict(effort)})
@@ -336,9 +393,18 @@ class TacticalDuel:
                                {'motion': pending.event_type, 'due': pending.end_time}}
 
         player_data = being_state(player)
-        # Distance and line clearance are disclosed only when the foe is
-        # currently detected. Range is evaluated both at attack start and
-        # again at its scheduled completion (after intervening movement).
+        last = self.history[-1] if self.history else None
+        if player_data['pending']:
+            active = player_data['pending']['motion']
+            player_data['action_state'] = f'{active} (completes at {player_data["pending"]["due"]:g}s)'
+        elif self._guard_active():
+            player_data['action_state'] = 'Guarding (sustained)'
+        elif last and last.get('player_activity', '').startswith('completed '):
+            player_data['action_state'] = last['player_activity'].capitalize()
+        else:
+            player_data['action_state'] = 'Idle'
+        # Distance is disclosed only when currently detected. Attack range is
+        # tested only at impact, after movement; not at scheduling.
         reach_status, measured_distance = (MeleeStrike(
             self.encounter, player.id, self.foe.id, self.player_weapon,
             motion='thrust', reach=self.REACH)._status(self.encounter)
@@ -357,6 +423,7 @@ class TacticalDuel:
                 log.append(item)
             else:
                 event = {'time': item['time'], 'player_choice': item['player_choice'],
+                         'player_activity': item.get('player_activity'),
                          'foe_cue': item.get('foe_cue') if item['foe_observed'] else None,
                          'player_moved': item.get('player_moved', False),
                          'foe_moved': item.get('foe_moved', False) and item['foe_observed'],
@@ -379,10 +446,24 @@ class TacticalDuel:
             command = self.commands[-1] if self.commands else None
             if isinstance(command, dict):
                 command = command['command']
+            if command == 'dodge' and latest.get('player_movement'):
+                vx, vy, _ = latest['player_movement']
+                angle = math.atan2(vy, vx)
+                dirs = ['east', 'northeast', 'north', 'northwest', 'west',
+                        'southwest', 'south', 'southeast']
+                command = dirs[round(angle / (math.pi / 4)) % 8]
             player_arrow = move_arrows.get(command, '➜')
         foe_arrow = '➜' if latest and latest.get('foe_moved') else ''
         player_just_struck = bool(latest and any(
-            r['actor'] == self.player.id for r in latest['results']))
+            r['actor'] == self.player.id and r.get('outcome') not in
+            ('no_threat', 'deflected', 'evaded', 'failed') for r in latest['results']))
+        player_reaction = ''
+        if latest:
+            for action_id in self.encounter.finished_action_list:
+                action = self.world.get_event_by_id(action_id)
+                if (isinstance(action, MeleeDefense) and action.actor_id == self.player.id
+                        and action.end_time == self.encounter.time):
+                    player_reaction = '↯' if action.kind == 'parry' else '◇'
         foe_just_struck = bool(latest and any(
             r['actor'] == self.foe.id for r in latest['results']))
         player_symbol = ('⚔' if player_data['pending'] else
@@ -396,8 +477,11 @@ class TacticalDuel:
                           'status': reach_status,
                           'in_range': reach_status == 'in_reach'} if enemy_visible else None,
                 'effort_pool': player.get_weapon_skill_level('Dagger') or 0,
-                'player_cues': {'attack': '⚔' if player_data['pending'] else ('✦' if player_just_struck else ''),
-                                'guard': '▣' if player.strategy.defense else '',
+                'player_cues': {'attack': ('↯' if player_data['pending'] and
+                                          player_data['pending']['motion'] in ('parry', 'dodge') else
+                                          '⚔' if player_data['pending'] else ('✦' if player_just_struck else '')),
+                                'guard': '▣' if self._guard_active() else '',
+                                'reaction': player_reaction,
                                 'movement': player_arrow},
                 'foe_cues': ({'attack': '⚔' if self._pending(self.foe) else ('✦' if foe_just_struck else ''),
                               'movement': foe_arrow} if enemy_visible else None),
@@ -480,7 +564,7 @@ class TacticalDuel:
             return item, None
         if isinstance(item, dict) and set(item) == {'command', 'effort'}:
             command = item['command']
-            if isinstance(command, str) and command in ('thrust', 'swing', 'guard'):
+            if isinstance(command, str) and command in ('thrust', 'swing', 'guard', 'parry', 'dodge'):
                 return command, item['effort']
         raise ValueError('Invalid session command')
 

@@ -116,30 +116,36 @@ class TestMeleeCombat(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.strike(reach=0)
 
-    def test_blocked_and_unknown_path_refuse_schedule(self):
+    def test_blocked_and_unknown_path_fail_at_impact(self):
         obstacle_id = self.world.make_object('Brick', 'Wall proxy')
         obstacle = self.world.get_object_by_id(obstacle_id)
         obstacle.set_position(CartesianPosition(.75, 0, 0))
         obstacle.set_geometry(Sphere(.3))
         obstacle.set_visual_occlusion(VisualOcclusion(1))
         self.encounter.add_object(obstacle_id)
-        with self.assertRaisesRegex(ValueError, 'blocked'):
-            self.encounter.schedule_action(self.strike())
+        blocked = self.strike()
+        self.encounter.schedule_action(blocked)
         obstacle.set_visual_occlusion(VisualOcclusion(0))
-        with self.assertRaisesRegex(ValueError, 'blocked'):
-            self.encounter.schedule_action(self.strike())
+        self.encounter.step(4)
+        self.assertEqual(blocked.combat_result.outcome, 'blocked')
+        self.assertEqual(self.b.get_hit_points(), 10)
+        # Unknown geometry at the next scheduled impact is not assumed clear.
         obstacle.set_geometry(None)
-        with self.assertRaisesRegex(ValueError, 'uncertain_path'):
-            self.encounter.schedule_action(self.strike())
+        uncertain = self.strike()
+        self.encounter.schedule_action(uncertain)
+        self.encounter.step(4)
+        self.assertEqual(uncertain.combat_result.outcome, 'uncertain_path')
 
-    def test_cannot_attack_before_aware_or_from_distance(self):
+    def test_awareness_required_but_distance_checked_at_impact(self):
         self.encounter.clear_awareness(self.a_id, self.b_id)
         with self.assertRaisesRegex(ValueError, 'not aware'):
             self.encounter.schedule_action(self.strike())
         self.encounter.mark_aware(self.a_id, self.b_id)
         self.b.set_position(CartesianPosition(20, 0, 0))
-        with self.assertRaisesRegex(ValueError, 'out_of_reach'):
-            self.encounter.schedule_action(self.strike())
+        distant = self.strike()
+        self.encounter.schedule_action(distant)
+        self.encounter.step(4)
+        self.assertEqual(distant.combat_result.outcome, 'out_of_reach')
 
     def test_reach_validation(self):
         for length in (None, '2', 0, -1, float('nan'), float('inf'), True):

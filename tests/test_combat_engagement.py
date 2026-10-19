@@ -28,7 +28,7 @@ class TestCombatEngagement(unittest.TestCase):
         self.assertEqual(state['player_cues']['attack'], '⚔')
         self.assertIn('thrust', state['player']['pending']['motion'])
 
-    def test_range_display_and_initiation_requires_reach(self):
+    def test_range_display_and_initiation_does_not_require_reach(self):
         game = TacticalDuel()
         first = game.state()
         self.assertTrue(first['range']['in_range'])
@@ -39,10 +39,9 @@ class TestCombatEngagement(unittest.TestCase):
         state = game.state()
         self.assertTrue(state['range'] is None or state['range']['status'] == 'out_of_reach')
         start = game.encounter.time
-        with self.assertRaisesRegex(ValueError, 'out_of_reach'):
-            game.choose('thrust')
-        self.assertEqual(game.encounter.time, start)
-        self.assertIsNone(game._pending(game.player))
+        game.choose('thrust')
+        self.assertEqual(game.encounter.time, start + 1)
+        self.assertEqual(game._pending(game.player).event_type, 'thrust')
 
     def test_out_of_range_at_impact_is_non_attempt_without_experience(self):
         game = TacticalDuel()

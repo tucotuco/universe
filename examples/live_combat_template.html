@@ -17,7 +17,7 @@ button:hover{background:#385b77}button:disabled{cursor:not-allowed;opacity:.45}
 @media(max-width:750px){.grid{grid-template-columns:1fr}}
 </style></head><body>
 <h1>Universe · Live combat</h1>
-<p class="sub">A real Encounter advances only when you issue a tactical command. All HP, equipment, actions and weapon XP belong to persistent Universe Entities. Each command advances one second.</p>
+<p class="sub">A real Encounter advances only when you issue a tactical command. All HP, equipment, reactions, actions and XP belong to persistent Universe Entities. Each command advances one second; strikes test reach only at impact.</p>
 <div class="grid"><section class="panel"><h2>Personal-scale encounter · top-down</h2><svg id="map" viewBox="0 0 600 380" aria-label="Combatant positions" role="img"></svg>
 <p id="perception" class="help"></p><p id="rangeStatus" class="help"></p><p><span id="time"></span> <span class="tag" id="status"></span></p>
 <div class="command-group"><h2>Allocate weapon skill effort</h2>
@@ -28,13 +28,15 @@ button:hover{background:#385b77}button:disabled{cursor:not-allowed;opacity:.45}
  <label>Speed (timing) <input type="number" min="0" value="0" data-effort="timing"></label>
  <label>Damage <input type="number" min="0" value="0" data-effort="extra_damage"></label></div>
  <p id="effortStatus" class="help"></p></div>
- <div class="command-group"><h2>Attack (timed actions)</h2><div class="commands"><button data-command="thrust">Dagger thrust</button><button data-command="swing">Dagger swing</button><button data-command="guard">Guard</button><button data-command="wait">Wait 1 s</button><button data-command="cancel">Cancel action</button></div></div>
+ <div class="command-group"><h2>Offense · timed attacks</h2><div class="commands"><button data-command="thrust">Dagger thrust</button><button data-command="swing">Dagger swing</button></div></div>
+<div class="command-group"><h2>Defense · stance or timed reaction</h2><div class="commands"><button data-command="guard">Guard · sustained</button><button data-command="parry">Parry · 1 s</button><button data-command="dodge">Dodge away · 1 s</button></div><p class="help">Parry and Dodge are one-second reactions. They protect against an attack that completes in that same second, and interrupt an unfinished attack. Dodge also moves you away. Assign Defense effort above if desired. Actual threatened attempts earn XP.</p></div>
+<div class="command-group"><h2>Time / action control</h2><div class="commands"><button data-command="wait">Wait 1 s</button><button data-command="cancel">Cancel current action / stance</button></div></div>
 <div class="command-group"><h2>Move (0.25 units/second)</h2><div class="commands"><button data-command="northwest">↖ NW</button><button data-command="north">↑ N</button><button data-command="northeast">↗ NE</button><button data-command="west">← W</button><button data-command="east">E →</button><button data-command="southwest">↙ SW</button><button data-command="south">↓ S</button><button data-command="southeast">SE ↘</button></div></div>
 <div class="command-group"><h2>Save and inspect history</h2><div class="commands"><button id="save">Save encounter</button><button id="review">Review timeline</button><button id="back">◀ Earlier</button><button id="forward">Later ▶</button><button id="live">Return to current</button></div><input type="range" min="0" max="0" value="0" id="scrub" style="width:100%" aria-label="Replay second"><span id="reviewStatus" class="help">Current live state</span></div>
-<p id="feedback" role="status"></p><p class="help">You can move while an attack is pending. Swing, thrust, Guard or Cancel interrupt an unfinished attack; interrupted attempts earn no XP. Diagonal steps are normalized to the same distance. The Raider follows a provisional deterministic tactical policy; it isn't a fully autonomous Agent.</p>
-</section><section class="panel"><h2>Scout · Current state</h2><div id="player"></div><h2>Opponent · Perceived state</h2><div id="foe"></div><p class="help">Your own strikes report exact HP damage dealt and a qualitative share of estimated opponent endurance, but not the opponent's current or maximum HP. A distance and reach indication is shown only with a current unobstructed geometric path observation. This model is not yet physical vision.</p></section>
+<p id="feedback" role="status"></p><p class="help">You can move while an attack is pending. Swing, thrust, Guard, Parry, Dodge or Cancel interrupt an unfinished attack; interrupted attempts earn no XP. Guard persists during movement; reactions take one second and earn practice only against a real imminent attack. Diagonal steps are normalized to the same distance. The Raider follows a provisional deterministic tactical policy; it isn't a fully autonomous Agent.</p>
+</section><section class="panel"><h2>Scout · Current state</h2><div id="player"></div><h2>Opponent · Perceived state</h2><div id="foe"></div><p class="help">Your own strikes report exact HP damage dealt and a qualitative share of estimated opponent endurance, but not the opponent's current or maximum HP. A distance and reach indication is shown only with a current unobstructed geometric path observation. Reach and obstruction are tested when a strike resolves, not when it is scheduled. This model is not yet physical vision.</p></section>
 <section class="panel"><h2>Actions and consequences</h2><ul class="log" id="history"></ul></section>
-<section class="panel"><h2>Current model boundaries</h2><p class="help">Reach, speed and body geometry remain explicit provisional units. There is no collision avoidance, facing, anatomical hit locations, full simultaneous damage model, or validated optical gesture recognition. Versioned command-journal saves reconstruct the encounter under the same simulation code; cross-version migrations and arbitrary world-state serialization remain deferred. Same-time melee attempts use frozen prerequisites; effects are applied in deterministic order. All observations, including geometric paths, remain distinct from belief.</p></section></div>
+<section class="panel"><h2>Current model boundaries</h2><p class="help">Reach, speed and body geometry remain explicit provisional units. There is no collision avoidance, facing, anatomical hit locations, general multi-attacker parrying, full simultaneous damage model, or validated optical gesture recognition. Versioned command-journal saves reconstruct the encounter under the same simulation code; cross-version migrations and arbitrary world-state serialization remain deferred. Same-time melee attempts use frozen prerequisites; effects are applied in deterministic order. All observations, including geometric paths, remain distinct from belief.</p></section></div>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -48,9 +50,9 @@ function view(data){
  $('perception').textContent=data.perception_model+(data.observed_now?' · Opponent path detected':' · No current opponent path');
  $('player').replaceChildren();
  field($('player'),'HP',`${p.hp} / ${p.hp_max}`);field($('player'),'Fatigue',`${p.fatigue} / 5 · ${p.fatigue_state}`);field($('player'),'Next exertion check',`${p.fatigue_next_check}s`);field($('player'),'Weapon',p.weapon);field($('player'),'Weapon skill',p.weapon_skill);field($('player'),'Weapon XP',p.xp);field($('player'),'Guard effort',p.strategy.defense);
- field($('player'),'Action',p.pending?`${p.pending.motion} (completes at ${p.pending.due}s)`:'Idle');
+ field($('player'),'Action',p.action_state);
  const rr=data.range;
- $('rangeStatus').textContent=rr?`Distance ${rr.distance.toFixed(2)} units · Reach ${rr.reach.toFixed(2)} · ${rr.in_range?'IN RANGE':rr.status.replaceAll('_',' ').toUpperCase()}`:'Opponent range unknown (not currently detected)';
+ $('rangeStatus').textContent=rr?`Distance ${rr.distance.toFixed(2)} units · Reach ${rr.reach.toFixed(2)} · ${rr.in_range?'IN RANGE NOW':rr.status.replaceAll('_',' ').toUpperCase()} · Reach checked at impact`:'Opponent range unknown (not currently detected)';
  $('rangeStatus').style.color=rr?.in_range?'#8ce2b0':'#f4bc8b';
  $('effortPool').textContent=data.effort_pool;
  $('foe').replaceChildren(); if(f){field($('foe'),'Detected',f.name);if(!data.audit && f.apparent_action)field($('foe'),'Appears to be doing',f.apparent_action);if(data.audit){field($('foe'),'HP',`${f.hp} / ${f.hp_max}`);field($('foe'),'Fatigue',`${f.fatigue} / 5 · ${f.fatigue_state}`);field($('foe'),'XP',f.xp)}else{field($('foe'),'HP / Skills / XP','Not established by observation')} }else field($('foe'),'Presence','Not currently detected');
@@ -68,6 +70,7 @@ function view(data){
    map.appendChild(svg('text',{x,y:y+31,'text-anchor':'middle',fill:'#eef6ff','font-size':13},b.name));
    // Separate icons keep movement and a concurrently pending attack visible.
    if(cues?.attack)map.appendChild(svg('text',{x:x-25,y:y-15,fill:'#ffe3a7','font-size':21},cues.attack));
+   if(cues?.reaction)map.appendChild(svg('text',{x:x-25,y:y-15,fill:'#ffe3a7','font-size':21},cues.reaction));
    if(cues?.guard)map.appendChild(svg('text',{x:x+14,y:y-15,fill:'#b0f1e0','font-size':21},cues.guard));
    if(cues?.movement)map.appendChild(svg('text',{x:x+18,y:y+18,fill:'#fff','font-size':23,'font-weight':'bold'},cues.movement));
  };
@@ -79,7 +82,7 @@ function view(data){
    draw(f,x,y,'#e39a57','R',data.foe_cues);
  }
  const logs=$('history');logs.replaceChildren();for(const h of data.history.slice(-16).reverse()){
-   const li=document.createElement('li');const texts=[];texts.push(`t=${h.time}: ${h.player_choice}`);
+   const li=document.createElement('li');const texts=[];texts.push(`t=${h.time}: ${h.player_choice}`);if(h.player_activity)texts.push(`Scout: ${h.player_activity}`);
    if(data.audit && h.foe_choice)texts.push(h.foe_choice);
    else if(h.foe_cue)texts.push(h.foe_cue);
    texts.push(...h.results.map(x=>typeof x==='string'?x:x.text));li.textContent=texts.join(' · ');if(h.results?.some(r=>(typeof r==='string'?r:r.text).includes('HIT!'))){li.style.borderLeft='4px solid #f4b26c';li.style.background='#35402f';li.style.paddingLeft='8px'}else if(h.results?.length){li.style.borderLeft='3px solid #5b7990';li.style.paddingLeft='8px'}logs.appendChild(li);
@@ -124,7 +127,7 @@ async function choose(command){if(busy)return;
  let body={command};
  try{
   if(command==='thrust'||command==='swing')body.effort=allocatedEffort();
-  if(command==='guard'){
+  if(command==='guard'||command==='parry'||command==='dodge'){
    const defense=Number(document.querySelector('[data-effort="defense"]').value);
    if(defense>0){const e=allocatedEffort();body.effort={attack:0,defense:e.defense,timing:0,extra_damage:0};}
   }

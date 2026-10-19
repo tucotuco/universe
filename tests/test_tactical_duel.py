@@ -50,7 +50,7 @@ class TestTacticalDuel(unittest.TestCase):
         self.assertIsNone(game.state()['player']['pending'])
         self.assertEqual(game.encounter.time, 3)
 
-    def test_movement_is_from_real_encounter_and_disables_out_of_range_attacks(self):
+    def test_movement_is_from_real_encounter_and_allows_out_of_range_preparation(self):
         game = TacticalDuel(17)
         start = game.player.get_position().x
         game.choose('west')
@@ -59,8 +59,8 @@ class TestTacticalDuel(unittest.TestCase):
         for _ in range(5):
             game.choose('west')
         self.assertGreater(game.encounter.distance_between_beings(game.player.id, game.foe.id), 2)
-        with self.assertRaisesRegex(ValueError, 'out_of_reach'):
-            game.choose('thrust')
+        game.choose('thrust')
+        self.assertIsNotNone(game._pending(game.player))
 
     def test_guard_changes_real_defensive_strategy_and_attack_resets_it(self):
         game = TacticalDuel(17)

@@ -741,7 +741,8 @@ class Encounter(Event):
                 continue
             if action.end_time is not None and action.end_time <= as_of:
                 due.append((action.end_time, index, action))
-        ordered = sorted(due, key=lambda item: (item[0], item[1]))
+        ordered = sorted(due, key=lambda item: (item[0],
+            getattr(item[2], 'resolution_priority', 0), item[1]))
         # Snapshot the eligibility of all strikes finishing at the same instant
         # *before* any of their effects can incapacitate a fellow combatant.
         # Snapshot each group just before processing it, not before earlier times.
