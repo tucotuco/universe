@@ -345,6 +345,8 @@ class BeingInstance(ObjectInstance):
         self.skill_experience = {}
         self.skill_use_history = []
         self._skill_practice_baselines = {}
+        # Optional objective historical realization; never a perception or belief.
+        self.personal_history = None
 
     def to_json(self):
         """Include personal skill-use evidence in the existing instance snapshot."""
@@ -352,7 +354,25 @@ class BeingInstance(ObjectInstance):
         data['skill_experience'] = self.skill_experience.copy()
         data['skill_practice_baselines'] = self._skill_practice_baselines.copy()
         data['skill_use_history'] = [entry.to_dict() for entry in self.skill_use_history]
+        if self.personal_history is not None:
+            data['personal_history'] = self.personal_history.to_jsonable()
         return json.dumps(data)
+
+    def begin_personal_history(self, *, earliest, known_through,
+                               nondeclining_skills=()):
+        """Enable selective historical realization for this Being, once.
+
+        This requires explicit time bounds and explicitly selected skills whose
+        ranks are modeled as non-declining. Existing current state and Action
+        histories remain authoritative and are never reconstructed by this API.
+        """
+        if self.personal_history is not None:
+            raise ValueError("personal history already initialized")
+        from personal_history import PersonalHistory
+        self.personal_history = PersonalHistory(
+            self, earliest=earliest, known_through=known_through,
+            nondeclining_skills=nondeclining_skills)
+        return self.personal_history
 
     def get_skill_experience(self, skill_name):
         """Experience earned through recorded use of one skill."""
@@ -409,6 +429,11 @@ class BeingInstance(ObjectInstance):
         after = before
         if definition['is_progressive']:
             after = max(before, level_from_practice(baseline, total))
+        # Validate prospective practice against any retroactively committed
+        # historical facts *before* mutating live skills or skill-use history.
+        entry = SkillUse(skill_name, experience, before, after, action_id, time, outcome)
+        if self.personal_history is not None:
+            self.personal_history.validate_future_skill_use(entry)
         # Do not call set_weapon_skill_level: category propagation is an
         # independent policy and should not be implicitly triggered by practice.
         if after > before:
@@ -418,7 +443,6 @@ class BeingInstance(ObjectInstance):
                 self.current.skills.skills[skill_name] = after
         self._skill_practice_baselines.setdefault(skill_name, before)
         self.skill_experience[skill_name] = total
-        entry = SkillUse(skill_name, experience, before, after, action_id, time, outcome)
         self.skill_use_history.append(entry)
         return entry
 
@@ -426,6 +450,8 @@ class BeingInstance(ObjectInstance):
         '''
         Set all of the current values of the BeingInstance to their original values.
         '''
+        if self.personal_history is not None and self.personal_history.reality.revision:
+            raise ValueError("cannot discard committed personal history with reset")
         self.current = self.original.copy()
         self.strategy = Strategy()
         self.fatigue_level = 0
@@ -434,6 +460,8 @@ class BeingInstance(ObjectInstance):
         self.skill_experience.clear()
         self.skill_use_history.clear()
         self._skill_practice_baselines.clear()
+        # A reset discards the practice history on which retrospective facts depend.
+        self.personal_history = None
 
     def set_strategy(self, attack=0, defense=0, timing=0, extra_damage=0):
         '''
