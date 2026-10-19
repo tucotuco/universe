@@ -1,0 +1,9 @@
+{
+  "seed": 2031,
+  "known": {"season_phase_deg": 0, "hour_angle_deg": 45},
+  "conditions": [
+    {"metric": "solar_day_hours", "target": 30, "tolerance": 0.2},
+    {"metric": "daylight_hours", "latitude_deg": 40, "time_s": 0,
+     "target": 11.45, "tolerance": 0.45}
+  ]
+}
