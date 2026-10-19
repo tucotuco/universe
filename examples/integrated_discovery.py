@@ -27,7 +27,7 @@ from statistical_group import StatisticalGroup
 from universe import Universe
 
 
-def propose_childhood(seed, topic):
+def propose_childhood(seed, topic, episode_time=10):
     """Supply alternate admissible stories, not a preselected biography.
 
     Choices are keyed by identity/topic so generation order and unrelated
@@ -47,15 +47,15 @@ def propose_childhood(seed, topic):
         description = ('Learned to run with ' + rng.choice(mentors) + ' near ' +
                        rng.choice(places) + ', ' + rng.choice(details) + '.')
         return (
-            Fact(history.episode_key(10, topic),
+            Fact(history.episode_key(episode_time, topic),
                  {'description': description, 'skill': 'run', 'rank_after': 1},
                  'seeded_conditional_life_history'),
-            Fact(history.skill_key(10, 'run'), 1, 'seeded_conditional_life_history'),
+            Fact(history.skill_key(episode_time, 'run'), 1, 'seeded_conditional_life_history'),
         )
     return generate
 
 
-def run_scenario(seed=391):
+def prepare_scenario(seed=391):
     config = json.loads((ROOT / 'examples' / 'nomadic_group.json').read_text())
     world = Universe('First explorable Universe', library=Library(
         config_dir=str(ROOT / 'src' / 'config')))
@@ -88,17 +88,38 @@ def run_scenario(seed=391):
     assert encounter.decide_to_act(observer.id, herder.id,
                                     'investigate people and their stories')
 
-    def follow_group_for_one_second():
-        # A deliberate motion policy for this *scenario*, not a consequence
-        # of the observer's Group membership. Keep Group and Encounter clocks
-        # aligned and let the explorer travel alongside the herder.
-        before = group.get_position()
-        group.advance(1)
-        after = group.get_position()
-        velocity = tuple(b - a for a, b in zip(
-            before.as_tuple(), after.as_tuple()))
-        encounter.step(1, velocities={observer.id: velocity})
+    return {'world': world, 'group': group, 'herder': herder,
+            'observer': observer, 'encounter': encounter, 'perception': perception,
+            'belief': belief, 'history': history, 'heard': heard,
+            'later_use': later_use, 'config': config, 'seed': seed}
 
+
+def advance_with_group(scene, duration=1, *, follow=True):
+    """Move the Group and Encounter in lockstep; following is an explicit choice.
+
+    The Group moves its own realized members. The observer follows only if the
+    caller chooses to apply the Group's displacement as its movement command.
+    """
+    group, encounter = scene['group'], scene['encounter']
+    if group.time != encounter.time:
+        raise ValueError('Group and Encounter clocks are not synchronized')
+    before = group.get_position()
+    group.advance(duration)
+    after = group.get_position()
+    velocity = tuple((b - a) / duration for a, b in zip(
+        before.as_tuple(), after.as_tuple()))
+    commands = {scene['observer'].id: velocity} if follow else None
+    return encounter.step(duration, velocities=commands)
+
+
+def run_scenario(seed=391):
+    """Preserve the original, noninteractive integration test fixture."""
+    scene = prepare_scenario(seed)
+    world, group, herder = scene['world'], scene['group'], scene['herder']
+    observer, encounter = scene['observer'], scene['encounter']
+    config, belief, heard, history = (scene[key] for key in
+                                    ('config', 'belief', 'heard', 'history'))
+    later_use = scene['later_use']
     # Group observation: a fallible perception/interpretation, not exact counts.
     survey = ObserveGroupAction(
         world, observer.id, group.id, start_time=100,
@@ -107,7 +128,7 @@ def run_scenario(seed=391):
         interpretation=config['interpretation'],
         experience={'success': 12, 'failure': 18}, ledger=belief)
     encounter.schedule_action(survey)
-    follow_group_for_one_second()
+    advance_with_group(scene)
 
     # The explorer asks about the Being's past. Objective life detail is
     # conditionally generated *on demand*, not known in advance.
@@ -116,7 +137,7 @@ def run_scenario(seed=391):
                                generate=propose_childhood(seed, 'early_running'),
                                received_accounts=heard)
     encounter.schedule_action(first)
-    follow_group_for_one_second()
+    advance_with_group(scene)
 
     # A subsequent account of the same past can disagree with reality, but
     # hearing it doesn't establish either truth or deliberate deception.
@@ -128,13 +149,10 @@ def run_scenario(seed=391):
         substituted_claim='I learned to run entirely alone, far from any settlement.',
         received_accounts=heard)
     encounter.schedule_action(second)
-    follow_group_for_one_second()
+    advance_with_group(scene)
 
-    return {'world': world, 'group': group, 'herder': herder,
-            'observer': observer, 'encounter': encounter, 'perception': perception,
-            'belief': belief, 'survey': survey, 'history': history,
-            'first': first, 'second': second, 'heard': heard,
-            'later_use': later_use}
+    scene.update({'survey': survey, 'first': first, 'second': second})
+    return scene
 
 
 if __name__ == '__main__':
