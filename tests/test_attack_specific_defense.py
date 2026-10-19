@@ -105,7 +105,7 @@ class TestAttackSpecificDefense(unittest.TestCase):
         html = (ROOT / 'examples/live_combat_template.html').read_text()
         for token in ('ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
                       'id="beingDetails"', 'openBeingDetails', 'renderedData',
-                      'perceived_incoming_attack', 'aria-label', 'id="actionSummary"'):
+                      'perceived_incoming_attack', 'aria-label', 'id="beingDetails"'):
             self.assertIn(token, html)
         self.assertNotIn('<div id="player"></div>', html)
         self.assertNotIn('<div id="foe"></div>', html)

@@ -177,7 +177,7 @@ class TestCombatReactions(unittest.TestCase):
         html = (ROOT / 'examples/live_combat_template.html').read_text()
         self.assertIn('data-command="parry"', html)
         self.assertIn('data-command="dodge"', html)
-        self.assertIn('p.action_state', html)
+        self.assertIn('b.action_state', html)
         self.assertIn('h.player_activity', html)
         self.assertIn('data.player_cues', html)
 
