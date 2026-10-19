@@ -338,7 +338,10 @@ class Action(Event):
         # Get the attacker's attack level
         actor_strategy = self.get_actor_strategy()
         aal = 0
-        aal += actor.get_weapon_skill_level(self.instrument_id)
+        # Weapon skills are indexed by weapon *type*, not instance identifier.
+        instrument = self.get_instrument()
+        if isinstance(instrument, WeaponInstance):
+            aal += actor.get_weapon_skill_level(instrument.current.obj_type)
         if actor_strategy is not None:
             aal += actor_strategy.attack 
 
@@ -362,7 +365,9 @@ class Action(Event):
             # The hit is a threat
             threat_roll = roll_dice("1d20")
             if threat_roll == 20:
-                saved = actor.makes_save(actor.current.abilities.CON, difficulty_class)
+                # The defender, not the attacker, resists a potentially fatal hit.
+                target = self.get_target()
+                saved = target.makes_save(target.current.abilities.CON, difficulty_class)
                 if not saved:
                     return "fatal"
                 else:
@@ -378,7 +383,7 @@ class Action(Event):
             if threat_roll == 1:
                 # Hit actor instead of target
                 return "hit self"
-            elif not self.roll_hits(roll, difficulty_class):
+            elif not self.roll_hits(threat_roll, difficulty_class):
                 # Actor must make Reflex Saving Throw
                 saved = actor.makes_save(actor.current.abilities.DEX, difficulty_class)
                 if saved == False:

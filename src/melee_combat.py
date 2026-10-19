@@ -1,0 +1,140 @@
+"""First playable, event-backed armed-melee exchange.
+
+This integrates the draft's weapon timing, attack rolls, strategy, shield/armor
+and injury rules with Encounter position/awareness/timeline checks. It does not
+pretend that optical sightline is a complete collision/reach/facing model.
+"""
+
+from dataclasses import asdict, dataclass
+import json
+import math
+
+from action import Action
+from experience import ActionResolution
+from weapon import WeaponInstance
+
+
+@dataclass(frozen=True)
+class MeleeResult:
+    action_id: str
+    at_time: float
+    actor_id: str
+    target_id: str
+    instrument_id: str
+    motion: str
+    outcome: str
+    distance: float | None
+    actor_hp_before: float
+    actor_hp_after: float
+    target_hp_before: float
+    target_hp_after: float
+
+    def to_dict(self):
+        return asdict(self)
+
+
+class MeleeStrike(Action):
+    """A scheduled swing or thrust between two present Beings.
+
+    ``reach`` is an explicit limit in the Encounter's continuous-coordinate
+    units. Weapon lengths in the draft table are in feet; no unverified unit
+    conversion or personal reach formula is assumed here.
+
+    An obstructed or indeterminate reference-point path is conservatively
+    unavailable, even if an intervening solid object is transparent. An open
+    straight segment does not certify that a swing has enough room. Facing,
+    body-part reach and simultaneous impacts are next.
+    """
+
+    def __init__(self, encounter, actor_id, target_id, weapon_id,
+                 motion='thrust', reach=None, strategy=None):
+        if motion not in ('swing', 'thrust'):
+            raise ValueError('motion must be swing or thrust')
+        if isinstance(reach, bool) or not isinstance(reach, (int, float)):
+            raise TypeError('reach must be a numeric length in Encounter units')
+        if not math.isfinite(reach) or reach <= 0:
+            raise ValueError('reach must be finite and positive')
+        self.encounter = encounter
+        self.reach = float(reach)
+        self.hit_type = None
+        self.combat_result = None
+        super().__init__(encounter.universe, encounter.time, None, motion,
+                         actor_id, target_id, weapon_id, strategy=strategy,
+                         parent_event_id=encounter.id)
+
+    def _status(self, encounter):
+        distance = encounter.distance_between_beings(self.actor_id, self.target_id)
+        if distance is None or distance == 0:
+            return 'unplaced', distance
+        if distance > self.reach:
+            return 'out_of_reach', distance
+        line = encounter.line_of_sight(self.actor_id, self.target_id)
+        if line is None:
+            return 'unplaced', distance
+        # Melee is physical: transparent geometry still obstructs a strike.
+        if line.intersections:
+            return 'blocked', distance
+        if line.unmodeled_entity_ids:
+            return 'uncertain_path', distance
+        return 'in_reach', distance
+
+    def on_schedule(self, encounter):
+        if encounter is not self.encounter:
+            raise ValueError('MeleeStrike belongs to a different Encounter')
+        actor = encounter.get_being(self.actor_id)
+        target = encounter.get_being(self.target_id)
+        if actor is None or target is None or actor is target:
+            raise ValueError('melee requires two distinct participating Beings')
+        if actor.get_hit_points() <= 0 or target.get_hit_points() <= 0:
+            raise ValueError('combatants must be able to participate')
+        if not encounter.is_aware(self.actor_id, self.target_id):
+            raise ValueError('actor is not aware of target')
+        weapon = self.get_instrument()
+        if not isinstance(weapon, WeaponInstance):
+            raise ValueError('instrument is not an instantiated Weapon')
+        if self.instrument_id not in actor.armed_with(encounter.universe).values():
+            raise ValueError('actor does not hold that weapon')
+        if self.event_type not in weapon.get_melee_types():
+            raise ValueError('weapon does not support requested attack motion')
+        if self.damage_potential() is None or self.damage_potential() <= 0:
+            raise ValueError('non-damaging attack not implemented')
+        status, _ = self._status(encounter)
+        if status != 'in_reach':
+            raise ValueError('cannot schedule melee: ' + status)
+
+    def hit_result(self, difficulty_class):
+        self.hit_type = super().hit_result(difficulty_class)
+        return self.hit_type
+
+    def resolve(self, difficulty_class):
+        if self.combat_result is not None:
+            raise RuntimeError('melee Action already resolved')
+        actor = self.get_actor()
+        target = self.get_target()
+        before_actor = actor.get_hit_points()
+        before_target = target.get_hit_points()
+        status, distance = self._status(self.encounter)
+        if before_actor <= 0:
+            outcome = 'unable_to_act'
+        elif before_target <= 0:
+            outcome = 'target_down'
+        elif self.instrument_id not in actor.armed_with(self.universe).values():
+            outcome = 'weapon_unavailable'
+        elif status != 'in_reach':
+            outcome = status
+        else:
+            super().resolve(difficulty_class)
+            outcome = self.hit_type
+        self.combat_result = MeleeResult(
+            self.id, self.end_time, self.actor_id, self.target_id,
+            self.instrument_id, self.event_type, outcome, distance,
+            before_actor, actor.get_hit_points(),
+            before_target, target.get_hit_points())
+        return ActionResolution(outcome)
+
+    def to_json(self):
+        data = json.loads(super().to_json())
+        data['combat_result'] = (None if self.combat_result is None
+                                 else self.combat_result.to_dict())
+        data['reach'] = self.reach
+        return json.dumps(data, indent=2)
