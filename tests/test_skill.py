@@ -45,7 +45,9 @@ class TestSkillDictionary(unittest.TestCase):
 
     def test_init_skills(self):
         skill_dict = SkillDictionary(self.skills_file)
-        self.assertEqual(len(skill_dict.skills), 23)
+        # The current skills.tsv includes the `spot` skill (24 entries).
+        self.assertEqual(len(skill_dict.skills), 24)
+        self.assertIn('spot', skill_dict.skills)
         for skill in skill_dict.skills:
             skill = skill_dict.skills[skill]
             self.assertIsInstance(skill, dict)
@@ -65,7 +67,7 @@ class TestSkillDictionary(unittest.TestCase):
 
     def test_load_skills2(self):
         self.skill_dictionary.load_skills(self.skills_file)
-        self.assertEqual(len(self.skill_dictionary.skills), 23)
+        self.assertEqual(len(self.skill_dictionary.skills), 24)
         for skill in self.skill_dictionary.skills:
             skill_dict = self.skill_dictionary.skills[skill]
             self.assertIsInstance(skill_dict, dict)
@@ -99,7 +101,7 @@ class TestSkills(unittest.TestCase):
 
         self.skill_dictionary.load_skills(self.skills_file)
         self.weapon_dictionary.load_object_categories(self.weapon_categories_file)
-        self.weapon_dictionary.load_objects(self.weapons_file)
+        self.weapon_dictionary.load(self.weapons_file)
         self.skill_dictionary.add_weapon_skills(self.weapon_dictionary)
 
         self.skills = Skills()
@@ -136,9 +138,15 @@ class TestSkills(unittest.TestCase):
         self.assertEqual(level, 4)
         
     def test_set_skill_level_invalid_value(self):
-        l = self.skills.get_skill_level('Longsword')
-        self.skills.set_skill_level('Longsword', 'invalid_value')
-        self.assertEqual(self.skills.get_skill_level('Longsword'), l)
+        # Invalid changes must not replace an existing ordinary skill level.
+        existing_skill_level = self.skills.get_skill_level('escape artist')
+        self.skills.set_skill_level(self.skill_dictionary, 'escape artist', 'invalid_value')
+        self.assertEqual(self.skills.get_skill_level('escape artist'), existing_skill_level)
+
+        # Weapon skill levels use their own validated setter.
+        existing_weapon_level = self.skills.get_weapon_skill_level('Longsword')
+        self.skills.set_weapon_skill_level(self.weapon_dictionary, 'Longsword', 'invalid_value')
+        self.assertEqual(self.skills.get_weapon_skill_level('Longsword'), existing_weapon_level)
 
 if __name__ == '__main__':
     unittest.main()

@@ -16,6 +16,7 @@ import uuid
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.abspath('../src'))
 #print(f'{__version__}:{sys.path}')
@@ -67,11 +68,11 @@ class TestUniverse(unittest.TestCase):
         self.assertEqual(self.universe.event_history[self.event2.id].name, "Battle of Florence")
 
     def test_from_file_with_encounters(self):
-        filename = "results/test_universe.json"
-        # Clean up the file if it already exists
-        if os.path.exists(filename):
-            # the file exists, remove it
-            os.remove(filename)
+        # The test owns its output directory; running the suite must not
+        # depend on a preexisting `results/` folder or leave test artifacts.
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        filename = os.path.join(temp_dir.name, "test_universe.json")
 
         saved_event_history = self.universe.event_history
         saved_event0 = saved_event_history["0"]

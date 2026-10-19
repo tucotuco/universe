@@ -69,6 +69,18 @@ class TestExertion(unittest.TestCase):
         self.exertion_tracker.set_activity_level("sprinting")
         self.assertEqual(self.exertion_tracker.activity_level, "sprinting")
 
+    def test_activity_level_short_names_remain_supported(self):
+        # Existing abbreviated activity names remain valid alongside the full
+        # spellings used elsewhere in these tests.
+        for short_name, expected_seconds in (
+            ("jog", 60), ("swim", 30), ("run", 30), ("sprint", 1),
+            ("husstle", 300), ("hustle", 300),
+        ):
+            with self.subTest(activity=short_name):
+                self.exertion_tracker.set_activity_level(short_name)
+                self.assertEqual(self.exertion_tracker.activity_level, short_name)
+                self.assertEqual(self.exertion_tracker.get_check_period(), expected_seconds)
+
     def test_set_fatigue_level(self):
         self.setUp()
         self.exertion_tracker.set_fatigue_level("4")

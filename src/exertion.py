@@ -36,6 +36,17 @@ class Exertion():
           "combat":{"light":6, "medium":3, "heavy":1 }, 
           "sprint":{"light":1, "medium":1, "heavy":1 }
           }
+        # Existing code uses abbreviated gait names, while callers (and earlier
+        # tests) also use full activity names. Accept both spellings without
+        # changing which activity name the caller selected.
+        for alias, canonical in {
+            "hustle": "above normal",  # "husstle" remains accepted for compatibility
+            "jogging": "jog",
+            "swimming": "swim",
+            "running": "run",
+            "sprinting": "sprint",
+        }.items():
+            self.check_periods[alias] = self.check_periods[canonical]
         
         self.fatigue_levels = {
           0:{ "state":"fresh", "ability_adjustment":0, "maximum_movement_rate":"sprint"},
