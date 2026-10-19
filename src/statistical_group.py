@@ -16,6 +16,7 @@ import random
 from object import ObjectDefinition, ObjectInstance
 from spatial.state import CartesianPosition
 from conditional_attributes import ConditionalAttributes
+from realization import Fact, FactKey, RealityLedger, ImpossibleRealization
 
 
 def _vec(value, name):
@@ -112,6 +113,13 @@ class StatisticalGroup(ObjectInstance):
         self.config = config
         self.seed = int(seed)
         self.time = float(time)
+        if not math.isfinite(self.time):
+            raise ValueError("formation time must be finite")
+        self.formation_time = self.time
+        # One authoritative store for formation-time household facts. Group
+        # membership history remains the authoritative source for later joins
+        # and departures; it is not duplicated as ledger facts.
+        self._composition_reality = RealityLedger((self._validate_composition_facts,))
         motion = config["motion"]
         self.set_position(CartesianPosition(*_vec(motion["position"], "position")))
         self.velocity = _vec(motion["velocity"], "velocity")
@@ -122,9 +130,7 @@ class StatisticalGroup(ObjectInstance):
                 or not math.isfinite(self.footprint_radius) or self.footprint_radius <= 0
                 or _norm(self.acceleration) > self.max_acceleration + 1e-12):
             raise ValueError("invalid motion limits or spatial footprint")
-        self._household_count = None
-        self._households = {}
-        self._counts = None
+        self._counts = None  # derived total, never an independent fact
         self._members = {}
         # A GroupMember records stable identity; only selected members become Beings.
         self._realized_beings = {}
@@ -157,24 +163,120 @@ class StatisticalGroup(ObjectInstance):
         value = int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:16], "big")
         return random.Random(value)
 
+    def _formation_key(self, attribute, detail=""):
+        return FactKey(self.id, attribute, self.formation_time, detail)
+
+    def _validate_composition_facts(self, view):
+        """Prevent invalid formation facts from entering the shared ledger."""
+        root_key = self._formation_key("household_count")
+        root = view.get(root_key)
+        if root is not None and (type(root) is not int or root < 0):
+            raise ImpossibleRealization("household count must be a nonnegative integer")
+        for record in view.all_facts():
+            key, value = record.key, record.value
+            if key == root_key:
+                continue
+            if (key.entity_id != self.id or key.time != self.formation_time
+                    or key.attribute != "household" or not key.detail.isdecimal()):
+                raise ImpossibleRealization("unexpected Group composition fact")
+            index = int(key.detail)
+            if (root is None or index >= root or str(index) != key.detail
+                    or not isinstance(value, dict)
+                    or set(value) != set(self.CATEGORIES)
+                    or any(type(value[k]) is not int or value[k] < 0
+                           for k in self.CATEGORIES)):
+                raise ImpossibleRealization("invalid household composition")
+
+    @property
+    def _household_count(self):
+        """Compatibility inspection of committed root; never samples."""
+        fact = self._composition_reality.inspect(self._formation_key("household_count"))
+        return None if fact is None else fact.value
+
+    @property
+    def _households(self):
+        """Compatibility inspection of committed household facts; never samples."""
+        return {int(r.key.detail): r.value for r in self._composition_reality.view().all_facts()
+                if r.key.attribute == "household"}
+
     @property
     def household_count(self):
-        if self._household_count is None:
-            self._household_count = _draw_cdf(self.config["composition"]["households_cdf"],
-                                              self._rng("household_count"))
-        return self._household_count
+        key = self._formation_key("household_count")
+        return self._composition_reality.ask(key, lambda view: (
+            Fact(key, _draw_cdf(self.config["composition"]["households_cdf"],
+                                self._rng("household_count")), "formation_cdf"),
+        )).record.value
 
     def household(self, index):
+        if not isinstance(index, int) or isinstance(index, bool):
+            raise TypeError("household index must be an integer")
         if not 0 <= index < self.household_count:
             raise IndexError("household index outside established composition")
-        if index not in self._households:
+        key = self._formation_key("household", str(index))
+        def propose(view):
             source = self.config["composition"]["per_household"]
-            self._households[index] = {
-                category: _draw_cdf(source[category + "_cdf"],
-                                    self._rng("household", index, category))
-                for category in self.CATEGORIES
-            }
-        return self._households[index].copy()
+            value = {category: _draw_cdf(source[category + "_cdf"],
+                                         self._rng("household", index, category))
+                     for category in self.CATEGORIES}
+            return (Fact(key, value, "formation_cdf"),)
+        return self._composition_reality.ask(key, propose).record.value.copy()
+
+    def refine_formation_at(self, time, household=None):
+        """Commit a requested piece of the original composition at any later time.
+
+        This is a retrospective refinement of formation facts, NOT an attempt
+        to reconstruct an individual's mutable past. Membership history does
+        not alter the original cohort's household CDF commitments.
+        """
+        self._check_historical_time(time)
+        if household is None:
+            return self.household_count
+        return self.household(household)
+
+    def _check_historical_time(self, time):
+        try:
+            requested = float(time)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise ValueError("historical query time must be finite") from exc
+        if not math.isfinite(requested) or not self.formation_time <= requested <= self.time:
+            raise ValueError("historical time must be between formation and current time")
+        return requested
+
+    def state_at(self, time):
+        """Non-realizing historical *composition* view at simulation time.
+
+        Original counts remain unresolved until every household composition is
+        committed. Dated membership changes are replayed independently. Does
+        not claim to reconstruct historical positions, health or skill levels.
+        """
+        requested = self._check_historical_time(time)
+        committed_households = self._households
+        root = self._household_count
+        known = {category: sum(h[category] for h in committed_households.values())
+                 for category in self.CATEGORIES}
+        exact = None
+        if root is not None and len(committed_households) == root:
+            exact = dict(known)
+            exact["humans"] = known["adults"] + known["children"]
+            exact["households"] = root
+        events = tuple(record for record in self.membership_history
+                       if record.time <= requested)
+        current = None
+        if exact is not None:
+            current = exact.copy()
+            current["adults"] += sum(1 if event.action == "join" else -1
+                                     for event in events)
+            current["humans"] = current["adults"] + current["children"]
+        return {
+            "time": requested,
+            "formation_time": self.formation_time,
+            "households_committed": len(committed_households),
+            "households_unresolved": None if root is None else root - len(committed_households),
+            "known_formation_minima": known,
+            "formation_composition": exact,
+            "current_composition": current,
+            "membership_changes": tuple(event.to_dict() for event in events),
+        }
 
     def counts(self):
         """Commit numerical composition without creating any individual Being."""
