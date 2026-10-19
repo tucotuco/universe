@@ -334,3 +334,27 @@ This short record is maintained with the code; it should not require separate us
 - Membership eligibility, nonexclusive affiliation types, uninstantiated
   member departures, births, deaths, household restructuring, and automatic
   physical co-movement remain deferred. This is still an in-memory experiment.
+
+## Resident-cohort constraints under membership change (2026-10)
+
+- A **formation-time quota** is attached to one original cohort, not all members
+  of the Group at all times. `current_formation_trait_state(trait)` derives a
+  current view partitioned into original members still resident, departed
+  original members, and arrivals. It never modifies `formation_trait_state()`.
+- Qualified/unqualified counts among **unresolved original members** remain
+  exact under this experiment's restriction that only fully realized members
+  can leave. Once a qualified original member departs, they no longer count
+  towards the *resident* original-cohort quota, but their formation assignment
+  and historical provenance survive.
+- Incoming adult Beings remain outside the recipient's original cohort quota;
+  their present skills are separately queryable as known individual state.
+  An arrival's historical formation trait cannot be inferred from its current
+  skill level, nor assumed to match the receiving Group's trait classification.
+- `current_counts()` remains a headcount of current membership, not a count of
+  living members. Realized status, physical presence and original provenance
+  are distinct axes. Group population estimates after membership changes are
+  not automatically a fresh CDF draw from its initial formation model.
+- **Deferred:** unknown departures from unresolved populations, recalibration
+  of distributions when members are selected non-randomly, traits shared
+  between origin and destination groups, joint probabilistic models for
+  mixed-origin current populations, and time-stamped query of past snapshots.

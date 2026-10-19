@@ -274,6 +274,51 @@ class StatisticalGroup(ObjectInstance):
             "unresolved_other": committed_adults - len(realized) - unresolved_qualified,
         }
 
+    def current_formation_trait_state(self, trait_name):
+        """Reconcile a formation quota with *current* Group membership.
+
+        The exact quota applies to the ORIGINAL cohort only. Original members
+        who departed carry their formation assignment with them; arrivals
+        are explicitly outside this cohort. The result therefore does NOT
+        estimate the prevalence of this trait across all current adults.
+
+        Only previously materialized Beings may leave in this experiment, so
+        the unresolved original-cohort quota remains exact without sampling
+        or instantiating any additional member.
+        """
+        qualified = self._adult_formation_assignments(trait_name)
+        original_count = self.counts()["adults"]
+        realized = set(self._realized_beings)
+        departed = self._departed_member_ids
+        current_realized = realized - departed
+        unresolved_total = original_count - len(realized)
+        unresolved_qualified = len(qualified - realized)
+        departed_qualified = len(qualified & departed)
+        resident_realized_qualified = len(qualified & current_realized)
+        resident_original = original_count - len(departed)
+        incoming = len(self._incoming_beings)
+        return {
+            "trait": trait_name,
+            "original_cohort": {
+                "adults": original_count,
+                "qualified": len(qualified),
+            },
+            "resident_original_cohort": {
+                "adults": resident_original,
+                "realized_qualified": resident_realized_qualified,
+                "realized_other": len(current_realized) - resident_realized_qualified,
+                "unresolved_qualified": unresolved_qualified,
+                "unresolved_other": unresolved_total - unresolved_qualified,
+            },
+            "departed_original_cohort": {
+                "adults": len(departed),
+                "qualified": departed_qualified,
+                "other": len(departed) - departed_qualified,
+            },
+            "arrivals": {"adults": incoming, "formation_trait_unknown": incoming},
+            "current_adults": self.current_counts()["adults"],
+        }
+
     def formation_attribute(self, household, category, index, attribute):
         """Commit a correlated formation fact without realizing a Being/member.
 
