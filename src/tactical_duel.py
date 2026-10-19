@@ -14,6 +14,7 @@ from pathlib import Path
 from exertion import Exertion
 from melee_combat import MeleeStrike
 from perception import GeometricPathPerception
+from strategy import Strategy
 from spatial.geometry import Sphere
 
 
@@ -27,7 +28,8 @@ class TacticalDuel:
     WALK_PER_SECOND = .25
     SENSE_DISTANCE = 3.0
     REACH = 2.0
-    SESSION_VERSION = 1
+    SESSION_VERSION = 2
+    EFFORT_FIELDS = ('attack', 'defense', 'timing', 'extra_damage')
 
     def __init__(self, seed=17):
         import sys
@@ -35,10 +37,15 @@ class TacticalDuel:
         if examples not in sys.path:
             sys.path.insert(0, examples)
         from armed_duel import make_duel
-        random.seed(seed)
-        self.seed = seed
-        self.world, self.encounter, self.player, self.foe, self.armor_id, strikes = make_duel(
-            schedule_attacks=False)
+        external_rng = random.getstate()
+        try:
+            random.seed(seed)
+            self.seed = seed
+            self.world, self.encounter, self.player, self.foe, self.armor_id, strikes = make_duel(
+                schedule_attacks=False)
+            encounter_rng = random.getstate()
+        finally:
+            random.setstate(external_rng)
         self.player_weapon = strikes[0].instrument_id
         self.foe_weapon = strikes[1].instrument_id
         self.encounter.end_time = None
@@ -54,6 +61,9 @@ class TacticalDuel:
             being.exertion = Exertion(start_time=0, activity_level='combat',
                                      fatigue_level=being.get_fatigue_level(),
                                      load_level='light')
+        # Each duel owns its random sequence. Other worlds or save verification
+        # must not consume its future outcomes through Python's global RNG.
+        self._rng_state = encounter_rng
         self.history = []
         self.commands = []
         self._frames = []
@@ -81,14 +91,34 @@ class TacticalDuel:
         self.encounter.cancel_action(pending.id)
         return pending
 
-    def _attack(self, actor, target, weapon_id, motion):
+    def _effort_strategy(self, actor, effort):
+        """Allocate a bounded pool of actual weapon-skill points to a strategy.
+
+        A strategy applies to the new attack; the Being's defense allocation
+        remains available to incoming blows. It is never a free bonus pool.
+        """
+        if not isinstance(effort, dict) or set(effort) != set(self.EFFORT_FIELDS):
+            raise ValueError('Effort requires attack, defense, timing and extra_damage')
+        if any(type(effort[key]) is not int or effort[key] < 0
+               for key in self.EFFORT_FIELDS):
+            raise ValueError('Effort allocations must be non-negative integers')
+        weapon = 'Dagger' if actor is self.player else 'Longsword'
+        budget = actor.get_weapon_skill_level(weapon) or 0
+        if sum(effort.values()) > budget:
+            raise ValueError(f'Effort exceeds {weapon} skill pool ({budget})')
+        return Strategy(**effort)
+
+    def _attack(self, actor, target, weapon_id, motion, strategy=None):
         # Preflight *before* abandoning an already scheduled action. Rejected
         # replacement leaves both world time and original pending action intact.
         strike = MeleeStrike(self.encounter, actor.id, target.id, weapon_id,
-                             motion=motion, reach=self.REACH)
+                             motion=motion, reach=self.REACH, strategy=strategy)
         strike.on_schedule(self.encounter)
         interrupted = self._interrupt(actor)
         self.encounter.schedule_action(strike)
+        if strategy is not None:
+            actor.set_strategy(strategy.attack, strategy.defense,
+                               strategy.timing, strategy.extra_damage)
         return strike, interrupted
 
     def _foe_choice(self):
@@ -138,23 +168,44 @@ class TacticalDuel:
                                'after': being.get_fatigue_level()})
         return events
 
-    def choose(self, command):
+    def choose(self, command, effort=None):
+        # Legacy dice code uses the module RNG. Scope it to this Encounter so
+        # simultaneously active worlds and save replays cannot alter its fate.
+        outside = random.getstate()
+        random.setstate(self._rng_state)
+        try:
+            return self._choose_one(command, effort)
+        finally:
+            self._rng_state = random.getstate()
+            random.setstate(outside)
+
+    def _choose_one(self, command, effort=None):
         if command not in self.COMMANDS:
             raise ValueError('Unknown tactical command.')
         if self.ended():
             raise ValueError('Combat has ended.')
+        if effort is not None and command not in ('thrust', 'swing', 'guard'):
+            raise ValueError('Effort may be allocated only for attacks and Guard')
+        strategy = self._effort_strategy(self.player, effort) if effort is not None else None
+        if command == 'guard' and strategy is not None and (
+                strategy.attack or strategy.timing or strategy.extra_damage):
+            raise ValueError('Guard currently accepts only defensive effort')
         self._observe()
         velocities = {}
         interrupted = None
         description = ''
         if command in ('thrust', 'swing'):
-            _, interrupted = self._attack(self.player, self.foe, self.player_weapon, command)
-            self.player.set_strategy(attack=1, defense=0)
+            _, interrupted = self._attack(self.player, self.foe, self.player_weapon, command,
+                                          strategy=strategy or Strategy(attack=1))
+            # The default attack keeps its established one-point offensive stance.
+            # An explicit allocation is checked against the available skill pool.
             description = f'Scout begins a dagger {command}.'
         elif command == 'guard':
             interrupted = self._interrupt(self.player)
-            self.player.set_strategy(defense=2)
-            description = 'Scout adopts a defensive stance.'
+            defense = strategy.defense if strategy is not None else 2
+            self.player.set_strategy(defense=defense)
+            description = f'Scout adopts a defensive stance ({defense} effort).'
+
         elif command == 'cancel':
             interrupted = self._interrupt(self.player)
             description = 'Scout abandons unfinished action.' if interrupted else 'Scout has no pending action.'
@@ -176,7 +227,8 @@ class TacticalDuel:
         if self._perceived[self.player.id]:
             foe_pending = self._pending(self.foe)
             if self.foe.id in foe_velocities:
-                foe_cue = 'Raider appears to move.'
+                foe_cue = ('Raider appears to move while preparing a strike.'
+                           if foe_pending else 'Raider appears to move.')
             elif foe_pending:
                 # Coarse gesture cue conditional on proximity/path; not an
                 # infallible recognition of intent (or of a future feint).
@@ -204,12 +256,24 @@ class TacticalDuel:
             if self_loss:
                 details.append(f'{attacker}: {self_loss:g} self-damage')
             details.append(f'+{xp} weapon XP')
-            # Exact opponent HP/armor durability is objective audit data, not
-            # something the range/path sensor has established for the Scout.
+            landed = result.outcome in ('normal', 'critical', 'fatal')
+            callout = 'HIT! ' if landed else ''
+            # The actor is told exact damage they inflicted as a combat-game
+            # convention; hidden opponent current/max HP remain undisclosed.
             if result.actor_id == self.player.id:
-                player_details = ('impact sensed; opponent damage not established'
-                                  if hp_loss or result.target_armor_damage else 'no confirmed damage')
-                player_text = f'Scout {result.motion}: {result.outcome} — {player_details}; +{xp} weapon XP'
+                # In this combat ruleset the actor knows the numeric damage
+                # inflicted by their own successful strike. Total opponent HP
+                # remains private; only a broad severity estimate is shown.
+                if hp_loss:
+                    fraction = hp_loss / max(1, self.foe.original.hit_points)
+                    severity = ('light' if fraction < .2 else
+                                'substantial' if fraction < .5 else 'severe')
+                    player_details = f'{hp_loss:g} HP dealt to {target} ({severity} relative to estimated endurance)'
+                else:
+                    player_details = '0 HP dealt'
+                if result.target_armor_damage:
+                    player_details += f'; {result.target_armor_damage:g} armor durability damage'
+                player_text = f'{callout}Scout {result.motion}: {result.outcome} — {player_details}; +{xp} weapon XP'
             else:
                 player_details = []
                 if hp_loss:
@@ -218,18 +282,28 @@ class TacticalDuel:
                     player_details.append(f'your armor loses {result.target_armor_damage:g} durability')
                 if not player_details:
                     player_details.append('no recorded injury')
-                player_text = f'Incoming {result.motion}: {result.outcome} — ' + '; '.join(player_details)
+                player_text = f'{callout}Incoming {result.motion}: {result.outcome} — ' + '; '.join(player_details)
             results.append({'actor': result.actor_id, 'target': result.target_id,
-                            'text': f'{attacker} {result.motion}: {result.outcome} — ' + '; '.join(details),
+                            'text': f'{callout}{attacker} {result.motion}: {result.outcome} — ' + '; '.join(details),
                             'player_text': player_text,
-                            'outcome': result.outcome, 'xp': xp, 'damage': hp_loss})
+                            'outcome': result.outcome, 'xp': xp, 'damage': hp_loss, 'hit': landed})
+        foe_pending_now = self._pending(self.foe)
+        foe_activity = {'decision': foe_decision,
+                        'movement': list(foe_velocities[self.foe.id])
+                                    if self.foe.id in foe_velocities else None,
+                        'pending': (None if foe_pending_now is None else
+                                    {'motion': foe_pending_now.event_type,
+                                     'due': foe_pending_now.end_time}),
+                        'completed': [r['outcome'] for r in results
+                                      if r['actor'] == self.foe.id]}
         self.history.append({'time': step.end_time, 'player_choice': description,
+                             'foe_activity': foe_activity,
                              'foe_choice': foe_decision, 'foe_cue': foe_cue,
                              'foe_observed': self._perceived[self.player.id],
                              'player_moved': command in self.DIRECTION,
                              'foe_moved': self.foe.id in foe_velocities,
                              'results': results, 'fatigue_events': fatigue_events})
-        self.commands.append(command)
+        self.commands.append(command if effort is None else {'command': command, 'effort': dict(effort)})
         self._save_frame()
         return self.state()
 
@@ -255,11 +329,20 @@ class TacticalDuel:
                     'fatigue_next_check': tracker.get_end_time(),
                     'armor_hp': armor.hit_points() if armor else None,
                     'strategy': {'attack': being.strategy.attack,
-                                 'defense': being.strategy.defense},
+                                 'defense': being.strategy.defense,
+                                 'timing': being.strategy.timing,
+                                 'extra_damage': being.strategy.extra_damage},
                     'pending': None if pending is None else
                                {'motion': pending.event_type, 'due': pending.end_time}}
 
         player_data = being_state(player)
+        # Distance and line clearance are disclosed only when the foe is
+        # currently detected. Range is evaluated both at attack start and
+        # again at its scheduled completion (after intervening movement).
+        reach_status, measured_distance = (MeleeStrike(
+            self.encounter, player.id, self.foe.id, self.player_weapon,
+            motion='thrust', reach=self.REACH)._status(self.encounter)
+            if enemy_visible else (None, None))
         foe_data = being_state(self.foe) if audit else (
             {'name': self.foe.name,
              'position': list(self.foe.get_position().as_tuple()),
@@ -294,8 +377,14 @@ class TacticalDuel:
         player_arrow = ''
         if latest and latest.get('player_moved'):
             command = self.commands[-1] if self.commands else None
+            if isinstance(command, dict):
+                command = command['command']
             player_arrow = move_arrows.get(command, '➜')
         foe_arrow = '➜' if latest and latest.get('foe_moved') else ''
+        player_just_struck = bool(latest and any(
+            r['actor'] == self.player.id for r in latest['results']))
+        foe_just_struck = bool(latest and any(
+            r['actor'] == self.foe.id for r in latest['results']))
         player_symbol = ('⚔' if player_data['pending'] else
                          '▣' if player.strategy.defense > 0 else '') + player_arrow or '•'
         foe_symbol = (('⚔' if self._pending(self.foe) else '') + foe_arrow or '•') if enemy_visible else None
@@ -303,6 +392,15 @@ class TacticalDuel:
                 'player': player_data, 'foe': foe_data, 'observed_now': enemy_visible,
                 'player_symbol': player_symbol, 'foe_symbol': foe_symbol,
                 'game_over': self.ended(), 'history': log,
+                'range': {'distance': measured_distance, 'reach': self.REACH,
+                          'status': reach_status,
+                          'in_range': reach_status == 'in_reach'} if enemy_visible else None,
+                'effort_pool': player.get_weapon_skill_level('Dagger') or 0,
+                'player_cues': {'attack': '⚔' if player_data['pending'] else ('✦' if player_just_struck else ''),
+                                'guard': '▣' if player.strategy.defense else '',
+                                'movement': player_arrow},
+                'foe_cues': ({'attack': '⚔' if self._pending(self.foe) else ('✦' if foe_just_struck else ''),
+                              'movement': foe_arrow} if enemy_visible else None),
                 'perception_model': ('GeometricPathPerception: path and range only; '
                                      'apparent action is provisional proximity cue'),
                 'commands': list(self.COMMANDS), 'audit': audit}
@@ -336,6 +434,22 @@ class TacticalDuel:
                 'cancelled': len(self.encounter.cancelled_action_list)}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
+    def _journal_signature(self):
+        # Version 2 fingerprint also includes allocated effort and both plans.
+        detail = []
+        for being in (self.player, self.foe):
+            strategy = being.strategy
+            pending = self._pending(being)
+            detail.append({'effort': [strategy.attack, strategy.defense,
+                                      strategy.timing, strategy.extra_damage],
+                           'pending_effort': (None if pending is None else [
+                               pending.strategy.attack, pending.strategy.defense,
+                               pending.strategy.timing, pending.strategy.extra_damage])})
+        payload = json.dumps([self._signature(), detail,
+                              hashlib.sha256(repr(self._rng_state).encode()).hexdigest()],
+                             sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
     def to_session(self):
         """Versioned seed + commands + fingerprints for checked reconstruction."""
         # Replaying a save must not perturb the active encounter's RNG stream.
@@ -343,33 +457,68 @@ class TacticalDuel:
         try:
             fresh = TacticalDuel(self.seed)
             checks = []
-            for command in self.commands:
-                fresh.choose(command)
-                checks.append(fresh._signature())
-            if fresh._signature() != self._signature():
+            foe_decisions = []
+            foe_actions = []
+            for item in self.commands:
+                command, effort = self._decode_command(item)
+                fresh.choose(command, effort)
+                checks.append(fresh._journal_signature())
+                foe_decisions.append(fresh.history[-1]['foe_choice'])
+                foe_actions.append(fresh.history[-1]['foe_activity'])
+
+            if fresh._journal_signature() != self._journal_signature():
                 raise ValueError('Current encounter diverges from its command history; cannot save safely')
             return {'format': 'universe.tactical-duel', 'version': self.SESSION_VERSION,
-                    'seed': self.seed, 'commands': list(self.commands), 'checks': checks}
+                    'seed': self.seed, 'commands': list(self.commands), 'checks': checks,
+                    'foe_decisions': foe_decisions, 'foe_actions': foe_actions}
         finally:
             random.setstate(rng_state)
 
     @classmethod
+    def _decode_command(cls, item):
+        if isinstance(item, str) and item in cls.COMMANDS:
+            return item, None
+        if isinstance(item, dict) and set(item) == {'command', 'effort'}:
+            command = item['command']
+            if isinstance(command, str) and command in ('thrust', 'swing', 'guard'):
+                return command, item['effort']
+        raise ValueError('Invalid session command')
+
+    @classmethod
     def from_session(cls, payload):
-        if not isinstance(payload, dict) or set(payload) != {'format', 'version', 'seed', 'commands', 'checks'}:
+        if not isinstance(payload, dict):
             raise ValueError('Invalid session structure')
-        if payload['format'] != 'universe.tactical-duel' or payload['version'] != cls.SESSION_VERSION:
+        version = payload.get('version')
+        expected = {'format', 'version', 'seed', 'commands', 'checks'}
+        if version == cls.SESSION_VERSION:
+            expected.update(('foe_decisions', 'foe_actions'))
+        if not {'format', 'version', 'seed', 'commands', 'checks'} <= set(payload):
+            raise ValueError('Invalid session structure')
+        if payload['format'] != 'universe.tactical-duel' or version not in (1, cls.SESSION_VERSION):
             raise ValueError('Unsupported session format/version')
+        if set(payload) != expected:
+            raise ValueError('Invalid session structure')
         if type(payload['seed']) is not int:
             raise ValueError('Session seed must be an integer')
         commands, checks = payload['commands'], payload['checks']
         if (not isinstance(commands, list) or not isinstance(checks, list)
                 or len(commands) != len(checks) or len(commands) > 100000):
             raise ValueError('Invalid session history')
+        if version == cls.SESSION_VERSION:
+            foes = payload['foe_decisions']
+            foe_actions = payload['foe_actions']
+            if (not isinstance(foes, list) or len(foes) != len(commands) or
+                    not isinstance(foe_actions, list) or len(foe_actions) != len(commands)):
+                raise ValueError('Invalid foe decision journal')
+        else:
+            foes = None
+            foe_actions = None
         game = cls(payload['seed'])
-        for command, expected in zip(commands, checks):
-            if not isinstance(command, str) or command not in cls.COMMANDS:
-                raise ValueError('Invalid session command')
-            game.choose(command)
-            if game._signature() != expected:
+        for index, (item, expected) in enumerate(zip(commands, checks)):
+            command, effort = cls._decode_command(item)
+            game.choose(command, effort)
+            if (game._journal_signature() if foes is not None else game._signature()) != expected or (foes is not None and
+                    game.history[-1]['foe_choice'] != foes[index]) or (
+                    foe_actions is not None and game.history[-1]['foe_activity'] != foe_actions[index]):
                 raise ValueError('Session validation failed: reconstructed world state differs')
         return game

@@ -94,9 +94,10 @@ def make_handler(game, audit=False, *, save_path=None, replay_only=False):
                 else:
                     if replay_only:
                         raise ValueError('Replay is read-only.')
-                    if not isinstance(body, dict) or set(body) != {'command'} or not isinstance(body['command'], str):
-                        raise ValueError('Expected a single command string.')
-                    result = game.choose(body['command'])
+                    if not isinstance(body, dict) or not isinstance(body.get('command'), str) or (
+                            set(body) not in ({'command'}, {'command', 'effort'})):
+                        raise ValueError('Expected command with optional effort allocation.')
+                    result = game.choose(body['command'], body.get('effort'))
             except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
                 return self.json_response(400, {'error': str(exc)})
             self.json_response(200, result if self.path == '/save' or not audit else game.state(audit=True))

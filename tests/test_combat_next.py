@@ -96,7 +96,8 @@ class TestTacticalUsability(unittest.TestCase):
             game.choose('wait')
         info = game.state()['history'][-1]['results']
         self.assertTrue(info)
-        self.assertIn('damage not established', info[0])
+        self.assertIn('HP dealt to Raider', info[0])
+        self.assertIn('relative to estimated endurance', info[0])
         self.assertNotIn('10→', info[0])
         audit = game.state(audit=True)['history'][-1]['results'][0]['text']
         self.assertIn('Raider:', audit)

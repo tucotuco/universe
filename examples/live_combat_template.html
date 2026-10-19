@@ -12,19 +12,27 @@ button{padding:11px 15px;background:#28465f;color:inherit;border:1px solid #6583
 button:hover{background:#385b77}button:disabled{cursor:not-allowed;opacity:.45}
 .commands{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px} .command-group{margin:14px 0}
 .stat{display:flex;justify-content:space-between;gap:12px;margin:7px 0;font-size:.9rem}.stat span:last-child{text-align:right;font-variant-numeric:tabular-nums}
-.log{list-style:none;padding:0;margin:0;max-height:340px;overflow:auto}.log li{padding:9px 0;border-bottom:1px solid #36495a;font-size:.88rem;line-height:1.4}
+.efforts{display:flex;flex-wrap:wrap;gap:12px}.efforts label{display:flex;align-items:center;gap:5px;font-size:.86rem}.efforts input{width:46px;background:#101c28;color:#edf5ff;border:1px solid #7890a8;padding:5px;border-radius:4px}.log{list-style:none;padding:0;margin:0;max-height:340px;overflow:auto}.log li{padding:9px 0;border-bottom:1px solid #36495a;font-size:.88rem;line-height:1.4}
 #feedback{min-height:1.6em;color:#f8d088}#time{font-size:1.25rem;font-weight:700}.tag{font-size:.75rem;color:#d3e5f8}
 @media(max-width:750px){.grid{grid-template-columns:1fr}}
 </style></head><body>
 <h1>Universe · Live combat</h1>
 <p class="sub">A real Encounter advances only when you issue a tactical command. All HP, equipment, actions and weapon XP belong to persistent Universe Entities. Each command advances one second.</p>
 <div class="grid"><section class="panel"><h2>Personal-scale encounter · top-down</h2><svg id="map" viewBox="0 0 600 380" aria-label="Combatant positions" role="img"></svg>
-<p id="perception" class="help"></p><p><span id="time"></span> <span class="tag" id="status"></span></p>
-<div class="command-group"><h2>Attack (timed actions)</h2><div class="commands"><button data-command="thrust">Dagger thrust</button><button data-command="swing">Dagger swing</button><button data-command="guard">Guard</button><button data-command="wait">Wait 1 s</button><button data-command="cancel">Cancel action</button></div></div>
+<p id="perception" class="help"></p><p id="rangeStatus" class="help"></p><p><span id="time"></span> <span class="tag" id="status"></span></p>
+<div class="command-group"><h2>Allocate weapon skill effort</h2>
+ <p class="help">Spend up to <strong id="effortPool">2</strong> Dagger skill points among attack accuracy, defense, timing and extra damage. These affect your next attack; Guard uses the chosen defense allocation (or the default of 2 when unset). Moving does not interrupt an action.</p>
+ <div id="efforts" class="efforts">
+ <label>Attack <input type="number" min="0" value="1" data-effort="attack"></label>
+ <label>Defense <input type="number" min="0" value="0" data-effort="defense"></label>
+ <label>Speed (timing) <input type="number" min="0" value="0" data-effort="timing"></label>
+ <label>Damage <input type="number" min="0" value="0" data-effort="extra_damage"></label></div>
+ <p id="effortStatus" class="help"></p></div>
+ <div class="command-group"><h2>Attack (timed actions)</h2><div class="commands"><button data-command="thrust">Dagger thrust</button><button data-command="swing">Dagger swing</button><button data-command="guard">Guard</button><button data-command="wait">Wait 1 s</button><button data-command="cancel">Cancel action</button></div></div>
 <div class="command-group"><h2>Move (0.25 units/second)</h2><div class="commands"><button data-command="northwest">↖ NW</button><button data-command="north">↑ N</button><button data-command="northeast">↗ NE</button><button data-command="west">← W</button><button data-command="east">E →</button><button data-command="southwest">↙ SW</button><button data-command="south">↓ S</button><button data-command="southeast">SE ↘</button></div></div>
 <div class="command-group"><h2>Save and inspect history</h2><div class="commands"><button id="save">Save encounter</button><button id="review">Review timeline</button><button id="back">◀ Earlier</button><button id="forward">Later ▶</button><button id="live">Return to current</button></div><input type="range" min="0" max="0" value="0" id="scrub" style="width:100%" aria-label="Replay second"><span id="reviewStatus" class="help">Current live state</span></div>
 <p id="feedback" role="status"></p><p class="help">You can move while an attack is pending. Swing, thrust, Guard or Cancel interrupt an unfinished attack; interrupted attempts earn no XP. Diagonal steps are normalized to the same distance. The Raider follows a provisional deterministic tactical policy; it isn't a fully autonomous Agent.</p>
-</section><section class="panel"><h2>Scout · Current state</h2><div id="player"></div><h2>Opponent · Perceived state</h2><div id="foe"></div><p class="help">The opponent's exact HP, skills and XP are not disclosed. A location is shown only with a current unobstructed geometric path observation. This model is not yet physical vision.</p></section>
+</section><section class="panel"><h2>Scout · Current state</h2><div id="player"></div><h2>Opponent · Perceived state</h2><div id="foe"></div><p class="help">Your own strikes report exact HP damage dealt and a qualitative share of estimated opponent endurance, but not the opponent's current or maximum HP. A distance and reach indication is shown only with a current unobstructed geometric path observation. This model is not yet physical vision.</p></section>
 <section class="panel"><h2>Actions and consequences</h2><ul class="log" id="history"></ul></section>
 <section class="panel"><h2>Current model boundaries</h2><p class="help">Reach, speed and body geometry remain explicit provisional units. There is no collision avoidance, facing, anatomical hit locations, full simultaneous damage model, or validated optical gesture recognition. Versioned command-journal saves reconstruct the encounter under the same simulation code; cross-version migrations and arbitrary world-state serialization remain deferred. Same-time melee attempts use frozen prerequisites; effects are applied in deterministic order. All observations, including geometric paths, remain distinct from belief.</p></section></div>
 <script>
@@ -41,19 +49,40 @@ function view(data){
  $('player').replaceChildren();
  field($('player'),'HP',`${p.hp} / ${p.hp_max}`);field($('player'),'Fatigue',`${p.fatigue} / 5 · ${p.fatigue_state}`);field($('player'),'Next exertion check',`${p.fatigue_next_check}s`);field($('player'),'Weapon',p.weapon);field($('player'),'Weapon skill',p.weapon_skill);field($('player'),'Weapon XP',p.xp);field($('player'),'Guard effort',p.strategy.defense);
  field($('player'),'Action',p.pending?`${p.pending.motion} (completes at ${p.pending.due}s)`:'Idle');
+ const rr=data.range;
+ $('rangeStatus').textContent=rr?`Distance ${rr.distance.toFixed(2)} units · Reach ${rr.reach.toFixed(2)} · ${rr.in_range?'IN RANGE':rr.status.replaceAll('_',' ').toUpperCase()}`:'Opponent range unknown (not currently detected)';
+ $('rangeStatus').style.color=rr?.in_range?'#8ce2b0':'#f4bc8b';
+ $('effortPool').textContent=data.effort_pool;
  $('foe').replaceChildren(); if(f){field($('foe'),'Detected',f.name);if(!data.audit && f.apparent_action)field($('foe'),'Appears to be doing',f.apparent_action);if(data.audit){field($('foe'),'HP',`${f.hp} / ${f.hp_max}`);field($('foe'),'Fatigue',`${f.fatigue} / 5 · ${f.fatigue_state}`);field($('foe'),'XP',f.xp)}else{field($('foe'),'HP / Skills / XP','Not established by observation')} }else field($('foe'),'Presence','Not currently detected');
  const map=$('map');map.replaceChildren();
  for(let i=0;i<=600;i+=60)map.appendChild(svg('line',{x1:i,y1:0,x2:i,y2:380,stroke:'#344658'}));
  for(let i=0;i<=380;i+=60)map.appendChild(svg('line',{x1:0,y1:i,x2:600,y2:i,stroke:'#344658'}));
  // Camera is anchored on the Scout; the opponent appears ONLY if observed.
- const draw=(b,x,y,color,symbol)=>{map.appendChild(svg('circle',{cx:x,cy:y,r:14,fill:color,stroke:'#eef6ff','stroke-width':2}));map.appendChild(svg('text',{x,y:y+4,'text-anchor':'middle',fill:'#061924','font-size':16,'font-weight':'bold'},symbol||'•'));map.appendChild(svg('text',{x,y:y+29,'text-anchor':'middle',fill:'#eef6ff','font-size':13},b.name))};
- draw(p,300,190,'#51a3e5',data.player_symbol);
- if(f?.position){const x=300+(f.position[0]-p.position[0])*85,y=190-(f.position[1]-p.position[1])*85;draw(f,x,y,'#e39a57',data.foe_symbol)}
+ // Dashed reach ring is a provisional reference-point reach limit.
+ const reach= data.range?.reach || 2;
+ map.appendChild(svg('circle',{cx:300,cy:190,r:reach*85,fill:'none',stroke:'#71b6d9',
+                                  'stroke-width':1.5,'stroke-dasharray':'7 5',opacity:.65}));
+ const draw=(b,x,y,color,initial,cues)=>{
+   map.appendChild(svg('circle',{cx:x,cy:y,r:14,fill:color,stroke:'#eef6ff','stroke-width':2}));
+   map.appendChild(svg('text',{x,y:y+5,'text-anchor':'middle',fill:'#061924','font-size':14,'font-weight':'bold'},initial));
+   map.appendChild(svg('text',{x,y:y+31,'text-anchor':'middle',fill:'#eef6ff','font-size':13},b.name));
+   // Separate icons keep movement and a concurrently pending attack visible.
+   if(cues?.attack)map.appendChild(svg('text',{x:x-25,y:y-15,fill:'#ffe3a7','font-size':21},cues.attack));
+   if(cues?.guard)map.appendChild(svg('text',{x:x+14,y:y-15,fill:'#b0f1e0','font-size':21},cues.guard));
+   if(cues?.movement)map.appendChild(svg('text',{x:x+18,y:y+18,fill:'#fff','font-size':23,'font-weight':'bold'},cues.movement));
+ };
+ draw(p,300,190,'#51a3e5','S',data.player_cues);
+ if(f?.position){
+   const x=300+(f.position[0]-p.position[0])*85,y=190-(f.position[1]-p.position[1])*85;
+   if(data.range){map.appendChild(svg('line',{x1:300,y1:190,x2:x,y2:y,stroke:data.range.in_range?'#8be5ac':'#f1a883',
+     'stroke-width':2,'stroke-dasharray':'3 5',opacity:.75}));}
+   draw(f,x,y,'#e39a57','R',data.foe_cues);
+ }
  const logs=$('history');logs.replaceChildren();for(const h of data.history.slice(-16).reverse()){
    const li=document.createElement('li');const texts=[];texts.push(`t=${h.time}: ${h.player_choice}`);
    if(data.audit && h.foe_choice)texts.push(h.foe_choice);
    else if(h.foe_cue)texts.push(h.foe_cue);
-   texts.push(...h.results.map(x=>typeof x==='string'?x:x.text));li.textContent=texts.join(' · ');logs.appendChild(li);
+   texts.push(...h.results.map(x=>typeof x==='string'?x:x.text));li.textContent=texts.join(' · ');if(h.results?.some(r=>(typeof r==='string'?r:r.text).includes('HIT!'))){li.style.borderLeft='4px solid #f4b26c';li.style.background='#35402f';li.style.paddingLeft='8px'}else if(h.results?.length){li.style.borderLeft='3px solid #5b7990';li.style.paddingLeft='8px'}logs.appendChild(li);
  }
  for(const b of document.querySelectorAll('[data-command]'))b.disabled=busy||data.game_over||reviewing||readOnly;
  $('save').disabled=busy||reviewing||readOnly;
@@ -64,7 +93,7 @@ function view(data){
  if(!reviewing)$('reviewStatus').textContent=readOnly?'Read-only saved encounter · review timeline':'Current live encounter';
 }
 let state=null;
-async function refresh(){const response=await fetch('/state',{cache:'no-store'});if(!response.ok)throw Error('State unavailable');state=await response.json();readOnly=!!state.replay_only;view(state);if(readOnly)await startReview()}
+async function refresh(){const response=await fetch('/state',{cache:'no-store'});if(!response.ok)throw Error('State unavailable');state=await response.json();readOnly=!!state.replay_only;view(state);updateEffort();if(readOnly)await startReview()}
 async function startReview(){const response=await fetch('/timeline',{cache:'no-store'});if(!response.ok)throw Error('Timeline unavailable');const data=await response.json();frames=data.frames;reviewing=true;index=frames.length-1;drawReview()}
 function drawReview(){if(!frames.length)return;$('scrub').max=frames.length-1;$('scrub').value=index;$('reviewStatus').textContent=`Historical replay · frame ${index+1}/${frames.length} · t=${frames[index].time}s`;view(frames[index]);}
 function returnLive(){reviewing=false;view(state)}
@@ -75,9 +104,34 @@ $('back').addEventListener('click',()=>{index=Math.max(0,index-1);drawReview()})
 $('forward').addEventListener('click',()=>{index=Math.min(frames.length-1,index+1);drawReview()});
 $('live').addEventListener('click',returnLive);
 $('scrub').addEventListener('input',e=>{index=Number(e.target.value);drawReview()});
-async function choose(command){if(busy)return;busy=true;for(const b of document.querySelectorAll('[data-command]'))b.disabled=true;
- try{const response=await fetch('/choose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command})});
- const result=await response.json();if(!response.ok)throw Error(result.error||'Action rejected');state=result;$('feedback').textContent='';view(state);
+function allocatedEffort(){
+ const effort={};let spent=0;
+ for(const input of document.querySelectorAll('[data-effort]')){
+   const value=Number(input.value);
+   if(!Number.isInteger(value)||value<0)throw Error('Effort must be non-negative whole numbers');
+   effort[input.dataset.effort]=value;spent+=value;
+ }
+ const pool=state?.effort_pool||0;
+ if(spent>pool)throw Error(`Effort total ${spent} exceeds Dagger skill ${pool}`);
+ return effort;
+}
+function updateEffort(){try{const e=allocatedEffort();const total=Object.values(e).reduce((a,b)=>a+b,0);
+ $('effortStatus').textContent=`${total} / ${state?.effort_pool||0} skill points allocated`;
+ $('effortStatus').style.color='#a6e9c0';
+ }catch(err){$('effortStatus').textContent=err.message;$('effortStatus').style.color='#ffc3a0';}}
+for(const input of document.querySelectorAll('[data-effort]'))input.addEventListener('input',updateEffort);
+async function choose(command){if(busy)return;
+ let body={command};
+ try{
+  if(command==='thrust'||command==='swing')body.effort=allocatedEffort();
+  if(command==='guard'){
+   const defense=Number(document.querySelector('[data-effort="defense"]').value);
+   if(defense>0){const e=allocatedEffort();body.effort={attack:0,defense:e.defense,timing:0,extra_damage:0};}
+  }
+ }catch(e){$('feedback').textContent=e.message;return}
+ busy=true;for(const b of document.querySelectorAll('[data-command]'))b.disabled=true;
+ try{const response=await fetch('/choose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const result=await response.json();if(!response.ok)throw Error(result.error||'Action rejected');state=result;$('feedback').textContent='';view(state);updateEffort();
  }catch(e){$('feedback').textContent=e.message;}finally{busy=false;if(state)view(state)} }
 for(const button of document.querySelectorAll('[data-command]'))button.addEventListener('click',()=>choose(button.dataset.command));
 refresh().catch(e=>{$('feedback').textContent=e.message});
