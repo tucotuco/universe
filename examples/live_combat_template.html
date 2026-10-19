@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Universe · Live combat</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;background:#101c28;color:#e9f1f9;color-scheme:dark}
+body{max-width:1100px;margin:auto;padding:18px}h1{font-size:1.7rem;margin:0}h2{font-size:1rem;margin:0 0 12px}
+.sub,.help{color:#b5c6d5;font-size:.86rem;line-height:1.5}
+.grid{display:grid;grid-template-columns:minmax(340px,1.6fr) minmax(260px,1fr);gap:14px}
+.panel{background:#192a3b;border:1px solid #3b5268;border-radius:10px;padding:15px;min-width:0}
+#map{display:block;background:#132432;width:100%;border:1px solid #3b5268;border-radius:7px}
+button{padding:11px 15px;background:#28465f;color:inherit;border:1px solid #65839b;border-radius:6px;cursor:pointer;font:inherit}
+button:hover{background:#385b77}button:disabled{cursor:not-allowed;opacity:.45}
+.commands{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px} .command-group{margin:14px 0}
+.stat{display:flex;justify-content:space-between;gap:12px;margin:7px 0;font-size:.9rem}.stat span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.log{list-style:none;padding:0;margin:0;max-height:340px;overflow:auto}.log li{padding:9px 0;border-bottom:1px solid #36495a;font-size:.88rem;line-height:1.4}
+#feedback{min-height:1.6em;color:#f8d088}#time{font-size:1.25rem;font-weight:700}.tag{font-size:.75rem;color:#d3e5f8}
+@media(max-width:750px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+<h1>Universe · Live combat</h1>
+<p class="sub">A real Encounter advances only when you issue a tactical command. All HP, equipment, actions and weapon XP belong to persistent Universe Entities. Each command advances one second.</p>
+<div class="grid"><section class="panel"><h2>Personal-scale encounter · top-down</h2><svg id="map" viewBox="0 0 600 380" aria-label="Combatant positions" role="img"></svg>
+<p id="perception" class="help"></p><p><span id="time"></span> <span class="tag" id="status"></span></p>
+<div class="command-group"><h2>Attack (timed actions)</h2><div class="commands"><button data-command="thrust">Dagger thrust</button><button data-command="swing">Dagger swing</button><button data-command="guard">Guard</button><button data-command="wait">Wait 1 s</button></div></div>
+<div class="command-group"><h2>Move (0.25 units/second)</h2><div class="commands"><button data-command="west">← West</button><button data-command="north">↑ North</button><button data-command="south">↓ South</button><button data-command="east">East →</button></div></div>
+<p id="feedback" role="status"></p><p class="help">You can move while an attack is pending. Guard adopts a defensive strategy until you attack. The Raider follows a provisional deterministic tactical policy; it isn't a fully autonomous Agent.</p>
+</section><section class="panel"><h2>Scout · Current state</h2><div id="player"></div><h2>Opponent · Perceived state</h2><div id="foe"></div><p class="help">The opponent's exact HP, skills and XP are not disclosed. A location is shown only with a current unobstructed geometric path observation. This model is not yet physical vision.</p></section>
+<section class="panel"><h2>Actions and consequences</h2><ul class="log" id="history"></ul></section>
+<section class="panel"><h2>Current model boundaries</h2><p class="help">Reach, speed and body geometry remain explicit provisional units. There is no collision avoidance, facing, stance animation, full simultaneous damage model, environmental sensing, or persistence across server restarts. Same-time melee attempts use frozen prerequisites; effects are applied in deterministic order. All observations, including geometric paths, remain distinct from belief.</p></section></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const ns='http://www.w3.org/2000/svg';
+let busy=false;
+function svg(name,attributes,text){const n=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attributes))n.setAttribute(k,String(v));if(text)n.textContent=text;return n}
+function field(root,name,value){const r=document.createElement('div');r.className='stat';const a=document.createElement('span'),b=document.createElement('span');a.textContent=name;b.textContent=value;r.append(a,b);root.appendChild(r)}
+function view(data){
+ const p=data.player,f=data.foe;
+ $('time').textContent=`Time ${data.time}s`; $('status').textContent=data.game_over?'· Encounter ended':'· Encounter active';
+ $('perception').textContent=data.perception_model+(data.observed_now?' · Opponent path detected':' · No current opponent path');
+ $('player').replaceChildren();
+ field($('player'),'HP',p.hp);field($('player'),'Weapon',p.weapon);field($('player'),'Weapon skill',p.weapon_skill);field($('player'),'Weapon XP',p.xp);field($('player'),'Guard effort',p.strategy.defense);
+ field($('player'),'Action',p.pending?`${p.pending.motion} (completes at ${p.pending.due}s)`:'Idle');
+ $('foe').replaceChildren(); if(f){field($('foe'),'Detected',f.name);if(data.audit){field($('foe'),'HP',f.hp);field($('foe'),'XP',f.xp)}else{field($('foe'),'HP / Skills / XP','Not established by observation')} }else field($('foe'),'Presence','Not currently detected');
+ const map=$('map');map.replaceChildren();
+ for(let i=0;i<=600;i+=60)map.appendChild(svg('line',{x1:i,y1:0,x2:i,y2:380,stroke:'#344658'}));
+ for(let i=0;i<=380;i+=60)map.appendChild(svg('line',{x1:0,y1:i,x2:600,y2:i,stroke:'#344658'}));
+ // Camera is anchored on the Scout; the opponent appears ONLY if observed.
+ const draw=(b,x,y,color)=>{map.appendChild(svg('circle',{cx:x,cy:y,r:14,fill:color,stroke:'#eef6ff','stroke-width':2}));map.appendChild(svg('text',{x,y:y+29,'text-anchor':'middle',fill:'#eef6ff','font-size':13},b.name))};
+ draw(p,300,190,'#51a3e5');
+ if(f?.position){const x=300+(f.position[0]-p.position[0])*85,y=190-(f.position[1]-p.position[1])*85;draw(f,x,y,'#e39a57')}
+ const logs=$('history');logs.replaceChildren();for(const h of data.history.slice(-16).reverse()){
+   const li=document.createElement('li');const texts=[];texts.push(`t=${h.time}: ${h.player_choice}`);
+   if(data.audit && h.foe_choice)texts.push(h.foe_choice);
+   texts.push(...h.results.map(x=>typeof x==='string'?x:x.text));li.textContent=texts.join(' · ');logs.appendChild(li);
+ }
+ for(const b of document.querySelectorAll('[data-command]'))b.disabled=busy||data.game_over;
+}
+let state=null;
+async function refresh(){const response=await fetch('/state',{cache:'no-store'});if(!response.ok)throw Error('State unavailable');state=await response.json();view(state)}
+async function choose(command){if(busy)return;busy=true;for(const b of document.querySelectorAll('[data-command]'))b.disabled=true;
+ try{const response=await fetch('/choose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command})});
+ const result=await response.json();if(!response.ok)throw Error(result.error||'Action rejected');state=result;$('feedback').textContent='';view(state);
+ }catch(e){$('feedback').textContent=e.message;}finally{busy=false;if(state)view(state)} }
+for(const button of document.querySelectorAll('[data-command]'))button.addEventListener('click',()=>choose(button.dataset.command));
+refresh().catch(e=>{$('feedback').textContent=e.message});
+</script></body></html>

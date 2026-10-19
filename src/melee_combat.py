@@ -10,7 +10,7 @@ import json
 import math
 
 from action import Action
-from experience import ActionResolution
+from experience import ActionResolution, SkillExercise
 from weapon import WeaponInstance
 
 
@@ -58,6 +58,7 @@ class MeleeStrike(Action):
         self.reach = float(reach)
         self.hit_type = None
         self.combat_result = None
+        self._simultaneous_eligibility = None
         super().__init__(encounter.universe, encounter.time, None, motion,
                          actor_id, target_id, weapon_id, strategy=strategy,
                          parent_event_id=encounter.id)
@@ -106,6 +107,19 @@ class MeleeStrike(Action):
         self.hit_type = super().hit_result(difficulty_class)
         return self.hit_type
 
+    def capture_simultaneous_eligibility(self):
+        """Freeze attempt prerequisites before any same-time melee impact.
+
+        This is an Encounter-owned batch precondition, never an independently
+        committed state or a guarantee about later armor interactions.
+        """
+        actor = self.get_actor()
+        target = self.get_target()
+        status, distance = self._status(self.encounter)
+        return (actor.get_hit_points() > 0, target.get_hit_points() > 0,
+                self.instrument_id in actor.armed_with(self.universe).values(),
+                status, distance)
+
     def resolve(self, difficulty_class):
         if self.combat_result is not None:
             raise RuntimeError('melee Action already resolved')
@@ -113,24 +127,35 @@ class MeleeStrike(Action):
         target = self.get_target()
         before_actor = actor.get_hit_points()
         before_target = target.get_hit_points()
-        status, distance = self._status(self.encounter)
-        if before_actor <= 0:
+        eligible = self._simultaneous_eligibility
+        if eligible is None:
+            eligible = self.capture_simultaneous_eligibility()
+        actor_ready, target_ready, weapon_ready, status, distance = eligible
+        attempted = False
+        if not actor_ready:
             outcome = 'unable_to_act'
-        elif before_target <= 0:
+        elif not target_ready:
             outcome = 'target_down'
-        elif self.instrument_id not in actor.armed_with(self.universe).values():
+        elif not weapon_ready:
             outcome = 'weapon_unavailable'
         elif status != 'in_reach':
             outcome = status
         else:
             super().resolve(difficulty_class)
             outcome = self.hit_type
+            attempted = True
+        # Canceled strikes never exercised a weapon.  Both hits and misses
+        # record real attempts on the ordinary Encounter experience path.
+        exercises = ()
+        if attempted:
+            weapon_type = self.get_instrument().original.obj_type
+            exercises = (SkillExercise(weapon_type, 10),)
         self.combat_result = MeleeResult(
             self.id, self.end_time, self.actor_id, self.target_id,
             self.instrument_id, self.event_type, outcome, distance,
             before_actor, actor.get_hit_points(),
             before_target, target.get_hit_points())
-        return ActionResolution(outcome)
+        return ActionResolution(outcome, skill_exercises=exercises)
 
     def to_json(self):
         data = json.loads(super().to_json())

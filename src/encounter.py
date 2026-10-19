@@ -705,11 +705,12 @@ class Encounter(Event):
         pass
 
     def resolve_actions(self, as_of=None):
-        """Resolve registered actions due by ``as_of`` in timeline order.
+        """Resolve due Events, freezing equal-time melee prerequisites together.
 
-        Legacy combat Action.resolve() remains responsible for combat effects.
-        Effects are applied serially for now; simultaneous-effect resolution is
-        a separate future enhancement.
+        Melee attempts finishing at an identical time all use their shared
+        pre-impact eligibility snapshot. Damage and armor effects are still
+        applied in deterministic order; general simultaneous effects (including
+        shared equipment, area attacks and secondary effects) remain deferred.
         """
         if as_of is None:
             as_of = self.time
@@ -720,9 +721,25 @@ class Encounter(Event):
                 continue
             if action.end_time is not None and action.end_time <= as_of:
                 due.append((action.end_time, index, action))
+        ordered = sorted(due, key=lambda item: (item[0], item[1]))
+        # Snapshot the eligibility of all strikes finishing at the same instant
+        # *before* any of their effects can incapacitate a fellow combatant.
+        # Snapshot each group just before processing it, not before earlier times.
         completed = []
-        for _, _, action in sorted(due, key=lambda item: (item[0], item[1])):
-            resolution = action.resolve(self.difficulty_class)
+        batch_time = None
+        for due_time, _, action in ordered:
+            if due_time != batch_time:
+                batch_time = due_time
+                for same_time, _, candidate in ordered:
+                    if same_time == due_time:
+                        freeze = getattr(candidate, 'capture_simultaneous_eligibility', None)
+                        if freeze is not None:
+                            candidate._simultaneous_eligibility = freeze()
+            try:
+                resolution = action.resolve(self.difficulty_class)
+            finally:
+                if hasattr(action, '_simultaneous_eligibility'):
+                    action._simultaneous_eligibility = None
             if isinstance(resolution, ActionResolution):
                 # Preflight the entire award set before updating any skill.
                 # A resolver returning None retains legacy, no-award behavior.

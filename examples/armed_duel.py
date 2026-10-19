@@ -20,7 +20,7 @@ from spatial.state import CartesianPosition
 from universe import Universe
 
 
-def make_duel():
+def make_duel(schedule_attacks=True):
     world = Universe('A clash at the ford', library=Library(config_dir=str(ROOT / 'src' / 'config')))
     scout_id = world.make_being('Human', 'Scout')
     raider_id = world.make_being('Human', 'Raider')
@@ -49,8 +49,9 @@ def make_duel():
                                motion='thrust', reach=2)
     raider_strike = MeleeStrike(encounter, raider_id, scout_id, sword_id,
                                 motion='swing', reach=2)
-    encounter.schedule_action(scout_strike)
-    encounter.schedule_action(raider_strike)
+    if schedule_attacks:
+        encounter.schedule_action(scout_strike)
+        encounter.schedule_action(raider_strike)
     return world, encounter, scout, raider, armor_id, (scout_strike, raider_strike)
 
 
