@@ -73,22 +73,26 @@ class ReachableRegion:
 
 
 @dataclass(frozen=True)
-class MembershipTransfer:
-    """One historical transfer, referenced by both Group-owned journals.
+class MembershipChange:
+    """One Group-owned join/leave fact at a particular simulation time.
 
-    Time is expressed in the shared Universe simulation time convention.
-    Membership and spatial presence are deliberately independent.
+    Historical memberships remain with the Group; a Being can be a current
+    member of no Group at all. This is not an Event or a travel instruction.
     """
     time: float
     being_id: str
     category: str
-    source_group_id: str
-    destination_group_id: str
+    group_id: str
+    action: str
+
+    def __post_init__(self):
+        if self.action not in ("join", "leave"):
+            raise ValueError("membership action must be 'join' or 'leave'")
 
     def to_dict(self):
         return dict(time=self.time, being_id=self.being_id,
-                    category=self.category, source_group_id=self.source_group_id,
-                    destination_group_id=self.destination_group_id)
+                    category=self.category, group_id=self.group_id,
+                    action=self.action)
 
 
 class StatisticalGroup(ObjectInstance):
@@ -420,66 +424,95 @@ class StatisticalGroup(ObjectInstance):
         counts['humans'] = counts['adults'] + counts['children']
         return counts
 
-    def transfer_being_to(self, universe, being, destination, time=None):
-        """Transfer a realized adult between Group-owned memberships.
-
-        One validated operation changes both groups, and the *same immutable*
-        transfer record appears in both journals. The Being's registry entry,
-        identity, history, skills, and 3D position are not modified. This first
-        experiment does not implement eligibility or overlapping membership.
-        """
+    def _check_membership_change(self, universe, being, time):
+        """Validate shared Universe identity and the Group's present time."""
         from being import BeingInstance
         from universe import Universe
-        if (not isinstance(universe, Universe)
-                or not isinstance(destination, StatisticalGroup)
-                or destination is self
-                or universe.get_object_by_id(self.id) is not self
-                or universe.get_object_by_id(destination.id) is not destination):
-            raise ValueError("source and destination must be distinct registered Groups in the same Universe")
+        if not isinstance(universe, Universe) or universe.get_object_by_id(self.id) is not self:
+            raise ValueError("Group must be registered in the supplied Universe")
         if (not isinstance(being, BeingInstance)
                 or universe.get_object_by_id(being.id) is not being):
-            raise ValueError("Being must exist in the shared Universe registry")
-        source_members = self._current_realized_members()
-        entry = source_members.get(being.id)
+            raise ValueError("Being must be registered in the same Universe")
+        try:
+            now = self.time if time is None else float(time)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("membership time must be finite") from exc
+        if not math.isfinite(now) or now != self.time:
+            raise ValueError("membership change must occur at this Group's current simulation time")
+        return now
+
+    def leave_being(self, universe, being, time=None):
+        """End a realized adult's Group membership, without requiring a destination.
+
+        The Being remains in the Universe with unchanged identity, position,
+        skill state and history. Formation-time composition stays committed.
+        """
+        now = self._check_membership_change(universe, being, time)
+        entry = self._current_realized_members().get(being.id)
         if entry is None or entry[0] is not being:
-            raise ValueError("Being is not a current realized member of source Group")
-        if destination.has_realized_member(being):
-            raise ValueError("Being is already a current member of destination Group")
+            raise ValueError("Being is not a current realized member of this Group")
         category = entry[1]
         if category != "adults":
-            raise NotImplementedError("membership transfer currently supports adult Beings only")
-        if self.time != destination.time:
-            raise ValueError("Groups must have the same current simulation time for transfer")
-        now = self.time if time is None else float(time)
-        if not math.isfinite(now) or now != self.time:
-            raise ValueError("transfer must occur at the Groups' current simulation time")
-        # Preflight: receiving the Being must correspond to either a returning
-        # native member or a new incoming member, never an identity collision.
-        returning = being.id in destination._realized_beings
-        if returning and being.id not in destination._departed_member_ids:
-            raise ValueError("destination's native identity is not departed")
-        if returning and destination._realized_beings[being.id] is not being:
-            raise ValueError("returning Being identity conflicts with destination history")
-        record = MembershipTransfer(now, being.id, category, self.id, destination.id)
-        # Commit both membership changes only after the complete preflight.
+            raise NotImplementedError("membership changes currently support adult Beings only")
+        record = MembershipChange(now, being.id, category, self.id, "leave")
+        # No mutation until the complete preflight above has passed.
         if being.id in self._realized_beings:
             self._departed_member_ids.add(being.id)
         else:
             del self._incoming_beings[being.id]
         self._motion_attached_native_ids.discard(being.id)
-        if returning:
-            destination._departed_member_ids.remove(being.id)
-        else:
-            destination._incoming_beings[being.id] = (being, category)
         self.membership_history.append(record)
-        destination.membership_history.append(record)
+        return record
+
+    def join_being(self, universe, being, time=None, category="adults"):
+        """Start membership independently of a previous Group or its clock.
+
+        In this initial experiment the caravan affiliation is exclusive: a
+        Being must have left another StatisticalGroup before joining here.
+        Groups own the authoritative membership state; a scan of the Universe
+        registry checks exclusivity, without storing affiliations on Beings.
+        """
+        now = self._check_membership_change(universe, being, time)
+        if category != "adults":
+            raise NotImplementedError("membership changes currently support adult Beings only")
+        if self.has_realized_member(being):
+            raise ValueError("Being is already a member of this Group")
+        returning = being.id in self._realized_beings
+        if returning:
+            if (being.id not in self._departed_member_ids
+                    or self._realized_beings[being.id] is not being):
+                raise ValueError("returning Being conflicts with the Group's formation identity")
+        elif being.id in self._incoming_beings:
+            raise ValueError("Being has an inconsistent incoming membership")
+
+        # Prevent an accidental duplicate current caravan membership. General
+        # multiple affiliation types are deliberately outside this experiment.
+        latest_change = None
+        for _, candidate in universe.get_object_registry():
+            if not isinstance(candidate, StatisticalGroup):
+                continue
+            if candidate is not self and candidate.has_realized_member(being):
+                raise ValueError("Being must leave its current Group before joining")
+            for record in candidate.membership_history:
+                if record.being_id == being.id:
+                    latest_change = (record.time if latest_change is None
+                                     else max(latest_change, record.time))
+        if latest_change is not None and now < latest_change:
+            raise ValueError("new membership cannot precede the Being's known membership history")
+        record = MembershipChange(now, being.id, category, self.id, "join")
+        if returning:
+            self._departed_member_ids.remove(being.id)
+        else:
+            self._incoming_beings[being.id] = (being, category)
+        # Joining never couples the Being's motion to the Group.
+        self.membership_history.append(record)
         return record
 
     def aggregate_state(self):
         """Live, *derived* group view of known individual state.
 
         ``counts()`` is the committed original composition; ``current_counts()``
-        reflects membership transfers. Neither assumes that dead members have
+        reflects membership changes. Neither assumes that dead members have
         departed. Unresolved members have no fabricated health/activity state.
         Health categories overlap:
         incapacitated and injured are subsets of known_living, not additional
@@ -560,8 +593,8 @@ class StatisticalGroup(ObjectInstance):
         old_position = self.get_position().as_tuple()
         delta = tuple(new - old for new, old in zip(new_position, old_position))
         self.set_position(CartesianPosition(*new_position))
-        # Only members explicitly attached to the group's ongoing movement
-        # accompany it. Transfer never teleports a Being or assumes presence.
+        # Only explicitly attached original-cohort members accompany motion.
+        # Joining or leaving never teleports a Being or implies travel.
         for identity in self._motion_attached_native_ids:
             being = self._realized_beings[identity]
             previous = being.get_position().as_tuple()

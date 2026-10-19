@@ -299,40 +299,38 @@ This short record is maintained with the code; it should not require separate us
   remain separate. A generated attribute is *private objective state*, never
   automatically an observer's knowledge.
 - Formation attribute commitments currently remain accessible through their
-  originating group. Before membership transfer is implemented, these need
-  durable individual provenance so leaving one's group cannot erase one's past.
+  originating group. Independent membership changes already preserve those
+  facts in the origin Group; durable individual-level provenance will be needed
+  before Group archival, removal, or migration can be supported.
 - **Group membership design preference:** Groups are Entities that own membership
   relations. An inverse index for Being-to-Groups queries may eventually be
   derived but is not the authoritative source. Membership criteria, transitions,
   overlapping memberships and time validity remain deferred.
 
-## Group-owned current membership and transfer experiment (2026-10)
+## Group-owned membership changes (2026-10)
 
-- A `StatisticalGroup` owns current membership: realized native members minus
-  departed natives, plus realized arrivals from other Groups. Beings do not
-  maintain an authoritative list of Groups. An inverse membership lookup may be
-  derived later, but is not required for this experiment.
-- `counts()` remains the **original committed formation composition**, including
-  formation quotas and conditional CDF draws. `current_counts()` is a distinct
-  derived view that reflects transfers. `aggregate_state()` exposes both; known
-  health and capabilities count only current realized members, while uninstantiated
-  cohort members remain unresolved. Death does not automatically remove membership.
-- `transfer_being_to()` supports *realized adult Beings* already registered in the
-  same Universe. Both registered Groups must be at the same simulation time, and
-  the transfer takes effect at that time. Full preflight validation precedes both
-  membership updates; one immutable `MembershipTransfer` record is stored in both
-  Groups' in-memory histories. Transfers back to the origin and through an
-  intermediate Group preserve the Being object and the origin Group's formation
-  facts; no additional individual is generated.
-- Membership **does not imply current physical presence**. Joining another Group
-  does not teleport or automatically attach the Being to that Group's motion.
-  Departure detaches it from automatic original-Group motion; returning does
-  not reattach automatically. A future movement/attachment model should make
-  physical accompanying explicit.
-- Current membership is separate from historical provenance, but transfer records
-  are not yet `Universe` Events and membership state cannot yet be restored from
-  saved JSON. This is an in-memory refinement/consistency experiment, not a
-  general social membership system. Membership rules, overlapping affiliations,
-  household restructuring, transfer of unrealized individuals, age transitions,
-  births/deaths changing population, dynamic statistical regeneration, movement
-  following rules, and serializable historical reconstruction remain deferred.
+- `StatisticalGroup` owns **current membership**: original cohort members minus
+  those who have left, plus arrivals. A Being exists in the Universe independently
+  of any Group; there is no authoritative Group list stored on the Being.
+- `leave_being()` and `join_being()` are **independent operations** and record
+  immutable, dated `MembershipChange` records (`leave` or `join`) in the affected
+  Group's journal. An interval with no Group membership is valid. A returning
+  native retains their original identity and formation provenance. No direct
+  `transfer_being_to()` primitive is assumed; related departures and arrivals
+  need not happen together or at the same simulation time.
+- Formation `counts()` remain historical commitments. `current_counts()`,
+  aggregate health, and known skills reflect current membership only.
+  Departures and arrivals do not move Beings or change their health, abilities,
+  existing Encounter actions, skill history, or original cohort CDF constraints.
+  Rejoining does not automatically attach a Being to group movement.
+- This experiment restricts caravan affiliation to **one StatisticalGroup at a
+  time**, enforced by checking registered Groups at join time, and supports
+  realized adult Beings only. This is a provisional constraint, not a claim
+  about all future social, familial, institutional, or nested memberships.
+- Operations take effect at the affected Group's current simulation time.
+  Joins cannot precede the Being's last recorded membership transition across
+  registered Groups. Synchronizing Group clocks is unnecessary; a canonical
+  Universe time and historical replay/persistence remain future work.
+- Membership eligibility, nonexclusive affiliation types, uninstantiated
+  member departures, births, deaths, household restructuring, and automatic
+  physical co-movement remain deferred. This is still an in-memory experiment.
