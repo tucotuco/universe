@@ -155,6 +155,26 @@ class GeographicalDesign:
                 'missing': [] if resolved else [f'terrain_tile:{tile[0]},{tile[1]}'],
                 'revision': self.revision}
 
+    def elevation_bounds(self, x, y):
+        """Nonmutating range of admissible terrain heights at a location.
+
+        This is the public cross-domain dependency contract for approximate
+        visibility/inquiry. It uses the same constrained amplitude interval as
+        preview(), and collapses to an exact height at fixed points.
+        """
+        point = self.inspect(x, y)
+        if point['resolved']:
+            lo = hi = point['elevation_m']
+        else:
+            tile = tuple(point['tile'])
+            a, b = self._allowed_interval(tile)
+            factor = self._shape(point['x_km'], point['y_km'], tile)
+            baseline = point['coarse_estimate_m']
+            lo, hi = sorted((baseline+a*factor, baseline+b*factor))
+        return {'x_km': point['x_km'], 'y_km': point['y_km'],
+                'tile': point['tile'], 'min_m': lo, 'max_m': hi,
+                'resolved': point['resolved'], 'revision': self.revision}
+
     def _condition(self, raw):
         if not isinstance(raw, dict):
             raise ValueError('Condition must be a mapping')
