@@ -258,6 +258,106 @@ class LateTributaryTests(unittest.TestCase):
         self.assertEqual(self.world.terrain.dumps(), before)
 
 
+    def assert_connected(self, graph):
+        downstream = {}
+        for edge in graph['edges']:
+            self.assertNotIn(edge['from'], downstream, 'A node has two downstream links')
+            downstream[edge['from']] = edge['to']
+        self.assertEqual(len(graph['edges']), len(graph['nodes']) - 1)
+        for node in graph['nodes']:
+            current, visited = node['id'], set()
+            while current != graph['outlet_id']:
+                self.assertNotIn(current, visited, 'A drainage cycle was introduced')
+                self.assertIn(current, downstream, 'A drainage node cannot reach the outlet')
+                visited.add(current)
+                current = downstream[current]
+
+    def test_join_an_earlier_late_tributary_without_revising_anything(self):
+        first = self.world.preview(1, -1, 2)
+        self.world.commit(first)
+        before = self.world.dumps()
+        old_elevations = [self.world.channel_at(t) for t in (0, 0.137, .42, .95, 1)]
+        candidate = self.world.preview(.5, -1.8, 0, target='late')
+        self.assertEqual(candidate.target_branch, 'late')
+        self.assertEqual(before, self.world.dumps())
+        self.assertIn('late2', self.world.mesh(proposal=candidate)['channels'])
+        self.assert_connected(self.world.graph(candidate))
+        self.world.commit(candidate)
+        self.assertEqual(self.world.state()['events'][1]['target_branch'], 'late')
+        self.assertEqual(old_elevations, [self.world.channel_at(t) for t in (0, 0.137, .42, .95, 1)])
+        self.assertEqual(self.world.terrain.watershed.network()['channels'],
+                         sample_world().terrain.watershed.network()['channels'])
+        self.assert_connected(self.world.graph())
+        self.assertEqual(self.world.dumps(), LateTributaryDesign.loads(self.world.dumps()).dumps())
+
+    def test_chain_a_third_generation_late_tributary(self):
+        self.world.commit(self.world.preview(1, -1, 2))
+        self.world.commit(self.world.preview(.5, -1.8, 0, target='late'))
+        second_before = [self.world.channel_at(t, branch_index=1)
+                         for t in (.11, .37, .83)]
+        third = self.world.preview(.2, -1.2, 0, target='late2')
+        self.assertEqual(third.target_branch, 'late2')
+        self.world.commit(third)
+        self.assertEqual(second_before, [self.world.channel_at(t, branch_index=1)
+                                         for t in (.11, .37, .83)])
+        self.assertIn('late3', self.world.mesh()['channels'])
+        self.assert_connected(self.world.graph())
+        self.assertEqual(self.world.dumps(), LateTributaryDesign.loads(self.world.dumps()).dumps())
+
+    def test_two_mouths_on_same_late_graph_edge_in_either_order(self):
+        sources = ((.5, -1.8), (.52, -1.77))
+        for sequence in (sources, tuple(reversed(sources))):
+            world = sample_world()
+            world.commit(world.preview(1, -1, 2))
+            first_mouth = None
+            for x, y in sequence:
+                proposal = world.preview(x, y, 0, target='late')
+                if first_mouth is None:
+                    first_mouth = proposal.points[-1]
+                else:
+                    self.assertLess(abs(proposal.points[-1][0] - first_mouth[0]), .01)
+                world.commit(proposal)
+            graph = world.graph()
+            self.assert_connected(graph)
+            self.assertEqual(len(world.state()['late_tributaries']), 3)
+            self.assertEqual(world.dumps(), LateTributaryDesign.loads(world.dumps()).dumps())
+
+    def test_inadmissible_late_join_is_rejected_atomically(self):
+        self.world.commit(self.world.preview(1, -1, 2))
+        before = self.world.dumps()
+        for target, coords in (('late2', (.5, -1.8)),
+                               ('late', (2, -1.5)),   # projected beyond mouth
+                               ('late', (1, -.2))):   # projected beyond source
+            with self.assertRaises(ValueError):
+                self.world.preview(*coords, target=target)
+        with self.assertRaises(ValueError):
+            self.world.preview(.5, -1.8, target='unknown')
+        self.assertEqual(before, self.world.dumps())
+
+    def test_replay_rejects_forged_late_join_target_or_mouth(self):
+        self.world.commit(self.world.preview(1, -1, 2))
+        self.world.commit(self.world.preview(.5, -1.8, 0, target='late'))
+        before = self.world.dumps()
+        data = json.loads(before)
+        data['events'][1]['target_branch'] = 'south'
+        with self.assertRaises(ValueError):
+            LateTributaryDesign.restore(data)
+        data = json.loads(before)
+        data['events'][1]['points'][-1][2] += 1
+        with self.assertRaises(ValueError):
+            LateTributaryDesign.restore(data)
+        self.assertEqual(before, self.world.dumps())
+
+    def test_restore_version_two_world_and_continue_with_late_join(self):
+        self.world.commit(self.world.preview(1, -1, 2))
+        old = self.world.state()
+        old['version'] = 2
+        upgrade = LateTributaryDesign.restore(old)
+        self.assertEqual(upgrade.dumps(), self.world.dumps())
+        upgrade.commit(upgrade.preview(.5, -1.8, 0, target='late'))
+        self.assertEqual(upgrade.dumps(), LateTributaryDesign.loads(upgrade.dumps()).dumps())
+
+
 class LateTributaryServerTests(unittest.TestCase):
     def setUp(self):
         self.app.world = sample_world()
@@ -304,6 +404,29 @@ class LateTributaryServerTests(unittest.TestCase):
         completed = self.post('/api/commit', {})
         self.assertIn('late2', completed['mesh']['channels'])
         self.assertEqual(len(completed['state']['late_tributaries']), 2)
+
+    def test_http_preview_and_commit_join_to_earlier_late_branch(self):
+        self.post('/api/preview', {'x_km': 1, 'y_km': -1, 'candidate_index': 2})
+        self.post('/api/commit', {})
+        before = json.loads(urlopen(self.base+'/api/state', timeout=5).read())
+        candidate = self.post('/api/preview', {'x_km': .5, 'y_km': -1.8,
+                                               'candidate_index': 0, 'target': 'late'})
+        self.assertEqual(candidate['proposal']['target_branch'], 'late')
+        self.assertEqual(before, json.loads(urlopen(self.base+'/api/state', timeout=5).read()))
+        result = self.post('/api/commit', {})
+        self.assertEqual(result['committed']['target_branch'], 'late')
+        self.assertEqual(len(result['state']['late_tributaries']), 2)
+
+    def test_http_rejects_changed_target_after_preview_without_mutation(self):
+        self.post('/api/preview', {'x_km': 1, 'y_km': -1, 'candidate_index': 2})
+        original = json.loads(urlopen(self.base+'/api/state', timeout=5).read())
+        with self.assertRaises(HTTPError) as caught:
+            self.post('/api/commit', {'x_km': 1, 'y_km': -1,
+                                      'candidate_index': 2, 'target': 'late'})
+        self.assertEqual(caught.exception.code, 400)
+        self.assertEqual(original, json.loads(urlopen(self.base+'/api/state', timeout=5).read()))
+        self.post('/api/commit', {'x_km': 1, 'y_km': -1,
+                                   'candidate_index': 2, 'target': 'original'})
 
     def test_cross_origin_mutation_forbidden(self):
         before = json.loads(urlopen(self.base+'/api/state', timeout=5).read())

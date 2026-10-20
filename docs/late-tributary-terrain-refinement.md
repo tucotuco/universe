@@ -27,9 +27,11 @@ committed terrain, which would be unacceptable.
 
 ## Requirements and proposal
 
-`preview(x_km, y_km, candidate_index)`:
+`preview(x_km, y_km, candidate_index, target='original')`:
 
-1. Finds a nearest established channel in the actual terrain surface.
+1. Finds the nearest original watershed channel, or the interior of an explicitly
+   selected previously committed late tributary. A request for a nonexistent
+   target fails without changing the world.
 2. Determines the intersected 2 km tiles along the source-to-channel trace.
 3. Creates a **scratch terrain world**, realizing *only those intersected tiles*
    which were unresolved, using the existing deterministic tile generator and
@@ -54,8 +56,8 @@ outside it.
 
 ## Topology and geometry
 
-The original channel geometry is unchanged. The extended graph splits an original
-channel edge at each new confluence, if necessary. Each new branch points toward
+The original channel geometry is unchanged. The extended graph splits the
+selected original or late-channel edge at each new confluence, if necessary. Each new branch points toward
 its shared node; the established river graph still leads to the bay. No cycles are
 introduced. The new branch's physical bed is the **existing height field
 restricted to its source-to-confluence horizontal line**; the stored sequence
@@ -67,21 +69,37 @@ is not proof of a perennial river. Watershed membership, source flow,
 precipitation, channel discharge, and the stability of the channel over time
 are deliberately outside this experiment.
 
-The extension layer now supports **multiple independently joining late tributaries**
-committed in discovery order. Each joins one of the original channels. Two or
-more late tributaries may split the same original channel edge at different
-confluences, in either order; the single-outlet directed graph is rebuilt and
-checked before committing. New late channels that cross or pass within
-10 metres of an earlier late channel are rejected. Joins between late branches, river-course incision,
-and tributaries that change the already established original topology remain
-outside the experiment.
+The extension layer now supports **tributaries that join earlier late tributaries**.
+The builder explicitly selects a confluence target: either the original
+watershed (nearest established original bed, as before), or a named committed
+late course (`late`, `late2`, etc.). For a late target, the exact perpendicular
+projection of the source onto that course defines a prospective mouth, which
+must be strictly interior to the existing branch. The terrain determines the
+mouth elevation: a polyline interpolation of two samples is not authoritative.
+A dense check samples the whole new straight path for monotonically descending
+surface elevations before it can be committed. This does not claim that water
+would follow the steepest descent, or that there is enough discharge to form a
+perennial channel; it is a bounded geometric surface-flow witness.
+
+The *existing directed graph edge* of the named late course is split at the
+new mouth without moving its other vertices, even when several confluences
+occur at different positions along the same edge. That graph continues to
+have one downstream edge per non-outlet node and a single original outlet.
+Existing terrain tiles are never resampled. Contacts with unrelated late
+courses or original river segments (including near-contacts within 10 metres)
+remain prohibited when a new branch targets an earlier late channel. Direct
+crossings, joins at a target's source/mouth endpoint, arbitrary curved flow
+paths, and target selection based on true hydrological catchment membership
+are outside this experiment. A request can legitimately have no admissible
+solution. The candidate is previewed without mutation and revalidated at commit.
 
 Each accepted tributary is a separately validated extension, not an instruction
 to recompute old terrain. Its traversed unresolved tiles are committed
 atomically using the current deterministic terrain configuration. A later
-tributary can reuse those tiles but must never resample them. Saving records an
-ordered journal and a list of late tributaries. Earlier version-1 exports
-with one late tributary remain readable and are upgraded on export.
+tributary can reuse those tiles but must never resample them. Saving records an ordered journal and a list of late tributaries. Earlier
+version-1 and version-2 exports remain readable and are upgraded to version 3
+on export. Changes to the current trial controls invalidate the pending browser
+preview, and the server rejects mismatched commit requests.
 
 ## Try it
 
@@ -93,9 +111,14 @@ The default landscape starts with the main river and two tributaries committed,
 but only two of eight terrain tiles realized. Click a source point (try `1,-1`
 for a route that requires realizing another tile, or `3,-1` for a route wholly
 in already committed terrain), then Preview, Another candidate, and Commit.
-After committing, choose another source and repeat, e.g. use `1,-1` followed
-by `3,-1` or reverse that order; both alternatives preserve the original
-river network and produce the same terrain when candidate indices are fixed.
+After committing a first late tributary at `1,-1` (candidate index `2`),
+select **late** in the Confluence target control. Set the next source to
+`0.5,-1.8` (candidate index `0`) and preview the new channel joining the first
+tributary. Commit only after inspecting the yellow path and its shared mouth.
+For a three-generation test, select **late2** after the second commitment and
+try `0.2,-1.2` as the next source. Alternatively, selecting **Nearest original
+river** retains the prior behavior (e.g. sources `1,-1` and `3,-1` may be
+committed in either order).
 The map distinguishes existing rivers, proposed tributary, established tiles
 and unresolved terrain. Export the resulting world from the UI and reload it:
 
@@ -114,7 +137,7 @@ python examples/late_tributary_designer.py \
 A candidate may legitimately be rejected when no acceptable downhill route
 exists, when the source lies too close to a known channel, or if it depends on
 conditions the bounded model cannot satisfy. Rejection does not mutate reality.
-The version-2 save format contains the original terrain state, the resulting
+The version-3 save format contains the original terrain state, the resulting
 state, all committed late branches, and an ordered commitment journal; loading replays the journal
 and rejects tampered or incompatible data.
 
@@ -127,8 +150,8 @@ shared directed graph node; invalid and forged proposals are rejected; and
 export/reload reproduces committed reality. The local HTTP API is also tested.
 
 Remaining architectural questions include (1) a **corridor-level** rather than
-tile-level resolution unit, (2) junctions and crossings **between** late
-tributaries, (3) incompatibility diagnostics for late tributaries imposed at
+tile-level resolution unit, (2) general intersections and confluences discovered
+without a preselected target, (3) incompatibility diagnostics for late tributaries imposed at
 fixed locations, (4) refining uncommitted river *topology* and terrain
 simultaneously without a precommitted trunk, and (5) hydrology and
 geomorphology when adding a stream

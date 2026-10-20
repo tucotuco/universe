@@ -36,11 +36,11 @@ class TributaryProposal:
 class LateTributaryDesign:
     """Bounded additive tributaries against a frozen terrain world.
 
-    Each late tributary joins an original channel; joins between late branches
-    and crossings between them require a later network-extension experiment.
-    The original watershed and all committed terrain remain authoritative.
+    Late tributaries join an original channel or an earlier late branch.
+    Crossings not selected as confluences are rejected. Original watershed,
+    committed terrain, and all previous channels remain authoritative.
     """
-    VERSION = 2
+    VERSION = 3
     SAMPLES = 32
     LATE_CLEARANCE_KM = 0.01  # Do not silently merge nearly touching late courses.
 
@@ -79,8 +79,39 @@ class LateTributaryDesign:
         return {terrain._tile(source[0]+t*(foot[0]-source[0]),
                               source[1]+t*(foot[1]-source[1])) for t in checked}
 
-    def _trial(self, source, index):
-        """Resolve only necessary tiles in a scratch world; no live mutations."""
+    def _late_target(self, trial, source, target_branch):
+        """Closest interior point on an existing *straight* late channel.
+
+        The surface-attached bed is not linear in elevation between polyline
+        samples: evaluate the committed height field at the exact XY foot.
+        """
+        matches = [(i, b) for i, b in enumerate(self._branches)
+                   if self._channel_id(i) == target_branch]
+        if not matches:
+            raise ValueError('Target late tributary is not established')
+        branch = matches[0][1]
+        head, mouth = branch.source, branch.points[-1]
+        dx, dy = mouth[0]-head[0], mouth[1]-head[1]
+        length2 = dx*dx + dy*dy
+        t = ((source[0]-head[0])*dx+(source[1]-head[1])*dy)/length2
+        # For this bounded experiment, disallow joins at the ends: they can
+        # coincide with an original confluence or late source, requiring
+        # separate semantics for merging multiple graph nodes.
+        if not 0.02 < t < 0.98:
+            raise ValueError('Late confluence must lie inside its target channel')
+        qx, qy = head[0]+t*dx, head[1]+t*dy
+        return target_branch, (qx, qy, trial.elevation(qx, qy)), math.hypot(
+            source[0]-qx, source[1]-qy)
+
+    def _trial(self, source, index, target='original'):
+        """Resolve only necessary tiles in a scratch world; no live mutations.
+
+        Target 'original' preserves the original nearest-watershed behavior;
+        a committed late ID (late, late2, ...) requests an explicit new join.
+        """
+        if target != 'original' and target not in {
+                self._channel_id(i) for i in range(len(self._branches))}:
+            raise ValueError('Unknown or unresolved confluence target')
         required = {self.terrain._tile(*source)}
         for _ in range(10):
             trial = DrainageTerrainDesign.loads(self.terrain.dumps())
@@ -90,22 +121,25 @@ class LateTributaryDesign:
                     candidate = trial.preview(tile, index)
                     trial.commit(candidate)
                     newly_committed.append(tile)
-            _, branch, foot, distance = trial._surface(*source)
+            if target == 'original':
+                _, branch, foot, distance = trial._surface(*source)
+            else:
+                branch, foot, distance = self._late_target(trial, source, target)
             if distance < 0.10:
-                raise ValueError('Tributary source must be at least 0.1 km from an existing channel')
+                raise ValueError('Tributary source must be at least 0.1 km from its target channel')
             needed = required | self._line_tiles(trial, source, foot)
             if needed == required:
                 return trial, branch, foot, tuple(newly_committed)
             required = needed
         raise ValueError('Tributary corridor could not be resolved consistently')
 
-    def preview(self, x_km, y_km, candidate_index=0):
+    def preview(self, x_km, y_km, candidate_index=0, *, target='original'):
         self._verify()
         if type(candidate_index) is not int or candidate_index < 0:
             raise ValueError('Candidate index must be a nonnegative integer')
         x, y = self.terrain._coords(x_km, y_km)
         source = (round(x, 6), round(y, 6))
-        trial, branch, foot, tiles = self._trial(source, candidate_index)
+        trial, branch, foot, tiles = self._trial(source, candidate_index, target)
         points = []
         for i in range(self.SAMPLES + 1):
             f = i / self.SAMPLES
@@ -117,14 +151,31 @@ class LateTributaryDesign:
             raise ValueError('Tributary source must lie above its confluence')
         if any(a[2] + 1e-6 < b[2] for a, b in zip(points, points[1:])):
             raise ValueError('No continuously descending path from that source to a channel')
+        if branch.startswith('late'):
+            # Closer sampling is important when the terminal bed is an old
+            # late channel, which is not the centerline of the terrain model.
+            heights = [trial.elevation(source[0]*(1-i/256)+foot[0]*i/256,
+                                       source[1]*(1-i/256)+foot[1]*i/256)
+                       for i in range(257)]
+            if any(a + 1e-6 < b for a, b in zip(heights, heights[1:])):
+                raise ValueError('Cannot descend to selected late tributary over established terrain')
         if any(trial._tile(a, b) not in trial._committed for a, b, _ in points):
             raise ValueError('Tributary depends on unresolved terrain')
         if abs(trial.elevation(*foot[:2]) - foot[2]) > 1e-5:
             raise ValueError('Confluence does not match the established channel bed')
-        for earlier in self._branches:
+        if branch.startswith('late'):
+            # A new mouth on a late course cannot silently create an
+            # additional confluence with an original channel en route.
+            for _, a, b in trial._segments:
+                if self._segments_intersect(source, foot, a, b):
+                    raise ValueError('Path to late tributary crosses or approaches an original channel')
+        for index, earlier in enumerate(self._branches):
+            if self._channel_id(index) == branch:
+                # Only the exact terminal projection is an authorized contact;
+                # the perpendicular branch has no other intersection.
+                continue
             if self._segments_intersect(source, foot, earlier.source, earlier.points[-1]):
-                raise ValueError('New tributary crosses or approaches an established late tributary; '
-                                 'confluences between late branches are not supported')
+                raise ValueError('New tributary crosses or approaches an unrelated late tributary')
         proposed = TributaryProposal(source, branch, tuple(points), tiles,
                                      candidate_index, self.revision)
         # Validate an unambiguous, connected graph *before* exposing an
@@ -154,18 +205,25 @@ class LateTributaryDesign:
     def _channel_id(index):
         return 'late' if index == 0 else f'late{index+1}'
 
+    @staticmethod
+    def _target_selector(branch):
+        return branch if branch.startswith('late') else 'original'
+
     def commit(self, proposal):
         self._verify()
         if not isinstance(proposal, TributaryProposal):
             raise ValueError('Expected a tributary proposal')
         if proposal.revision != self.revision:
             raise ValueError('Stale tributary preview')
-        expected = self.preview(*proposal.source, proposal.candidate_index)
+        expected = self.preview(*proposal.source, proposal.candidate_index,
+                                target=self._target_selector(proposal.target_branch))
         if expected != proposal:
             raise ValueError('Tributary proposal disagrees with current world')
         # The trial only changes previously unresolved tiles and passes every
         # check *before* making any of its results authoritative.
-        trial, branch, foot, tiles = self._trial(proposal.source, proposal.candidate_index)
+        trial, branch, foot, tiles = self._trial(
+            proposal.source, proposal.candidate_index,
+            self._target_selector(proposal.target_branch))
         if branch != proposal.target_branch or tiles != proposal.resolved_tiles:
             raise ValueError('Tributary trial differs from preview')
         self.terrain = trial
@@ -202,9 +260,11 @@ class LateTributaryDesign:
             branch = self._branches[branch_index]
         else:
             branch = proposal
-        if proposal is not None and proposal != self.preview(*proposal.source, proposal.candidate_index):
+        if proposal is not None and proposal != self.preview(*proposal.source, proposal.candidate_index,
+                                                target=self._target_selector(proposal.target_branch)):
             raise ValueError('Stale or invalid preview')
-        terrain = self._trial(proposal.source, proposal.candidate_index)[0] if proposal else self.terrain
+        terrain = self._trial(proposal.source, proposal.candidate_index,
+                              self._target_selector(proposal.target_branch))[0] if proposal else self.terrain
         q = branch.points[-1]
         x = branch.source[0]*(1-f)+q[0]*f
         y = branch.source[1]*(1-f)+q[1]*f
@@ -213,9 +273,9 @@ class LateTributaryDesign:
     def _graph_from(self, branches):
         """Add all late branches to one acyclic graph with shared junctions.
 
-        Split the *currently surviving* original-course edge, not necessarily
-        the original watershed edge: several late mouths can join different
-        positions on that same former edge in either commitment order.
+        Split the surviving edge of the selected original or late course:
+        successive late mouths may share an original segment or an earlier
+        tributary segment in either eligible commitment order.
         """
         base = self.terrain.watershed.network()['graph']
         nodes = [dict(n) for n in base['nodes']]
@@ -235,7 +295,13 @@ class LateTributaryDesign:
                         continue
                     a, b = positions[edge['from']], positions[edge['to']]
                     d, foot, t = self.terrain._foot(q[0], q[1], a, b)
-                    if d < 1e-6 and math.dist(foot, q) < 1e-5 and 1e-8 < t < 1-1e-8:
+                    # A late channel's intermediate heights follow the exact
+                    # nonlinear surface rather than linear interpolation.
+                    # Therefore splitting it is based on XY, not 3-D.
+                    close = (math.dist(foot[:2], q[:2]) < 1e-6 if
+                             edge['course'].startswith('late') else
+                             math.dist(foot, q) < 1e-5)
+                    if d < 1e-6 and close and 1e-8 < t < 1-1e-8:
                         candidates.append(edge_index)
                 if len(candidates) != 1:
                     raise ValueError('Confluence does not uniquely split an established channel edge')
@@ -273,16 +339,19 @@ class LateTributaryDesign:
 
     def graph(self, proposal=None):
         self._verify()
-        if proposal is not None and proposal != self.preview(*proposal.source, proposal.candidate_index):
+        if proposal is not None and proposal != self.preview(*proposal.source, proposal.candidate_index,
+                                                target=self._target_selector(proposal.target_branch)):
             raise ValueError('Stale or invalid preview')
         return self._graph_from(self._branches + ([proposal] if proposal is not None else []))
 
     def mesh(self, step_km=0.2, proposal=None):
         self._verify()
-        if proposal is not None and proposal != self.preview(*proposal.source, proposal.candidate_index):
+        if proposal is not None and proposal != self.preview(*proposal.source, proposal.candidate_index,
+                                                target=self._target_selector(proposal.target_branch)):
             raise ValueError('Stale or invalid preview')
         if proposal is not None:
-            trial, _, _, _ = self._trial(proposal.source, proposal.candidate_index)
+            trial, _, _, _ = self._trial(proposal.source, proposal.candidate_index,
+                                              self._target_selector(proposal.target_branch))
         else:
             trial = self.terrain
         mesh = trial.mesh(step_km)
@@ -306,7 +375,7 @@ class LateTributaryDesign:
 
     @classmethod
     def restore(cls, state):
-        if not isinstance(state, dict) or state.get('version') not in (1, cls.VERSION):
+        if not isinstance(state, dict) or state.get('version') not in (1, 2, cls.VERSION):
             raise ValueError('Unsupported late tributary world')
         # Earlier single-tributary exports remain loadable. Once restored,
         # they export the current multibranch format.
@@ -315,11 +384,16 @@ class LateTributaryDesign:
             state['version'] = cls.VERSION
             state['late_tributaries'] = ([state['late_tributary']]
                                           if state['late_tributary'] else [])
+        if state['version'] == 2:
+            state = json.loads(json.dumps(state))
+            state['version'] = cls.VERSION
         design = cls(DrainageTerrainDesign.restore(state['base_terrain']))
         for event in state['events']:
             if event['type'] != 'tributary':
                 raise ValueError('Unexpected tributary event')
-            proposal = design.preview(*event['source'], event['candidate_index'])
+            selector = design._target_selector(event['target_branch'])
+            proposal = design.preview(*event['source'], event['candidate_index'],
+                                      target=selector)
             if any(proposal.as_dict()[key] != event[key] for key in
                    ('target_branch', 'points', 'resolved_tiles')):
                 raise ValueError('Saved tributary does not match admissible generation')

@@ -22,13 +22,14 @@ button{cursor:pointer}button:hover{background:#284960}button:focus-visible,input
 <section><h2>Inquiry and history</h2><pre id="log">Choose a source point on the map, then preview a tributary.</pre><p id="message" role="status"></p></section>
 </div>
 <section class="controls"><h2>Discover a tributary</h2>
-<p class="muted">Each source must lie above an original channel. New courses may not cross previously added tributaries; they never change established elevations.</p>
+<p class="muted">Choose an original-network outlet or an earlier late tributary as the target. The new channel must descend to an interior confluence without crossing unrelated established courses. Previously committed terrain remains unchanged.</p>
 <div class="row"><div><label for="x">Source x (km)</label><input id="x" type="number" value="3" min="0" max="8" step="0.05"></div>
 <div><label for="y">Source y (km)</label><input id="y" type="number" value="-1" min="-2" max="2" step="0.05"></div></div>
+<div><label for="target">Confluence target</label><select id="target"><option value="original">Nearest original river</option></select></div>
 <div><label for="index">Alternative index</label><input id="index" type="number" min="0" step="1" value="0"></div>
 <div class="actions"><button id="inspect">Inspect source</button><button id="preview">Preview</button><button id="another">Another candidate</button><button id="commit">Commit tributary</button><button id="reset">Clear preview</button><button id="export">Export world</button></div>
 <h2>Commitment status</h2><p id="status" class="muted">Loading…</p>
-<p class="muted">This experiment traces an existing surface-flow path. It does not excavate a new valley or model rainfall, runoff, erosion, or stream discharge. Previously unresolved tiles along the proposed channel are realized to prevent future contradictions. Several independent late branches can be committed; crossings or junctions among late branches are deferred.</p>
+<p class="muted">This experiment traces an existing surface-flow path. It does not excavate a new valley or model rainfall, runoff, erosion, or stream discharge. Previously unresolved tiles along the proposed channel are realized to prevent future contradictions. A later branch can join an earlier late tributary at a valid interior mouth; accidental crossings, sources too near the target, and uphill paths are rejected.</p>
 </section></main>
 <script>
 'use strict';const $=id=>document.getElementById(id),cv=$('map'),ctx=cv.getContext('2d');
@@ -44,14 +45,16 @@ function draw(){if(!mesh)return;const arr=mesh.heights_m,dx=cv.width/(arr[0].len
  const p=xy(selected.x_km,selected.y_km);ctx.fillStyle='#ffcf7a';ctx.beginPath();ctx.arc(...p,5,0,Math.PI*2);ctx.fill()}
 async function req(path,data){const response=await fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const value=await response.json();if(!response.ok)throw Error(value.error||'Request failed');return value}
 function info(obj){$('log').textContent=JSON.stringify(obj,null,2)}function notice(str){$('message').textContent=str}
-async function refresh(){state=await req('/api/state');mesh=await req('/api/mesh');proposal=null;draw();$('status').textContent=`${state.terrain.committed.length}/8 terrain tiles realized · ${state.late_tributaries.length} late tributaries established · revision ${state.revision}`}
+function targets(){const previous=$('target').value;const list=$('target');list.textContent='';const first=document.createElement('option');first.value='original';first.textContent='Nearest original river';list.append(first);(state.late_tributaries||[]).forEach((branch,i)=>{const option=document.createElement('option');option.value=i===0?'late':`late${i+1}`;option.textContent=`${option.value} · previously committed tributary`;list.append(option)});list.value=[...list.options].some(o=>o.value===previous)?previous:'original'}
+async function refresh(){state=await req('/api/state');mesh=await req('/api/mesh');proposal=null;$('commit').disabled=true;targets();draw();$('status').textContent=`${state.terrain.committed.length}/8 terrain tiles realized · ${state.late_tributaries.length} late tributaries established · revision ${state.revision}`}
 function act(fn){return async event=>{try{notice('');await fn(event)}catch(e){notice(e.message)}}}
 function source(){return {x_km:Number($('x').value),y_km:Number($('y').value)}}
 cv.onclick=act(async ev=>{selected=coordinates(ev);$('x').value=selected.x_km.toFixed(4);$('y').value=selected.y_km.toFixed(4);info(await req('/api/inspect',selected));draw()});
 $('inspect').onclick=act(async()=>{selected=source();info(await req('/api/inspect',selected));draw()});
-$('preview').onclick=act(async()=>{selected=source();const r=await req('/api/preview',{...selected,candidate_index:Number($('index').value)});proposal=r.proposal;mesh=r.mesh;draw();info({proposed_channel_id:r.mesh.proposed_channel_id,target:r.proposal.target_branch,head_elevation_m:r.proposal.points[0][2],junction:r.proposal.points.at(-1),newly_realized_tiles:r.proposal.resolved_tiles,graph_edges:r.graph.edges.length});notice('Provisional tributary shown; nothing committed.')});
+$('preview').onclick=act(async()=>{selected=source();const r=await req('/api/preview',{...selected,candidate_index:Number($('index').value),target:$('target').value});proposal=r.proposal;mesh=r.mesh;$('commit').disabled=false;draw();info({proposed_channel_id:r.mesh.proposed_channel_id,target:r.proposal.target_branch,head_elevation_m:r.proposal.points[0][2],junction:r.proposal.points.at(-1),newly_realized_tiles:r.proposal.resolved_tiles,graph_edges:r.graph.edges.length});notice('Provisional tributary shown; nothing committed.')});
 $('another').onclick=act(async()=>{$('index').value=Number($('index').value)+1;await $('preview').onclick()});
-$('commit').onclick=act(async()=>{const r=await req('/api/commit',{});info({committed_tributary:r.committed,graph_edges:r.graph.edges.length});await refresh();notice('Additional tributary and required tiles committed atomically. Select another source to continue.')});
+$('commit').onclick=act(async()=>{const r=await req('/api/commit',{...source(),candidate_index:Number($('index').value),target:$('target').value});info({committed_tributary:r.committed,graph_edges:r.graph.edges.length});await refresh();notice('Additional tributary and required tiles committed atomically. Select another source to continue.')});
+for(const id of ['x','y','index','target'])$(id).addEventListener('input',()=>{if(proposal){proposal=null;$('commit').disabled=true;notice('Trial inputs changed. Preview again before committing.')}});
 $('reset').onclick=act(async()=>{await req('/api/reset',{});await refresh();notice('Preview cleared.')});
 $('export').onclick=act(async()=>{state=await req('/api/state');const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='universe-late-tributary-world.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)});
 refresh().catch(e=>notice(e.message));
