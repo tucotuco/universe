@@ -78,7 +78,7 @@ function report(obj){$('details').textContent=JSON.stringify(obj,null,2)}
 function message(txt){$('message').textContent=txt}
 async function refresh(){state=await request('/api/state');mesh=await request('/api/mesh');preview=null;trace=null;draw();updateStatus()}
 function updateStatus(){if(!state)return;$('status').textContent=`${state.committed.length}/8 tiles committed · ${state.conditions.length} elevation conditions · revision ${state.revision}`}
-function action(fun){return async()=>{try{message('');await fun()}catch(err){message(err.message)}}}
+function action(fun){return async event=>{try{message('');await fun(event)}catch(err){message(err.message)}}}
 cv.addEventListener('click',action(async ev=>{point=coords(ev);$('x').value=point.x_km.toFixed(3);$('y').value=point.y_km.toFixed(3);
  const info=await request('/api/inspect',point);report(info);draw()}));
 cv.addEventListener('mousemove',ev=>{if(!mesh)return;const b=cv.getBoundingClientRect(),loc=coords(ev),t=$('tip');t.style.display='block';t.style.left=(ev.clientX-b.left+10)+'px';t.style.top=(ev.clientY-b.top+10)+'px';t.textContent=`${loc.x_km.toFixed(2)}, ${loc.y_km.toFixed(2)} km`});
