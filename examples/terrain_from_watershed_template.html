@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universe | Drainage → Terrain</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1721;--surface:#1b2937;--ink:#ecf3f5;--quiet:#b6c6d4;--line:#385064;--river:#65bdf7;--accent:#f5c471}
+*{box-sizing:border-box}body{background:var(--bg);color:var(--ink);font:15px system-ui,sans-serif;margin:0}
+header{padding:17px 24px;border-bottom:1px solid var(--line)}h1{margin:0;font-size:22px}header p{margin:5px 0;color:var(--quiet)}
+main{max-width:1340px;margin:0 auto;padding:18px;display:grid;grid-template-columns:minmax(0,2fr) minmax(245px,1fr);gap:16px}
+section{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+h2{font-size:16px;margin:0 0 12px}#map{width:100%;height:auto;aspect-ratio:2 / 1;border-radius:8px;background:#394b4d;cursor:crosshair}
+.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--quiet);font-size:12px;margin-top:10px}
+.legend span::before{content:'●';color:var(--river);margin-right:5px}.legend .gold::before{color:var(--accent)}.legend .soft::before{color:#95a1a3}
+.controls{display:grid;gap:11px}label{display:block;color:var(--quiet);font-size:13px;margin-bottom:4px}
+input,select,button{background:#0c1b28;color:var(--ink);border:1px solid #58718a;border-radius:6px;padding:9px;width:100%;font:inherit}
+button{cursor:pointer}button:hover{background:#24415a}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--accent)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:7px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.actions button{min-height:43px}
+small{color:var(--quiet)}pre{overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px ui-monospace,monospace;line-height:1.6;background:#101e2c;padding:12px;border-radius:8px;min-height:85px}
+#message{color:var(--accent);min-height:20px}.mapbox{position:relative}#tip{position:absolute;pointer-events:none;display:none;background:#07131de6;padding:7px;border-radius:5px;font:12px ui-monospace,monospace}
+@media(max-width:780px){main{grid-template-columns:1fr}}
+</style></head><body>
+<header><h1>Universe · Terrain from committed drainage</h1><p>Preview local relief without changing the established river network. Tiles index resolution; terrain is continuous.</p></header>
+<main>
+<div style="display:grid;gap:16px;align-content:start">
+<section><h2>Elevation and drainage</h2><div class="mapbox"><canvas id="map" width="1000" height="500" aria-label="Elevation and river network; click to inspect"></canvas><div id="tip"></div></div>
+<div class="legend"><span>Committed channels</span><span class="gold">Proposed tile</span><span class="soft">Unresolved relief shows its baseline, not committed elevations</span></div></section>
+<section><h2>Inquiry</h2><pre id="details">Select a location on the map.</pre><div class="actions"><button id="drainage">Trace downhill to bay</button><button id="export">Export committed world</button></div><p id="message" aria-live="polite"></p></section>
+</div>
+<section class="controls"><h2>Local realization</h2>
+<div><label for="tile">Region to refine</label><select id="tile"></select></div>
+<div><label for="candidate">Alternative relief index</label><input type="number" min="0" step="1" value="0" id="candidate"></div>
+<div class="actions"><button id="preview">Preview</button><button id="another">Another candidate</button><button id="commit">Commit preview</button><button id="reset">Show established state</button></div>
+<hr style="width:100%;border:0;border-top:1px solid #385064">
+<h2>Impose an elevation condition</h2><small>Click a map location, then establish its known elevation. Conditions restrict subsequent proposals, without realizing the tile.</small>
+<div class="two"><div><label for="x">x (km)</label><input type="number" id="x" step="0.01" value="1"></div><div><label for="y">y (km)</label><input type="number" id="y" step="0.01" value="0"></div></div>
+<div class="two"><div><label for="elevation">Known elevation (m)</label><input type="number" id="elevation" step="1" value="1100"></div><div><label for="tolerance">Tolerance (m)</label><input type="number" id="tolerance" value="10" min="0" step="1"></div></div>
+<button id="condition">Establish condition</button>
+<hr style="width:100%;border:0;border-top:1px solid #385064">
+<h2>World progress</h2><div id="status"><small>Loading…</small></div>
+<p><small>Height colors and paths outside realized tiles are provisional. This is a geometrically constrained drainage surface, not an erosion or flood model.</small></p>
+</section>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const cv=$('map'),ctx=cv.getContext('2d');
+let mesh=null,state=null,preview=null,trace=null,point={x_km:1,y_km:0};
+for(let j=1;j>=0;j--)for(let i=0;i<4;i++){
+ const option=document.createElement('option');option.value=`${i},${j}`;option.textContent=`Tile (${i}, ${j})`; $('tile').append(option);
+}
+function tile(){return $('tile').value.split(',').map(Number)}
+function coords(ev){const b=cv.getBoundingClientRect();return {x_km:Math.max(0,Math.min(8,8*(ev.clientX-b.left)/b.width)),y_km:Math.max(-2,Math.min(2,2-4*(ev.clientY-b.top)/b.height))}}
+function xy(x,y){return [x*cv.width/8,(2-y)*cv.height/4]}
+function rangeColor(h){const t=Math.min(1,Math.max(0,h/3800));const r=Math.round(40+160*t),g=Math.round(100+125*t),b=Math.round(105+90*(1-t));return `rgb(${r},${g},${b})`}
+function draw(){if(!mesh)return;const heights=mesh.heights_m,step=mesh.step_km;
+ const dx=step/8*cv.width,dy=step/4*cv.height;
+ for(let j=0;j<heights.length-1;j++)for(let i=0;i<heights[j].length-1;i++){
+   const h=(heights[j][i]+heights[j+1][i]+heights[j][i+1]+heights[j+1][i+1])/4;
+   ctx.fillStyle=rangeColor(h);ctx.fillRect(i*dx,cv.height-(j+1)*dy,dx+1,dy+1);
+ }
+ for(let i=0;i<4;i++)for(let j=0;j<2;j++){
+   const realized=mesh.realized_tiles.some(v=>v[0]===i&&v[1]===j),proposed=mesh.proposed_tile&&mesh.proposed_tile[0]===i&&mesh.proposed_tile[1]===j;
+   const px=i*cv.width/4,py=(1-j)*cv.height/2;
+   if(!realized&&!proposed){ctx.fillStyle='#07152180';ctx.fillRect(px,py,cv.width/4,cv.height/2)}
+   ctx.strokeStyle=proposed?'#f5c471':realized?'#72d7b1':'#b5bbc4aa';ctx.lineWidth=proposed?4:1;
+   ctx.strokeRect(px+1,py+1,cv.width/4-2,cv.height/2-2);
+ }
+ for(const [branch,points] of Object.entries(mesh.channels)){
+   ctx.strokeStyle=branch==='main'?'#74d3ff':'#4b9edf';ctx.lineWidth=branch==='main'?5:3;ctx.beginPath();
+   points.forEach((p,i)=>{const [a,b]=xy(p[0],p[1]);i?ctx.lineTo(a,b):ctx.moveTo(a,b)});ctx.stroke();
+ }
+ if(trace){ctx.strokeStyle='#ffcf75';ctx.lineWidth=3;ctx.setLineDash([8,6]);ctx.beginPath();
+ trace.points.forEach((p,i)=>{const [a,b]=xy(p[0],p[1]);i?ctx.lineTo(a,b):ctx.moveTo(a,b)});ctx.stroke();ctx.setLineDash([])}
+ const [sx,sy]=xy(point.x_km,point.y_km);ctx.fillStyle='#ffce77';ctx.beginPath();ctx.arc(sx,sy,5,0,Math.PI*2);ctx.fill();
+}
+async function request(path,data){const opts=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)};
+ const response=await fetch(path,opts);const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');return result}
+function report(obj){$('details').textContent=JSON.stringify(obj,null,2)}
+function message(txt){$('message').textContent=txt}
+async function refresh(){state=await request('/api/state');mesh=await request('/api/mesh');preview=null;trace=null;draw();updateStatus()}
+function updateStatus(){if(!state)return;$('status').textContent=`${state.committed.length}/8 tiles committed · ${state.conditions.length} elevation conditions · revision ${state.revision}`}
+function action(fun){return async()=>{try{message('');await fun()}catch(err){message(err.message)}}}
+cv.addEventListener('click',action(async ev=>{point=coords(ev);$('x').value=point.x_km.toFixed(3);$('y').value=point.y_km.toFixed(3);
+ const info=await request('/api/inspect',point);report(info);draw()}));
+cv.addEventListener('mousemove',ev=>{if(!mesh)return;const b=cv.getBoundingClientRect(),loc=coords(ev),t=$('tip');t.style.display='block';t.style.left=(ev.clientX-b.left+10)+'px';t.style.top=(ev.clientY-b.top+10)+'px';t.textContent=`${loc.x_km.toFixed(2)}, ${loc.y_km.toFixed(2)} km`});
+cv.addEventListener('mouseleave',()=>{$('tip').style.display='none'});
+$('preview').onclick=action(async()=>{const r=await request('/api/preview',{tile:tile(),candidate_index:Number($('candidate').value)});preview=r.proposal;mesh=r.mesh;trace=null;draw();report(preview);message('Uncommitted candidate shown in gold.')});
+$('another').onclick=action(async()=>{$('candidate').value=Number($('candidate').value)+1;$('preview').click()});
+$('commit').onclick=action(async()=>{const r=await request('/api/commit',{});report(r.committed);message('Terrain committed.');await refresh()});
+$('reset').onclick=action(async()=>{await refresh();message('Showing committed world only.')});
+$('condition').onclick=action(async()=>{const r=await request('/api/condition',{x_km:Number($('x').value),y_km:Number($('y').value),elevation_m:Number($('elevation').value),tolerance_m:Number($('tolerance').value)});report(r.condition);await refresh();message('Condition recorded without realizing terrain.')});
+$('drainage').onclick=action(async()=>{trace=await request('/api/drainage',point);report({branch:trace.branch,provisional:trace.provisional,steps:trace.points.length,starts_at_m:trace.points[0][2],ends_at_m:trace.points.at(-1)[2]});draw();message(trace.provisional?'Provisional trace: some traversed tiles are unresolved.':'Drainage to bay from committed terrain.')});
+$('export').onclick=action(async()=>{state=await request('/api/state');const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='universe-drainage-terrain-world.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+refresh().catch(err=>message(err.message));
+</script></body></html>
