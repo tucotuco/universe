@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Universe · AI encounter</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;background:#101c28;color:#e9f1f9;color-scheme:dark}
+body{max-width:1180px;margin:auto;padding:12px}h1{font-size:1.45rem;margin:0}h2{font-size:1rem;margin:0 0 8px}h3{font-size:.83rem;margin:0 0 5px;color:#b5c6d5}
+.sub,.help{color:#b5c6d5;font-size:.86rem;line-height:1.5}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(205px,260px);align-items:start;gap:9px}
+.encounter-column{display:flex;flex-direction:column;gap:8px;min-width:0}
+.map-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
+.map-heading h2{margin:0}.map-meta{display:flex;flex-wrap:wrap;column-gap:14px;row-gap:2px;margin:5px 0 0}
+.map-meta .help{margin:0}#rangeStatus{margin:0}
+.controls-panel{padding:10px;position:sticky;top:8px}.controls-panel .command-group{margin:9px 0}
+.controls-panel .commands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:4px}
+.controls-panel .commands button{padding:7px 5px;font-size:.81rem;min-height:34px;line-height:1.2}
+.history-panel{padding:9px 12px}.history-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.history-heading h2{margin:0}.history-panel .log{max-height:240px;overflow:auto}.history-panel .log li{padding:5px 0;font-size:.82rem}
+.history-panel #scrub{width:100%;margin-top:5px}
+.replay-transport{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.replay-transport button{padding:5px 8px;font-size:.78rem}
+.replay-transport label{margin-left:auto;font-size:.75rem;display:flex;gap:5px;align-items:center}
+.replay-transport input{width:64px;background:#101c28;color:#edf5ff;border:1px solid #7890a8;border-radius:4px;padding:5px}
+#feedback{margin:5px 0 0;min-height:0}
+.model-details{margin-top:10px;font-size:.82rem;color:#b5c6d5;padding:7px 11px;border:1px solid #3b5268;border-radius:8px}
+.model-details summary{cursor:pointer}
+@media(max-width:750px){.grid{grid-template-columns:1fr}.controls-panel{position:static}.controls-panel .commands{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.panel{background:#192a3b;border:1px solid #3b5268;border-radius:10px;padding:15px;min-width:0}
+#map{display:block;background:#132432;width:100%;height:clamp(240px,44vh,380px);border:1px solid #3b5268;border-radius:7px}
+button{padding:11px 15px;background:#28465f;color:inherit;border:1px solid #65839b;border-radius:6px;cursor:pointer;font:inherit}
+button:hover{background:#385b77} .being-marker{cursor:pointer;outline:none}.being-marker:focus circle{stroke:#ffe09c;stroke-width:4} dialog{border:1px solid #87a9c7;border-radius:12px;color:#e9f1f9;background:#192a3b;min-width:min(380px,85vw);max-width:580px}dialog::backdrop{background:#000a}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}button:disabled{cursor:not-allowed;opacity:.45}
+.commands{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px} .command-group{margin:14px 0}
+.stat{display:flex;justify-content:space-between;gap:12px;margin:7px 0;font-size:.9rem}.stat span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.efforts{display:flex;flex-wrap:wrap;gap:12px}.efforts label{display:flex;align-items:center;gap:5px;font-size:.86rem}.efforts input{width:46px;background:#101c28;color:#edf5ff;border:1px solid #7890a8;padding:5px;border-radius:4px}.log{list-style:none;padding:0;margin:0;max-height:340px;overflow:auto}.log li{padding:9px 0;border-bottom:1px solid #36495a;font-size:.88rem;line-height:1.4}
+#feedback{color:#f8d088}#time{font-size:1.25rem;font-weight:700}.tag{font-size:.75rem;color:#d3e5f8}
+</style></head><body>
+<h1>Universe · AI encounter</h1>
+<div class="grid">
+<div class="encounter-column">
+<section class="panel map-panel">
+<div class="map-heading"><h2>Personal-scale encounter · top-down</h2><p style="margin:0"><span id="time"></span> <span class="tag" id="status"></span></p></div>
+<svg id="map" viewBox="0 0 600 380" aria-label="Combatant positions" role="img"></svg>
+<div class="map-meta"><span id="perception" class="help"></span><span id="rangeStatus" class="help"></span>
+<span id="equipmentStatus" class="help"></span></div>
+<p id="feedback" role="status"></p>
+</section>
+<section class="panel" aria-label="Autonomous opponent">
+<h2>Autonomous opponent · most recent decision</h2>
+<p id="aiMode" class="sub">Loading autonomous policy...</p>
+<div class="stat"><span>Selected action</span><strong id="aiAction">—</strong></div>
+<p id="aiReason" class="help" aria-live="polite">The AI chooses from its own observable state before the human action takes effect.</p>
+<p id="aiFallback" class="help"></p>
+</section>
+<section class="panel history-panel">
+<div class="history-heading"><h2>Encounter history · newest first</h2><span id="reviewStatus" class="help">Current live state</span></div>
+<ul class="log" id="history"></ul>
+<input type="range" min="0" max="0" value="0" id="scrub" aria-label="Replay second">
+<div class="replay-transport" aria-label="Replay transport">
+ <button id="beginning" title="First recorded second">⏮ First</button>
+ <button id="back" title="Previous recorded second">◀</button>
+ <button id="play" title="Play history">▶ Play</button>
+ <button id="pause" title="Pause at current second">Ⅱ Pause</button>
+ <button id="stop" title="Stop playback and rewind">■ Stop</button>
+ <button id="forward" title="Next recorded second">▶</button>
+ <button id="end" title="Last recorded second">Last ⏭</button>
+ <label for="pace">Real s / game s <input id="pace" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+</div>
+</section>
+</div>
+<section class="panel controls-panel" aria-label="Scout action controls"><h2>Scout · Actions</h2>
+<div class="command-group"><h3>Offense</h3><div class="commands"><button data-command="thrust">Dagger thrust</button><button data-command="swing">Dagger swing</button></div></div>
+<div class="command-group"><h3>Defense</h3><div class="commands"><button data-command="guard">Guard</button><button data-command="parry">Parry</button><button data-command="dodge">Dodge</button></div>
+<p id="defenseReadiness" class="help" aria-live="polite"></p></div>
+<div class="command-group"><h3>Movement</h3><div class="commands"><button data-command="northwest">↖ NW</button><button data-command="north">↑ N</button><button data-command="northeast">↗ NE</button><button data-command="west">← W</button><button data-command="east">E →</button><button data-command="southwest">↙ SW</button><button data-command="south">↓ S</button><button data-command="southeast">SE ↘</button></div></div>
+<div class="command-group"><h3>Other</h3><div class="commands"><button data-command="wait">Wait 1 s</button><button data-command="cancel">Cancel action</button></div></div>
+<div class="command-group"><h3>Encounter</h3><div class="commands"><button id="save">Save</button><button id="review">Replay</button><button id="live">Return to live</button></div></div>
+</section>
+</div>
+<details class="model-details"><summary>Rules coverage · what this duel does and does not simulate</summary>
+<p><strong>Implemented in this encounter:</strong> one-second steps, timed dagger/longsword swing and thrust, bounded strategic effort, guarded stance, target-specific Parry/Dodge, eight-direction movement, fatigue checks, HP, armor, and weapon XP. The human and autonomous opponent use the same rule resolver.</p>
+<p><strong>Not yet fully implemented:</strong> surprise/hearing, hex-based facing/flanking, calibrated weapon reach, ranged/unarmed combat, grappling, special attacks, all fatigue and equipment rules, six-second rounds, and exact simultaneous physical consequences. The authority is <code>docs/Encounters Working Draft.pdf</code>. Consult <code>docs/ai-encounter-experiment.md</code> for the section-by-section matrix.</p>
+</details>
+<details class="model-details"><summary>Simulation notes</summary><p>Arrow keys move the Scout north, south, east, and west. Diagonal movement remains available from the action panel. Movement does not interrupt a pending attack, Guard, or a prepared reaction. Click a Being to inspect its available details, or hover for a brief summary. Parry and Dodge target an apparent incoming attack and must be ready by impact. Opponent state remains observer-filtered.</p><p>Reach and obstruction are checked at impact. Facing, precise anatomy, engagement rolls, general multi-attacker parrying, full simultaneous consequences, and arbitrary world-state serialization remain deferred. The opponent and player receive the same action-readiness checks and select from the same bounded melee commands and uses the same authoritative resolution engine. The deterministic policy is a baseline; the optional LLM proposes actions but cannot alter combat mechanics. This does not yet implement all rules in the Encounters Working Draft.</p></details>
+<dialog id="effortDetails" aria-label="Skill effort allocation"><div class="dialog-head"><h2 id="effortTitle">Allocate effort</h2><button id="closeEffort" aria-label="Cancel action">Cancel</button></div>
+<p class="help">Allocate up to <strong id="effortPool">2</strong> skill points as you <em>select the action</em>. Once it begins, this allocation is fixed until you explicitly choose a new action. </p>
+<div id="efforts" class="efforts">
+<label>Attack <input type="number" min="0" value="1" data-effort="attack"></label>
+<label>Defense <input type="number" min="0" value="0" data-effort="defense"></label>
+<label>Speed <input type="number" min="0" value="0" data-effort="timing"></label>
+<label>Damage <input type="number" min="0" value="0" data-effort="extra_damage"></label>
+</div><p id="effortStatus" class="help"></p><button id="commitEffort">Begin selected action</button></dialog>
+<dialog id="beingDetails" aria-label="Being details"><div class="dialog-head"><h2 id="beingTitle">Being details</h2><button id="closeDetails" aria-label="Close Being details">Close</button></div><div id="beingFields"></div><p class="help">This is an observer-filtered view; hidden opponent details are unavailable outside developer audit.</p></dialog>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const ns='http://www.w3.org/2000/svg';
+let busy=false, reviewing=false, readOnly=false, frames=[], index=0;
+let playbackTimer=null, selectedCommand=null;
+function svg(name,attributes,text){const n=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attributes))n.setAttribute(k,String(v));if(text)n.textContent=text;return n}
+function field(root,name,value){const r=document.createElement('div');r.className='stat';const a=document.createElement('span'),b=document.createElement('span');a.textContent=name;b.textContent=value;r.append(a,b);root.appendChild(r)}
+function view(data){
+ const p=data.player,f=data.foe;
+ $('aiMode').textContent=data.ai_mode||'Unknown policy';
+ $('aiAction').textContent=data.ai_last?.choice?.command||'No decision yet';
+ $('aiReason').textContent=data.ai_last?.choice?.reason||'The opponent will decide independently when you act.';
+ $('aiFallback').textContent=data.ai_last?.fallback?'Model unavailable/invalid; lawful tactical fallback: '+data.ai_last.fallback:'';
+ $('time').textContent=`Time ${data.time}s`; $('status').textContent=data.game_over?'· Encounter ended':'· Encounter active';
+ $('perception').textContent=data.perception_model+(data.observed_now?' · Opponent path detected':' · No current opponent path');
+ const rr=data.range;
+ $('rangeStatus').textContent=rr?`Separation ${rr.distance.toFixed(2)} yd · Scout/dagger ${rr.reach.toFixed(2)} yd ${rr.in_range?'(in range)':'(out of range)'} · Raider/longsword ${rr.opponent_reach.toFixed(2)} yd ${rr.opponent_in_range?'(in range)':'(out of range)'}`:'Opponent distance unknown';
+ $('equipmentStatus').textContent=data.foe?`Raider: ${data.foe.weapon}, ${data.foe.armor} · Reach: ${data.ranges.raider.toFixed(2)} yd`:'Raider equipment not observed';
+ $('defenseReadiness').textContent=['parry','dodge'].map(k=>`${k}: ${data.reaction_readiness?.[k]||'Unknown'}`).join(' · ');
+ $('rangeStatus').style.color=rr?.in_range?'#8ce2b0':'#f4bc8b';
+ $('effortPool').textContent=data.effort_pool;
+ renderedData=data;
+ if($('beingDetails').open)populateBeingDetails();
+ const map=$('map');map.replaceChildren();
+ for(let i=0;i<=600;i+=60)map.appendChild(svg('line',{x1:i,y1:0,x2:i,y2:380,stroke:'#344658'}));
+ for(let i=0;i<=380;i+=60)map.appendChild(svg('line',{x1:0,y1:i,x2:600,y2:i,stroke:'#344658'}));
+ // Camera is anchored on the Scout; the opponent appears ONLY if observed.
+ // Separate dashed circles show measured Scout and Raider weapon reach.
+ const reach=data.ranges?.scout || 2;
+ map.appendChild(svg('circle',{cx:300,cy:190,r:reach*85,fill:'none',stroke:'#71b6d9',
+                                  'stroke-width':1.5,'stroke-dasharray':'7 5',opacity:.65}));
+ // Hover shows only current HP, apparent/current actions, and resolution times.
+ // The foe's exact HP, hidden actions, and timing are NEVER inferred from the
+ // objective model in ordinary observer mode. Audit may show those facts.
+ function hoverText(b,cues,kind){
+   const own=kind==='player',known=own||data.audit;
+   const hp=known&&b.hp!=null&&b.hp_max!=null?`${b.hp} / ${b.hp_max}`:'unknown / unknown';
+   const equipment=b.weapon?`\nWeapon: ${b.weapon} · Armor: ${b.armor||'None'} · Reach: ${(kind==='player'?data.ranges.scout:data.ranges.raider).toFixed(2)} yd`:'';
+   const actions=[];const resolutions=[];
+   if(known){
+     if(b.pending){actions.push(b.pending.motion);resolutions.push(`${b.pending.motion}: t=${b.pending.due}s`)}
+     else if(b.action_state){actions.push(b.action_state)}
+     else{actions.push('No pending action')}
+   }else{actions.push(b.apparent_action||'Unknown')}
+   if(cues?.guard){
+     if(!actions.some(a=>a.toLowerCase().includes('guard')))actions.push('Guard');
+     resolutions.push('Guard: sustained');
+   }
+   if(cues?.movement){actions.push(`Movement ${cues.movement}`);resolutions.push('Movement: current second')}
+   return `HP: ${hp}${equipment}\nActions: ${actions.join('; ')}\nResolves: ${resolutions.join('; ')||'unknown / not scheduled'}`;
+ }
+ const draw=(b,x,y,color,initial,cues)=>{
+   const group=svg('g',{class:'being-marker',tabindex:0,role:'button','aria-label':`Inspect ${b.name}`});
+   group.appendChild(svg('title',{},hoverText(b,cues,initial==='S'?'player':'foe')));
+   group.appendChild(svg('circle',{cx:x,cy:y,r:18,fill:color,stroke:'#eef6ff','stroke-width':2}));
+   group.appendChild(svg('text',{x,y:y+5,'text-anchor':'middle',fill:'#061924','font-size':14,'font-weight':'bold','pointer-events':'none'},initial));
+   group.addEventListener('click',()=>openBeingDetails(initial==='S'?'player':'foe'));
+   group.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openBeingDetails(initial==='S'?'player':'foe')}});
+   map.appendChild(group);
+   map.appendChild(svg('text',{x,y:y+31,'text-anchor':'middle',fill:'#eef6ff','font-size':13},b.name));
+   // Separate icons keep movement and a concurrently pending attack visible.
+   if(cues?.attack)map.appendChild(svg('text',{x:x-25,y:y-15,fill:'#ffe3a7','font-size':21},cues.attack));
+   if(cues?.reaction)map.appendChild(svg('text',{x:x-25,y:y-15,fill:'#ffe3a7','font-size':21},cues.reaction));
+   if(cues?.guard)map.appendChild(svg('text',{x:x+14,y:y-15,fill:'#b0f1e0','font-size':21},cues.guard));
+   if(cues?.movement)map.appendChild(svg('text',{x:x+18,y:y+18,fill:'#fff','font-size':23,'font-weight':'bold'},cues.movement));
+ };
+ draw(p,300,190,'#51a3e5','S',data.player_cues);
+ if(f?.position){
+   const x=300+(f.position[0]-p.position[0])*85,y=190-(f.position[1]-p.position[1])*85;
+   if(data.range){map.appendChild(svg('line',{x1:300,y1:190,x2:x,y2:y,stroke:data.range.in_range?'#8be5ac':'#f1a883',
+     'stroke-width':2,'stroke-dasharray':'3 5',opacity:.75}));}
+   map.appendChild(svg('circle',{cx:x,cy:y,r:data.ranges.raider*85,fill:'none',stroke:'#e7ac64',
+                                  'stroke-width':1.6,'stroke-dasharray':'5 6',opacity:.8}));
+   draw(f,x,y,'#e39a57','R',data.foe_cues);
+ }
+ const logs=$('history');logs.replaceChildren();for(const h of data.history.slice(-16).reverse()){
+   const li=document.createElement('li');const texts=[];texts.push(`t=${h.time}: ${h.player_choice}`);if(h.player_activity)texts.push(`Scout: ${h.player_activity}`);
+   if(data.audit && h.foe_choice)texts.push(h.foe_choice);
+   else if(h.foe_cue)texts.push(h.foe_cue);
+   texts.push(...h.results.map(x=>typeof x==='string'?x:x.text));li.textContent=texts.join(' · ');if(h.results?.some(r=>(typeof r==='string'?r:r.text).includes('HIT!'))){li.style.borderLeft='4px solid #f4b26c';li.style.background='#35402f';li.style.paddingLeft='8px'}else if(h.results?.length){li.style.borderLeft='3px solid #5b7990';li.style.paddingLeft='8px'}logs.appendChild(li);
+ }
+ for(const b of document.querySelectorAll('[data-command]')){
+   b.disabled=busy||data.game_over||reviewing||readOnly||(Array.isArray(data.player_legal)&&!data.player_legal.includes(b.dataset.command));
+   if(['parry','dodge'].includes(b.dataset.command))b.title=data.reaction_readiness?.[b.dataset.command]||'';
+ }
+ $('save').disabled=busy||reviewing||readOnly;
+ $('commitEffort').disabled=busy||reviewing||readOnly||data.game_over;
+ $('beginning').disabled=!reviewing||index===0;
+ $('end').disabled=!reviewing||index>=frames.length-1;
+ $('play').disabled=!reviewing||index>=frames.length-1||!!playbackTimer;
+ $('pause').disabled=!reviewing||!playbackTimer;
+ $('stop').disabled=!reviewing;
+ $('pace').disabled=!reviewing;
+ $('back').disabled=!reviewing||index===0;
+ $('forward').disabled=!reviewing||index>=frames.length-1;
+ $('live').disabled=!reviewing;
+ $('scrub').disabled=!reviewing;
+ if(!reviewing)$('reviewStatus').textContent=readOnly?'Read-only saved encounter · review timeline':'Current live encounter';
+}
+let state=null, renderedData=null, inspecting='player';
+function openBeingDetails(which){inspecting=which;populateBeingDetails();$('beingDetails').showModal()}
+function populateBeingDetails(){
+ const data=renderedData;if(!data)return;
+ const b=inspecting==='player'?data.player:data.foe;
+ $('beingTitle').textContent=inspecting==='player'?'Scout · Personal state':'Raider · Perceived state';
+ const root=$('beingFields');root.replaceChildren();
+ if(!b){field(root,'Presence','Not currently detected');return}
+ field(root,'Name',b.name);
+ if(inspecting==='player'||data.audit){
+  field(root,'HP',`${b.hp} / ${b.hp_max}`);
+  field(root,'Fatigue',`${b.fatigue} / 5 · ${b.fatigue_state}`);
+  field(root,'Next exertion check',`${b.fatigue_next_check}s`);
+  field(root,'Weapon',b.weapon);field(root,'Armor',b.armor||'None');field(root,'Reach (yards)',(inspecting==='player'?data.ranges.scout:data.ranges.raider).toFixed(2));field(root,'Weapon skill',b.weapon_skill);
+  field(root,'Weapon XP',b.xp);
+  field(root,'Guard effort',b.strategy.defense);
+  field(root,'Action',b.action_state||b.pending?.motion||'No pending action');
+ }else{
+  field(root,'Weapon',b.weapon||'Unidentified');
+  field(root,'Armor',b.armor||'Unidentified');
+  field(root,'Reach (yards)',data.ranges.raider.toFixed(2));
+  field(root,'Apparent activity',b.apparent_action||'No current activity inferred');
+  field(root,'HP, fatigue, skills','Not established by observation');
+ }
+}
+$('closeDetails').addEventListener('click',()=>$('beingDetails').close());
+function prepareEffort(command){
+ if(busy||reviewing||readOnly||state?.game_over)return;
+ selectedCommand=command;
+ $('effortTitle').textContent=`Choose ${command} · allocate effort`;
+ const defensive=['guard','parry','dodge'].includes(command);
+ for(const input of document.querySelectorAll('[data-effort]')){
+  input.disabled=defensive&&input.dataset.effort!=='defense';
+  input.value=(input.dataset.effort===(defensive?'defense':'attack'))?1:0;
+ }
+ updateEffort();$('effortDetails').showModal();
+}
+$('commitEffort').addEventListener('click',async()=>{
+ if(!selectedCommand)return;
+ let effort;
+ try{effort=allocatedEffort()}catch(e){$('effortStatus').textContent=e.message;return}
+ const ok=await choose(selectedCommand,effort);
+ if(ok){selectedCommand=null;$('effortDetails').close()}
+});
+$('closeEffort').addEventListener('click',()=>{selectedCommand=null;$('effortDetails').close()});
+$('effortDetails').addEventListener('close',()=>{selectedCommand=null});
+// Keyboard movement applies only while playing, not while editing effort,
+// reading modal details, or scrubbing a historical replay.
+const arrowMoves={ArrowUp:'north',ArrowDown:'south',ArrowLeft:'west',ArrowRight:'east'};
+document.addEventListener('keydown',e=>{
+ const command=arrowMoves[e.key];if(!command)return;
+ const element=document.activeElement;
+ if(element && (['INPUT','TEXTAREA','SELECT'].includes(element.tagName)||element.isContentEditable))return;
+ if($('beingDetails').open||$('effortDetails').open||busy||reviewing||readOnly||state?.game_over)return;
+ e.preventDefault();choose(command);
+});
+async function refresh(){const response=await fetch('/state',{cache:'no-store'});if(!response.ok)throw Error('State unavailable');state=await response.json();readOnly=!!state.replay_only;view(state);updateEffort();if(readOnly)await startReview()}
+async function startReview(){pausePlayback();const response=await fetch('/timeline',{cache:'no-store'});if(!response.ok)throw Error('Timeline unavailable');const data=await response.json();frames=data.frames;reviewing=true;index=frames.length-1;drawReview()}
+function drawReview(){if(!frames.length)return;$('scrub').max=frames.length-1;$('scrub').value=index;$('reviewStatus').textContent=`Historical replay · frame ${index+1}/${frames.length} · t=${frames[index].time}s`;view(frames[index]);}
+function returnLive(){pausePlayback();reviewing=false;view(state)}
+function pausePlayback(){if(playbackTimer!==null){clearTimeout(playbackTimer);playbackTimer=null}if(reviewing&&frames.length)drawReview()}
+function setPlayback(){
+ if(!reviewing||index>=frames.length-1)return;
+ const pace=Number($('pace').value);
+ if(!Number.isFinite(pace)||pace<0.1||pace>10){$('feedback').textContent='Choose a pace between 0.1 and 10 real seconds per game second.';return}
+ pausePlayback();
+ function step(){playbackTimer=null;if(!reviewing||index>=frames.length-1){drawReview();return}
+   index++;drawReview();if(index<frames.length-1)playbackTimer=setTimeout(step,pace*1000)}
+ playbackTimer=setTimeout(step,pace*1000);drawReview();
+}
+async function save(){if(busy)return;busy=true;try{const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const j=await r.json();if(!r.ok)throw Error(j.error||'Save failed');$('feedback').textContent=`Saved at ${j.saved}`;}catch(e){$('feedback').textContent=e.message;}finally{busy=false;view(state)}}
+$('save').addEventListener('click',save);
+$('review').addEventListener('click',()=>startReview().catch(e=>{$('feedback').textContent=e.message}));
+$('beginning').addEventListener('click',()=>{pausePlayback();index=0;drawReview()});
+$('end').addEventListener('click',()=>{pausePlayback();index=frames.length-1;drawReview()});
+$('back').addEventListener('click',()=>{pausePlayback();index=Math.max(0,index-1);drawReview()});
+$('forward').addEventListener('click',()=>{pausePlayback();index=Math.min(frames.length-1,index+1);drawReview()});
+$('play').addEventListener('click',setPlayback);
+$('pause').addEventListener('click',pausePlayback);
+$('stop').addEventListener('click',()=>{pausePlayback();index=0;drawReview()});
+$('pace').addEventListener('change',()=>{if(playbackTimer!==null)setPlayback()});
+$('live').addEventListener('click',returnLive);
+$('scrub').addEventListener('input',e=>{pausePlayback();index=Number(e.target.value);drawReview()});
+function allocatedEffort(){
+ const effort={};let spent=0;
+ for(const input of document.querySelectorAll('[data-effort]')){
+   const value=Number(input.value);
+   if(!Number.isInteger(value)||value<0)throw Error('Effort must be non-negative whole numbers');
+   effort[input.dataset.effort]=value;spent+=value;
+ }
+ const pool=state?.effort_pool||0;
+ if(spent>pool)throw Error(`Effort total ${spent} exceeds Dagger skill ${pool}`);
+ return effort;
+}
+function updateEffort(){try{const e=allocatedEffort();const total=Object.values(e).reduce((a,b)=>a+b,0);
+ $('effortStatus').textContent=`${total} / ${state?.effort_pool||0} skill points allocated`;
+ $('commitEffort').textContent=`Begin ${selectedCommand||'action'} · ${total}/${state?.effort_pool||0} points`;
+ $('effortStatus').style.color='#a6e9c0';
+ }catch(err){$('effortStatus').textContent=err.message;$('effortStatus').style.color='#ffc3a0';
+ $('commitEffort').textContent='Invalid effort allocation';}}
+for(const input of document.querySelectorAll('[data-effort]'))input.addEventListener('input',updateEffort);
+async function choose(command,effort=null){if(busy||reviewing||readOnly||state?.game_over)return false;
+ const body={command};if(effort!==null)body.effort=effort;
+ busy=true;for(const b of document.querySelectorAll('[data-command]'))b.disabled=true;
+ try{const response=await fetch('/choose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const result=await response.json();if(!response.ok)throw Error(result.error||'Action rejected');state=result;$('feedback').textContent='';view(state);return true;
+ }catch(e){$('feedback').textContent=e.message;return false}finally{busy=false;if(state)view(state)} }
+for(const button of document.querySelectorAll('[data-command]'))button.addEventListener('click',()=>{
+ const command=button.dataset.command;
+ if(['thrust','swing','guard','parry','dodge'].includes(command))prepareEffort(command);
+ else choose(command);
+});
+refresh().catch(e=>{$('feedback').textContent=e.message});
+</script></body></html>

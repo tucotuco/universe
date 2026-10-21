@@ -110,11 +110,15 @@ class TacticalDuel:
             raise ValueError(f'Effort exceeds {weapon} skill pool ({budget})')
         return Strategy(**effort)
 
+    def _reach_for(self, actor, weapon_id):
+        """Legacy tactical encounter reach; scenarios may provide weapon-specific values."""
+        return self.REACH
+
     def _attack(self, actor, target, weapon_id, motion, strategy=None):
         # Preflight *before* abandoning an already scheduled action. Rejected
         # replacement leaves both world time and original pending action intact.
         strike = MeleeStrike(self.encounter, actor.id, target.id, weapon_id,
-                             motion=motion, reach=self.REACH, strategy=strategy)
+                             motion=motion, reach=self._reach_for(actor, weapon_id), strategy=strategy)
         strike.on_schedule(self.encounter)
         interrupted = self._interrupt(actor)
         self.encounter.schedule_action(strike)
@@ -152,7 +156,8 @@ class TacticalDuel:
         if not self._perceived[self.foe.id]:
             return {}, 'Raider has not detected the Scout.'
         status, _ = MeleeStrike(self.encounter, self.foe.id, self.player.id,
-                                self.foe_weapon, motion='swing', reach=self.REACH)._status(self.encounter)
+                                self.foe_weapon, motion='swing',
+                                reach=self._reach_for(self.foe, self.foe_weapon))._status(self.encounter)
         if status == 'in_reach':
             self._attack(self.foe, self.player, self.foe_weapon, 'swing')
             return {}, 'Raider initiates a longsword swing.'
@@ -419,7 +424,7 @@ class TacticalDuel:
         # tested only at impact, after movement; not at scheduling.
         reach_status, measured_distance = (MeleeStrike(
             self.encounter, player.id, self.foe.id, self.player_weapon,
-            motion='thrust', reach=self.REACH)._status(self.encounter)
+            motion='thrust', reach=self._reach_for(player, self.player_weapon))._status(self.encounter)
             if enemy_visible else (None, None))
         perceived_strike = self._pending(self.foe) if enemy_visible else None
         can_target_strike = isinstance(perceived_strike, MeleeStrike) and (
@@ -488,7 +493,8 @@ class TacticalDuel:
                 'player': player_data, 'foe': foe_data, 'observed_now': enemy_visible,
                 'player_symbol': player_symbol, 'foe_symbol': foe_symbol,
                 'game_over': self.ended(), 'history': log,
-                'range': {'distance': measured_distance, 'reach': self.REACH,
+                'range': {'distance': measured_distance,
+                          'reach': self._reach_for(player, self.player_weapon),
                           'status': reach_status,
                           'in_range': reach_status == 'in_reach'} if enemy_visible else None,
                 'effort_pool': player.get_weapon_skill_level('Dagger') or 0,
