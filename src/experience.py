@@ -106,3 +106,29 @@ def level_from_practice(baseline_level, experience, cost_per_rank=250):
         remaining -= (level + 1) * cost_per_rank
         level += 1
     return level
+
+
+@dataclass(frozen=True)
+class BatchSkillUse:
+    """One Target-owned simultaneous transition; exercises retain all causes.
+
+    Deliberately no per-Action before/after ranks. Legacy history readers can
+    use the shared transition fields; persistence requires separate 5C3 work.
+    """
+    being_id: str
+    skill_name: str
+    experience: int
+    level_before: int
+    level_after: int
+    time: int
+    exercises: tuple
+    action_id: None = None
+    outcome: str = 'simultaneous'
+
+    def to_dict(self):
+        raise ValueError('Batch skill history requires a separately authorized checkpoint migration')
+
+
+def practice_action_ids(use):
+    """Source IDs without fabricating sequential per-Action rank transitions."""
+    return tuple(x.action_id for x in use.exercises) if type(use) is BatchSkillUse else (() if use.action_id is None else (use.action_id,))

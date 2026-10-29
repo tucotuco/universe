@@ -143,6 +143,7 @@ class AgentDuel(TacticalDuel):
         This bounded scene defines one coordinate unit as one yard. Full
         facing/engagement and body-part contact remain outside the prototype.
         """
+        self.encounter.assert_legacy_consumer()
         if self.legacy_reach:
             return self.REACH  # Verify pre-reach-fix saved battles without changing history.
         weapon = self.world.get_object_by_id(weapon_id)
@@ -150,6 +151,7 @@ class AgentDuel(TacticalDuel):
                 float(weapon.original.length)) / 3.0
 
     def _visible_equipment(self, actor, weapon_id):
+        self.encounter.assert_legacy_consumer()
         weapon = self.world.get_object_by_id(weapon_id)
         armor_id = actor.get_armor_id()
         armor = self.world.get_object_by_id(armor_id) if armor_id else None
@@ -158,6 +160,7 @@ class AgentDuel(TacticalDuel):
 
     def _reaction_options(self, defender, attacker, weapon_id):
         """Explain whether target-specific reactions can be completed in time."""
+        self.encounter.assert_legacy_consumer()
         incoming = self._pending(attacker)
         possible = isinstance(incoming, MeleeStrike) and incoming.target_id == defender.id
         if not possible:
@@ -176,6 +179,7 @@ class AgentDuel(TacticalDuel):
 
     def observation(self):
         """Opponent-private own state plus what its current perception reveals."""
+        self.encounter.assert_legacy_consumer()
         self._observe()
         visible = self._perceived[self.foe.id]
         source = self.foe.get_position()
@@ -240,6 +244,7 @@ class AgentDuel(TacticalDuel):
         return {'command': command, 'reason': reason, 'effort': effort}
 
     def choose(self, command, effort=None, *, ai_choice=None):
+        self.encounter.validate_progression_entry()
         # Validate player syntax first, before calling a (possibly paid) model.
         if command not in self.COMMANDS or self.ended():
             raise ValueError('Unknown command or finished combat')
@@ -271,6 +276,7 @@ class AgentDuel(TacticalDuel):
         return self.state()
 
     def _foe_choice(self):
+        self.encounter.assert_legacy_consumer()
         proposal = self._ai_proposal
         if proposal is None:
             return super()._foe_choice()
@@ -303,15 +309,16 @@ class AgentDuel(TacticalDuel):
             reaction = MeleeDefense(self.encounter, self.foe.id, self.player.id,
                                     kind=command, target_action_id=incoming.id,
                                     weapon_id=self.foe_weapon if command == 'parry' else None)
-            reaction.on_schedule(self.encounter)
-            self._interrupt(self.foe)
-            self.encounter.schedule_action(reaction)
+            previous = self._pending(self.foe)
+            self.encounter.schedule_action(reaction,
+                interrupt_action_id=None if previous is None else previous.id)
             if allocation is not None:
                 self.foe.set_strategy(defense=allocation.defense)
         text = 'Raider autonomously chooses ' + command + ': ' + proposal['reason']
         return movement, text
 
     def state(self, audit=False):
+        self.encounter.assert_legacy_consumer()
         state = super().state(audit=audit)
         decision = getattr(self, '_ai_last', None)
         # Offer the human exactly the same reaction readiness information
@@ -355,6 +362,8 @@ class AgentDuel(TacticalDuel):
 
     def to_session(self):
         """Replay actual AI action decisions, never request fresh model calls."""
+        self.encounter.assert_legacy_consumer()
+        self.encounter.assert_checkpoint_exportable(replay=True)
         replay = AgentDuel(self.seed, legacy_reach=self.legacy_reach)
         checks = []
         for choice, opponent in zip(self.commands, self.ai_decisions):

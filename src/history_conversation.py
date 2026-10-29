@@ -7,11 +7,14 @@ objective history is delegated to the Being's authoritative PersonalHistory.
 """
 from __future__ import annotations
 
+from transactional_progression import guard_legacy_action, guard_legacy_encounter
+
 from dataclasses import asdict, dataclass
 import json
 import math
 
 from action import Action
+from scheduling import PreparedSchedule
 from experience import ActionResolution
 from perception import Perception
 
@@ -81,8 +84,8 @@ class AskAboutPastAction(Action):
         self.heard_account = None
         self.newly_realized = None
 
-    def on_schedule(self, encounter):
-        if self._encounter is not None or self.start_time != encounter.time:
+    def prepare_schedule(self, encounter):
+        if self._encounter is not None or self.start_time < encounter.time:
             raise ValueError('inquiry must begin once at Encounter current time')
         if encounter.get_being(self.actor_id) is None:
             raise ValueError('listener must participate in Encounter')
@@ -92,9 +95,10 @@ class AskAboutPastAction(Action):
         if not encounter.is_aware(self.actor_id, self.target_id):
             raise ValueError('listener must be aware of speaker before asking')
         speaker.personal_history.episode_key(self.episode_time, self.topic)
-        self._encounter = encounter
+        return PreparedSchedule.from_action(self, initialization=(('_encounter', encounter),))
 
     def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
         if self._encounter is None:
             raise RuntimeError('inquiry must be scheduled first')
         distance = self._encounter.distance_between_beings(self.actor_id, self.target_id)
@@ -122,6 +126,8 @@ class AskAboutPastAction(Action):
     def on_completed(self, encounter):
         # The testimony enters the listener's evidence only once the Encounter
         # has accepted completion and its observation consequences.
+        guard_legacy_action(self, effect=True)
+        guard_legacy_encounter(encounter, "legacy completion hook")
         if self.resolution is not None and self.resolution.outcome == 'heard':
             self.heard_account = self._pending_account
             if self.received_accounts is not None:

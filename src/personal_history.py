@@ -76,55 +76,10 @@ class PersonalHistory:
         return self.reality.commit((Fact(self.skill_key(time, skill), rank, origin),))
 
     def _validate(self, view, additional_skill_use=()):
-        ranks = {}
-        episodes = []
-        for record in view.all_facts():
-            key, value = record.key, record.value
-            if (key.entity_id != self.being.id or key.time is None
-                    or not self.earliest <= key.time <= self.known_through
-                    or not key.detail):
-                raise ImpossibleRealization("historical fact outside Being's inquiry window")
-            if key.attribute == "skill_rank":
-                if (key.detail not in self.nondeclining_skills
-                        or type(value) is not int or value < 0):
-                    raise ImpossibleRealization("invalid historical skill rank")
-                ranks.setdefault(key.detail, []).append((key.time, value))
-            elif key.attribute == "episode":
-                if (not isinstance(value, dict) or not value.get("description")
-                        or not isinstance(value["description"], str)
-                        or set(value) - {"description", "skill", "rank_after"}):
-                    raise ImpossibleRealization("invalid historical episode")
-                if ("skill" in value) != ("rank_after" in value):
-                    raise ImpossibleRealization("training episode requires skill and rank_after")
-                episodes.append(record)
-            else:
-                raise ImpossibleRealization("unsupported historical fact type")
-
-        for episode in episodes:
-            value = episode.value
-            if "skill" in value:
-                key = FactKey(self.being.id, "skill_rank", episode.key.time, value["skill"])
-                if (value["skill"] not in self.nondeclining_skills
-                        or type(value["rank_after"]) is not int
-                        or value["rank_after"] < 0
-                        or not view.contains(key)
-                        or view.get(key) != value["rank_after"]):
-                    raise ImpossibleRealization("training episode disagrees with historical rank")
-
-        for skill, dated in ranks.items():
-            dated.sort()
-            if any(left[1] > right[1]
-                   for left, right in zip(dated, dated[1:])):
-                raise ImpossibleRealization("nondeclining skill decreases between committed facts")
-            uses = [use for use in (*self.being.skill_use_history, *additional_skill_use)
-                    if use.skill_name == skill and use.time is not None]
-            for time, rank in dated:
-                for use in uses:
-                    # Historical rank at the action time means after the action.
-                    if time < use.time and rank > use.level_before:
-                        raise ImpossibleRealization("historical rank exceeds later known pre-action rank")
-                    if time >= use.time and rank < use.level_after:
-                        raise ImpossibleRealization("historical rank predates no later known skill gain")
+        from frozen_practice import validate_history_constraints
+        validate_history_constraints(self.being.id, self.earliest, self.known_through,
+            self.nondeclining_skills, view.all_facts(),
+            (*self.being.skill_use_history, *additional_skill_use))
 
     def validate_future_skill_use(self, proposed_use):
         """Reject a newly recorded skill use that would invalidate committed past.

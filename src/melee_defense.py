@@ -4,7 +4,12 @@ The defender selects one pending strike. A reaction must be ready when that
 strike resolves; neither a later strike nor an unspecified attacker is protected.
 """
 
+from transactional_progression import guard_legacy_action
+
+import math
+
 from action import Action
+from scheduling import PreparedSchedule
 from experience import ActionResolution, SkillExercise
 from weapon import WeaponInstance
 from utils import roll_dice
@@ -31,7 +36,7 @@ class MeleeDefense(Action):
         # Set from the designated strike and applicable preparation time.
         self.end_time = encounter.time
 
-    def on_schedule(self, encounter):
+    def prepare_schedule(self, encounter, *, proposed_actions=None, target_action_id=None):
         from melee_combat import MeleeStrike
         if encounter is not self.encounter:
             raise ValueError('reaction belongs to a different Encounter')
@@ -48,11 +53,17 @@ class MeleeDefense(Action):
             if not isinstance(weapon, WeaponInstance) or (
                     self.instrument_id not in actor.armed_with(encounter.universe).values()):
                 raise ValueError('parry requires a held weapon')
-        strike = encounter.universe.get_event_by_id(self.target_action_id)
+        target_action_id = self.target_action_id if target_action_id is None else target_action_id
+        proposed_actions = proposed_actions or {}
+        strike = proposed_actions.get(target_action_id) or encounter.universe.get_event_by_id(target_action_id)
         if (not isinstance(strike, MeleeStrike)
-                or strike.id not in encounter.pending_action_list
+                or (strike.id not in encounter.pending_action_list and strike.id not in proposed_actions)
                 or strike.actor_id != attacker.id or strike.target_id != actor.id):
             raise ValueError('defense must designate one pending incoming attack')
+        from scheduling import native_preparer
+        native_preparer(strike)  # Do not call scheduling helpers on opaque extensions.
+        if (type(strike.end_time) not in (int, float) or not math.isfinite(strike.end_time)):
+            raise ValueError('Designated strike requires a finite nominal deadline')
         if self.kind == 'parry':
             weapon = self.get_instrument()
             # Existing weapon definitions specify separate swing/thrust timings.
@@ -62,15 +73,18 @@ class MeleeDefense(Action):
             preparation = max(1, min(times) - 1)
         else:
             preparation = 2
-        self.ready_at = encounter.time + preparation
-        if self.ready_at > strike.end_time:
+        ready_at = self.start_time + preparation
+        if ready_at > strike.end_time:
             raise ValueError('defense cannot be ready before the designated attack impacts')
         # Remain committed to this strike until its impact, even if prepared
         # earlier. The action is not a reusable defense against other strikes.
-        self.end_time = strike.end_time
-        self.threat_at_schedule = ((strike.id, strike._status(encounter)[0] == 'in_reach'),)
+        threat = ((strike.id, strike._status(encounter)[0] == 'in_reach'),)
+        return PreparedSchedule.from_action(self, end_time=strike.end_time,
+            initialization=(('ready_at', ready_at), ('threat_at_schedule', threat),
+                            ('target_action_id', strike.id)))
 
     def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
         from melee_combat import MeleeStrike
         actor = self.get_actor()
         attacker = self.get_target()
@@ -104,9 +118,11 @@ class MeleeDefense(Action):
                 continue
             weapon = strike.get_instrument()
             attacker_rank = attacker.get_weapon_skill_level(weapon.original.obj_type) or 0
-            defense_roll = roll_dice('1d20') + defender_rank + actor.strategy.defense
-            attack_roll = roll_dice('1d20') + attacker_rank + attacker.strategy.attack
-            if defense_roll >= attack_roll:
+            from action_calculations import defense_succeeds
+            defense_roll = roll_dice('1d20')
+            attack_roll = roll_dice('1d20')
+            if defense_succeeds(defense_roll, defender_rank, actor.strategy.defense,
+                                attack_roll, attacker_rank, attacker.strategy.attack):
                 strike.defended_by = self.id
                 self.defended_action_ids += (strike.id,)
         self.success = bool(self.defended_action_ids) or all(

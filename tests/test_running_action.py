@@ -90,13 +90,17 @@ class TestRunningAction(unittest.TestCase):
         self.encounter.step(duration=1)
         self.assertEqual(action.resolution.outcome, 'no_movement')
 
-    def test_future_schedule_rejected_without_registering_event(self):
+    def test_future_schedule_delays_publication_and_start_snapshot(self):
         action = RunAction(self.universe, self.actor_id, 1, 2, 2, 250)
-        with self.assertRaisesRegex(ValueError, 'scheduling time'):
-            self.encounter.schedule_action(action)
+        self.encounter.schedule_action(action)
         self.assertNotIn(action.id, self.encounter.pending_action_list)
         self.assertIsNone(self.universe.get_event_by_id(action.id))
         self.assertIsNone(action.start_position)
+        self.encounter.step(1, velocities={self.actor_id: (10, 0, 0)})
+        self.assertIn(action.id, self.encounter.pending_action_list)
+        self.assertEqual(action.start_position, self.actor.get_position())
+        self.encounter.step(2)
+        self.assertEqual(action.resolution.outcome, 'no_movement')
 
     def test_requires_position(self):
         self.actor.set_spatial_state(None)

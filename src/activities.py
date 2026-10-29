@@ -4,11 +4,14 @@ This module deliberately contains only a testable running activity. It does not
 claim to model gait, exertion, fatigue, terrain, or whether a speed is realistic.
 """
 
+from transactional_progression import guard_legacy_action
+
 import math
 import json
 import random
 
 from action import Action
+from scheduling import PreparedSchedule
 from experience import ActionResolution, SkillExercise
 from perception import Perception
 from spatial.state import CartesianPosition
@@ -20,7 +23,7 @@ class RunAction(Action):
     The Encounter moves the Being using its ordinary step() velocities. This
     Action *observes* the resulting displacement; it never moves the Being.
 
-    The initial position is captured at scheduling, not construction, so an
+    The initial position is captured when activity starts, not construction, so an
     Action cannot credit movement that happened before it was scheduled.
     Successful or partial movement exercises 'run'; no motion earns no XP.
     ``experience`` is an explicit scenario award, not a progression policy.
@@ -64,30 +67,37 @@ class RunAction(Action):
         })
         return json.dumps(data, indent=2)
 
-    def on_schedule(self, encounter):
-        """Begin observing physical movement at the encounter's current time."""
+    def prepare_schedule(self, encounter):
+        """Stage a sample; the choice coordinator captures the actual start."""
         if self.start_position is not None:
             raise ValueError("running activity has already been started")
-        if self.start_time != encounter.time:
-            raise ValueError("running activity must begin at scheduling time")
+        if self.start_time < encounter.time:
+            raise ValueError("running activity cannot begin before scheduling time")
         actor = encounter.get_being(self.actor_id)
         if actor is None or actor.get_position() is None:
             raise ValueError("running activity requires a positioned participating Being")
-        self.start_position = actor.get_position()
+        return PreparedSchedule.from_action(self, initialization=(
+            ('start_position', actor.get_position()),))
 
     def resolve(self, difficulty_class):
         """Report practice from measured displacement, not declared intention."""
+        guard_legacy_action(self, effect=True)
         if self.start_position is None:
+            if getattr(self, '_activity_started', False):
+                return ActionResolution('unplaced')
             raise RuntimeError("running activity has not been scheduled")
         actor = self.get_actor()
         position = actor.get_position() if actor is not None else None
+        if position is None:
+            return ActionResolution('unplaced')
         if not isinstance(position, CartesianPosition):
             raise ValueError("running activity requires the Being's current position")
         displacement = math.dist(self.start_position.as_tuple(), position.as_tuple())
         if displacement == 0:
             result = ActionResolution('no_movement')
         else:
-            outcome = 'success' if displacement >= self.minimum_distance else 'partial'
+            from action_calculations import run_outcome
+            outcome = run_outcome(displacement, self.minimum_distance)
             result = ActionResolution(outcome, (SkillExercise('run', self.practice_experience),))
         self.displacement = displacement
         return result
@@ -132,19 +142,20 @@ class SpotAction(Action):
         self.path_status = None
         self._encounter = None
 
-    def on_schedule(self, encounter):
+    def prepare_schedule(self, encounter):
         """Bind to a validated Encounter but do not manufacture awareness."""
         if self._encounter is not None:
             raise ValueError("spotting activity has already been scheduled")
-        if self.start_time != encounter.time:
-            raise ValueError("spotting activity must begin at scheduling time")
+        if self.start_time < encounter.time:
+            raise ValueError("spotting activity cannot begin before scheduling time")
         skill = encounter.universe.get_skill_dictionary().get_skill_definition('spot')
         if skill is None or not skill['is_ordinary']:
             raise ValueError("spot skill must be defined as an ordinary skill")
-        self._encounter = encounter
+        return PreparedSchedule.from_action(self, initialization=(('_encounter', encounter),))
 
     def resolve(self, difficulty_class):
         """Report the check and any awareness; Encounter applies consequences."""
+        guard_legacy_action(self, effect=True)
         if self._encounter is None:
             raise RuntimeError("spotting activity has not been scheduled")
         if not isinstance(difficulty_class, (int, float)) or isinstance(difficulty_class, bool) or not math.isfinite(difficulty_class):
@@ -173,8 +184,8 @@ class SpotAction(Action):
                 self.roll = self.declared_roll if self.declared_roll is not None else random.randint(1, 20)
                 # Keep the Encounter draft's d20 check semantics, including
                 # natural 1 always failing and natural 20 always succeeding.
-                passed = self.roll == 20 or (self.roll != 1 and
-                                              self.roll + self.skill_level_used >= difficulty_class)
+                from action_calculations import check_succeeds
+                passed = check_succeeds(self.roll, self.skill_level_used, difficulty_class)
                 outcome = 'success' if passed else 'failure'
                 if passed:
                     observation = (Perception(self.actor_id, self.target_id,

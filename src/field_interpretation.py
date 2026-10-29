@@ -39,16 +39,25 @@ class FieldInterpreter:
             raise TypeError("expected FieldObservation")
         if observation.observer_id != observer.id:
             raise ValueError("only the original observer may directly interpret its own sighting")
-        level = observer.get_skill_level(self.skill_name)
-        if isinstance(level, bool) or not isinstance(level, int) or level < 0:
-            raise ValueError("invalid observer skill level")
-        fraction = min(level / self.expert_level, 1.0)
-        reports, rejected = {}, {}
-        for category, report in observation.reports.items():
-            dubious = observation.dubious_candidates.get(category, 0)
-            reduction = round(dubious * fraction)
-            rejected[category] = reduction
-            reports[category] = CountReport(report.estimate - reduction,
-                                            report.uncertainty)
-        return FieldInterpretation(observation.id, observation.observer_id,
-                                   self.skill_name, level, reports, rejected)
+        return interpret_field(observation, observer.id, observer.get_skill_level(self.skill_name),
+                               self.skill_name, self.expert_level)
+
+
+def interpret_field(observation, observer_id, level, skill_name, expert_level):
+    """Native interpretation; reads only explicit evidence/capability."""
+    if not isinstance(observation, FieldObservation):
+        raise TypeError("expected FieldObservation")
+    if observation.observer_id != observer_id:
+        raise ValueError("only the original observer may directly interpret its own sighting")
+    if isinstance(level, bool) or not isinstance(level, int) or level < 0:
+        raise ValueError("invalid observer skill level")
+    fraction = min(level / expert_level, 1.0)
+    reports, rejected = {}, {}
+    for category, report in observation.reports.items():
+        dubious = observation.dubious_candidates.get(category, 0)
+        reduction = round(dubious * fraction)
+        rejected[category] = reduction
+        reports[category] = CountReport(report.estimate - reduction,
+                                        report.uncertainty)
+    return FieldInterpretation(observation.id, observation.observer_id,
+                               skill_name, level, reports, rejected)

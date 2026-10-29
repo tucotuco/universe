@@ -79,6 +79,10 @@ class Library(Identifiable):
             categories_filename = f'{config_dir}/weapon_categories.json'
             self.weapon_dictionary = WeaponDictionary(dictionary_filename)
             self.weapon_dictionary.load_object_categories(categories_filename)
+            # Weapon-specific practice is recorded by Encounter using the same
+            # skill dictionary as other Action resolutions.
+            if self.skill_dictionary is not None:
+                self.skill_dictionary.add_weapon_skills(self.weapon_dictionary)
 #            print(f"Dictionary added to library from {dictionary_filename}!")
         except Exception as e:
             print(f"Error adding dictionary {dictionary_filename}: {e}")

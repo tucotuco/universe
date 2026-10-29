@@ -91,7 +91,8 @@ class TestActionResolutionExperience(unittest.TestCase):
         self.assertIn(action.id, self.encounter.pending_action_list)
         self.assertNotIn(action.id, self.encounter.finished_action_list)
         self.assertIsNone(action.resolution)
-        self.assertEqual(self.encounter.time, 0)
+        self.assertEqual(self.encounter.time, 1)
+        self.assertIsNotNone(self.encounter.boundary_fault)
 
     def test_invalid_result_data_and_no_duplicate_skill(self):
         for value in (True, -1, 1.5):

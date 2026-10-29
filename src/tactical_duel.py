@@ -20,6 +20,16 @@ from spatial.geometry import Sphere
 
 
 class TacticalDuel:
+    @staticmethod
+    def inspect_encounter(encounter, boundary=None, *, receipt=None):
+        """Native inspection adapter only; no facade ownership or policy execution.
+
+        Also inherited by AgentDuel. This omniscient schema is distinct from
+        observer-filtered state()/observation() and session/replay data.
+        """
+        from encounter_inspection import inspect_encounter
+        return inspect_encounter(encounter, boundary, receipt=receipt)
+
     DIRECTION = {
         'north': (0, 1), 'northeast': (1, 1), 'east': (1, 0),
         'southeast': (1, -1), 'south': (0, -1), 'southwest': (-1, -1),
@@ -48,6 +58,8 @@ class TacticalDuel:
             encounter_rng = random.getstate()
         finally:
             random.setstate(external_rng)
+        from transactional_progression import register_legacy_facade
+        register_legacy_facade(self.encounter, self)
         self.player_weapon = strikes[0].instrument_id
         self.foe_weapon = strikes[1].instrument_id
         self.encounter.end_time = None
@@ -74,19 +86,22 @@ class TacticalDuel:
         self._save_frame()
 
     def _observe(self):
+        self.encounter.assert_legacy_consumer()
         for observer, other in ((self.player, self.foe), (self.foe, self.player)):
             self.encounter.clear_awareness(observer.id, other.id)
             observed = self.encounter.perceive(observer.id, self.perception)
             self._perceived[observer.id] = any(o.target_id == other.id for o in observed)
 
     def _pending(self, being):
+        self.encounter.assert_legacy_consumer()
         for action_id in self.encounter.pending_action_list:
             action = self.world.get_event_by_id(action_id)
-            if action.actor_id == being.id:
+            if action.actor_id == being.id and action.start_time <= self.encounter.time:
                 return action
         return None
 
     def _interrupt(self, actor):
+        self.encounter.assert_legacy_consumer()
         pending = self._pending(actor)
         if pending is None:
             return None
@@ -99,6 +114,7 @@ class TacticalDuel:
         A strategy applies to the new attack; the Being's defense allocation
         remains available to incoming blows. It is never a free bonus pool.
         """
+        self.encounter.assert_legacy_consumer()
         if not isinstance(effort, dict) or set(effort) != set(self.EFFORT_FIELDS):
             raise ValueError('Effort requires attack, defense, timing and extra_damage')
         if any(type(effort[key]) is not int or effort[key] < 0
@@ -112,22 +128,25 @@ class TacticalDuel:
 
     def _reach_for(self, actor, weapon_id):
         """Legacy tactical encounter reach; scenarios may provide weapon-specific values."""
+        self.encounter.assert_legacy_consumer()
         return self.REACH
 
     def _attack(self, actor, target, weapon_id, motion, strategy=None):
         # Preflight *before* abandoning an already scheduled action. Rejected
         # replacement leaves both world time and original pending action intact.
+        self.encounter.assert_legacy_consumer()
         strike = MeleeStrike(self.encounter, actor.id, target.id, weapon_id,
                              motion=motion, reach=self._reach_for(actor, weapon_id), strategy=strategy)
-        strike.on_schedule(self.encounter)
-        interrupted = self._interrupt(actor)
-        self.encounter.schedule_action(strike)
+        interrupted = self._pending(actor)
+        self.encounter.schedule_action(strike,
+            interrupt_action_id=None if interrupted is None else interrupted.id)
         if strategy is not None:
             actor.set_strategy(strategy.attack, strategy.defense,
                                strategy.timing, strategy.extra_damage)
         return strike, interrupted
 
     def _react(self, kind):
+        self.encounter.assert_legacy_consumer()
         if not self._perceived[self.player.id]:
             raise ValueError('No currently perceived incoming attack to defend against')
         incoming = self._pending(self.foe)
@@ -136,14 +155,15 @@ class TacticalDuel:
         defense = MeleeDefense(self.encounter, self.player.id, self.foe.id,
                                kind=kind, target_action_id=incoming.id,
                                weapon_id=self.player_weapon if kind == 'parry' else None)
-        defense.on_schedule(self.encounter)  # validate before interrupting
-        interrupted = self._interrupt(self.player)
-        self.encounter.schedule_action(defense)
+        interrupted = self._pending(self.player)
+        self.encounter.schedule_action(defense,
+            interrupt_action_id=None if interrupted is None else interrupted.id)
         return defense, interrupted
 
     def _guard_active(self):
         # Guard is a sustained Being strategy, not a pending timed Action.
         # Derive its mode from commands; movement and waiting do not end it.
+        self.encounter.assert_legacy_consumer()
         for recorded in reversed(self.commands):
             command, _ = self._decode_command(recorded)
             if command not in self.DIRECTION and command != 'wait':
@@ -151,6 +171,7 @@ class TacticalDuel:
         return False
 
     def _foe_choice(self):
+        self.encounter.assert_legacy_consumer()
         if self._pending(self.foe) or self.foe.is_helpless():
             return {}, 'Raider continues or cannot act.'
         if not self._perceived[self.foe.id]:
@@ -170,6 +191,7 @@ class TacticalDuel:
                                self.WALK_PER_SECOND * dy / norm, 0)}, 'Raider closes distance.'
 
     def ended(self):
+        self.encounter.assert_legacy_consumer()
         return self.player.is_helpless() or self.foe.is_helpless()
 
     def _fatigue_tick(self, start, end):
@@ -179,6 +201,7 @@ class TacticalDuel:
         exertion continues while guarding or preparing an attack; resting,
         recovery, load and multi-activity changes are future extensions.
         """
+        self.encounter.assert_legacy_consumer()
         events = []
         for being in (self.player, self.foe):
             tracker = being.exertion
@@ -199,6 +222,7 @@ class TacticalDuel:
         return events
 
     def choose(self, command, effort=None):
+        self.encounter.validate_progression_entry()
         # Legacy dice code uses the module RNG. Scope it to this Encounter so
         # simultaneously active worlds and save replays cannot alter its fate.
         outside = random.getstate()
@@ -210,6 +234,7 @@ class TacticalDuel:
             random.setstate(outside)
 
     def _choose_one(self, command, effort=None):
+        self.encounter.assert_legacy_consumer()
         if command not in self.COMMANDS:
             raise ValueError('Unknown tactical command.')
         if self.ended():
@@ -383,6 +408,7 @@ class TacticalDuel:
 
     def state(self, audit=False):
         """Observer-filtered state: never send undiscovered foe objective data."""
+        self.encounter.assert_legacy_consumer()
         player = self.player
         enemy_visible = self._perceived[player.id]
 
@@ -513,15 +539,18 @@ class TacticalDuel:
                 'commands': list(self.COMMANDS), 'audit': audit}
 
     def _save_frame(self):
+        self.encounter.assert_legacy_consumer()
         self._frames.append(self.state())
         self._audit_frames.append(self.state(audit=True))
 
     def timeline(self, *, audit=False):
         """Immutable snapshot-like observer views for browser replay."""
+        self.encounter.assert_legacy_consumer()
         return json.loads(json.dumps(self._audit_frames if audit else self._frames))
 
     def _signature(self):
         """Stable semantic fingerprint: IDs are intentionally not compared."""
+        self.encounter.assert_legacy_consumer()
         def being(b):
             pos = b.get_position()
             pending = self._pending(b)
@@ -543,6 +572,7 @@ class TacticalDuel:
 
     def _journal_signature(self):
         # Version 2 fingerprint also includes allocated effort and both plans.
+        self.encounter.assert_legacy_consumer()
         detail = []
         for being in (self.player, self.foe):
             strategy = being.strategy
@@ -559,6 +589,8 @@ class TacticalDuel:
 
     def to_session(self):
         """Versioned seed + commands + fingerprints for checked reconstruction."""
+        self.encounter.assert_legacy_consumer()
+        self.encounter.assert_checkpoint_exportable(replay=True)
         # Replaying a save must not perturb the active encounter's RNG stream.
         rng_state = random.getstate()
         try:

@@ -5,17 +5,25 @@ and injury rules with Encounter position/awareness/timeline checks. It does not
 pretend that optical sightline is a complete collision/reach/facing model.
 """
 
+from transactional_progression import guard_legacy_action
+
 from dataclasses import asdict, dataclass
 import json
 import math
 
 from action import Action
+from scheduling import PreparedSchedule
 from experience import ActionResolution, SkillExercise
 from weapon import WeaponInstance
 
 
 @dataclass(frozen=True)
 class MeleeResult:
+    """Legacy live-only sequential result; never used by pure proposals.
+
+    HP deltas remain for current replay consumers until separate activation.
+    The inactive ActionProposal contract instead records causal contributions.
+    """
     action_id: str
     at_time: float
     actor_id: str
@@ -67,22 +75,13 @@ class MeleeStrike(Action):
                          parent_event_id=encounter.id)
 
     def _status(self, encounter):
+        from action_calculations import melee_path_status
         distance = encounter.distance_between_beings(self.actor_id, self.target_id)
-        if distance is None or distance == 0:
-            return 'unplaced', distance
-        if distance > self.reach:
-            return 'out_of_reach', distance
-        line = encounter.line_of_sight(self.actor_id, self.target_id)
-        if line is None:
-            return 'unplaced', distance
-        # Melee is physical: transparent geometry still obstructs a strike.
-        if line.intersections:
-            return 'blocked', distance
-        if line.unmodeled_entity_ids:
-            return 'uncertain_path', distance
-        return 'in_reach', distance
+        path = (encounter.line_of_sight(self.actor_id, self.target_id)
+                if distance is not None and 0 < distance <= self.reach else None)
+        return melee_path_status(distance, self.reach, path)
 
-    def on_schedule(self, encounter):
+    def prepare_schedule(self, encounter):
         if encounter is not self.encounter:
             raise ValueError('MeleeStrike belongs to a different Encounter')
         actor = encounter.get_being(self.actor_id)
@@ -104,6 +103,7 @@ class MeleeStrike(Action):
             raise ValueError('non-damaging attack not implemented')
         # Reach/path are evaluated at impact only; actors may wind up while
         # approaching a target, or anticipate movement into reach.
+        return PreparedSchedule.from_action(self)
 
     def hit_result(self, difficulty_class):
         self.hit_type = super().hit_result(difficulty_class)
@@ -132,6 +132,7 @@ class MeleeStrike(Action):
         return super().roll_hits(roll, difficulty_class - adjustment)
 
     def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
         if self.combat_result is not None:
             raise RuntimeError('melee Action already resolved')
         actor = self.get_actor()

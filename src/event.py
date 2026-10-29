@@ -7,6 +7,7 @@ __version__ = "event.py 2024-03-26T10:42-03:00"
 
 # TODO: Redo unit tests for library parent
 
+from transactional_progression import guard_legacy_encounter
 import heapq
 import json
 
@@ -28,6 +29,7 @@ class Event(Identifiable):
         self.parent_event_id = parent_event_id
 
     def to_json(self):
+        guard_legacy_encounter(self, "legacy Event serialization")
         def handle_circular_refs(obj):
             if isinstance(obj, (Universe)):
                 return obj.id  # Return only the ID for Universe and Event instances

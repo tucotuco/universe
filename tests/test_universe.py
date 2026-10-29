@@ -89,21 +89,26 @@ class TestUniverse(unittest.TestCase):
         
         # Load the Universe from the file
         loaded_universe = Universe("Loaded Universe", library=Library(config_dir="../src/config"))
-        loaded_universe.load_from_file(filename)
-        
-        loaded_event_history = loaded_universe.event_history
-        loaded_event0 = loaded_event_history["0"]
-        loaded_event1 = loaded_event_history[self.event1.id]
-        loaded_event2 = loaded_event_history[self.event2.id]
+        before = loaded_universe.to_json()
+        with self.assertRaisesRegex(ValueError, 'checkpoint restoration is unsupported'):
+            loaded_universe.load_from_file(filename)
+        self.assertEqual(loaded_universe.to_json(), before)
+        self.assertEqual(len(saved_event_history), 3)  # Original checkpoint is preserved.
 
-        # assert that the loaded Universe is the same as the original Universe
-        self.assertEqual(self.universe.id, loaded_universe.id)
-        self.assertEqual(self.universe.name, loaded_universe.name)
-        self.assertEqual(self.universe.type, loaded_universe.type)
-        self.assertEqual(len(saved_event_history), len(loaded_event_history))
-        self.assertIsInstance(loaded_event0, Event)
-        self.assertIsInstance(loaded_event1, Event)
-        self.assertIsInstance(loaded_event2, Encounter)
+        # Retain ordinary Event round-trip coverage; only Encounter restoration
+        # requires a future coherent checkpoint migration.
+        with open(filename) as stream:
+            ordinary = json.load(stream)
+        ordinary['event_history'].pop(self.event2.id)
+        with open(filename, 'w') as stream:
+            json.dump(ordinary, stream)
+        loaded_universe.load_from_file(filename)
+        self.assertEqual(loaded_universe.name, self.universe.name)
+        self.assertEqual(len(loaded_universe.event_history), 2)
+        for event_id in ('0', self.event1.id):
+            self.assertIsInstance(loaded_universe.get_event_by_id(event_id), Event)
+            self.assertEqual(loaded_universe.get_event_by_id(event_id).start_time,
+                             self.universe.get_event_by_id(event_id).start_time)
 
 #        print(f'{loaded_universe.to_json()}')
 

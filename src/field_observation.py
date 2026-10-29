@@ -268,14 +268,9 @@ class BeliefLedger:
                    for e in other.evidence)
 
     def _record_belief(self, group_id, trigger, time, observation_id):
-        relevant = [e for e in self.evidence if e.group_id == group_id]
-        categories = sorted(set().union(*(self._reports_for(e).keys() for e in relevant)))
-        conflicts = {category for category, _, _ in self.discrepancies(group_id)}
-        for category in categories:
-            sources = tuple(e.id for e in relevant if category in self._reports_for(e))
-            self._belief_history.append(BeliefRevision(
-                group_id, category, self.count_estimate(group_id, category),
-                sources, trigger, time, category in conflicts, observation_id))
+        readings = {e.id: self.current_interpretation_for(e.id) for e in self.evidence}
+        self._belief_history.extend(belief_revisions(self.evidence, readings,
+            group_id, trigger, time, observation_id))
 
     def reconsider(self, observation_id, observer, interpreter, *, at_time=None):
         """Reinterpret an original personal observation using present skill.
@@ -374,3 +369,29 @@ class BeliefLedger:
         dt = future_time - latest.time
         return CartesianPosition(*(p + v * dt for p, v in zip(
             latest.reported_position.as_tuple(), velocity)))
+
+
+@dataclass(frozen=True)
+class _EvidenceReads:
+    evidence: tuple
+    readings: object
+
+    def _reports_for(self, observation):
+        reading = self.readings.get(observation.id)
+        return reading.reports if reading is not None else observation.reports
+
+
+_BELIEF_COUNT_NATIVE = BeliefLedger.count_estimate
+_BELIEF_DISCREPANCIES_NATIVE = BeliefLedger.discrepancies
+
+
+def belief_revisions(evidence, readings, group_id, trigger, time, observation_id):
+    """Shared native append calculations; no ledger mutation or live lookup."""
+    view = _EvidenceReads(tuple(evidence), readings)
+    relevant = [e for e in view.evidence if e.group_id == group_id]
+    categories = sorted(set().union(*(view._reports_for(e).keys() for e in relevant)))
+    conflicts = {category for category, _, _ in _BELIEF_DISCREPANCIES_NATIVE(view, group_id)}
+    return tuple(BeliefRevision(group_id, category,
+        _BELIEF_COUNT_NATIVE(view, group_id, category),
+        tuple(e.id for e in relevant if category in view._reports_for(e)),
+        trigger, time, category in conflicts, observation_id) for category in categories)

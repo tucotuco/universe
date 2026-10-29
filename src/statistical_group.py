@@ -55,6 +55,36 @@ def _draw_cdf(points, rng):
     return points[-1][0]
 
 
+def composition_rng(seed, group_id, *parts):
+    """Native keyed objective stream, shared with inactive candidates."""
+    token = "|".join(map(str, (seed, group_id, *parts)))
+    value = int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:16], "big")
+    return random.Random(value)
+
+
+def validate_composition_records(group_id, formation_time, records):
+    """Native formation constraints, accepting detached frozen values too."""
+    from types import MappingProxyType
+    root_key = FactKey(group_id, "household_count", formation_time)
+    values = {record.key: record.value for record in records}
+    root = values.get(root_key)
+    if root is not None and (type(root) is not int or root < 0):
+        raise ImpossibleRealization("household count must be a nonnegative integer")
+    for record in records:
+        key, value = record.key, record.value
+        if key == root_key:
+            continue
+        if (key.entity_id != group_id or key.time != formation_time
+                or key.attribute != "household" or not key.detail.isdecimal()):
+            raise ImpossibleRealization("unexpected Group composition fact")
+        index = int(key.detail)
+        if (root is None or index >= root or str(index) != key.detail
+                or not isinstance(value, (dict, MappingProxyType))
+                or set(value) != set(StatisticalGroup.CATEGORIES)
+                or any(type(value[k]) is not int or value[k] < 0 for k in StatisticalGroup.CATEGORIES)):
+            raise ImpossibleRealization("invalid household composition")
+
+
 @dataclass(frozen=True)
 class GroupMember:
     """Materialized *identity/placement*, not yet a complete BeingInstance."""
@@ -159,33 +189,14 @@ class StatisticalGroup(ObjectInstance):
         )
 
     def _rng(self, *parts):
-        token = "|".join(map(str, (self.seed, self.id, *parts)))
-        value = int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:16], "big")
-        return random.Random(value)
+        return composition_rng(self.seed, self.id, *parts)
 
     def _formation_key(self, attribute, detail=""):
         return FactKey(self.id, attribute, self.formation_time, detail)
 
     def _validate_composition_facts(self, view):
         """Prevent invalid formation facts from entering the shared ledger."""
-        root_key = self._formation_key("household_count")
-        root = view.get(root_key)
-        if root is not None and (type(root) is not int or root < 0):
-            raise ImpossibleRealization("household count must be a nonnegative integer")
-        for record in view.all_facts():
-            key, value = record.key, record.value
-            if key == root_key:
-                continue
-            if (key.entity_id != self.id or key.time != self.formation_time
-                    or key.attribute != "household" or not key.detail.isdecimal()):
-                raise ImpossibleRealization("unexpected Group composition fact")
-            index = int(key.detail)
-            if (root is None or index >= root or str(index) != key.detail
-                    or not isinstance(value, dict)
-                    or set(value) != set(self.CATEGORIES)
-                    or any(type(value[k]) is not int or value[k] < 0
-                           for k in self.CATEGORIES)):
-                raise ImpossibleRealization("invalid household composition")
+        validate_composition_records(self.id, self.formation_time, view.all_facts())
 
     @property
     def _household_count(self):

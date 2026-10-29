@@ -10,6 +10,7 @@ __version__ = "action.py 2024-03-26T08:36-3:00"
 # TODO: Implement Locations as possible targets
 # TODO: Implement Spells as instruments
 
+from transactional_progression import guard_legacy_action
 import json
 
 from armor import ArmorInstance
@@ -19,6 +20,7 @@ from object import ObjectInstance
 from strategy import Strategy
 from utils import roll_dice, get_random_key
 from weapon import WeaponInstance
+from scheduling import PreparedSchedule
 
 class Action(Event):
     """
@@ -67,6 +69,7 @@ class Action(Event):
         """
         Serialize the Action as JSON.
         """
+        guard_legacy_action(self)
         def handle_circular_refs(obj):
             if isinstance(obj, (Universe)):
                 return obj.id  # Return only the ID for Universe
@@ -83,10 +86,25 @@ class Action(Event):
         }
         return json.dumps(data, indent = 2)
 
+    def prepare_schedule(self, encounter):
+        """Derive a candidate without modifying this Action or the world.
+
+        Encounter invokes only reviewed native implementations. The Encounter
+        argument is read-only during preparation, never an extension sandbox.
+        """
+        if self.instrument_id is not None and self.event_type not in ('swing', 'thrust'):
+            if encounter.universe.get_object_by_id(self.instrument_id) is None:
+                raise ValueError('action instrument must be an existing Object')
+            from scheduling import UnsupportedScheduleExtension
+            raise UnsupportedScheduleExtension(
+                'Active instrument semantics require a reviewed native Action adapter')
+        return PreparedSchedule.from_action(self)
+
     def resolve(self, difficulty_class):
         """
         Resolve the effects of this Action.
         """
+        guard_legacy_action(self, effect=True)
         hit_type = self.hit_result(difficulty_class)
         if hit_type == "normal":
             self.do_normal_hit()
@@ -233,6 +251,7 @@ class Action(Event):
         Apply damage to the target's shield and return the amount that gets through.
         """
         # See if damage hits a shield
+        guard_legacy_action(self, effect=True)
         target = self.get_target()
         if not isinstance(target, BeingInstance):
             return damage
@@ -246,6 +265,7 @@ class Action(Event):
         Apply damage to the actor's shield and return the amount that gets through.
         """
         # See if damage hits a shield
+        guard_legacy_action(self, effect=True)
         actor = self.get_actor()
         if not isinstance(actor, BeingInstance):
             return damage
@@ -259,6 +279,7 @@ class Action(Event):
         """
         Apply damage to a specified shield and return the amount that gets through.
         """
+        guard_legacy_action(self, effect=True)
         shield_instance = self.universe.get_object_by_id(shield_id)
 #        print(f"{shield_instance.to_json()}")
         if shield_instance is None:
@@ -275,13 +296,12 @@ class Action(Event):
         # shield’s hit points.
         shield_roll = roll_dice("1d10+0")
 #        print(f"Shield size: {shield_size} shield roll: {shield_roll}")
-        if shield_roll <= int(shield_size) + 4:
+        from action_calculations import shield_impact
+        intercepted, remaining_damage = shield_impact(damage, shield_size, shield_roll)
+        if intercepted:
             # Damage shield
             shield_instance.damage(damage)
 #            print(f"Shield {shield_instance.name} was hit for {damage} damage leaving {shield_instance.current.hit_points} hit points")
-            remaining_damage = damage - int(shield_size)
-            if remaining_damage < 0:
-                remaining_damage = 0
 #            print(f"{remaining_damage} gets through shield")
             return remaining_damage
         else:
@@ -293,6 +313,7 @@ class Action(Event):
         """
         Apply damage to the target's armor and return the amount that gets through.
         """
+        guard_legacy_action(self, effect=True)
         target_armor = self.universe.get_object_by_id(self.get_target_armor_id())
         if target_armor is None:
             return damage
@@ -311,6 +332,7 @@ class Action(Event):
         """
         Apply damage to the actor's armor and return the amount that gets through.
         """
+        guard_legacy_action(self, effect=True)
         actor_armor = self.universe.get_object_by_id(self.get_actor_armor_id())
         if actor_armor is None:
             return damage
@@ -350,106 +372,70 @@ class Action(Event):
         ddl = 0
         if target_strategy is not None:
             ddl = target_strategy.defense
-        return roll + aal - ddl >= difficulty_class
+        from action_calculations import attack_hits
+        return attack_hits(roll, aal, ddl, difficulty_class)
 
     def hit_result(self, difficulty_class):
         """
         Determine the type of result from an attempt to hit.
         """
-        roll = roll_dice("1d20")
-        actor = self.get_actor()
+        guard_legacy_action(self, effect=True)
+        from action_calculations import hit_outcome
+        actor, target = self.get_actor(), self.get_target()
         if actor is None:
+            roll_dice('1d20')  # Preserve the direct legacy helper's draw.
             print("Ojo, eh! This shouldn't happen. hit_result() has no actor.")
             return None
-        if roll == 20:
-            # The hit is a threat
-            threat_roll = roll_dice("1d20")
-            if threat_roll == 20:
-                # The defender, not the attacker, resists a potentially fatal hit.
-                target = self.get_target()
-                saved = target.makes_save(target.current.abilities.CON, difficulty_class)
-                if not saved:
-                    return "fatal"
-                else:
-                    # Revert from fatal hit to critical hit
-                    return "critical"
-            elif self.roll_hits(threat_roll, difficulty_class):
-                return "critical"
-            else:
-                return "normal"
-        elif roll == 1:
-            # The attempt was a potentially dangerous failure
-            threat_roll = roll_dice("1d20")
-            if threat_roll == 1:
-                # Hit actor instead of target
-                return "hit self"
-            elif not self.roll_hits(threat_roll, difficulty_class):
-                # Actor must make Reflex Saving Throw
-                saved = actor.makes_save(actor.current.abilities.DEX, difficulty_class)
-                if saved == False:
-                    return "drop weapon"
-                else:
-                    return "spectacular miss"
-            else:
-                return "miss"
-        elif self.roll_hits(roll, difficulty_class):
-            return "normal"
-        else:
-            return "miss"
+        return hit_outcome(difficulty_class, roll_dice, self.roll_hits,
+            lambda dc: target.makes_save(target.current.abilities.CON, dc),
+            lambda dc: actor.makes_save(actor.current.abilities.DEX, dc))
+
+    def _distribute_hit_damage(self, outcome):
+        guard_legacy_action(self, effect=True)
+        from action_calculations import damage_path
+        self_hit = outcome == 'hit self'
+        potential = self.damage_potential()
+        failed = False
+
+        def legacy_damage_roll(dice):
+            # Direct legacy helpers retain their old malformed-die fallback.
+            # Pure evaluation never uses this mutating/error-suppressing adapter.
+            nonlocal failed
+            if failed:
+                return 0
+            try:
+                return roll_dice(dice)
+            except Exception:
+                failed = True
+                instrument = self.get_instrument()
+                method = 'do_critical_hit' if outcome == 'critical' else 'do_normal_hit'
+                print(f"Ojo, eh! This shouldn't happen. {method}() trying to roll 1d{{normal_damage}}.")
+                print(f'event type: {self.event_type} normal_damage: {potential} SD: {instrument.Sd()} TD: {instrument.Td()}')
+                return 0
+
+        damage_path(outcome, potential, self.strategy.extra_damage,
+            roll_dice if self_hit else legacy_damage_roll,
+            self._resolve_damage_to_actor_shield if self_hit else self._resolve_damage_to_target_shield,
+            self._resolve_damage_to_actor_armor if self_hit else self._resolve_damage_to_target_armor,
+            lambda ordinary, critical: (self.get_actor() if self_hit else self.get_target()).damage(ordinary + critical))
 
     def do_normal_hit(self):
-        """
-        Distribute damage from a successful normal hit.
-        """
-        normal_damage = self.damage_potential()
-        extra_damage = self.strategy.extra_damage
-        damage_roll = 0
-        try:
-            damage_roll = roll_dice(f"1d{normal_damage}")
-        except Exception as e:
-            instrument = self.get_instrument()
-            print("Ojo, eh! This shouldn't happen. do_normal_hit() trying to roll 1d{normal_damage}.")
-            print(f"event type: {self.event_type} normal_damage: {normal_damage} SD: {instrument.Sd()} TD: {instrument.Td()}")
-        remaining_damage = self._resolve_damage_to_target_shield(damage_roll + extra_damage)
-        remaining_damage = self._resolve_damage_to_target_armor(remaining_damage)
-        self.get_target().damage(remaining_damage)
+        guard_legacy_action(self, effect=True)
+        self._distribute_hit_damage('normal')
 
     def do_critical_hit(self):
-        """
-        Distribute damage from a successful critical hit.
-        """
-        # Critical hit damage (that part of damage from extra dice due to a hit being 
-        # critical) is not stopped by shields or armor.
-        normal_damage = self.damage_potential()
-        extra_damage = self.strategy.extra_damage
-        damage_roll = 0
-        critical_damage_roll = 0
-        try:
-            damage_roll = roll_dice(f"1d{normal_damage}")
-            critical_damage_roll = roll_dice(f"1d{normal_damage}")
-        except Exception as e:
-            instrument = self.get_instrument()
-            print("Ojo, eh! This shouldn't happen. do_critical_hit() trying to roll 1d{normal_damage}.")
-            print(f"event type: {self.event_type} normal_damage: {normal_damage} SD: {instrument.Sd()} TD: {instrument.Td()}")
-        remaining_damage = self._resolve_damage_to_target_shield(damage_roll + extra_damage)
-        remaining_damage = self._resolve_damage_to_target_armor(remaining_damage)
-        self.get_target().damage(remaining_damage + critical_damage_roll)
+        guard_legacy_action(self, effect=True)
+        self._distribute_hit_damage('critical')
 
     def do_critical_failure(self):
-        """
-        Distribute damage to the actor from a critical failure.
-        """
-        normal_damage = self.damage_potential()
-        extra_damage = self.strategy.extra_damage
-        damage_roll = roll_dice(f"1d{normal_damage}")
-        remaining_damage = self._resolve_damage_to_actor_shield(damage_roll + extra_damage)
-        remaining_damage = self._resolve_damage_to_actor_armor(remaining_damage)
-        self.get_actor().damage(remaining_damage)
+        guard_legacy_action(self, effect=True)
+        self._distribute_hit_damage('hit self')
 
     def do_miss(self):
         """
         Resolve the effect of a miss.
         """
+        guard_legacy_action(self, effect=True)
         actor = self.get_actor()
 #        print(f"{actor.name} missed")
 
@@ -457,6 +443,7 @@ class Action(Event):
         """
         Resolve the effect of a spectacular miss.
         """
+        guard_legacy_action(self, effect=True)
         actor = self.get_actor()
 #        print(f"{actor.name} missed spectacularly")
 
@@ -464,6 +451,7 @@ class Action(Event):
         """
         Resolve the effect of dropping a weapon used in the action.
         """
+        guard_legacy_action(self, effect=True)
         actor = self.get_actor()
         if actor is None:
             print("Ojo, eh! This shouldn't happen. do_drop_weapon() has no actor.")
@@ -475,6 +463,7 @@ class Action(Event):
         """
         Resolve the effect of a critical hit that kills the target outright.
         """
+        guard_legacy_action(self, effect=True)
         target = self.get_target()
         if target is None:
             print("Ojo, eh! This shouldn't happen. do_fatal_hit() has no target.")

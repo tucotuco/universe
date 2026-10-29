@@ -6,6 +6,8 @@ visibility is asserted: range merely gates the currently modeled sensor.
 """
 from __future__ import annotations
 
+from transactional_progression import guard_legacy_action, guard_legacy_encounter
+
 from dataclasses import asdict
 import hashlib
 import json
@@ -13,12 +15,23 @@ import math
 import random
 
 from action import Action
+from scheduling import PreparedSchedule
 from experience import ActionResolution, SkillExercise
 from field_observation import BeliefLedger, CountReport, FieldObservation
 from field_interpretation import FieldInterpreter
 from perception import Perception
 from spatial.state import CartesianPosition
 from statistical_group import StatisticalGroup
+
+
+def observation_rng(seed, random_key, target_id, start_time, stage):
+    token = f'{seed}|{random_key}|{target_id}|{start_time}|{stage}'
+    number = int.from_bytes(hashlib.sha256(token.encode()).digest()[:16], 'big')
+    return random.Random(number)
+
+
+def group_check(roll, level, distance, detailed_range, difficulty):
+    return roll == 20 or (roll != 1 and roll + level >= difficulty + (2 if distance > detailed_range else 0))
 
 
 class SampledGroupObservation:
@@ -74,30 +87,42 @@ class SampledGroupObservation:
             raise ValueError('spot level must be a nonnegative integer')
         if focus_category not in (None, 'humans', 'livestock', 'dogs'):
             raise ValueError('unknown observation focus category')
-        detail = 'detailed' if distance <= self.detailed_range_m else 'coarse'
-        factor = 1 / math.sqrt(1 + level * self.skill_precision_gain)
-        truths = group.counts()  # May commit *aggregate counts*, never individuals.
-        reports = {}
-        false_positives = rng.randint(0, self.max_ambiguous_dogs if detail == 'coarse' else min(1, self.max_ambiguous_dogs))
-        for category in ('humans', 'livestock', 'dogs'):
-            sigma = self.count_sigmas[detail][category] * factor
-            if category == focus_category:
-                sigma *= self.focus_precision_factor
-            noise = round(rng.gauss(0, sigma))
-            estimate = max(0, truths[category] + noise + (false_positives if category == 'dogs' else 0))
-            uncertainty = max(1, math.ceil(2 * sigma))
-            reports[category] = CountReport(estimate, uncertainty)
-        # A few genuine dogs may also look dubious. Expertise isn't an oracle.
-        ambiguous_true = int(truths['dogs'] > 0 and rng.random() < .15)
-        dubious = min(reports['dogs'].estimate, false_positives + ambiguous_true)
-        position_sigma = self.position_sigmas[detail] * factor
-        center = group.get_position()
-        reported_position = CartesianPosition(*(v + rng.gauss(0, position_sigma)
-                                                for v in center.as_tuple()))
-        return FieldObservation(
-            observation_id, observer_id, group.id, time, reported_position,
-            max(1., 2 * position_sigma), reports,
-            f'sampled_{detail}_range_proxy', {'dogs': dubious}, focus_category)
+        return sample_group_evidence(self.__dict__, group.counts(), group.get_position(),
+            group.id, observer_id, time, distance, level, observation_id, rng, focus_category)
+
+
+
+def sample_group_evidence(config, truths, center, group_id, observer_id, time, distance,
+                          level, observation_id, rng, focus_category=None):
+    """Native sampling math against explicit truth; no world reads or writes."""
+    if distance is None or distance > config['coarse_range_m']:
+        raise ValueError('observation outside modeled range')
+    if type(level) is not int or level < 0:
+        raise ValueError('spot level must be a nonnegative integer')
+    if focus_category not in (None, 'humans', 'livestock', 'dogs'):
+        raise ValueError('unknown observation focus category')
+    detail = 'detailed' if distance <= config['detailed_range_m'] else 'coarse'
+    factor = 1 / math.sqrt(1 + level * config['skill_precision_gain'])
+    reports = {}
+    false_positives = rng.randint(0, config['max_ambiguous_dogs'] if detail == 'coarse' else min(1, config['max_ambiguous_dogs']))
+    for category in ('humans', 'livestock', 'dogs'):
+        sigma = config['count_sigmas'][detail][category] * factor
+        if category == focus_category:
+            sigma *= config['focus_precision_factor']
+        noise = round(rng.gauss(0, sigma))
+        estimate = max(0, truths[category] + noise + (false_positives if category == 'dogs' else 0))
+        uncertainty = max(1, math.ceil(2 * sigma))
+        reports[category] = CountReport(estimate, uncertainty)
+    # A few genuine dogs may also look dubious. Expertise isn't an oracle.
+    ambiguous_true = int(truths['dogs'] > 0 and rng.random() < .15)
+    dubious = min(reports['dogs'].estimate, false_positives + ambiguous_true)
+    position_sigma = config['position_sigmas'][detail] * factor
+    reported_position = CartesianPosition(*(v + rng.gauss(0, position_sigma)
+                                            for v in center.as_tuple()))
+    return FieldObservation(
+        observation_id, observer_id, group_id, time, reported_position,
+        max(1., 2 * position_sigma), reports,
+        f'sampled_{detail}_range_proxy', {'dogs': dubious}, focus_category)
 
 
 class ObserveGroupAction(Action):
@@ -150,20 +175,19 @@ class ObserveGroupAction(Action):
 
     def _rng(self, stage):
         # No mutable shared random stream and no Action UUID in the seed.
-        token = f'{self.seed}|{self.random_key}|{self.target_id}|{self.start_time}|{stage}'
-        number = int.from_bytes(hashlib.sha256(token.encode()).digest()[:16], 'big')
-        return random.Random(number)
+        return observation_rng(self.seed, self.random_key, self.target_id, self.start_time, stage)
 
-    def on_schedule(self, encounter):
-        if self._encounter is not None or self.start_time != encounter.time:
+    def prepare_schedule(self, encounter):
+        if self._encounter is not None or self.start_time < encounter.time:
             raise ValueError('group observation must be scheduled once at current time')
         if not isinstance(encounter.get_entity(self.target_id), StatisticalGroup):
             raise ValueError('target must be a participating StatisticalGroup')
         if encounter.universe.get_skill_dictionary().get_skill_definition('spot') is None:
             raise ValueError('spot skill is not defined')
-        self._encounter = encounter
+        return PreparedSchedule.from_action(self, initialization=(('_encounter', encounter),))
 
     def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
         if self._encounter is None:
             raise RuntimeError('group observation was not scheduled')
         if not isinstance(difficulty_class, (int, float)) or isinstance(difficulty_class, bool) or not math.isfinite(difficulty_class):
@@ -181,9 +205,7 @@ class ObserveGroupAction(Action):
         # The simple range instrument is the only feasibility gate. Group
         # geometry/terrain/lighting are not yet modeled; no visibility claim.
         self.roll = self._rng('d20').randint(1, 20)
-        passed = self.roll == 20 or (self.roll != 1 and
-                  self.roll + self.skill_level_used >= difficulty_class +
-                  (2 if distance > self.observer.detailed_range_m else 0))
+        passed = group_check(self.roll, self.skill_level_used, distance, self.observer.detailed_range_m, difficulty_class)
         if not passed:
             return ActionResolution('failure', (SkillExercise('spot', self.experience_policy['failure']),))
         self.field_observation = self.observer.sample(
@@ -198,6 +220,8 @@ class ObserveGroupAction(Action):
 
     def on_completed(self, encounter):
         """Record evidence only after Encounter accepts the completed Action."""
+        guard_legacy_action(self, effect=True)
+        guard_legacy_encounter(encounter, "legacy completion hook")
         if self.ledger is not None and self.field_observation is not None:
             self.ledger.learn(self.field_observation, interpretation=self.field_interpretation)
 

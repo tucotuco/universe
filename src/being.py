@@ -14,8 +14,9 @@ import random
 
 from abilities import Abilities
 from actiondictionary import ActionDictionary
-from experience import SkillUse, level_from_practice
+from experience import SkillUse, level_from_practice, practice_action_ids
 from exertion import Exertion
+from physical_fatigue import PhysicalFatigueState, read_physical_fatigue
 from object import ObjectDefinition, ObjectInstance, ObjectDictionary
 from skill import SkillDictionary, Skills
 from speeds import Speed
@@ -35,7 +36,7 @@ class BeingDefinition(ObjectDefinition):
                  max_speed=None, abilities=None, skills=None, senses=None, 
                  vulnerabilities=None, resistances=None, immunities=None, languages=None, 
                  psionics=None, spells=None, traits=None, states=None, actions=None, 
-                 reactions=None, body_parts=None, armor_id=None):
+                 reactions=None, body_parts=None, armor_id=None, physiology_id=None):
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
                          hit_points, is_magical, tags, weapon_categories)
         self.experience = convert_to_experience(experience)
@@ -61,6 +62,9 @@ class BeingDefinition(ObjectDefinition):
         # weapon in that location
         self.body_parts = body_parts or {}
         self.armor_id = armor_id
+        if physiology_id is not None and (not isinstance(physiology_id, str) or not physiology_id.strip()):
+            raise ValueError("physiology_id must be a nonempty reference or None")
+        self.physiology_id = physiology_id
 
     def copy(self):
         '''
@@ -98,7 +102,8 @@ class BeingDefinition(ObjectDefinition):
             self.actions.copy(), 
             self.reactions.copy(),
             self.body_parts.copy(),
-            self.armor_id)
+            self.armor_id,
+            self.physiology_id)
         return new_being_definition
 
     def to_json(self):
@@ -137,7 +142,8 @@ class BeingDefinition(ObjectDefinition):
             'actions': self.actions,
             'reactions': self.reactions,
             'body_parts': self.body_parts,
-            'armor_id': self.armor_id
+            'armor_id': self.armor_id,
+            'physiology_id': self.physiology_id
             }
         return json.dumps(data)
 
@@ -338,6 +344,10 @@ class BeingInstance(ObjectInstance):
         self.possessions = []
         self.weapons = []
         self.strategy = Strategy()
+        # Q/B are the only NEW persistent physical reserves. Legacy fatigue_level
+        # remains temporarily for old combat code until its replacement is wired.
+        self.physical_fatigue = PhysicalFatigueState()
+        self.physiology_id = self.original.physiology_id
         self.fatigue_level = 0
         self.effective_fitness = self.current.FIT()
         self.exertion = Exertion()
@@ -351,6 +361,7 @@ class BeingInstance(ObjectInstance):
     def to_json(self):
         """Include personal skill-use evidence in the existing instance snapshot."""
         data = json.loads(super().to_json())
+        data['physical_fatigue'] = self.physical_fatigue.to_dict(self.physiology_id)
         data['skill_experience'] = self.skill_experience.copy()
         data['skill_practice_baselines'] = self._skill_practice_baselines.copy()
         data['skill_use_history'] = [entry.to_dict() for entry in self.skill_use_history]
@@ -397,7 +408,7 @@ class BeingInstance(ObjectInstance):
         if outcome is not None and not isinstance(outcome, str):
             raise TypeError('outcome must be a string or None')
         if action_id is not None and any(
-                use.action_id == action_id and use.skill_name == skill_name
+                action_id in practice_action_ids(use) and use.skill_name == skill_name
                 for use in self.skill_use_history):
             raise ValueError('skill use has already been recorded for this action')
         before = self.get_skill_level(skill_name)
@@ -454,6 +465,8 @@ class BeingInstance(ObjectInstance):
             raise ValueError("cannot discard committed personal history with reset")
         self.current = self.original.copy()
         self.strategy = Strategy()
+        self.physical_fatigue = PhysicalFatigueState()
+        self.physiology_id = self.original.physiology_id
         self.fatigue_level = 0
         self.effective_fitness = self.current.FIT()
         self.exertion = Exertion()
@@ -487,6 +500,32 @@ class BeingInstance(ObjectInstance):
         '''
         self.current.experience += convert_to_numeric(experience)
         self.current.experience = convert_to_experience(self.current.experience)
+
+    def get_physical_fatigue(self):
+        """Immutable current Q/B pair; legacy fatigue_level is not used."""
+        return self.physical_fatigue
+
+    def set_physical_fatigue(self, q, b):
+        """Change *committed* Q/B, never a frozen Encounter view."""
+        self.physical_fatigue = PhysicalFatigueState(q, b)
+
+    def set_physiology_id(self, physiology_id):
+        """Reference to an externally resolved/versioned physiology definition.
+
+        None denotes an unresolved profile; it does not silently mean human.
+        """
+        if physiology_id is not None and (not isinstance(physiology_id, str)
+                                       or not physiology_id.strip()):
+            raise ValueError('physiology_id must be a nonempty reference or None')
+        self.physiology_id = physiology_id
+
+    def restore_physical_fatigue(self, saved_being, *, missing='reject'):
+        """Restore Q/B atomically; old records require explicit fresh migration."""
+        state, physiology_id = read_physical_fatigue(saved_being, missing=missing)
+        if 'physical_fatigue' not in saved_being and missing == 'fresh':
+            physiology_id = self.original.physiology_id
+        self.physical_fatigue = state
+        self.physiology_id = physiology_id
 
     def get_fatigue_level(self):
         '''
@@ -891,15 +930,12 @@ class BeingInstance(ObjectInstance):
         '''
         Assess whether a saving throw for this BeingInstance is successful.
         '''
+        from action_calculations import saving_throw
         roll = roll_dice('1d20')
-        if roll == 1:
-            return False
-        if roll == 20:
-            return True
-        level = experience_level(self.current.experience)
-        if roll >= difficulty_class - saving_throw_experience_modifier(level):
-            return True
-        return False
+        if roll in (1, 20):
+            return saving_throw(roll, difficulty_class, 0)
+        return saving_throw(roll, difficulty_class,
+                            saving_throw_experience_modifier(experience_level(self.current.experience)))
 
     def choose_melee_action(self, universe):
         '''

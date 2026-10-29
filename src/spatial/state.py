@@ -144,3 +144,11 @@ class SpatialState:
             raise TypeError("grid must implement SpatialGrid")
         latitude, longitude = self.position.angular_coordinate(origin)
         return grid.cell_at(latitude, longitude, level)
+
+
+def integrate_position(previous, velocity, duration):
+    """Native constant-velocity displacement, shared by live and inactive paths."""
+    vx, vy, vz = velocity
+    return CartesianPosition(previous.x + vx * duration,
+                             previous.y + vy * duration,
+                             previous.z + vz * duration)

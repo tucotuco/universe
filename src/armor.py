@@ -195,18 +195,8 @@ class ArmorInstance(ObjectInstance):
         Return the amount of damage stopped by the armor for the worst defense among the 
         given list of penetration types.
         '''
-        least_defense_damage = 1000
-        for p in penetration_types.split(','):
-            try:
-                pdamage = self.current.defenses[p]['d']
-    #            print(f'damage stopped for pt {p} is {pdamage}')
-            except Exception as e:
-                # The penetration type is E (Entangle) only and the weapon does no damage
-#                print(f"defenses: {self.current.defenses}")
-                return 0
-            if pdamage < least_defense_damage:
-                least_defense_damage = pdamage
-        return least_defense_damage
+        from action_calculations import least_armor_defense
+        return least_armor_defense(self.current.defenses, penetration_types, 'd')
 
     def worst_defense_hardness(self, penetration_types):
         '''
@@ -214,18 +204,8 @@ class ArmorInstance(ObjectInstance):
         penetration types. The list must be a comma-separated string of valid penetration
         types (e.g., "B,P,S").
         '''
-        least_defense_hardness = 1000
-        for p in penetration_types.split(','):
-            try:
-                phardness = self.current.defenses[p]['h']
-            except Exception as e:
-                # The penetration type is E (Entangle) only and the weapon does no damage
-#                print(f"defenses: {self.current.defenses}")
-                return 0
-#            print(f'hardness for pt {p} is {phardness}')
-            if phardness < least_defense_hardness:
-                least_defense_hardness = phardness
-        return least_defense_hardness
+        from action_calculations import least_armor_defense
+        return least_armor_defense(self.current.defenses, penetration_types, 'h')
 
     def damage_to_armor(self, damage, penetration_types):
         '''

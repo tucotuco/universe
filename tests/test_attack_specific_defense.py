@@ -67,8 +67,8 @@ class TestAttackSpecificDefense(unittest.TestCase):
         # same timestamp. The defense must not switch target implicitly.
         new_strike = MeleeStrike(duel.encounter, duel.foe.id, duel.player.id,
                                  duel.foe_weapon, motion='swing', reach=duel.REACH)
-        duel.encounter.schedule_action(new_strike)
         new_strike.end_time = strike.end_time
+        duel.encounter.schedule_action(new_strike)
         for _ in range(4): duel.choose('wait')
         self.assertEqual(defense.result, 'no_threat')
         self.assertEqual(duel.player.get_skill_experience('Dagger'), 0)

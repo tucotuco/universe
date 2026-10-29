@@ -127,7 +127,9 @@ class TestEncounterCycle(unittest.TestCase):
             self.encounter.step()
         self.assertEqual(self.encounter.pending_action_list, [action.id])
         self.assertEqual(self.encounter.finished_action_list, [])
-        self.assertEqual(self.encounter.time, 7)
+        self.assertEqual(self.encounter.time, 8)
+        self.assertEqual(self.encounter.last_processed_boundary, 7)
+        self.assertIsNotNone(self.encounter.boundary_fault)
 
     def test_movement_validation_before_any_position_changes(self):
         self.initiate()
@@ -170,8 +172,8 @@ class TestEncounterCycle(unittest.TestCase):
         self.encounter.schedule_action(action)
         self.encounter.step(velocities={self.a_id: (2, 0, 0)})
         self.assertEqual(timeline, [
-            ('action', CartesianPosition(2, 0, 0), 7),
-            ('environment', CartesianPosition(2, 0, 0), 7),
+            ('action', CartesianPosition(2, 0, 0), 8),
+            ('environment', CartesianPosition(2, 0, 0), 8),
         ])
         self.assertEqual(self.encounter.time, 8)
 

@@ -7,25 +7,39 @@ __version__ = "encounter.py 2024-03-09T22:00-03:00"
 
 # TODO: Make ''' comments on classes and methods
 
+from transactional_progression import guard_legacy_encounter, planning_entry, validate_action_contract, validate_choice_actions
 import json
 import math
 import random
 from dataclasses import dataclass
 
-from spatial.state import CartesianPosition
+from spatial.state import CartesianPosition, integrate_position
 from spatial.frame import LocalFrame, LocalPosition
 from spatial.visibility import trace_sightline
 
 from utils import convert_to_dc
 from action import Action
+from action_choice import ChoiceBook, ChoiceView, ChoiceRejected
+from scheduling import PreparedSchedule, native_preparer
 from event import Event
 from experience import ActionResolution
 from library import Library
 from being import BeingInstance
+from encounter_fatigue_bridge import FrozenFatigueFrame
 from object import ObjectInstance
 from perception import RangePerception, GeometricPathPerception
 from strategy import Strategy
 from weapon import WeaponInstance
+
+
+class BoundaryInvariantError(ValueError):
+    """Invalid timeline/dispatch state; never a request to execute late."""
+
+
+@dataclass(frozen=True)
+class BoundaryContext:
+    boundary: int
+    interval_start: float
 
 
 @dataclass(frozen=True)
@@ -56,7 +70,7 @@ class EncounterStep:
     """Outcome of one bounded Encounter simulation step.
 
     Movement is applied from a simultaneous position snapshot.  Actions are
-    resolved at the end of the step using the existing Event/Action timeline.
+    resolved at each crossed integer boundary using the native timeline.
     """
 
     start_time: float
@@ -77,7 +91,8 @@ class Encounter(Event):
                  time=None, being_list=None, non_being_object_list=None, 
                  pending_action_list=None, finished_action_list=None,
                  cancelled_action_list=None, initiated=False,
-                 map=None, awareness=None, initiation=None, local_frame=None):
+                 map=None, awareness=None, initiation=None, local_frame=None,
+                 fatigue_frame_history=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
@@ -88,6 +103,21 @@ class Encounter(Event):
             self.time = start_time
         else:
             self.time = time
+        if (isinstance(self.time, bool) or not isinstance(self.time, (int, float))
+                or not math.isfinite(self.time) or self.time < 0):
+            raise BoundaryInvariantError('Encounter start time must be finite and nonnegative')
+        if self.time != start_time:
+            raise BoundaryInvariantError('Restoring an advanced Encounter requires an unsupported checkpoint migration')
+        self.last_processed_boundary = math.floor(self.time)
+        self.active_boundary = None
+        self.boundary_fault = None
+        self._coordinator_time = self.time
+        self._interval_start = self.time
+        self._advancing = False
+        self._running = False
+        self._dispatching = False
+        self._boundary_context = None
+        self._choice_book = ChoiceBook(self)
         if being_list is None:
             self.being_list = [] # A list of ids of Beings involved in the Encounter
         else:
@@ -105,6 +135,12 @@ class Encounter(Event):
         else:
             self.finished_action_list = finished_action_list
         self.cancelled_action_list = list(cancelled_action_list or [])  # recorded aborted Actions
+        # Patch 1: observational Q/B snapshots, not independent combat state.
+        self._active_fatigue_frame = None
+        # Registry is a transient explicit dependency, not a new save-game meter.
+        self._physiology_registry = None
+        self.last_fatigue_frame = None
+        self.fatigue_frame_history = list(fatigue_frame_history or [])
         # Awareness is directed encounter state: observer Being id -> Entity ids
         # currently known to that observer.  It is deliberately distinct from physical proximity;
         # later sight, hearing, memory, concealment, and other perception systems can
@@ -121,6 +157,8 @@ class Encounter(Event):
             self.initiation = None
 
     def to_json(self):
+        if self.progression_mode == 'transactional' or self.__dict__.get('_atomic_interval_history') or (self.boundary_fault or {}).get('kind') == 'atomic_publication':
+            raise BoundaryInvariantError('Transactional Encounter serialization requires Increment 5C3 compatibility')
         def handle_circular_refs(obj):
             if isinstance(obj, (Universe)):
                 return obj.id  # Return only the ID for Universe and Event instances
@@ -138,6 +176,8 @@ class Encounter(Event):
             "difficulty_class": self.difficulty_class,
             "initiated": self.initiated,
             "time": self.time,
+            "boundary_state": self.boundary_state,
+            "choice_state": self.choice_state,
             "initiation": None if self.initiation is None else self.initiation.to_dict(),
             "map": self.map,
             "local_frame": None if self.local_frame is None else self.local_frame.to_dict(),
@@ -150,11 +190,13 @@ class Encounter(Event):
             "pending_action_list": self.pending_action_list,
             "finished_action_list": self.finished_action_list,
             "cancelled_action_list": self.cancelled_action_list,
+            "fatigue_frame_history": list(self.fatigue_frame_history),
         }
         return json.dumps(data, default=handle_circular_refs, sort_keys=False, indent=2)
 
     # Generate an Encounter.
     def generate(self):
+        guard_legacy_encounter(self, "generate")
         if self.map is None:
 #            self.map = EncounterMap(location)
             pass
@@ -484,65 +526,178 @@ class Encounter(Event):
         self.initiated = True
         return self.initiation
 
-    def schedule_action(self, action):
-        """Add an existing resolvable Action/Event to the Encounter timeline.
+    def prepare_action(self, action, *, _proposed_actions=None, _target_action_id=None):
+        """Prepare and validate one native schedule without publishing effects.
 
-        Decisions and action construction are external for this first cycle.
-        The caller supplies a resolvable Event with a start/end time and a
-        participating Being actor; no automatic combat choice is made.
+        No opaque extension callback is invoked. Native preparers treat this
+        Encounter and their Action as read-only; initialization is returned as
+        data and applied only by schedule_action after final validation.
         """
+        self._assert_timeline()
+        from transactional_progression import validate_action_contract
+        validate_action_contract(self, action)
+        preparer = native_preparer(action)
         if not self.initiated:
             raise RuntimeError("Encounter must be initiated before scheduling actions")
-        if not isinstance(action, Event) or not callable(getattr(action, "resolve", None)):
-            raise TypeError("action must be a resolvable Event")
         if action.universe is not self.universe:
             raise ValueError("action must belong to this Universe")
-        if self.get_being(getattr(action, "actor_id", None)) is None:
+        from melee_defense import MeleeDefense
+        if type(action) is MeleeDefense:
+            prepared = preparer(action, self, proposed_actions=_proposed_actions,
+                                target_action_id=_target_action_id)
+        else:
+            prepared = preparer(action, self)
+        self._validate_prepared_schedule(action, prepared)
+        return prepared
+
+    def _validate_prepared_schedule(self, action, prepared):
+        if not isinstance(prepared, PreparedSchedule) or prepared.action_id != action.id:
+            raise ValueError("preparation must describe this Action")
+        for name in ('actor_id', 'target_id', 'instrument_id', 'parent_event_id', 'start_time'):
+            if getattr(prepared, name) != getattr(action, name):
+                raise ValueError(f"prepared {name} does not match the Action declaration")
+        if self.get_being(prepared.actor_id) is None:
             raise ValueError("action actor must be a participating Being")
-        target_id = getattr(action, "target_id", None)
-        if target_id is not None and self.get_entity(target_id) is None:
+        if prepared.target_id is not None and self.get_entity(prepared.target_id) is None:
             raise ValueError("action target must be a participating Entity")
-        if action.parent_event_id not in (None, self.id):
+        if prepared.parent_event_id not in (None, self.id):
             raise ValueError("action belongs to a different parent Event")
-        if (not isinstance(action.start_time, (int, float))
-                or not isinstance(action.end_time, (int, float))
-                or not math.isfinite(action.start_time)
-                or not math.isfinite(action.end_time)
-                or action.start_time < self.time
-                or action.end_time < action.start_time):
-            raise ValueError("action times must be finite and start no earlier than now")
-        if self.end_time is not None and action.end_time > self.end_time:
+        times = (prepared.start_time, prepared.end_time, self.time)
+        if any(isinstance(t, bool) or not isinstance(t, (int, float))
+               or not math.isfinite(t) for t in times):
+            raise ValueError("finalized action times and Encounter time must be finite numbers")
+        if prepared.end_time - prepared.start_time < 1:
+            raise ValueError('finalized Action duration must be at least one second')
+        boundary = math.ceil(prepared.end_time)
+        if boundary <= self.last_processed_boundary or (
+                self.active_boundary is not None and boundary <= self.active_boundary):
+            raise BoundaryInvariantError('Cannot schedule into an active or already processed boundary')
+        if (self.time < 0 or prepared.start_time < 0 or prepared.start_time < self.time
+                or prepared.end_time - prepared.start_time < 1):
+            raise ValueError("finalized Action must start at or after time zero and now, "
+                             "with duration at least one second")
+        if self.end_time is not None and prepared.end_time > self.end_time:
             raise ValueError("action would finish after the Encounter end time")
+        if self.end_time is not None and boundary > self.end_time:
+            raise ValueError("Action resolution boundary would exceed the Encounter end time")
+        if (prepared.instrument_id is not None and
+                self.universe.get_object_by_id(prepared.instrument_id) is None):
+            raise ValueError("action instrument must be an existing Object")
+        if (len(prepared.active_object_ids) != len(set(prepared.active_object_ids))
+                or any(self.universe.get_object_by_id(resource) is None
+                       for resource in prepared.active_object_ids)):
+            raise ValueError("prepared active Objects must be distinct existing Objects")
         if action.id in self.pending_action_list or action.id in self.finished_action_list:
             raise ValueError("action is already scheduled or completed")
         registered = self.universe.get_event_by_id(action.id)
         if registered is not None and registered is not action:
             raise ValueError("an Event with this id already exists")
-        # Optional start hook lets an activity observe state from the precise
-        # moment it is scheduled. Legacy Actions need no such hook.
-        on_schedule = getattr(action, 'on_schedule', None)
-        if on_schedule is not None:
-            on_schedule(self)
-        action.parent_event_id = self.id
-        self.universe.add_event(action)
-        self.pending_action_list.append(action.id)
-        return action.id
+        allowed = {'start_position', '_encounter', 'ready_at', 'threat_at_schedule', 'target_action_id'}
+        names = [name for name, _ in prepared.initialization]
+        if len(names) != len(set(names)) or any(name not in allowed for name in names):
+            raise ValueError("unsupported prepared initialization fields")
+        for name, value in prepared.initialization:
+            if name == '_encounter' and value is not self:
+                raise ValueError("prepared binding must refer to this Encounter")
+            if name == 'ready_at' and (isinstance(value, bool)
+                    or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    or not prepared.start_time <= value <= prepared.end_time):
+                raise ValueError("prepared readiness must lie within the finalized Action")
+
+    def propose_choice(self, actions):
+        planning_entry(self)
+        return self._choice_book.propose(actions)
+
+    def edit_choice(self, draft, actions):
+        planning_entry(self)
+        return self._choice_book.edit(draft, actions)
+
+    def validate_choice(self, draft, *, replacing=None):
+        planning_entry(self)
+        with self._choice_book.lock:
+            return self._choice_book.validate(draft, replacing=self._choice_id(replacing))
+
+    def accept_valid_choice(self, validation):
+        planning_entry(self)
+        return self._choice_book.accept(validation)
+
+    def _choice_id(self, choice):
+        if isinstance(choice, ChoiceView):
+            if self._choice_book.view(choice.id) != choice:
+                from action_choice import ChoiceRejected, ChoiceDiagnostic
+                raise ChoiceRejected((ChoiceDiagnostic('stale_choice', 'choice',
+                    'The choice changed; inspect the current version before editing'),))
+            return choice.id
+        return choice
+
+    def undo_choice(self, choice):
+        planning_entry(self)
+        with self._choice_book.lock:
+            return self._choice_book.undo(self._choice_id(choice))
+
+    def replace_choice(self, choice, validation):
+        planning_entry(self)
+        with self._choice_book.lock:
+            return self._choice_book.replace(self._choice_id(choice), validation)
+
+    def publish_choice(self, choice):
+        guard_legacy_encounter(self, "direct choice publication; transactional start fences publish the whole choice")
+        with self._choice_book.lock:
+            return self._choice_book.publish(self._choice_id(choice))
+
+    def get_choice(self, choice_id):
+        return self._choice_book.view(choice_id)
+
+    def choice_for_action(self, action_id):
+        return self._choice_book.for_action(action_id)
+
+    @property
+    def active_reservations(self):
+        return self._choice_book.reservations
+
+    @property
+    def choice_state(self):
+        return self._choice_book.summary()
+
+    def schedule_action(self, action, *, interrupt_action_id=None):
+        """Single-item adapter to the same whole-choice/resource validator.
+
+        Current starts publish and begin before returning (after settlement if
+        called during a boundary). Future starts reserve now and publish later.
+        """
+        planning_entry(self)
+        validate_action_contract(self, action)
+        return self._choice_book.schedule_single(action, interrupt_action_id)
+
+    def schedule_choice(self, actions):
+        """Immediate/future complete-set convenience adapter to the same book."""
+        planning_entry(self)
+        validate_choice_actions(self, actions)
+        return self._choice_book.schedule_complete(actions)
 
     def cancel_action(self, action_id, *, reason='interrupted'):
+        planning_entry(self)
+        with self._choice_book.lock:
+            return self._cancel_action(action_id, reason=reason)
+
+    def _cancel_action(self, action_id, *, reason='interrupted'):
         """Withdraw a pending Action, retaining the Event as evidence of intent.
 
         It has no resolution, completion, damage, or practice award.  Repeated
         cancellation or attempts to cancel a finished action are rejected.
         """
+        self._assert_timeline()
         if action_id not in self.pending_action_list:
             raise ValueError('action is not pending')
         action = self.universe.get_event_by_id(action_id)
         if not isinstance(action, Action):
             raise ValueError('only pending Actions may be canceled')
+        self._choice_book.assert_registered(action)
         self.pending_action_list.remove(action_id)
         action.canceled_at = self.time
         action.cancellation_reason = reason
         self.cancelled_action_list.append(action_id)
+        self._choice_book.cancelled(action_id)
         return action
 
     def record_skill_use(self, action_id, skill_name, experience=0, outcome=None):
@@ -566,19 +721,173 @@ class Encounter(Event):
             self.universe.get_skill_dictionary(), skill_name, experience,
             action_id=action_id, time=action.end_time, outcome=outcome)
 
-    def step(self, duration=1.0, velocities=None, velocity_frame="global"):
-        """Advance one explicit Encounter interval without automatic combat AI.
+    def set_physiology_registry(self, registry):
+        """Opt in to resolving versioned physiology at the snapshot boundary."""
+        from physiology_registry import PhysiologyRegistry
+        if not isinstance(registry, PhysiologyRegistry):
+            raise TypeError('registry must be a PhysiologyRegistry')
+        self._physiology_registry = registry
 
-        ``velocities`` maps participating Entity ids to continuous Cartesian
-        velocity triples, expressed per unit of Encounter time.  By default
-        velocities are global; ``velocity_frame="local"`` interprets them in
-        the Encounter's local frame, converting them to global vectors first.
-        All new positions are computed from the same starting snapshot. This is a
-        kinematic placeholder, not a collision, speed-limit, or terrain model.
-        Action decisions are made externally through ``schedule_action``.
+    def capture_evaluation_snapshot(self, boundary, *, rng_state=None):
+        """Inactive Increment 4 read boundary; never progresses or resolves.
+
+        A caller must supply post-movement, pre-action state at this exact
+        integer fence. The live dispatcher remains sequential and unchanged.
         """
+        from action_evaluation import capture_snapshot
+        return capture_snapshot(self, boundary, rng_state=rng_state)
+
+    @property
+    def progression_mode(self):
+        from transactional_progression import mode_of
+        return mode_of(self)
+
+    def enable_transactional_progression(self, *, quiescent=False, rng_owner=None):
+        from transactional_progression import enable_transactional_progression
+        return enable_transactional_progression(self, quiescent=quiescent, rng_owner=rng_owner)
+
+    def recover_transactional_progression(self, token):
+        from transactional_progression import recover_transactional_progression
+        return recover_transactional_progression(self, token)
+
+    def inspect_committed(self, boundary=None, *, receipt=None):
+        """Detached omniscient committed results; never a command or save API."""
+        from encounter_inspection import inspect_encounter
+        return inspect_encounter(self, boundary, receipt=receipt)
+
+    def assert_legacy_consumer(self):
+        from transactional_progression import guard_legacy_encounter
+        guard_legacy_encounter(self, 'legacy facade/UI/replay consumer')
+
+    def prepare_interval_candidate(self, next_boundary, *, velocities=None,
+                                   velocity_frame="global", rng_state=None, rng_owner=None):
+        """Inactive one-interval staging; never advances or publishes live state."""
+        from interval_staging import prepare_interval_candidate
+        return prepare_interval_candidate(self, next_boundary, velocities=velocities,
+            velocity_frame=velocity_frame, rng_state=rng_state, rng_owner=rng_owner)
+
+    def _capture_fatigue_frame(self):
+        return FrozenFatigueFrame((self.get_being(being_id)
+                                   for being_id in self.being_list),
+                                  registry=self._physiology_registry)
+
+    def propose_physical_fatigue(self, timeline, *, max_step=0.25):
+        """Pure proposed Q/B from the last native post-movement frame.
+
+        Deliberately does not commit; action/damage effects are still sequential
+        in the legacy resolver. Only Patch 3 may integrate atomic settlement.
+        """
+        if self.last_fatigue_frame is None:
+            raise RuntimeError('no Encounter fatigue snapshot is available')
+        if not self.fatigue_frame_history or abs(
+                timeline.end - self.fatigue_frame_history[-1]['time']) > 1e-9:
+            raise ValueError('work must end at the last completed step')
+        if not self.fatigue_frame_history or abs(
+                timeline.start - self.fatigue_frame_history[-1]['start']) > 1e-9:
+            raise ValueError('work interval must match the latest Encounter step')
+        return self.last_fatigue_frame.propose_work(timeline, max_step=max_step)
+
+    def fatigue_view(self, being_id):
+        """Read the common post-movement Q/B view *during* action resolution."""
+        if self._active_fatigue_frame is None:
+            raise RuntimeError('no active frozen Encounter fatigue frame')
+        return self._active_fatigue_frame.view(being_id)
+
+    @property
+    def boundary_state(self):
+        """Diagnostic cursor surface, not an authoritative restore format."""
+        return {'version': 1, 'time': self.time,
+                'last_processed': self.last_processed_boundary,
+                'active': self.active_boundary,
+                'fault': None if self.boundary_fault is None else dict(self.boundary_fault)}
+
+    def _assert_timeline(self):
+        if self.boundary_fault is not None:
+            if self.boundary_fault.get('kind') == 'atomic_publication':
+                raise BoundaryInvariantError('Atomic publication stopped: ' + self.boundary_fault['rollback']
+                    + '; explicit controlled recovery is required')
+            raise BoundaryInvariantError(
+                'Encounter progression is faulted; legacy movement/effects/RNG may remain. '
+                'Checkpoint recovery is not implemented; do not retry this state')
+        if (isinstance(self.time, bool) or not isinstance(self.time, (int, float))
+                or not math.isfinite(self.time) or self.time != self._coordinator_time):
+            raise BoundaryInvariantError('Encounter clock changed outside the boundary coordinator')
+        if type(self.last_processed_boundary) is not int:
+            raise BoundaryInvariantError('Invalid boundary cursor')
+        expected = math.floor(self.time)
+        if self.active_boundary is None:
+            if self.last_processed_boundary != expected:
+                raise BoundaryInvariantError('Skipped, duplicate, or inconsistent boundary cursor')
+        elif (self.active_boundary != self.last_processed_boundary + 1
+              or self.time != self.active_boundary):
+            raise BoundaryInvariantError('Out-of-order active boundary')
+
+    def _pending_schedule(self):
+        """Preflight all references/deadlines, including future pending Actions.
+
+        Missing instruments remain ordinary weapon-unavailable outcomes. Missing
+        actor/target registry entries are corrupt references, not new targets.
+        """
+        self._assert_timeline()
+        seen = set()
+        pending = []
+        for index, action_id in enumerate(self.pending_action_list):
+            if action_id in seen or action_id in self.finished_action_list or action_id in self.cancelled_action_list:
+                raise BoundaryInvariantError('Duplicate or conflicting pending Action lifecycle')
+            seen.add(action_id)
+            action = self.universe.get_event_by_id(action_id)
+            if not isinstance(action, Action) or action.id != action_id or action.parent_event_id != self.id:
+                raise BoundaryInvariantError(f'Missing/invalid pending Action reference: {action_id}')
+            times = (action.start_time, action.end_time)
+            if (any(isinstance(t, bool) or not isinstance(t, (int, float))
+                    or not math.isfinite(t) for t in times)
+                    or action.start_time < 0 or action.end_time - action.start_time < 1):
+                raise BoundaryInvariantError(f'Invalid pending Action deadline/duration: {action_id}')
+            boundary = math.ceil(action.end_time)
+            if boundary <= self.last_processed_boundary:
+                raise BoundaryInvariantError(f'Overdue Action for boundary {boundary}: {action_id}')
+            if self.get_being(action.actor_id) is None or (action.target_id is not None
+                    and self.get_entity(action.target_id) is None):
+                raise BoundaryInvariantError(f'Missing pending Action actor/target: {action_id}')
+            if self.end_time is not None and boundary > self.end_time:
+                raise BoundaryInvariantError('Pending Action resolves beyond Encounter end')
+            self._choice_book.assert_registered(action)
+            pending.append((index, action, boundary))
+        self._choice_book.assert_accepted()
+        return pending
+
+    def assert_checkpoint_exportable(self, *, replay=False):
+        self._assert_timeline()
+        if self.progression_mode == 'transactional' or self.__dict__.get('_atomic_interval_history'):
+            raise BoundaryInvariantError('Transactional checkpoint/replay compatibility requires Increment 5C3')
+        if (self._advancing or self._running or self.active_boundary is not None
+                or (self.time != self.start_time and self.time != self.last_processed_boundary)):
+            raise BoundaryInvariantError('Only a completed boundary checkpoint can be saved')
+        self._pending_schedule()
+        self._choice_book.assert_exportable(replay=replay)
+
+    def validate_progression_entry(self):
+        """Facade preflight before choices, strategy changes, or policy/RNG use."""
+        guard_legacy_encounter(self, "validate_progression_entry")
+        if self._advancing or self._dispatching or self._running:
+            raise BoundaryInvariantError('Reentrant progression/choice entry')
+        self._pending_schedule()
+
+    def step(self, duration=1.0, velocities=None, velocity_frame="global"):
+        """Advance fractional kinematics; dispatch only crossed integer boundaries."""
+        if self._running:
+            raise BoundaryInvariantError('Reentrant progression during run()')
+        return self._advance(duration, velocities, velocity_frame)
+
+    def _advance(self, duration, velocities=None, velocity_frame="global"):
+        from transactional_progression import mode_of, step_transactionally
+        if mode_of(self) == 'transactional':
+            return step_transactionally(self, duration, velocities, velocity_frame)
+        if self._advancing or self._dispatching:
+            raise BoundaryInvariantError('Reentrant Encounter advancement')
         if not self.initiated:
             raise RuntimeError("Encounter must be initiated before stepping")
+        self._pending_schedule()
         try:
             duration = float(duration)
         except (TypeError, ValueError) as exc:
@@ -587,93 +896,137 @@ class Encounter(Event):
             raise ValueError("duration must be finite and positive")
         start = self.time
         end = start + duration
-        if not math.isfinite(end):
-            raise ValueError("Encounter time overflow")
+        if not math.isfinite(end) or end <= start:
+            raise ValueError("Encounter time overflow or unrepresentable advance")
         if self.end_time is not None and end > self.end_time:
             raise ValueError("step would exceed the Encounter end time")
         if velocity_frame not in ("global", "local"):
             raise ValueError("velocity_frame must be 'global' or 'local'")
         if velocity_frame == "local" and self.local_frame is None:
             raise RuntimeError("Encounter has no local frame")
-        if velocities is None:
-            velocities = {}
+        velocities = {} if velocities is None else velocities
         if not hasattr(velocities, "items"):
             raise TypeError("velocities must be a mapping of Entity ids to 3D vectors")
-
-        destinations = []
+        motion = []
         for entity_id, vector in velocities.items():
             entity = self.get_entity(entity_id)
-            if entity is None:
-                raise ValueError("moving Entity must participate in the Encounter")
-            previous = entity.get_position()
-            if previous is None:
-                raise ValueError("moving Entity must have a continuous position")
+            if entity is None or entity.get_position() is None:
+                raise ValueError("moving Entity must participate and have a continuous position")
             try:
                 vx, vy, vz = vector
-            except (TypeError, ValueError) as exc:
-                raise TypeError("velocity must be a three-component vector") from exc
-            try:
                 vx, vy, vz = float(vx), float(vy), float(vz)
             except (TypeError, ValueError) as exc:
-                raise TypeError("velocity components must be numeric") from exc
+                raise TypeError("velocity must have three numeric components") from exc
             if not all(math.isfinite(v) for v in (vx, vy, vz)):
                 raise ValueError("velocity components must be finite")
             if velocity_frame == "local":
                 vx, vy, vz = self.local_frame.vector_to_global((vx, vy, vz))
-            destinations.append((entity_id, entity, CartesianPosition(
-                previous.x + vx * duration,
-                previous.y + vy * duration,
-                previous.z + vz * duration,
-            )))
+            previous = entity.get_position()
+            # Validate the complete requested displacement before any movement.
+            integrate_position(previous, (vx, vy, vz), duration)
+            motion.append((entity_id, entity, (vx, vy, vz)))
+        if self._physiology_registry is not None:
+            for being_id in self.being_list:
+                for mode in ('ordinary', 'running'):
+                    self._physiology_registry.resolve(self.get_being(being_id), mode=mode)
 
-        for _, entity, destination in destinations:
-            entity.set_position(destination)
-        completed = self.resolve_actions(as_of=end)
-        self.update_environment()  # Hook intentionally has no model yet.
-        self.time = end
-        return EncounterStep(start, end,
-                             tuple(entity_id for entity_id, _, _ in destinations),
-                             tuple(completed))
+        self._choice_book.publish_due(self.time)
+        completed = []
+        self._advancing = True
+        try:
+            while self.time < end:
+                self._pending_schedule()
+                boundary = self.last_processed_boundary + 1
+                destination_time = min(end, boundary, self._choice_book.next_start(self.time))
+                dt = destination_time - self.time
+                destinations = []
+                for entity_id, entity, (vx, vy, vz) in motion:
+                    if self.get_entity(entity_id) is not entity:
+                        raise BoundaryInvariantError('Moving Entity reference changed during progression')
+                    previous = entity.get_position()
+                    destinations.append((entity, integrate_position(previous, (vx, vy, vz), dt)))
+                for entity, position in destinations:
+                    entity.set_position(position)
+                self.time = float(destination_time)
+                self._coordinator_time = self.time
+                if destination_time == boundary:
+                    self.active_boundary = boundary
+                    context = BoundaryContext(boundary, self._interval_start)
+                    self._boundary_context = context
+                    self._active_fatigue_frame = self._capture_fatigue_frame()
+                    self.last_fatigue_frame = self._active_fatigue_frame
+                    completed.extend(self.resolve_actions(as_of=boundary, _context=context))
+                    self.update_environment()
+                    self._assert_timeline()
+                    self.fatigue_frame_history.append({
+                        'start': self._interval_start, 'time': self.time,
+                        'views': self.last_fatigue_frame.to_dict()})
+                    self.last_processed_boundary = boundary
+                    self._interval_start = self.time
+                    self.active_boundary = None
+                    self._boundary_context = None
+                    self._active_fatigue_frame = None
+                    self._choice_book.settled(boundary)
+                self._choice_book.publish_due(self.time)
+            return EncounterStep(start, end, tuple(item[0] for item in motion), tuple(completed))
+        except Exception as exc:
+            if isinstance(exc, ChoiceRejected) and self.active_boundary is None and not self._dispatching:
+                exc.add_note('Progression paused at a planning/start fence; earlier physical progression '
+                             'remains. Correct the selection or settle its prior commitment before continuing.')
+                raise
+            self.boundary_fault = {
+                'time': self.time, 'boundary': self.active_boundary,
+                'last_processed': self.last_processed_boundary,
+                'error': type(exc).__name__, 'message': str(exc)}
+            exc.add_note('Increment 2 stops here: sequential legacy movement/effects/RNG may remain; '
+                         'this Encounter cannot be retried or saved without future checkpoint recovery.')
+            raise
+        finally:
+            self._advancing = False
+            self._dispatching = False
+            self.active_boundary = None
+            self._boundary_context = None
+            self._active_fatigue_frame = None
 
-    # Load an Encounter from storage.
-#    def load(self):
-
-    # Cycle through the events in an encounter.
-    # 1. make movement decisions: set movement targets, whether stationary or moving, relative or absolute.
-    # 2. update acceleration, velocity, location, position, facings, engagement, etc. (include moving targets and accelerating targets)
-    # 3. resolve non-movement actions and their effects
-    # 4. update environment
-    # 5. make action decisions (continue, change) based on currently knowable state and map actions on timeline
-    # 6. save state
-    # 7. prompt to continue playing: if continue, go to 1 else exit
     def run(self, run_children=True):
+        """Choose at the current instant, then use the same boundary walker as step."""
+        guard_legacy_encounter(self, "run")
+        if self._running or self._advancing or self._dispatching:
+            raise BoundaryInvariantError('Reentrant Encounter run')
+        self._pending_schedule()
         if not self.initiated:
             self.generate()
-
-        continue_turns = True
-        while continue_turns:
-#            print(f"----- {self.name} turn {self.time} -----")
-#            print(f"choose movement: not implemented")
-            self.choose_movement()
-#            print(f"move: not implemented")
-            self.move()
-#            print(f"resolve actions: not implemented")
-            self.resolve_actions()
-#            print(f"update environment: not implemented")
-            self.update_environment()
-#            print(f"choose actions")
-#            self.choose_actions()
-#            print(f"choose fight actions")
-            self.choose_fight_actions()
-#             print("Pending actions:")
-#             for action_id in self.pending_action_list:
-#                 action = self.universe.get_event_by_id(action_id)
-#                 if action is None:
-#                     print(f"Action {action_id} not found in event history")
-#                 else:
-#                     print(f"{action.get_actor().name} targets {action.get_target().name} with {action.name} starting: {action.start_time} ending: {action.end_time}")
-            self.time += 1
-            continue_turns = self.keep_going()
+        if not self.initiated:
+            raise RuntimeError('Encounter must be initiated before running')
+        self._running = True
+        try:
+            continue_turns = True
+            while continue_turns and (self.end_time is None or self.time < self.end_time):
+                self._pending_schedule()
+                # The native movement hook has no model; optional velocity
+                # output uses the existing constant-velocity step interface.
+                velocities = self.choose_movement()
+                self.choose_fight_actions()
+                target = self.last_processed_boundary + 1
+                if self.end_time is not None:
+                    target = min(target, self.end_time)
+                self._advance(target - self.time, velocities)
+                continue_turns = self.keep_going()
+        except ChoiceRejected:
+            # Invalid planning is editable input, not a simulation fault. If
+            # an exception escaped an executing legacy callback, _advance has
+            # already latched its separate partial-effect safety stop.
+            raise
+        except Exception as exc:
+            if self.boundary_fault is None:
+                self.boundary_fault = {
+                    'time': self.time, 'boundary': None, 'phase': 'run-choice',
+                    'last_processed': self.last_processed_boundary,
+                    'error': type(exc).__name__, 'message': str(exc)}
+                exc.add_note('run() stopped: legacy choices/RNG may remain; checkpoint recovery is not implemented.')
+            raise
+        finally:
+            self._running = False
 
     def keep_going(self):
         # Do one round
@@ -683,6 +1036,7 @@ class Encounter(Event):
 #        return self.last_one_standing()
 
         # Go until one or no one left running
+        guard_legacy_encounter(self, "keep_going")
         return self.last_one_running()
 
     def do_one_round(self):
@@ -710,108 +1064,119 @@ class Encounter(Event):
         beings_exhausted = 0
         for being_id in self.being_list:
             being = self.universe.get_object_by_id(being_id)
-            print(f"Current fatigue for {being.name}: {being.current.fatigue_level}")
-            if being.current.fatigue_level > 4: # Fatigue level 4 is exhausted
+            fatigue = being.get_fatigue_level()
+            print(f"Current fatigue for {being.name}: {fatigue}")
+            if fatigue > 4: # Preserve the legacy continuation predicate.
                 beings_exhausted += 1
                 if beings_exhausted > 1:
                     return True
         return False
 
     def choose_movement(self):
+        guard_legacy_encounter(self, "choose_movement")
         pass
 
     def move(self):
         # If not immobile
+        guard_legacy_encounter(self, "move")
         pass
 
-    def resolve_actions(self, as_of=None):
-        """Resolve due Events, freezing equal-time melee prerequisites together.
+    def resolve_actions(self, as_of=None, *, _context=None):
+        """Dispatch one coordinator-owned boundary; direct calls are unsupported.
 
-        Melee attempts finishing at an identical time all use their shared
-        pre-impact eligibility snapshot. Damage and armor effects are still
-        applied in deterministic order; general simultaneous effects (including
-        shared equipment, area attacks and secondary effects) remain deferred.
+        Eligibility and Q/B are frozen for the batch, but legacy action effects
+        still execute sequentially. This is not a world-state transaction.
         """
-        if as_of is None:
-            as_of = self.time
-        due = []
-        for index, action_id in enumerate(self.pending_action_list):
-            action = self.universe.get_event_by_id(action_id)
-            if action is None:
-                continue
-            if action.end_time is not None and action.end_time <= as_of:
-                due.append((action.end_time, index, action))
-        ordered = sorted(due, key=lambda item: (item[0],
-            getattr(item[2], 'resolution_priority', 0), item[1]))
-        # Snapshot the eligibility of all strikes finishing at the same instant
-        # *before* any of their effects can incapacitate a fellow combatant.
-        # Snapshot each group just before processing it, not before earlier times.
+        guard_legacy_encounter(self, "resolve_actions")
+        if (isinstance(as_of, bool) or not isinstance(as_of, (int, float))
+                or not math.isfinite(as_of) or as_of < 1 or as_of != math.floor(as_of)):
+            raise BoundaryInvariantError('Action dispatch requires a positive integer boundary')
+        if (self._dispatching or not self._advancing or _context is None
+                or _context is not self._boundary_context
+                or _context.boundary != as_of or self.active_boundary != as_of
+                or self.time != as_of or self.last_processed_boundary + 1 != as_of):
+            raise BoundaryInvariantError('Direct, duplicate, or reentrant dispatch lacks a boundary context')
+        pending = self._pending_schedule()
+        ordered = [(index, action, action.end_time) for index, action, boundary in pending
+                   if boundary == as_of]
+        ordered.sort(key=lambda item: (getattr(item[1], 'resolution_priority', 0), item[0]))
         completed = []
-        batch_time = None
-        for due_time, _, action in ordered:
-            if due_time != batch_time:
-                batch_time = due_time
-                for same_time, _, candidate in ordered:
-                    if same_time == due_time:
-                        freeze = getattr(candidate, 'capture_simultaneous_eligibility', None)
-                        if freeze is not None:
-                            candidate._simultaneous_eligibility = freeze()
-            try:
+        self._dispatching = True
+        try:
+            # One eligibility group even when nominal ends differ fractionally.
+            for _, candidate, _ in ordered:
+                freeze = getattr(candidate, 'capture_simultaneous_eligibility', None)
+                if freeze is not None:
+                    candidate._simultaneous_eligibility = freeze()
+            for _, action, nominal_end in ordered:
+                if action.id not in self.pending_action_list:
+                    if action.id in self.cancelled_action_list:
+                        continue  # A legitimate interruption, not late execution.
+                    raise BoundaryInvariantError('Due Action disappeared from the pending schedule')
+                self._pending_schedule()
+                if action.end_time != nominal_end:
+                    raise BoundaryInvariantError('Due Action deadline changed during dispatch')
                 resolution = action.resolve(self.difficulty_class)
-            finally:
-                if hasattr(action, '_simultaneous_eligibility'):
-                    action._simultaneous_eligibility = None
-            if isinstance(resolution, ActionResolution):
-                # Preflight the entire award set before updating any skill.
-                # A resolver returning None retains legacy, no-award behavior.
-                if not isinstance(action, Action):
-                    if resolution.skill_exercises or resolution.observations:
-                        raise ValueError("Only Actions can report exercised skills or observations")
-                else:
-                    actor = self.get_being(action.actor_id)
-                    if actor is None:
-                        raise ValueError("Resolving Action has no participating Being")
-                    # Observations are declarative consequences. Validate them
-                    # before applying experience, so invalid observations cannot
-                    # cause partial practice awards or spurious awareness.
-                    for observation in resolution.observations:
-                        if observation.observer_id != action.actor_id:
-                            raise ValueError("Action observation must belong to its actor")
-                        if (observation.target_id == action.actor_id or
-                                self.get_entity(observation.target_id) is None):
-                            raise ValueError("Action observation target must be another Encounter Entity")
-                    skills = self.universe.get_skill_dictionary()
-                    for exercise in resolution.skill_exercises:
-                        actor.validate_skill_use(
-                            skills, exercise.skill_name, exercise.experience,
-                            action_id=action.id, time=action.end_time,
-                            outcome=resolution.outcome)
-                    for exercise in resolution.skill_exercises:
-                        actor.record_skill_use(
-                            skills, exercise.skill_name, exercise.experience,
-                            action_id=action.id, time=action.end_time,
-                            outcome=resolution.outcome)
-                    for observation in resolution.observations:
-                        self.mark_aware(observation.observer_id, observation.target_id)
-                    action.resolution = resolution
-            self.pending_action_list.remove(action.id)
-            self.finished_action_list.append(action.id)
-            on_completed = getattr(action, 'on_completed', None)
-            if on_completed is not None:
-                on_completed(self)
-            completed.append(action.id)
-        return completed
+                if isinstance(resolution, ActionResolution):
+                    # Preflight the entire award set before updating any skill.
+                    # A resolver returning None retains legacy, no-award behavior.
+                    if not isinstance(action, Action):
+                        if resolution.skill_exercises or resolution.observations:
+                            raise ValueError("Only Actions can report exercised skills or observations")
+                    else:
+                        actor = self.get_being(action.actor_id)
+                        if actor is None:
+                            raise ValueError("Resolving Action has no participating Being")
+                        # Observations are declarative consequences. Validate them
+                        # before applying experience, so invalid observations cannot
+                        # cause partial practice awards or spurious awareness.
+                        for observation in resolution.observations:
+                            if observation.observer_id != action.actor_id:
+                                raise ValueError("Action observation must belong to its actor")
+                            if (observation.target_id == action.actor_id or
+                                    self.get_entity(observation.target_id) is None):
+                                raise ValueError("Action observation target must be another Encounter Entity")
+                        skills = self.universe.get_skill_dictionary()
+                        for exercise in resolution.skill_exercises:
+                            actor.validate_skill_use(
+                                skills, exercise.skill_name, exercise.experience,
+                                action_id=action.id, time=action.end_time,
+                                outcome=resolution.outcome)
+                        for exercise in resolution.skill_exercises:
+                            actor.record_skill_use(
+                                skills, exercise.skill_name, exercise.experience,
+                                action_id=action.id, time=action.end_time,
+                                outcome=resolution.outcome)
+                        for observation in resolution.observations:
+                            self.mark_aware(observation.observer_id, observation.target_id)
+                        action.resolution = resolution
+                self.pending_action_list.remove(action.id)
+                self.finished_action_list.append(action.id)
+                self._choice_book.completed(action.id)
+                on_completed = getattr(action, 'on_completed', None)
+                if on_completed is not None:
+                    on_completed(self)
+                completed.append(action.id)
+            return completed
     
+        finally:
+            for _, candidate, _ in ordered:
+                if hasattr(candidate, '_simultaneous_eligibility'):
+                    candidate._simultaneous_eligibility = None
+            self._dispatching = False
+
     def update_environment(self):
         pass
 
     def is_being_occupied(self, being_id):
+        if self._choice_book.actor_planned_now(being_id):
+            return True
         for action_id in self.pending_action_list:
             action = self.universe.get_event_by_id(action_id)
-            if action.actor_id == being_id:
+            if action.actor_id == being_id and action.start_time <= self.time:
                 if action.event_type == "delay":
                     return False
-                if action.end_time > self.time:
+                if math.ceil(action.end_time) > self.time:
                     return True
         return False
 
@@ -844,6 +1209,22 @@ class Encounter(Event):
         return random.choice(self.weapon_list)
 
     def choose_fight_actions(self):
+        # Decide the complete native AI set before registering any member.
+        # Rejected planning consumes no authoritative selection RNG.
+        guard_legacy_encounter(self, "choose_fight_actions")
+        before_rng = random.getstate()
+        try:
+            proposed = self._propose_fight_actions()
+            if len(proposed) == 1:
+                self.schedule_action(proposed[0])
+            elif proposed:
+                self.schedule_choice(proposed)
+        except ChoiceRejected:
+            random.setstate(before_rng)
+            raise
+
+    def _propose_fight_actions(self):
+        proposed = []
         action_dict = self.universe.get_action_dictionary()
         object_registry = self.universe.object_registry
 
@@ -916,10 +1297,12 @@ class Encounter(Event):
 #                print(f"{subject_being.name} targets {target.name} with {chosen_action} using {weapon.name}")
 #                print(f"{subject_being.name} targets {target.name} with {chosen_action} using {weapon.name} ending at t={new_action.end_time}")
                 # Add Action to the Event History
-                self.pending_action_list.append(new_action.id)
-                self.universe.add_event(new_action)
+                if new_action is not None:
+                    proposed.append(new_action)
+        return proposed
 
     def choose_actions(self):
+        guard_legacy_encounter(self, "choose_actions")
         for subject_being_id in self.being_list:
             subject_being = self.universe.get_object_by_id(subject_being_id)
             if isinstance(subject_being, (BeingInstance)):

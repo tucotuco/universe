@@ -12,6 +12,7 @@ __version__ = "universe.py 2024-03-15T22:51-03:00"
 # TODO: Create exceptions for make and arm methods if expectations aren't met.
 
 import json, sys
+from threading import RLock
 
 from armor import ArmorInstance
 from being import BeingInstance
@@ -36,13 +37,36 @@ class Universe(Identifiable):
 
         self.object_registry = ObjectRegistry()
         self.event_history = {}
+        self._schedule_lock = RLock()
+        self._schedule_revision = 0
+        self._choice_books = []  # Live native Encounter commitment indexes.
         first_event = Event(self, 0, name="Origin of the Universe", id="0")
         self.event_history["0"]=first_event
 
     def to_json(self):
+        if any(book.encounter.progression_mode == 'transactional' or book.encounter.__dict__.get('_atomic_interval_history') or
+               (book.encounter.boundary_fault or {}).get('kind') == 'atomic_publication'
+               for book in self._choice_books):
+            raise ValueError('Transactional Universe serialization requires Increment 5C3 compatibility')
         def handle_circular_refs(obj):
             if isinstance(obj, (Library, Universe)):
                 return obj.id  # Return only the ID for Universe and Event instances
+            if isinstance(obj, set):
+                return sorted(obj)  # Encounter awareness is a directed set
+            if isinstance(obj, BeingInstance):
+                # Retain the versioned Q/B record even in legacy Universe saves.
+                # Full Being-instance reconstruction is a separate preexisting
+                # serialization limitation; this preserves its state correctly.
+                return {**obj.__dict__, 'physical_fatigue':
+                        obj.physical_fatigue.to_dict(obj.physiology_id)}
+            if isinstance(obj, Encounter):
+                # Only persistent Encounter fields belong in the save. Active
+                # frozen fatigue views are transient; recorded frame history
+                # is already JSON-compatible and restored by Encounter.
+                return {key: val for key, val in obj.__dict__.items()
+                        if key not in ('_active_fatigue_frame', 'last_fatigue_frame', '_physiology_registry',
+                                       '_coordinator_time', '_interval_start', '_advancing', '_running',
+                                       '_dispatching', '_boundary_context', '_choice_book')} | {'choice_state': obj.choice_state}
             return obj.__dict__
 
         data = {
@@ -69,16 +93,39 @@ class Universe(Identifiable):
         return self.object_registry.get_object_by_id(obj_id)
 
     def add_event(self, event):
+        from action import Action
+        if isinstance(event, Action):
+            raise ValueError('Actions must register through native Encounter choice publication')
         if isinstance(event, Event):
             self.event_history[event.id]=event
 
     def save_to_file(self, filename):
+        for book in self._choice_books:
+            book.encounter.assert_checkpoint_exportable()
+        for event in self.event_history.values():
+            if isinstance(event, Encounter):
+                event.assert_checkpoint_exportable()
         with open(filename, "w") as f:
             f.write(self.to_json())
 
     def load_from_file(self, filename):
+        if any(book.encounter.progression_mode == 'transactional' for book in self._choice_books):
+            raise ValueError('Transactional checkpoint restoration is unsupported before D7 migration')
         with open(filename, "r") as f:
             data = json.load(f)
+
+        if self._choice_books:
+            self._choice_books[0].assert_exportable()
+
+        # The legacy loader does not reconstruct functional Action/Being/RNG
+        # checkpoints. Refuse Encounter restores before changing this Universe.
+        if any(event.get('type') == 'Encounter'
+               for event in data.get('event_history', {}).values()):
+            raise ValueError('Encounter checkpoint restoration is unsupported; '
+                             'boundary cursor and complete native state require a versioned migration')
+        if any(event.get('type', 'Event') != 'Event'
+               for event in data.get('event_history', {}).values()):
+            raise ValueError('Action checkpoint restoration is unsupported; complete native state is required')
 
         if data["type"] == "Universe":
             self.name = data["name"]

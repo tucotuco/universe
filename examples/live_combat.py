@@ -16,9 +16,9 @@ sys.path.insert(0, str(ROOT / 'src'))
 from tactical_duel import TacticalDuel
 
 
-def make_handler(game, audit=False, *, save_path=None, replay_only=False):
+def make_handler(game, audit=False, *, save_path=None, replay_only=False, template_path=None):
     """Local-only HTTP interface. The browser receives a filtered view by default."""
-    template = (ROOT / 'examples' / 'live_combat_template.html').read_bytes()
+    template = (template_path or ROOT / 'examples' / 'live_combat_template.html').read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
         def respond(self, status, content, kind):
