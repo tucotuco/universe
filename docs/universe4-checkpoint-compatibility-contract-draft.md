@@ -42,7 +42,7 @@ Safe cycles must be references: World↔Event/Encounter, Encounter↔ChoiceBook,
 
 ## 3. Complete field closure required for a future checkpoint
 
-The source-derived [observed field catalog](universe4-increment5d1-evidence/observed-field-catalog.json) enumerates actual fields found in native fixtures. It is evidence, **not** an approved closed-field adapter list. Unknown added fields must fail full closure until reviewed; they must never be silently treated as optional.
+The source-derived [observed field catalog in the archived 5D1 evidence group](historical-evidence-archive-index.md#increment-5d1-observed-field-catalog) enumerates actual fields found in native fixtures. It is evidence, **not** an approved closed-field adapter list. Unknown added fields must fail full closure until reviewed; they must never be silently treated as optional.
 
 Classification: **A** authoritative required; **D** derived with an explicit reconstruct/validate rule; **T** transient and excluded; **U** currently unsupported/unbound. Future full closure must resolve every A/D/U relationship below.
 
@@ -198,7 +198,7 @@ The bounded probe exposes three independent closure blockers:
 2. Committed receipt records contain process-local Action/Target anchors and native issuance is tracked by `_COMMITTED_RECEIPTS`. No contract authorizes fresh receipt issuance/rebinding while preserving authenticity and chronology.
 3. `NativeInventory.build()` still emits `semantic_closure_adapter_incomplete`. The current closed-field vocabulary does not prove semantic coverage of all declared dictionary definitions, optional-state combinations, and alias roles, even for the tested fixture.
 
-These are observed implementation facts, not proposed rules. A later bounded design may define a native accepted-choice signature format and receipt reissuance protocol, but must first specify their trust/ownership boundaries and then supply complete field-level closure evidence for its declared configuration. It must not set readiness flags as a substitute for that proof. See `docs/universe4-increment5d2b-report.md` and the blocker matrix in `docs/universe4-increment5d2b-evidence/closure-blocker-matrix.md` for test/source evidence. No save, restore, replay, or continuation behavior is specified or enabled by this probe.
+These are observed implementation facts, not proposed rules. A later bounded design may define a native accepted-choice signature format and receipt reissuance protocol, but must first specify their trust/ownership boundaries and then supply complete field-level closure evidence for its declared configuration. It must not set readiness flags as a substitute for that proof. See the [archived 5D2B report and blocker matrix](historical-evidence-archive-index.md#increment-5d2b-closure-report-and-blocker-matrix) for test/source evidence. No save, restore, replay, or continuation behavior is specified or enabled by this probe.
 
 ## 11. 5D2C1 portable accepted-choice descriptor
 
