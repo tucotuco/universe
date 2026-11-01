@@ -12,7 +12,13 @@ Back to [TASKS.md](../../TASKS.md).
 
 ## ACTIVE: U-REL-001
 
-Design and test one bounded family-relationship generation-on-demand experiment. Define proposed reciprocal and temporal constraints, stable identity, partial realization, Reality/Observation/Belief separation, and rollback/refusal tests before implementation. These are experiment acceptance questions, not adopted family rules.
+The D1 design/source audit is complete; this task remains active, but there is no adopted family model and no production implementation is authorized by the audit. The next proof should be world-only and should not depend on Observation or Belief. Before implementation, resolve the approval questions in [`family-generation-u-rel-001-audit.md`](../design/family-generation-u-rel-001-audit.md), especially the meaning and timing of parent-child, which pre-existing identities may be linked, and whether the first proof is the bounded all-offspring request or one edge between already-counted members.
+
+The current Being model has no age/date-of-birth or relationship graph. `StatisticalGroup` has stable latent slot IDs and aggregate counts, but child Being realization is unsupported. The audited transaction has one typed adult-realization operation, not a general relationship-write operation. Therefore the audit recommends a constrained edge-only proof between already-counted slots as the smallest first implementation proof, subject to approval; it is not a rule decision and does not establish full offspring generation. No observer knowledge is to be changed by world generation.
+
+### Open archival prerequisite: U-ARC-001
+
+Historical sources remain untrusted and are not runtime dependencies. Before adopting their distributions or formats, decode only selected formats safely and establish provenance and rights. The 5E3H archive index and static U-ARC-001 assessment locate material but do not resolve those questions. Do not execute archived code or bulk-import its data.
 
 ## Planned and deferred
 

@@ -6,11 +6,10 @@
 
 ## ACTIVE — one development objective
 
-- [ ] **U-REL-001 · ACTIVE — Design and test a bounded family-relationship generation-on-demand experiment.** Define a small proposed parent/child or equivalent kinship scenario, reciprocal/time-consistent constraints, partial realization, stable identity, objective Reality versus Agent knowledge, and rollback tests. These are experiment gates; no general family rules or implementation have been authorized yet. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [ ] **U-REL-001 · ACTIVE — Design and test a bounded family-relationship generation-on-demand experiment.** The D1 source audit is complete; no family rules or implementation are adopted. Obtain decisions on relationship semantics, chronology, identity, and generation scope before the smallest world-only proof. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## NEXT
 
-- [ ] **U-OPS-006 · NEXT, operational — Verify and safely push local commits to the intended GitHub remote.** Confirm repository identity, visibility, upstream, permissions and fast-forward safety before a separately authorized push. Local commits and private `ARCHIVE_ROOT` contents are not GitHub backups. See [repository workflow](docs/tasks/repository-workflow.md).
 - [ ] **U-REL-002 · PLANNED — Test kinship consistency under partial realization.** Select a second small scenario only after U-REL-001 yields approved rules and a passing first example. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## DONE — bounded, demonstrated milestones
@@ -20,6 +19,7 @@
 - [x] **U-OPS-003 — Preserve interrupted work separately (5E3F).** Commit `03c5e9a874c88ac21686b0c0da58d24a736a4cd4` contains the tracked `work-stash/`; 78 snapshots were checksum-verified. Not pushed. See [work-stash](work-stash/README.md).
 - [x] **U-OPS-004 — Install this task register and five topic files (5E3I).** Completed by the commit that adds this register; the commit is identifiable by this report and subject `Establish Universe task register and development roadmap` (self-hash is intentionally not embedded). See [workflow](docs/tasks/repository-workflow.md).
 - [x] **U-OPS-005 — Audit and independently verify the CORE candidate (5E2V–5E2Z / 5E3A).** The 83-path CORE candidate passed in a clean export before the exact candidate was committed. See [workflow](docs/tasks/repository-workflow.md).
+- [x] **U-OPS-006 — Publish sanitized local history to the intended GitHub repository (5E3J–5E3K).** The normal fast-forward push was independently verified; current `main` and its `origin/main` tracking ref both identify `a22c284909d7f64c14cad919518f9da319bcf1ed`. This does not back up private `ARCHIVE_ROOT` material. See [repository workflow](docs/tasks/repository-workflow.md).
 - [x] **U-ENG-001 — Native one-second transactional Encounter progression for supported cases.** Boundary coordination, common post-movement snapshots, candidate evaluation, atomic publication, rollback and deterministic RNG handling are implemented for the supported native subset. This does not prove every combat combination. See [Encounter engine](docs/tasks/encounter-engine.md).
 - [x] **U-PER-001 — Bounded fresh-process Run continuation (5E1J6).** One imported historical Run boundary plus one new Run boundary; imported practice is not replayed and the new interval gets a native receipt. This Run-only case consumes no RNG and does not establish stochastic replay or general save/load. See [Encounter engine](docs/tasks/encounter-engine.md).
 - [x] **U-SPOT-001 — Rule-correct deliberate Spot (5E1J1).** Six-second Action, target discovery DC (15 by default), one check and no Spot skill XP. This does not establish category-directed sensing. See [Encounter engine](docs/tasks/encounter-engine.md).
@@ -31,6 +31,8 @@
 - [x] **U-INT-001 — Narrow spatial Encounter and motion demonstrations.** Continuous position, derived TriFold context and simple Run movement are demonstrated in bounded examples; this is not global geography or terrain integration. See [broader Universe roadmap](docs/tasks/broader-universe.md).
 
 ## OPEN — capabilities requiring follow-up
+
+- [ ] **U-ARC-001 — Decode selected historical formats and establish provenance/rights before reuse.** The static assessment is available, but opaque NPC/session formats, data provenance, and licensing were not resolved; legacy material remains untrusted reference only. See [generation and Attention](docs/tasks/generation-and-attention.md) and the [historical archive index](docs/historical-evidence-archive-index.md).
 
 - [ ] **U-GRP-005 — Generalize Group semantics beyond the population prototype.** `StatisticalGroup` may remain an `ObjectInstance` subtype; mixed-object `ObjectGroup` semantics and a rename are separate decisions. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [ ] **U-GRP-006 — Agent-interest-triggered private selection of unresolved members.** Aggregate Belief does not provide a hidden member ID. Define authority, selection, timing and observer-information rules first. See [generation and Attention](docs/tasks/generation-and-attention.md).

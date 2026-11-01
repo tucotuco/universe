@@ -8,6 +8,7 @@ Back to [TASKS.md](../../TASKS.md).
 - **5E3F:** commit `03c5e9a874c88ac21686b0c0da58d24a736a4cd4` preserves interrupted work under Git-tracked `work-stash/`, with 78 verified snapshots.
 - **5E3H:** commit `379219223686d841fdff70702cd43a45423b8758`, parent `03c5e9a874c88ac21686b0c0da58d24a736a4cd4`, tree `1d12256a79aca7f9ca06b279e238ca462d836d54`; 25 documentation paths. The latest full clean-export regression reported 1,573 passing tests at 5E3G. The 5E2U dirty-tree integration reported 1,630; that later count is separate evidence and is not a replacement for the committed 5E3A candidate provenance.
 - **5E3I:** installs the task register and topic files in one selective documentation commit. Its self-hash is not written into that same commit; identify it in Git by report path and commit subject.
+- **5E3J–5E3K:** sanitized unpublished local history was pushed normally to `https://github.com/tucotuco/universe.git`; the reported remote `main` was independently confirmed at `a22c284909d7f64c14cad919518f9da319bcf1ed`. The current checkout is on `main` at that commit and tracks `origin/main` at the same commit. Private `ARCHIVE_ROOT/` files are still not GitHub-backed up.
 
 No regression suite was run for this documentation-only adoption. Run `python docs/encounters_adopted_r60/tools/generate_outstanding_todo.py --check` and `python docs/encounters_adopted_r60/tools/update_encounters_toc.py --check` to verify the maintained issue output and ToC.
 
@@ -28,9 +29,9 @@ Keep `work-stash/` tracked and topic-oriented. Verify `work-stash/MANIFEST.tsv` 
 
 The historical archive is addressed through [`historical-evidence-archive-index.md`](../historical-evidence-archive-index.md). `ARCHIVE_ROOT/` is a portable placeholder for private local storage. Neither those files nor the local commits below imply an off-machine backup.
 
-## Open operational task: GitHub backup
+## Completed operational task: GitHub publication
 
-**U-OPS-006 remains open.** Before a fast-forward push, confirm the remote URL/repository identity, public/private visibility, account permission, upstream and branch ancestry. Inspect proposed content for sensitive or oversized material. Push only after separate explicit authorization. Never force push and never claim local commits are GitHub-backed up before a successful push.
+**U-OPS-006 is complete** for the sanitized history through the current `main` commit, based on the independent remote verification recorded by 5E3K and the matching local tracking ref. Future pushes still require normal repository/content review and explicit authorization. Private `ARCHIVE_ROOT/` contents remain outside GitHub.
 
 ## Safe commits
 
