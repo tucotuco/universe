@@ -1,0 +1,27 @@
+# Broader Universe roadmap
+
+Back to [TASKS.md](../../TASKS.md).
+
+The long-term direction is a coherent world that refines detail on demand while preserving objective history and separating Reality, Observation and Belief. Current code provides bounded foundations, not a complete Universe simulator.
+
+## Geography, world physics and environment
+
+- **U-GEO-001:** multiresolution ISEA TriFold context is derived; continuous 3D positions are authoritative. Global geography, terrain, climate, hydrology, ecology, settlements and local refinement remain planned.
+- **U-PHY-001 / U-PHY-002:** live fatigue integration and broad force/combat-rule validation remain deferred. The R4 workbench at [`work-stash/universe-fatigue-r4/STATUS.md`](../../work-stash/universe-fatigue-r4/STATUS.md) is experimental, not runtime authority.
+- Spatial Encounter examples demonstrate local position and simple movement, not planet-wide frame consistency or collision-complete physics.
+
+## Astronomy, statistical design and generation
+
+- **U-AST-001:** infer a coherent two-satellite system from observed periods and apparent angular sizes.
+- **U-GEN-001:** interactive statistical/CDF authoring should reveal consequences, preserve correlations and require only necessary commitments.
+- These are future capabilities. There is no general celestial generator or cross-domain constraint solver.
+
+## Agents, evidence and interfaces
+
+- **U-AGENT-001:** richer goals, planning, learning, communication and social history must use observer-owned evidence rather than objective omniscience.
+- **U-ATT-001:** persistent Attention may eventually concern Beings, Objects, Groups and Events. Events remain a distinct ontology.
+- **U-UI-001:** observer-facing presentation must show only knowledge available to that observer; developer inspection is omniscient and is not player perception.
+
+## Planning source
+
+[`deferred-ideas.md`](../deferred-ideas.md) is the earlier consolidated Universe backlog, reviewed 2026-10-19. Keep its broad aspirations, but use current [`TASKS.md`](../../TASKS.md), adopted Encounter rules, current source/tests and later user decisions for present status and acceptance. Historical engineering material is indexed in the [archive index](../historical-evidence-archive-index.md).
