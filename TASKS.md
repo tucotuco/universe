@@ -6,7 +6,7 @@
 
 ## ACTIVE — one development objective
 
-- [ ] **U-REL-001 · ACTIVE — Design and test a bounded family-relationship generation-on-demand experiment.** D2 records the user-confirmed exact unordered parent-set semantics and proposes (without adopting) a first-class world-level `FamilyGroup`. Obtain approval on storage/identity, event and time rules, completeness, population accounting and world transaction before implementation. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [ ] **U-REL-001 · ACTIVE — Design and test on-demand world-level reproductive relationships.** D3 records the confirmed nonempty `ReproductionGroup` constraint, exact unordered parent sets, separate zero/unknown potential scopes, and local versus parent-global completeness. Name/storage and mechanics remain proposals; review D3 and approve the first no-Encounter RG0 gate before implementation. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## NEXT
 
