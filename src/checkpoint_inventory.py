@@ -174,6 +174,17 @@ class _Inventory:
         return ('reference',ref)
 
     def field(self,tag,field,item,ref,path,depth):
+        if tag=='universe.Universe' and field=='_reproduction_group_registry':
+            from reproduction_group import ReproductionGroupRegistry
+            _require(type(item) is ReproductionGroupRegistry
+                     and item._world is self._capture_world,
+                     'ReproductionGroup registry is not bound to the captured Universe')
+            _require(item._revision==0 and not item._groups_by_id
+                     and not item._group_id_by_parent_set and not item._group_id_by_offspring
+                     and not item._parent_set_by_offspring and not item._person_id_reservations
+                     and not item._group_id_reservations and not item._requests,
+                     'published ReproductionGroup state is outside the native Run/Spot checkpoint subset')
+            return ('excluded-out-of-scope-empty-registry',0)
         transient={
             'universe.Universe':{'_schedule_lock'},
             'action_choice.ChoiceBook':{'lock','_drafts','_closed_drafts','_tokens'},
@@ -209,6 +220,7 @@ class _Inventory:
         return self.value(item,path+(field,),depth+1)
 
     def build(self,world,encounter,rng_role,rng_state,rng_scope):
+        self._capture_world=world
         self.emitted=set()
         self.anchor(world,('universe',world.id));self.anchor(encounter,('encounter',encounter.id))
         for key,obj in world.object_registry.object_instances.items():self.anchor(obj,('object',key))

@@ -40,6 +40,8 @@ class Universe(Identifiable):
         self._schedule_lock = RLock()
         self._schedule_revision = 0
         self._choice_books = []  # Live native Encounter commitment indexes.
+        from reproduction_group import ReproductionGroupRegistry
+        self._reproduction_group_registry = ReproductionGroupRegistry(self)
         first_event = Event(self, 0, name="Origin of the Universe", id="0")
         self.event_history["0"]=first_event
 
@@ -47,6 +49,8 @@ class Universe(Identifiable):
         from transactional_progression import is_quarantined
         if is_quarantined(self):
             raise ValueError('Quarantined checkpoint reconstruction cannot be serialized')
+        if self._reproduction_group_registry.revision:
+            raise ValueError('ReproductionGroup world state requires an unimplemented persistence contract')
         if any(book.encounter.progression_mode == 'transactional' or book.encounter.__dict__.get('_atomic_interval_history') or
                (book.encounter.boundary_fault or {}).get('kind') == 'atomic_publication'
                for book in self._choice_books):
@@ -93,20 +97,41 @@ class Universe(Identifiable):
         if is_quarantined(self):
             raise ValueError('Quarantined checkpoint reconstruction cannot accept Objects')
         if isinstance(obj, ObjectInstance):
-            self.object_registry.add_object(obj)
+            with self._schedule_lock:
+                self.object_registry.add_object(obj)
 
     def get_object_by_id(self, obj_id):
-        return self.object_registry.get_object_by_id(obj_id)
+        with self._schedule_lock:
+            return self.object_registry.get_object_by_id(obj_id)
+
+    def reproduction_group_snapshot(self):
+        """Detached read of this world's authored ReproductionGroup registry."""
+        return self._reproduction_group_registry.snapshot()
+
+    def get_reproduction_group(self, group_id):
+        """Read one published objective group without realizing other state."""
+        return self._reproduction_group_registry.get_group(group_id)
+
+    def publish_reproduction_group(self, candidate, *, request_key, expected_revision,
+                                   _fail_after=None):
+        """World-owned, no-Encounter atomic publication for the bounded D4B case."""
+        return self._reproduction_group_registry.publish(
+            candidate,
+            request_key=request_key,
+            expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
 
     def add_event(self, event):
         from transactional_progression import is_quarantined
         if is_quarantined(self):
             raise ValueError('Quarantined checkpoint reconstruction cannot accept Events')
         from action import Action
-        if isinstance(event, Action):
-            raise ValueError('Actions must register through native Encounter choice publication')
-        if isinstance(event, Event):
-            self.event_history[event.id]=event
+        with self._schedule_lock:
+            if isinstance(event, Action):
+                raise ValueError('Actions must register through native Encounter choice publication')
+            if isinstance(event, Event):
+                self.event_history[event.id]=event
 
     def save_to_file(self, filename):
         from transactional_progression import is_quarantined
@@ -121,6 +146,8 @@ class Universe(Identifiable):
             f.write(self.to_json())
 
     def load_from_file(self, filename):
+        if self._reproduction_group_registry.revision:
+            raise ValueError('Loading over ReproductionGroup world state requires an unimplemented persistence contract')
         if any(book.encounter.progression_mode == 'transactional' for book in self._choice_books):
             raise ValueError('Transactional checkpoint restoration is unsupported before D7 migration')
         with open(filename, "r") as f:

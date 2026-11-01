@@ -447,8 +447,8 @@ FIELD_ADAPTERS = {
         "required": 'attack defense extra_damage timing'.split(),
     },
     'universe.Universe': {
-        "allowed": '_choice_books _schedule_lock _schedule_revision event_history id library name object_registry type'.split(),
-        "required": '_choice_books _schedule_lock _schedule_revision event_history library name object_registry type'.split(),
+        "allowed": '_choice_books _reproduction_group_registry _schedule_lock _schedule_revision event_history id library name object_registry type'.split(),
+        "required": '_choice_books _reproduction_group_registry _schedule_lock _schedule_revision event_history library name object_registry type'.split(),
     },
     'universe_physical_fatigue_r4.Profile': {
         "allowed": 'critical_floor critical_fresh fast_budget fast_recovery peak_curve peak_floor slow_baseline slow_depletion slow_recovery_awake slow_recovery_sleep'.split(),
@@ -478,6 +478,7 @@ RUN_SPOT_FIELD_CLOSURE = {
                           '_schedule_revision', '_choice_books'),
         'derived': ('type',),
         'transient': ('_schedule_lock',),
+        'out_of_scope': ('_reproduction_group_registry',),
     },
     'library.Library': {
         'authoritative': ('id', 'name', 'being_dictionary', 'skill_dictionary'),

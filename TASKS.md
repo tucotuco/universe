@@ -6,7 +6,7 @@
 
 ## ACTIVE — one development objective
 
-- [ ] **U-REL-001 · ACTIVE — Design and test on-demand world-level reproductive relationships.** D3 records the confirmed nonempty `ReproductionGroup` constraint and completeness boundaries. D4A adds only immutable authored proposals/candidates and pure preparation; it does not publish a world group. Review the D4A report and approve the separate D4B no-Encounter publication gate before implementation. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [ ] **U-REL-001 · ACTIVE — Design and test on-demand world-level reproductive relationships.** D4A established pure authored candidates; D4B adds an in-memory, no-Encounter atomic publication proof for a nonempty group and first offspring. Neither implements generation or completeness. Continue with a bounded D4C on-demand authoring/resolution demonstration after reviewing its scope. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## NEXT
 

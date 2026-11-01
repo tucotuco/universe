@@ -18,6 +18,8 @@ The current Being model has no age/date-of-birth or relationship graph. `Statist
 
 D4A's candidate-only implementation adds `ReproductionGroupProposal` and its prepared candidate as immutable logical-ID records; the pure preparer canonicalizes exact parent sets and refuses empty/duplicate identities. The candidate cannot claim complete offspring enumeration. It performs no registration, reservation, Reality publication, RNG use, date handling, observation, Being construction or population coupling. This is a partial engineering milestone, not a world-level family generator.
 
+D4B adds a `Universe`-owned, in-memory registry and typed publisher for the authored nonempty candidate plus its first offspring parentage facts. It checks per-world exact-parent-set and group-ID uniqueness, Person-ID assignments, request idempotency and registry revision; failure injection verifies rollback. It is explicitly no-Encounter and nonpersistent. It does not generate offspring, resolve a sampling/constraint request, add dates or zero-through-T scopes, or establish global Person identity/durability. D4C should be a bounded world-level on-demand resolution proof, not another registry-only increment.
+
 ### Open archival prerequisite: U-ARC-001
 
 Historical sources remain untrusted and are not runtime dependencies. Before adopting their distributions or formats, decode only selected formats safely and establish provenance and rights. The 5E3H archive index and static U-ARC-001 assessment locate material but do not resolve those questions. Do not execute archived code or bulk-import its data.
