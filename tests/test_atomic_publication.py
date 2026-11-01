@@ -57,6 +57,12 @@ class TestAtomicPublication(unittest.TestCase):
 
     def build(self,boundary=1,**kwargs):return self.enc.prepare_interval_candidate(boundary,**kwargs)
 
+    def advance_before(self,boundary):
+        """Publish intervening integer boundaries without skipping native intervals."""
+        while self.enc.last_processed_boundary < boundary - 1:
+            next_boundary=self.enc.last_processed_boundary+1
+            self.publish(self.build(next_boundary))
+
     def publish(self,candidate,**kwargs):
         with publication_boundary(self.enc,quiescent=True) as owner:
             return publish_interval_candidate(self.enc,candidate,ownership=owner,**kwargs)
@@ -70,21 +76,22 @@ class TestAtomicPublication(unittest.TestCase):
         self.enc.schedule_choice((one,two,ask,spot,run))
         # Also exercise unpublished whole-choice registration and fractional starts.
         future=RunAction(self.world,self.b.id,.2,1,1)
-        later=SpotAction(self.world,self.c.id,self.b.id,.7,duration=1,die_roll=20)
+        later=SpotAction(self.world,self.c.id,self.b.id,.7,duration=6,die_roll=20)
         self.enc.schedule_choice((future,later))
         return self.build(velocities={self.c.id:(1,0,0),self.b.id:(.5,0,0)}),group,history,la,lb,accounts,(one,two,ask,spot,run,future,later)
 
     def test_success_advances_once_preserves_references_and_next_interval(self):
         action=self.f.spot();self.enc.schedule_action(action)
+        self.advance_before(6)
         refs=(self.a,self.a.current,self.a.current.skills,self.a.current.skills.skills,self.a.skill_experience,
             self.a.skill_use_history,self.world.event_history,self.enc.pending_action_list,self.enc.finished_action_list,
             self.enc._choice_book,self.enc._choice_book._registered,self.enc._choice_book._states,self.enc._choice_book._choices,
             self.enc.awareness,self.enc.awareness[self.a.id],self.enc.fatigue_frame_history)
-        candidate=self.build();receipt=self.publish(candidate)
-        self.assertTrue(receipt.committed);self.assertEqual(receipt.boundary,1)
-        self.assertEqual(self.enc.time,1);self.assertEqual(self.enc.last_processed_boundary,1)
+        candidate=self.build(6);receipt=self.publish(candidate)
+        self.assertTrue(receipt.committed);self.assertEqual(receipt.boundary,6)
+        self.assertEqual(self.enc.time,6);self.assertEqual(self.enc.last_processed_boundary,6)
         self.assertEqual(action.resolution,candidate.supported_candidate.boundary.actions[action.id])
-        self.assertEqual(self.a.skill_experience['spot'],10)
+        self.assertNotIn('spot',self.a.skill_experience)
         self.assertEqual(refs,(self.a,self.a.current,self.a.current.skills,self.a.current.skills.skills,self.a.skill_experience,
             self.a.skill_use_history,self.world.event_history,self.enc.pending_action_list,self.enc.finished_action_list,
             self.enc._choice_book,self.enc._choice_book._registered,self.enc._choice_book._states,self.enc._choice_book._choices,
@@ -94,7 +101,7 @@ class TestAtomicPublication(unittest.TestCase):
             self.enc._choice_book,self.enc._choice_book._registered,self.enc._choice_book._states,self.enc._choice_book._choices,
             self.enc.awareness,self.enc.awareness[self.a.id],self.enc.fatigue_frame_history)):self.assertIs(ref,now)
         with self.assertRaises(PublicationRejected):self.publish(candidate)
-        self.publish(self.build(2));self.assertEqual(self.enc.time,2)
+        self.publish(self.build(7));self.assertEqual(self.enc.time,7)
 
     def test_mixed_publication_commits_exact_candidate_and_shared_reality(self):
         candidate,group,history,la,lb,accounts,actions=self.mixed()
@@ -106,7 +113,8 @@ class TestAtomicPublication(unittest.TestCase):
         self.assertEqual({r.revision for r in group._composition_reality._records.values()},{1})
         self.assertEqual(len(accounts),1);self.assertEqual(len(la.evidence),1);self.assertEqual(len(lb.evidence),1)
         self.assertNotEqual(la.evidence[0].reported_position,lb.evidence[0].reported_position)
-        self.assertEqual(self.a.skill_experience['spot'],22);self.assertEqual(self.c.skill_experience['run'],7)
+        # Only provisional Group observations contribute Spot practice here.
+        self.assertEqual(self.a.skill_experience['spot'],12);self.assertEqual(self.c.skill_experience['run'],7)
         self.assertEqual(self.c.get_position(),candidate.pre_action_snapshot.entity(self.c.id).position)
         self.assertEqual(self.enc.finished_action_list,list(supported.boundary.actions))
         self.assertEqual(self.enc.pending_action_list,list(candidate.proposed_authoritative_changes['queues'].pending))
@@ -128,37 +136,41 @@ class TestAtomicPublication(unittest.TestCase):
         self.assertEqual(self.enc._choice_book._registered[one.id][2],__import__('action_choice').declaration(one))
         self.publish(self.build(2));self.assertIsNotNone(one.resolution)
 
-    def test_exact_boundary_and_nextafter_do_not_complete_together(self):
-        one=self.f.spot();two=self.f.spot(self.c,duration=math.nextafter(1,math.inf));self.enc.schedule_choice((one,two))
-        self.publish(self.build());self.assertIsNotNone(one.resolution);self.assertIsNone(two.resolution)
-        self.publish(self.build(2));self.assertIsNotNone(two.resolution)
+    def test_exact_boundary_and_fractional_spot_end_resolve_at_their_boundaries(self):
+        one=self.f.spot();two=SpotAction(self.world,self.c.id,self.b.id,.25,die_roll=20);self.enc.schedule_choice((one,two))
+        self.advance_before(6)
+        self.publish(self.build(6));self.assertIsNotNone(one.resolution);self.assertIsNone(two.resolution)
+        self.publish(self.build(7));self.assertIsNotNone(two.resolution)
 
     def test_practice_is_one_batch_transition_with_both_sources_and_history_query(self):
-        skills=self.world.get_skill_dictionary();self.a.set_skill_level(skills,'spot',1)
-        self.a.record_skill_use(skills,'spot',1230,action_id='prior',time=-2)
-        h=self.f.f.f.history();g=self.f.f.f.group()
-        observation=self.f.f.observe(self.a,g);spot=self.f.spot()
-        ask=self.f.f.f.ask(self.c,h,self.f.f.f.recipe(h,rank=2,extra=(Fact(h.skill_key(1,'spot'),3),)))
-        self.enc.schedule_choice((observation,spot,ask));before=self.a.skill_use_history
-        candidate=self.build();self.publish(candidate)
+        skills=self.world.get_skill_dictionary();self.a.set_skill_level(skills,'run',1)
+        self.a.record_skill_use(skills,'run',1230,action_id='prior',time=-2)
+        h=self.a.begin_personal_history(earliest=-10,known_through=10,nondeclining_skills=('run',))
+        ask=self.f.f.f.ask(self.c,h,self.f.f.f.recipe(h,rank=2,extra=(Fact(h.skill_key(1,'run'),3),)))
+        one=RunAction(self.world,self.a.id,0,1,.5,experience=10)
+        two=RunAction(self.world,self.a.id,0,1,.5,experience=12)
+        spot=self.f.spot();self.enc.schedule_choice((one,two,spot,ask));before=self.a.skill_use_history
+        candidate=self.build(velocities={self.a.id:(1,0,0)});self.publish(candidate)
         self.assertIs(self.a.skill_use_history,before);self.assertEqual(len(before),2)
         batch=before[-1];self.assertIs(type(batch),BatchSkillUse)
         self.assertEqual((batch.level_before,batch.level_after,batch.experience),(2,3,22))
-        self.assertEqual({x.action_id for x in batch.exercises},{observation.id,spot.id})
-        self.assertIsNone(batch.action_id);self.assertEqual(h.reality.inspect(h.skill_key(1,'spot')).value,3)
-        self.assertEqual(self.a.get_skill_level('spot'),3)
-        self.assertEqual(self.a.skill_experience['spot'],1252)
+        self.assertEqual({x.action_id for x in batch.exercises},{one.id,two.id})
+        self.assertIsNone(batch.action_id);self.assertEqual(h.reality.inspect(h.skill_key(1,'run')).value,3)
+        self.assertEqual(self.a.get_skill_level('run'),3)
+        self.assertEqual(self.a.skill_experience['run'],1252)
         self.assertTrue(self.build(2).coverage=='complete_supported_interval')
-        with self.assertRaises(ValueError):self.a.record_skill_use(skills,'spot',1,action_id=spot.id,time=2)
-        with self.assertRaises(ValueError):h.commit_skill_rank(1,'spot',2)
+        with self.assertRaises(ValueError):self.a.record_skill_use(skills,'run',1,action_id=one.id,time=2)
+        with self.assertRaises(ValueError):h.commit_skill_rank(1,'run',2)
 
     def test_unfavorable_outcome_and_cancelled_acknowledgement_commit(self):
         fail=self.f.spot(roll=1);cancelled=RunAction(self.world,self.c.id,0,1,1)
         self.enc.schedule_choice((fail,cancelled));self.enc.cancel_action(cancelled.id,reason='stopped')
         self.publish(self.build())
-        self.assertEqual(fail.resolution.outcome,'failure');self.assertEqual(cancelled.resolution.outcome,'interrupted')
+        self.assertIsNone(fail.resolution);self.assertEqual(cancelled.resolution.outcome,'interrupted')
         self.assertEqual(self.enc.cancelled_action_list,[cancelled.id]);self.assertNotIn(cancelled.id,self.enc.finished_action_list)
-        self.publish(self.build(2));self.assertEqual(cancelled._atomic_acknowledged_boundary,1)
+        self.advance_before(6)
+        self.publish(self.build(6));self.assertEqual(fail.resolution.outcome,'failure')
+        self.assertEqual(cancelled._atomic_acknowledged_boundary,1)
 
     def test_failed_observation_does_not_commit_unused_objective_facts(self):
         group=self.f.f.f.group();action=self.f.f.observe(self.a,group,roll=1);self.enc.schedule_action(action)
@@ -226,19 +238,25 @@ class TestAtomicPublication(unittest.TestCase):
 
     def test_immutable_caller_state_refuses_but_explicit_cursor_commits(self):
         action=self.f.spot(roll=None);self.enc.schedule_action(action);state=random.Random(9).getstate()
-        candidate=self.build(rng_state=state);before=raw_graph(self.world,self.enc)
+        self.advance_before(6)
+        candidate=self.build(6,rng_state=state);before=raw_graph(self.world,self.enc)
         with self.assertRaises(UnsupportedEvaluation):self.publish(candidate,rng_state=state)
         self.assertEqual(raw_graph(self.world,self.enc),before);self.assertIsNone(self.enc.boundary_fault)
-        cursor=RNGCursor(state);candidate=self.build(rng_owner=cursor);self.publish(candidate,rng_owner=cursor)
+        cursor=RNGCursor(state);candidate=self.build(6,rng_owner=cursor);self.publish(candidate,rng_owner=cursor)
         self.assertEqual(cursor.state,candidate.provisional_rng.after);self.assertNotEqual(cursor.state,state)
 
     def test_module_and_native_random_commit_proposed_cursor(self):
         saved=random.getstate()
         try:
-            action=self.f.spot(roll=None);self.enc.schedule_action(action);candidate=self.build()
+            action=self.f.spot(roll=None);self.enc.schedule_action(action)
+            self.advance_before(6)
+            candidate=self.build(6)
             self.publish(candidate);self.assertEqual(random.getstate(),candidate.provisional_rng.after)
-            rng=random.Random(42);action=SpotAction(self.world,self.c.id,self.b.id,1,die_roll=None);self.enc.schedule_action(action)
-            candidate=self.build(2,rng_owner=rng);outside=random.getstate();self.publish(candidate,rng_owner=rng)
+            other=TestAtomicPublication();other.setUp();rng=random.Random(42)
+            action=SpotAction(other.world,other.c.id,other.b.id,0,die_roll=None)
+            other.enc.schedule_action(action)
+            other.advance_before(6)
+            candidate=other.build(6,rng_owner=rng);outside=random.getstate();other.publish(candidate,rng_owner=rng)
             self.assertEqual(rng.getstate(),candidate.provisional_rng.after);self.assertEqual(random.getstate(),outside)
         finally:random.setstate(saved)
 
@@ -252,7 +270,9 @@ class TestAtomicPublication(unittest.TestCase):
         self.assertEqual(duel.commands,[])
 
     def test_coordinated_reader_blocks_until_committed_interval_visible(self):
-        action=self.f.spot();self.enc.schedule_action(action);candidate=self.build()
+        action=self.f.spot();self.enc.schedule_action(action)
+        self.advance_before(6)
+        candidate=self.build(6)
         attempted=threading.Event();done=threading.Event();observed=[]
         def reader():
             attempted.set()
@@ -263,7 +283,7 @@ class TestAtomicPublication(unittest.TestCase):
             self.assertFalse(done.wait(.05))
             publish_interval_candidate(self.enc,candidate,ownership=owner)
             self.assertFalse(done.is_set())
-        thread.join(2);self.assertFalse(thread.is_alive());self.assertEqual(observed,[(1,'success',1)])
+        thread.join(2);self.assertFalse(thread.is_alive());self.assertEqual(observed,[(6,'success',0)])
 
     def test_competing_coordinated_writer_before_acquisition_makes_candidate_stale(self):
         candidate=self.build()
@@ -287,16 +307,18 @@ class TestAtomicPublication(unittest.TestCase):
 
     def test_callback_override_and_unsupported_due_family_refused_without_execution(self):
         action=self.f.spot();self.enc.schedule_action(action);unsafe=Mock(side_effect=AssertionError('unsafe'))
+        self.advance_before(6)
         action.on_completed=unsafe
-        with self.assertRaises(UnsupportedEvaluation):self.build()
-        unsafe.assert_not_called();self.assertEqual(self.enc.time,0)
+        with self.assertRaises(UnsupportedEvaluation):self.build(6)
+        unsafe.assert_not_called();self.assertEqual(self.enc.time,5)
 
     def test_aliased_recipient_and_practice_write_locations_fail_before_writes(self):
         one=self.f.spot();self.enc.schedule_action(one)
+        self.advance_before(6)
         # Existing staging can read these equal containers; publisher must not
         # install independent meanings into one retained mutable mapping.
         self.a._skill_practice_baselines=self.a.skill_experience
-        candidate=self.build();before=raw_graph(self.world,self.enc)
+        candidate=self.build(6);before=raw_graph(self.world,self.enc)
         with self.assertRaises(UnsupportedEvaluation):self.publish(candidate)
         self.assertEqual(raw_graph(self.world,self.enc),before);self.assertIsNone(self.enc.boundary_fault)
 
@@ -312,8 +334,8 @@ class TestAtomicPublication(unittest.TestCase):
     def test_live_dispatch_and_legacy_consumers_do_not_use_publisher(self):
         action=self.f.spot();self.enc.schedule_action(action)
         with patch('atomic_publication.publish_interval_candidate',side_effect=AssertionError('inactive')):
-            self.enc.step(1)
-        self.assertIsNotNone(action.resolution);self.assertIs(type(self.a.skill_use_history[-1]),SkillUse)
+            self.enc.step(6)
+        self.assertIsNotNone(action.resolution);self.assertNotIn('spot',self.a.skill_experience)
         self.assertFalse(self.enc.__dict__.get('_atomic_interval_history'))
 
     def test_failure_after_prior_committed_second_restores_only_current_interval(self):
@@ -373,7 +395,11 @@ class TestAtomicPublication(unittest.TestCase):
                     fixture=intervals.TestIntervalStaging();fixture.setUp();enc=fixture.enc
                     action=fixture.spot(roll=None);enc.schedule_action(action)
                     owner=None if role=='module' else random.Random(31) if role=='random' else RNGCursor(random.Random(31).getstate())
-                    candidate=enc.prepare_interval_candidate(1,rng_owner=owner)
+                    for boundary in range(1,6):
+                        prior=enc.prepare_interval_candidate(boundary,rng_owner=owner)
+                        with publication_boundary(enc,quiescent=True) as lease:
+                            publish_interval_candidate(enc,prior,ownership=lease,rng_owner=owner)
+                    candidate=enc.prepare_interval_candidate(6,rng_owner=owner)
                     self.assertNotEqual(candidate.provisional_rng.before,candidate.provisional_rng.after)
                     before=raw_graph(fixture.world,enc)
                     with publication_boundary(enc,quiescent=True) as lease:
@@ -383,7 +409,7 @@ class TestAtomicPublication(unittest.TestCase):
                         self.assertEqual(actual,candidate.provisional_rng.before)
                         self.assertEqual(raw_graph(fixture.world,enc),before)
                         recover_interval_publication(enc,caught.exception.recovery_token,ownership=lease,rng_owner=owner)
-                        retry=enc.prepare_interval_candidate(1,rng_owner=owner)
+                        retry=enc.prepare_interval_candidate(6,rng_owner=owner)
                         self.assertEqual(candidate,retry)
                         publish_interval_candidate(enc,retry,ownership=lease,rng_owner=owner)
         finally:random.setstate(outside)
@@ -423,10 +449,11 @@ class TestAtomicPublication(unittest.TestCase):
         with self.assertRaises(ValueError):self.build(2)
 
     def test_cancelled_action_and_multiple_awards_can_be_captured_in_later_interval(self):
-        first=self.f.spot();self.enc.schedule_action(first);self.publish(self.build())
-        second=SpotAction(self.world,self.a.id,self.b.id,1,experience=10,die_roll=20)
-        self.enc.schedule_action(second);self.publish(self.build(2))
-        self.assertEqual(self.a.skill_experience['spot'],20)
+        first=RunAction(self.world,self.a.id,0,1,.5,experience=10)
+        self.enc.schedule_action(first);self.publish(self.build(velocities={self.a.id:(1,0,0)}))
+        second=RunAction(self.world,self.a.id,1,1,.5,experience=10)
+        self.enc.schedule_action(second);self.publish(self.build(2,velocities={self.a.id:(1,0,0)}))
+        self.assertEqual(self.a.skill_experience['run'],20)
         self.assertEqual([x.time for x in self.a.skill_use_history],[1,2])
         self.assertTrue(self.build(3).coverage=='complete_supported_interval')
 

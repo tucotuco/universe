@@ -36,10 +36,15 @@ class TestIntervalStaging(unittest.TestCase):
 
     def spot(self,actor=None,start=0,duration=1,roll=20,maximum=20):
         return SpotAction(self.world,(actor or self.a).id,self.b.id,start,
-            duration=duration,max_distance=maximum,experience=10,die_roll=roll)
+            duration=6,die_roll=roll)
 
     def build(self,boundary=1,**kwargs):
         return self.f.f.unchanged(lambda:self.enc.prepare_interval_candidate(boundary,**kwargs))
+
+    def enable_native_step(self):
+        from atomic_publication import RNGCursor
+        self.enc.enable_transactional_progression(
+            quiescent=True,rng_owner=RNGCursor(random.getstate()))
 
     def accept(self,actions):
         return self.enc.accept_valid_choice(self.enc.validate_choice(self.enc.propose_choice(actions)))
@@ -113,7 +118,7 @@ class TestIntervalStaging(unittest.TestCase):
         self.assertIsNone(candidate.pre_action_snapshot.actions[two.id].data['start_position'])
 
     def test_endpoint_starter_published_only_after_preceding_batch(self):
-        old=self.spot();new=RunAction(self.world,self.a.id,1,1,1)
+        old=RunAction(self.world,self.a.id,0,1,1);new=RunAction(self.world,self.a.id,1,1,1)
         self.enc.schedule_action(old);view=self.enc.schedule_action(new)
         candidate=self.build(velocities={self.a.id:(2,0,0)})
         self.assertEqual(candidate.start_fences[-1].phase,'after_settlement')
@@ -125,24 +130,27 @@ class TestIntervalStaging(unittest.TestCase):
         self.assertEqual(candidate.start_fences[-1].metadata[new.id]['start_position'],CartesianPosition(2,0,0))
 
     def test_exact_deadline_and_nextafter_belong_to_distinct_boundaries(self):
-        one=self.spot();two=self.spot(self.c,duration=math.nextafter(1,math.inf))
+        one=RunAction(self.world,self.a.id,0,1,1);two=RunAction(self.world,self.c.id,0,math.nextafter(1,math.inf),1)
         self.enc.schedule_choice((one,two));candidate=self.build()
         self.assertEqual(set(candidate.supported_candidate.boundary.actions),{one.id})
         self.assertIn(two.id,candidate.proposed_authoritative_changes['queues'].pending)
         self.assertEqual(candidate.pre_action_snapshot.actions[two.id].boundary,2)
 
-    def test_all_checks_read_shared_endpoint_not_starting_geometry(self):
-        first=self.spot(maximum=3);second=self.spot(self.c,maximum=3)
-        self.enc.schedule_choice((first,second));candidate=self.build(velocities={self.b.id:(10,0,0)})
-        self.assertEqual({p.outcome for p in candidate.supported_candidate.boundary.actions.values()},{'out_of_range'})
-        self.assertEqual(candidate.pre_action_snapshot.entity(self.b.id).position,CartesianPosition(12,0,0))
+    def test_spot_check_uses_the_shared_post_movement_snapshot(self):
+        first=self.spot();second=self.spot(self.c)
+        self.enable_native_step();self.enc.schedule_choice((first,second));self.enc.step(5)
+        candidate=self.build(6)
+        self.assertEqual({p.outcome for p in candidate.supported_candidate.boundary.actions.values()},{'success'})
+        self.assertEqual(candidate.pre_action_snapshot.entity(self.b.id).position,CartesianPosition(2,0,0))
         self.assertEqual(self.b.get_position(),CartesianPosition(2,0,0))
+        self.assertTrue(all(effect.max_distance is None for p in candidate.supported_candidate.boundary.actions.values() for effect in p.effects))
 
-    def test_movement_into_range_uses_native_success_and_common_rank(self):
-        self.b.set_position(CartesianPosition(12,0,0));action=self.spot(maximum=3)
-        self.enc.schedule_action(action);candidate=self.build(velocities={self.b.id:(-10,0,0)})
+    def test_movement_changes_spot_path_snapshot_without_skill_practice(self):
+        self.b.set_position(CartesianPosition(12,0,0));action=self.spot()
+        self.enable_native_step();self.enc.schedule_action(action);self.enc.step(5)
+        candidate=self.build(6,velocities={self.b.id:(-10,0,0)})
         self.assertEqual(candidate.supported_candidate.boundary.actions[action.id].outcome,'success')
-        self.assertEqual(candidate.supported_candidate.target(self.a.id).practice_state.skill_experience['spot'],10)
+        self.assertNotIn('spot',candidate.supported_candidate.target(self.a.id).practice_state.skill_experience)
 
     def test_local_velocity_uses_native_rigid_frame(self):
         self.enc.set_local_frame(LocalFrame(CartesianPosition(0,0,0),(0,1,0),(-1,0,0),(0,0,1)))
@@ -151,15 +159,16 @@ class TestIntervalStaging(unittest.TestCase):
 
     def test_supported_mixed_observers_history_spot_and_run_have_complete_recipients(self):
         group=self.f.f.group();h=self.f.f.history();accounts=[]
-        one=self.f.observe(self.a,group,ledger=BeliefLedger(self.a.id));two=self.f.observe(self.b,group,ledger=BeliefLedger(self.b.id))
-        ask=AskAboutPastAction(self.world,self.c.id,self.a.id,0,episode_time=0,topic='lessons',generate=self.f.f.recipe(h),received_accounts=accounts)
-        spot=self.spot();run=RunAction(self.world,self.c.id,0,1,1,experience=7)
-        self.enc.schedule_choice((one,two,ask,spot,run));candidate=self.build(velocities={self.c.id:(1,0,0)})
+        one=self.f.observe(self.a,group,ledger=BeliefLedger(self.a.id),start=5);two=self.f.observe(self.b,group,ledger=BeliefLedger(self.b.id),start=5)
+        ask=AskAboutPastAction(self.world,self.c.id,self.a.id,5,episode_time=0,topic='lessons',generate=self.f.f.recipe(h),received_accounts=accounts)
+        spot=self.spot();run=RunAction(self.world,self.c.id,5,1,1,experience=7)
+        self.enable_native_step();self.enc.schedule_action(spot);self.enc.step(5)
+        self.enc.schedule_choice((one,two,ask,run));candidate=self.build(6,velocities={self.c.id:(1,0,0)})
         supported=candidate.supported_candidate
         self.assertEqual(set(supported.boundary.actions),{a.id for a in (one,two,ask,spot,run)})
         self.assertEqual(len(supported.recipients),3);self.assertEqual(accounts,[])
         self.assertEqual(supported.target(self.c.id).practice_state.skill_experience['run'],7)
-        self.assertEqual(supported.target(self.a.id).practice_state.skill_experience['spot'],22)
+        self.assertEqual(supported.target(self.a.id).practice_state.skill_experience['spot'],12)
         self.assertIsNone(group._counts);self.assertTrue(supported.objective.draws)
         self.assertEqual(len(candidate.provisional_rng.observer_trace),4)
 
@@ -205,15 +214,15 @@ class TestIntervalStaging(unittest.TestCase):
         self.assertEqual(self.a.physical_fatigue.q,.7);self.assertIsNone(self.enc.last_fatigue_frame)
 
     def test_candidate_nested_data_are_detached_and_frozen(self):
-        action=self.spot();self.enc.schedule_action(action);candidate=self.build()
+        self.enable_native_step();action=self.spot();self.enc.schedule_action(action);self.enc.step(5);candidate=self.build(6)
         with self.assertRaises(FrozenInstanceError):candidate.boundary=2
         with self.assertRaises(TypeError):candidate.proposed_authoritative_changes['positions'][self.a.id]=None
         before=repr(candidate);self.a.set_position(CartesianPosition(99,0,0))
         self.assertEqual(repr(candidate),before)
 
     def test_module_rng_is_provisional_and_repeatable(self):
-        action=self.spot(roll=None);self.enc.schedule_action(action);before=random.getstate()
-        one=self.build();two=self.build()
+        self.enable_native_step();action=self.spot(roll=None);self.enc.schedule_action(action);self.enc.step(5);before=random.getstate()
+        one=self.build(6);two=self.build(6)
         self.assertEqual(one,two);self.assertEqual(random.getstate(),before)
         self.assertNotEqual(one.provisional_rng.after,before)
         self.assertEqual(one.provisional_rng.role,'module')
@@ -323,9 +332,10 @@ class TestIntervalStaging(unittest.TestCase):
         unsafe.assert_not_called()
 
     def test_normal_failed_roll_and_cancelled_action_are_valid_proposals(self):
-        action=self.spot(roll=1);other=RunAction(self.world,self.c.id,0,1,1)
-        self.enc.schedule_choice((action,other));self.enc.cancel_action(other.id,reason='interrupted')
-        candidate=self.build();outcomes=candidate.supported_candidate.boundary.actions
+        self.enable_native_step();action=self.spot(roll=1);other=RunAction(self.world,self.c.id,5,1,1)
+        self.enc.schedule_choice((action,other));self.enc.step(5)
+        self.enc.cancel_action(other.id,reason='interrupted')
+        candidate=self.build(6);outcomes=candidate.supported_candidate.boundary.actions
         self.assertEqual(outcomes[action.id].outcome,'failure');self.assertEqual(outcomes[other.id].outcome,'interrupted')
         self.assertEqual(candidate.proposed_authoritative_changes['queues'].cancelled,(other.id,))
 
@@ -343,7 +353,7 @@ class TestIntervalStaging(unittest.TestCase):
         self.assertEqual(one,two);self.assertIsNone(group._counts)
 
     def test_fault_after_prior_committed_second_preserves_that_checkpoint(self):
-        action=self.spot(duration=2);self.enc.schedule_action(action);self.enc.step(1,velocities={self.a.id:(1,0,0)})
+        action=RunAction(self.world,self.a.id,0,2,1);self.enc.schedule_action(action);self.enc.step(1,velocities={self.a.id:(1,0,0)})
         before=self.f.f.raw_state()
         with patch('interval_staging._validate_closure',side_effect=RuntimeError('late')):
             with self.assertRaises(RuntimeError):self.build(2,velocities={self.a.id:(1,0,0)})
@@ -356,7 +366,7 @@ class TestIntervalStaging(unittest.TestCase):
         with self.assertRaises(ImpossibleRealization):self.build()
 
     def test_live_long_step_remains_legacy_and_does_not_call_interval_builder(self):
-        action=self.spot(duration=2);self.enc.schedule_action(action)
+        action=RunAction(self.world,self.a.id,0,2,1);self.enc.schedule_action(action)
         with patch('interval_staging.prepare_interval_candidate',side_effect=AssertionError('inactive')):
             self.enc.step(2.25,velocities={self.a.id:(1,0,0)})
         self.assertEqual(self.enc.last_processed_boundary,2);self.assertIsNotNone(action.resolution)
@@ -454,15 +464,17 @@ class TestIntervalStaging(unittest.TestCase):
         self.assertEqual(self.enc.fatigue_frame_history,list(old));self.assertEqual(self.enc.time,1)
 
     def test_interval_complete_practice_revalidates_new_history_after_group_award(self):
-        skills=self.world.get_skill_dictionary();self.a.set_skill_level(skills,'spot',1)
-        self.a.record_skill_use(skills,'spot',1230,action_id='prior',time=-1,outcome='practice')
+        skills=self.world.get_skill_dictionary();self.a.set_skill_level(skills,'run',1)
+        self.a.record_skill_use(skills,'run',1230,action_id='prior',time=-1,outcome='practice')
         history=self.f.f.history();group=self.f.f.group()
-        observation=self.f.observe(self.a,group);spot=self.spot()
-        ask=self.f.f.ask(self.b,history,self.f.f.recipe(history,rank=2,extra=(Fact(history.skill_key(1,'spot'),3),)))
-        self.enc.schedule_choice((observation,spot,ask));candidate=self.build()
-        self.assertEqual(candidate.supported_candidate.target(self.a.id).practice_state.skill_experience['spot'],1252)
+        observation=self.f.observe(self.a,group)
+        run=RunAction(self.world,self.a.id,0,1,1,experience=22)
+        ask=self.f.f.ask(self.b,history,self.f.f.recipe(history,rank=2,extra=(Fact(history.skill_key(1,'run'),3),)),time=0)
+        self.enc.schedule_choice((observation,run,ask));candidate=self.build(velocities={self.a.id:(1,0,0)})
+        self.assertEqual(candidate.supported_candidate.target(self.a.id).practice_state.skill_experience['run'],1252)
         self.assertEqual(candidate.supported_candidate.target(self.a.id).practice_state.transitions[0].level_after,3)
-        self.assertEqual(self.a.get_skill_level('spot'),2)
+        self.assertEqual(self.a.get_skill_level('spot'),0)
+        self.assertEqual(self.a.get_skill_level('run'),2)
 
     def test_time_zero_duration_under_one_is_still_rejected_by_native_schedule(self):
         action=RunAction(self.world,self.a.id,0,.5,1)

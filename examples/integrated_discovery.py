@@ -1,4 +1,4 @@
-"""An explorer encounters a Group and discovers a herder's unresolved past.
+"""EXPERIMENTAL Group observation plus an inquiry into an unresolved past.
 
 Run: python examples/integrated_discovery.py [--audit]
 

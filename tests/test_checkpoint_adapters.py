@@ -254,7 +254,7 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
         self.assertEqual(self.a.physical_fatigue.q,.75)
 
     def test_simultaneous_practice_remains_target_owned(self):
-        self.enable();a=self.f.spot();b=self.f.spot();self.enc.schedule_choice((a,b));self.enc.step(1)
+        self.enable();a=RunAction(self.world,self.a.id,0,1,.5,experience=3);b=RunAction(self.world,self.a.id,0,1,.5,experience=4);self.enc.schedule_choice((a,b));self.enc.step(1,velocities={self.a.id:(1,0,0)})
         c=self.capture();self.assert_partial(c);self.assertIn('experience.BatchSkillUse',tags(c))
 
     def test_unknown_subclasses_are_not_promoted(self):

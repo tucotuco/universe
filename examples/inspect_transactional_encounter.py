@@ -28,7 +28,7 @@ from developer_inspection import format_inspection_text, render_inspection_html
 
 
 def build_demo_view(boundary=None):
-    """Build a fresh native scene, commit two seconds, acquire one guarded view.
+    """Build a fresh native scene, commit six seconds, acquire one guarded view.
 
     Seed, choices, positions and physics inputs are fixed. Native UUIDs/process
     identities remain fresh; this is not a cross-process replay fingerprint.
@@ -43,15 +43,15 @@ def build_demo_view(boundary=None):
     encounter.mark_aware(runner.id,observer.id);encounter.mark_aware(observer.id,runner.id)
     encounter.enable_transactional_progression(quiescent=True,rng_owner=RNGCursor(random.Random(141).getstate()))
     run=RunAction(world,runner.id,.25,1,1,experience=7)
-    spot=SpotAction(world,observer.id,runner.id,0,duration=1,max_distance=20,experience=10,die_roll=20)
-    encounter.schedule_choice((run,spot));encounter.step(2,velocities={runner.id:(1,0,0)})
+    spot=SpotAction(world,observer.id,runner.id,0,duration=6,die_roll=20)
+    encounter.schedule_choice((run,spot));encounter.step(6,velocities={runner.id:(1,0,0)})
     return encounter.inspect_committed(boundary)
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--html',action='store_true',help='print inert HTML instead of text')
-    parser.add_argument('--boundary',type=int,choices=(1,2),help='select a committed historical boundary')
+    parser.add_argument('--boundary',type=int,choices=(5,6),help='select a committed historical boundary')
     args=parser.parse_args(argv)
     view=build_demo_view(args.boundary)
     sys.stdout.write(render_inspection_html(view) if args.html else format_inspection_text(view))

@@ -40,7 +40,8 @@ class Action(Event):
         strategy=None,
         location=None,
         name=None,
-        parent_event_id=None
+        parent_event_id=None,
+        id=None
     ):
         Event.__init__(
             self,
@@ -50,7 +51,8 @@ class Action(Event):
             event_type,
             location,
             name,
-            parent_event_id
+            parent_event_id,
+            id=id
         )
         self.actor_id = actor_id
         self.target_id = target_id

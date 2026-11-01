@@ -79,7 +79,7 @@ class TestCheckpointInventory(fixtures.InspectionFixture):
         self.assertIn('receipt_rebinding_required',{d.code for d in c.diagnostics})
 
     def test_multiple_boundaries_and_cancelled_lifecycle_are_captured(self):
-        self.enable();action=self.f.spot(start=.25);self.enc.schedule_action(action);self.enc.step(1)
+        self.enable();action=RunAction(self.world,self.a.id,.25,1,.5,experience=3);self.enc.schedule_action(action);self.enc.step(1)
         self.enc.cancel_action(action.id);self.enc.step(1);c=self.capture();self.assert_inventory(c)
         self.assertIn('observer_proposals.LifecycleEffect',tags(c));self.assertIn('cancelled',tuple(strings(c.envelope)))
         self.assertIn('atomic_publication.TargetIntervalRecord',tags(c))
@@ -202,8 +202,10 @@ class TestCheckpointInventory(fixtures.InspectionFixture):
         with self.assertRaisesRegex(CheckpointRejected,'stale'):validate(self.world,self.enc,c,quiescent=True)
 
     def test_simultaneous_skill_exercises_remain_one_target_batch_record(self):
-        self.a.record_skill_use(self.world.get_skill_dictionary(),'spot',1240,action_id='prior',time=-2)
-        self.enable();one,two=self.f.spot(),self.f.spot();self.enc.schedule_choice((one,two));self.enc.step(1)
+        self.a.record_skill_use(self.world.get_skill_dictionary(),'run',1240,action_id='prior',time=-2)
+        self.enable();one,two=(RunAction(self.world,self.a.id,0,1,.5,experience=3),
+                              RunAction(self.world,self.a.id,0,1,.5,experience=4))
+        self.enc.schedule_choice((one,two));self.enc.step(1,velocities={self.a.id:(1,0,0)})
         c=self.capture();self.assert_inventory(c)
         self.assertIn('experience.BatchSkillUse',tags(c));self.assertIn('frozen_practice.CandidatePracticeUse',tags(c))
         self.assertEqual(len(self.a.skill_use_history[-1].exercises),2)

@@ -34,7 +34,7 @@ class RunAction(Action):
     """
 
     def __init__(self, universe, actor_id, start_time, duration,
-                 minimum_distance, experience=0):
+                 minimum_distance, experience=0, id=None):
         for name, value in (("start_time", start_time),
                             ("duration", duration),
                             ("minimum_distance", minimum_distance)):
@@ -45,7 +45,7 @@ class RunAction(Action):
         if isinstance(experience, bool) or not isinstance(experience, int) or experience < 0:
             raise ValueError("experience must be a nonnegative integer")
         super().__init__(universe, start_time, None, 'run', actor_id,
-                         target_id=None, instrument_id=None)
+                         target_id=None, instrument_id=None, id=id)
         self.end_time = start_time + duration
         if not math.isfinite(self.end_time):
             raise ValueError("end_time must be finite")
@@ -104,43 +104,48 @@ class RunAction(Action):
 
 
 class SpotAction(Action):
-    """Attempt to spot an Entity via a provisional geometric-path skill check.
+    """Six-second deliberate Spot discovery Action (revision-60 rules).
 
-    Unlike RunAction, success depends on the Being's *current* skill rank,
-    compared with an explicit d20 roll against Encounter difficulty. The
-    sightline gate only verifies modeled geometry: it is NOT an assertion of
-    realistic visual detection (terrain, light, sensory acuity absent).
-
-    The attempt can earn configured practice even when unsuccessful; only a
-    successful check with a known clear modeled path creates awareness.
+    The geometry gate remains a limited scaffold and does not model complete
+    visibility, lighting, acuity, or terrain.
     """
 
     def __init__(self, universe, actor_id, target_id, start_time,
-                 duration=1, max_distance=20, experience=0, die_roll=None):
-        for name, value in (("start_time", start_time), ("duration", duration),
-                            ("max_distance", max_distance)):
+                 duration=6, die_roll=None, id=None, spotting_conditions=(), *,
+                 ledger=None, group_fully_visible=False):
+        for name, value in (("start_time", start_time), ("duration", duration)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{name} must be a finite number")
-        if duration <= 0 or max_distance <= 0:
-            raise ValueError("duration and max_distance must be positive")
-        if isinstance(experience, bool) or not isinstance(experience, int) or experience < 0:
-            raise ValueError("experience must be a nonnegative integer")
+        if duration != 6:
+            raise ValueError("deliberate Spot takes exactly six seconds")
         if die_roll is not None and (type(die_roll) is not int or not 1 <= die_roll <= 20):
             raise ValueError("die_roll must be an integer between 1 and 20")
         if actor_id == target_id:
             raise ValueError("a Being cannot spot itself")
+        if type(group_fully_visible) is not bool:
+            raise TypeError("group_fully_visible must be a Boolean scenario premise")
+        if ledger is not None:
+            from field_observation import BeliefLedger
+            if type(ledger) is not BeliefLedger or ledger.observer_id != actor_id:
+                raise ValueError("Spot evidence ledger must belong to the observing Being")
+        if group_fully_visible and ledger is None:
+            raise ValueError("fully visible Group observation requires the observer's BeliefLedger")
+        if ledger is not None and not group_fully_visible:
+            raise ValueError("Spot ledger is supported only with an explicit fully visible Group premise")
+        from discovery import SpottingConditions
+        conditions = SpottingConditions(tuple(spotting_conditions))
         super().__init__(universe, start_time, None, 'spot', actor_id,
-                         target_id, instrument_id=None)
-        self.end_time = start_time + duration
+                         target_id, instrument_id=None, id=id)
+        self.end_time = start_time + 6
         if not math.isfinite(self.end_time):
             raise ValueError("end_time must be finite")
-        self.max_distance = float(max_distance)
-        self.practice_experience = experience
+        self.spotting_conditions = conditions.values
         self.declared_roll = die_roll
         self.roll = None
-        self.skill_level_used = None
         self.path_status = None
         self._encounter = None
+        self.ledger = ledger
+        self.group_fully_visible = group_fully_visible
 
     def prepare_schedule(self, encounter):
         """Bind to a validated Encounter but do not manufacture awareness."""
@@ -148,31 +153,29 @@ class SpotAction(Action):
             raise ValueError("spotting activity has already been scheduled")
         if self.start_time < encounter.time:
             raise ValueError("spotting activity cannot begin before scheduling time")
-        skill = encounter.universe.get_skill_dictionary().get_skill_definition('spot')
-        if skill is None or not skill['is_ordinary']:
-            raise ValueError("spot skill must be defined as an ordinary skill")
+        if self.group_fully_visible:
+            from statistical_group import StatisticalGroup
+            if type(encounter.get_entity(self.target_id)) is not StatisticalGroup:
+                raise ValueError("fully visible Group premise requires a StatisticalGroup target")
         return PreparedSchedule.from_action(self, initialization=(('_encounter', encounter),))
 
     def resolve(self, difficulty_class):
         """Report the check and any awareness; Encounter applies consequences."""
         guard_legacy_action(self, effect=True)
+        if self.group_fully_visible:
+            raise RuntimeError("exact Group evidence requires native transactional Spot publication")
         if self._encounter is None:
             raise RuntimeError("spotting activity has not been scheduled")
-        if not isinstance(difficulty_class, (int, float)) or isinstance(difficulty_class, bool) or not math.isfinite(difficulty_class):
-            raise ValueError("difficulty_class must be a finite number")
         actor = self._encounter.get_being(self.actor_id)
         target = self._encounter.get_entity(self.target_id)
         if actor is None or target is None:
             raise ValueError("spotting requires participating actor and target")
-        self.skill_level_used = actor.get_skill_level('spot') or 0
         distance = self._encounter.distance_between_entities(self.actor_id, self.target_id)
         self.path_status = None
         self.roll = None
         observation = ()
         if distance is None:
             outcome = 'unplaced'
-        elif distance > self.max_distance:
-            outcome = 'out_of_range'
         elif target.geometry is None:
             outcome = 'unmodeled_target'
         else:
@@ -182,27 +185,24 @@ class SpotAction(Action):
                 outcome = 'no_clear_path'
             else:
                 self.roll = self.declared_roll if self.declared_roll is not None else random.randint(1, 20)
-                # Keep the Encounter draft's d20 check semantics, including
-                # natural 1 always failing and natural 20 always succeeding.
-                from action_calculations import check_succeeds
-                passed = check_succeeds(self.roll, self.skill_level_used, difficulty_class)
+                from discovery import SpottingConditions, discovery_dc, racial_discovery_bonus
+                target_dc = discovery_dc(target.current.discovery_dc)
+                target_dc += SpottingConditions(self.spotting_conditions).dc_adjustment
+                race = getattr(actor.current, 'race', None)
+                passed = self.roll + racial_discovery_bonus(race, 'spot') >= target_dc
                 outcome = 'success' if passed else 'failure'
                 if passed:
                     observation = (Perception(self.actor_id, self.target_id,
                                               'spot_check_geometric_path',
-                                              distance, self.max_distance),)
-        return ActionResolution(outcome,
-                                (SkillExercise('spot', self.practice_experience),),
-                                observation)
+                                              distance, None),)
+        return ActionResolution(outcome, (), observation)
 
     def to_json(self):
         data = json.loads(super().to_json())
         data.update({
-            'max_distance': self.max_distance,
-            'practice_experience': self.practice_experience,
+            'spotting_conditions': self.spotting_conditions,
             'declared_roll': self.declared_roll,
             'roll': self.roll,
-            'skill_level_used': self.skill_level_used,
             'path_status': self.path_status,
         })
         return json.dumps(data, indent=2)

@@ -20,7 +20,8 @@ class ObjectDefinition:
     A template for characteristics of Objects.
     '''
     def __init__(self, obj_type, length, width, height, weight, cost, hardness, 
-                 hit_points, is_magical=False, tags=None, weapon_categories=None):
+                 hit_points, is_magical=False, tags=None, weapon_categories=None,
+                 discovery_dc=None):
         self.obj_type = obj_type
         self.length = convert_to_numeric(length)
         self.width = convert_to_numeric(width)
@@ -34,6 +35,9 @@ class ObjectDefinition:
         self.weapon_categories = weapon_categories or []
         if weapon_categories is not None:
             self.weapon_categories = weapon_categories
+        if discovery_dc is not None and (type(discovery_dc) is not int or discovery_dc < 0):
+            raise ValueError("discovery_dc must be a nonnegative integer or None")
+        self.discovery_dc = discovery_dc
 
     def copy(self):
         '''
@@ -50,7 +54,8 @@ class ObjectDefinition:
             self.hit_points,
             self.is_magical,
             self.tags.copy(),
-            self.weapon_categories)
+            self.weapon_categories,
+            self.discovery_dc)
         return new_definition
 
     def to_json(self):
@@ -68,7 +73,8 @@ class ObjectDefinition:
             'hit_points': self.hit_points,
             'is_magical': self.is_magical,
             'tags': self.tags,
-            'weapon_categories': self.weapon_categories
+            'weapon_categories': self.weapon_categories,
+            'discovery_dc': self.discovery_dc
         }
         return json.dumps(data)
 

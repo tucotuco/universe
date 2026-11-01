@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from spatial.state import CartesianPosition, integrate_position
 from spatial.frame import LocalFrame, LocalPosition
-from spatial.visibility import trace_sightline
+from spatial.visibility import trace_sightline, trace_physical_path
 
 from utils import convert_to_dc
 from action import Action
@@ -79,6 +79,28 @@ class EncounterStep:
     completed_action_ids: tuple
 
 
+@dataclass(frozen=True)
+class _QuarantinedPostBoundaryPlan:
+    """Private, already validated inputs for the one-boundary constructor."""
+    universe: object
+    encounter_id: str
+    start_time: int
+    time: int
+    difficulty_class: int | float
+    name: str
+    event_type: object
+    location: object
+    parent_event_id: object
+    end_time: object
+    initiated: bool
+    being_ids: tuple
+    awareness: tuple
+    rng_owner: object
+
+
+_QUARANTINED_POST_BOUNDARY_TOKEN = object()
+
+
 # An Encounter is a container for the activity that occurs in a location over a period
 # of time. Each Encounter has a start time in seconds from a base epoch that anchors it 
 # in a broader historical context. 
@@ -92,7 +114,7 @@ class Encounter(Event):
                  pending_action_list=None, finished_action_list=None,
                  cancelled_action_list=None, initiated=False,
                  map=None, awareness=None, initiation=None, local_frame=None,
-                 fatigue_frame_history=None):
+                 fatigue_frame_history=None, _post_boundary_token=None):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
@@ -107,7 +129,12 @@ class Encounter(Event):
                 or not math.isfinite(self.time) or self.time < 0):
             raise BoundaryInvariantError('Encounter start time must be finite and nonnegative')
         if self.time != start_time:
-            raise BoundaryInvariantError('Restoring an advanced Encounter requires an unsupported checkpoint migration')
+            if (_post_boundary_token is not _QUARANTINED_POST_BOUNDARY_TOKEN
+                    or type(start_time) is not int or start_time != 0
+                    or type(self.time) is not int or self.time != 1):
+                raise BoundaryInvariantError('Restoring an advanced Encounter requires an unsupported checkpoint migration')
+        elif _post_boundary_token is not None:
+            raise BoundaryInvariantError('Quarantined advanced-time constructor token requires the supported 0-to-1 boundary')
         self.last_processed_boundary = math.floor(self.time)
         self.active_boundary = None
         self.boundary_fault = None
@@ -155,6 +182,148 @@ class Encounter(Event):
             self.initiation = EncounterInitiation(**initiation)
         else:
             self.initiation = None
+
+    @classmethod
+    def _construct_quarantined_post_boundary(cls, plan):
+        """Build only the validated, empty native Encounter context at 0 -> 1.
+
+        This internal constructor does not restore history or enable simulation.
+        Callers must retain the returned native object privately. The token path
+        is intentionally unavailable through ordinary Encounter construction.
+        """
+        from being import BeingInstance
+        from atomic_publication import RNGCursor
+        from transactional_progression import (is_quarantined,
+            quarantine_reconstructed_graph)
+        from universe import Universe
+
+        def need(condition, message):
+            if not condition:
+                raise BoundaryInvariantError(message)
+
+        need(type(cls) is type and cls is Encounter,
+             'quarantined boundary construction requires the exact Encounter class')
+        need(type(plan) is _QuarantinedPostBoundaryPlan,
+             'validated quarantined post-boundary plan is required')
+        need(type(plan.universe) is Universe and not is_quarantined(plan.universe),
+             'construction requires a private, unquarantined Universe shell')
+        need(type(plan.start_time) is int and plan.start_time == 0
+             and type(plan.time) is int and plan.time == 1,
+             'only the validated 0-to-1 committed boundary is supported')
+        need(type(plan.encounter_id) is str and plan.encounter_id
+             and plan.encounter_id != '0', 'Encounter logical identity is invalid')
+        need(type(plan.being_ids) is tuple and len(plan.being_ids) == 2
+             and all(type(value) is str and value for value in plan.being_ids)
+             and len(set(plan.being_ids)) == 2,
+             'exactly two distinct native Being participants are required')
+        need(type(plan.awareness) is tuple,
+             'awareness must be a closed immutable observer mapping')
+        need(type(plan.name) is str and type(plan.initiated) is bool
+             and type(plan.difficulty_class) in (int, float)
+             and math.isfinite(plan.difficulty_class)
+             and plan.event_type is None and plan.location is None
+             and plan.parent_event_id is None and plan.end_time is None,
+             'Encounter declaration is outside the bounded native contract')
+        world = plan.universe
+        world_data = object.__getattribute__(world, '__dict__')
+        registry = object.__getattribute__(world_data['object_registry'], '__dict__')['object_instances']
+        need(set(registry) == set(plan.being_ids) and len(registry) == 2
+             and all(type(registry[key]) is BeingInstance for key in plan.being_ids),
+             'Universe registry must contain exactly the two native participant Beings')
+        beings = tuple(registry[key] for key in plan.being_ids)
+        need(all(not is_quarantined(being) for being in beings),
+             'participant graph is already quarantined or ambiguously owned')
+        need(set(world_data['event_history']) == {'0'}
+             and world_data['event_history']['0'].universe is world,
+             'private Universe must contain only its native origin Event')
+        need(not world_data['_choice_books'] and world_data['_schedule_revision'] == 0,
+             'private Universe already has scheduling state')
+        awareness = {}
+        for row in plan.awareness:
+            need(type(row) is tuple and len(row) == 2 and row[0] in plan.being_ids
+                 and row[0] not in awareness and type(row[1]) is tuple
+                 and len(row[1]) == len(set(row[1]))
+                 and all(type(target) is str and target in plan.being_ids for target in row[1]),
+                 'awareness contains an unsupported or ambiguous participant reference')
+            awareness[row[0]] = set(row[1])
+        need(set(awareness) == set(plan.being_ids),
+             'awareness must explicitly cover both participants')
+        need(type(plan.rng_owner) is RNGCursor and type(plan.rng_owner.state) is tuple,
+             'an exclusive caller-owned RNG cursor is required')
+        rng_before = plan.rng_owner.state
+        probe = random.Random()
+        try:
+            probe.setstate(rng_before)
+        except (TypeError, ValueError) as exc:
+            raise BoundaryInvariantError('private RNG cursor state is invalid') from exc
+        module_rng_before = random.getstate()
+        encounter = None
+        event_history = world_data['event_history']
+        event_snapshot = dict(event_history)
+        books = world_data['_choice_books']
+        books_snapshot = list(books)
+        revision = world_data['_schedule_revision']
+        try:
+            encounter = cls(world, plan.difficulty_class, plan.start_time,
+                end_time=plan.end_time, event_type=plan.event_type,
+                location=plan.location, name=plan.name,
+                parent_event_id=plan.parent_event_id, id=plan.encounter_id,
+                time=plan.time, being_list=list(plan.being_ids),
+                non_being_object_list=[], pending_action_list=[],
+                finished_action_list=[], cancelled_action_list=[],
+                initiated=plan.initiated, awareness=awareness,
+                fatigue_frame_history=[],
+                _post_boundary_token=_QUARANTINED_POST_BOUNDARY_TOKEN)
+            world.add_event(encounter)
+            encounter._assert_timeline()
+            book = encounter._choice_book
+            need(encounter.id == plan.encounter_id
+                 and encounter.universe is world
+                 and encounter.start_time == 0 and encounter.time == 1
+                 and encounter.last_processed_boundary == 1
+                 and encounter._coordinator_time == 1
+                 and encounter._interval_start == 1
+                 and encounter.active_boundary is None
+                 and encounter.boundary_fault is None
+                 and not encounter._advancing and not encounter._dispatching
+                 and not encounter._running
+                 and encounter.being_list == list(plan.being_ids)
+                 and not encounter.non_being_object_list
+                 and not encounter.pending_action_list
+                 and not encounter.finished_action_list
+                 and not encounter.cancelled_action_list
+                 and not encounter.fatigue_frame_history
+                 and encounter.awareness == awareness,
+                 'advanced Encounter constructor produced inconsistent boundary state')
+            need(world_data['event_history'].get(plan.encounter_id) is encounter
+                 and world_data['_choice_books'] == [book]
+                 and book.encounter is encounter
+                 and book._counter == 0 and not book._drafts
+                 and not book._closed_drafts and not book._tokens
+                 and not book._choices and not book._reservations
+                 and not book._registered and not book._states
+                 and world_data['_schedule_revision'] == revision,
+                 'Encounter Event/ChoiceBook initialization is not fresh and empty')
+            need(plan.rng_owner.state == rng_before
+                 and random.getstate() == module_rng_before,
+                 'Encounter construction consumed or changed RNG state')
+            quarantine_reconstructed_graph(world, (encounter,) + beings)
+            need(is_quarantined(world) and is_quarantined(encounter)
+                 and all(is_quarantined(being) for being in beings),
+                 'native Encounter graph could not be quarantined')
+            return encounter
+        except BaseException:
+            # The private source shell is restored in place if construction
+            # fails before a result can be returned.
+            event_history.clear(); event_history.update(event_snapshot)
+            books[:] = books_snapshot
+            world_data['_schedule_revision'] = revision
+            if encounter is not None:
+                from transactional_progression import _QUARANTINED
+                for value in (world, encounter) + beings:
+                    _QUARANTINED.discard(value)
+                    object.__getattribute__(value, '__dict__').pop('_checkpoint_quarantined', None)
+            raise
 
     def to_json(self):
         if self.progression_mode == 'transactional' or self.__dict__.get('_atomic_interval_history') or (self.boundary_fault or {}).get('kind') == 'atomic_publication':
@@ -342,6 +511,25 @@ class Encounter(Event):
                       for entity_id in self.entity_ids())
         return trace_sightline(start, end, candidates,
                                exclude_ids=(source_entity_id, target_entity_id))
+
+    def physical_path(self, source_entity_id, target_entity_id):
+        """Trace melee-relevant physical geometry, not optical opacity.
+
+        StatisticalGroup envelopes are aggregate bounds and are filtered by
+        the shared physical-path classifier. Optical callers must continue to
+        use ``line_of_sight``.
+        """
+        source = self.get_entity(source_entity_id)
+        target = self.get_entity(target_entity_id)
+        if source is None or target is None or source_entity_id == target_entity_id:
+            return None
+        start, end = source.get_position(), target.get_position()
+        if start is None or end is None or start == end:
+            return None
+        candidates = ((entity_id, self.get_entity(entity_id))
+                      for entity_id in self.entity_ids())
+        return trace_physical_path(start, end, candidates,
+                                   exclude_ids=(source_entity_id, target_entity_id))
 
     def perceive_geometric_paths(self, observer_being_id, max_distance):
         """Opt-in path-only perception; not a physical vision model."""
@@ -760,11 +948,14 @@ class Encounter(Event):
         guard_legacy_encounter(self, 'legacy facade/UI/replay consumer')
 
     def prepare_interval_candidate(self, next_boundary, *, velocities=None,
-                                   velocity_frame="global", rng_state=None, rng_owner=None):
+                                   velocity_frame="global", rng_state=None, rng_owner=None,
+                                   _restore_context=None, adult_member_candidate=None):
         """Inactive one-interval staging; never advances or publishes live state."""
         from interval_staging import prepare_interval_candidate
         return prepare_interval_candidate(self, next_boundary, velocities=velocities,
-            velocity_frame=velocity_frame, rng_state=rng_state, rng_owner=rng_owner)
+            velocity_frame=velocity_frame, rng_state=rng_state, rng_owner=rng_owner,
+            _restore_context=_restore_context,
+            adult_member_candidate=adult_member_candidate)
 
     def _capture_fatigue_frame(self):
         return FrozenFatigueFrame((self.get_being(being_id)
@@ -873,16 +1064,24 @@ class Encounter(Event):
             raise BoundaryInvariantError('Reentrant progression/choice entry')
         self._pending_schedule()
 
-    def step(self, duration=1.0, velocities=None, velocity_frame="global"):
+    def step(self, duration=1.0, velocities=None, velocity_frame="global", *,
+             adult_member_candidate=None):
         """Advance fractional kinematics; dispatch only crossed integer boundaries."""
         if self._running:
             raise BoundaryInvariantError('Reentrant progression during run()')
-        return self._advance(duration, velocities, velocity_frame)
+        return self._advance(duration, velocities, velocity_frame,
+                             adult_member_candidate=adult_member_candidate)
 
-    def _advance(self, duration, velocities=None, velocity_frame="global"):
-        from transactional_progression import mode_of, step_transactionally
+    def _advance(self, duration, velocities=None, velocity_frame="global", *,
+                 adult_member_candidate=None):
+        from transactional_progression import assert_not_quarantined, mode_of, step_transactionally
+        assert_not_quarantined(self, 'Encounter progression')
         if mode_of(self) == 'transactional':
-            return step_transactionally(self, duration, velocities, velocity_frame)
+            return step_transactionally(self, duration, velocities, velocity_frame,
+                adult_member_candidate=adult_member_candidate)
+        if adult_member_candidate is not None:
+            raise BoundaryInvariantError(
+                'adult-member realization is available only through opt-in transactional progression')
         if self._advancing or self._dispatching:
             raise BoundaryInvariantError('Reentrant Encounter advancement')
         if not self.initiated:

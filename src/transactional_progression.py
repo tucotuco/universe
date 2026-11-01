@@ -8,10 +8,22 @@ from dataclasses import dataclass
 import math
 import threading
 import weakref
+from contextlib import contextmanager
 
 
 class TransactionalProgressionError(ValueError):
     pass
+
+
+def assert_not_quarantined(encounter, operation='gameplay operation'):
+    data = object.__getattribute__(encounter, '__dict__')
+    world = data.get('universe')
+    active = _ACTIVE_RESTORED_EXECUTION
+    if (active is not None and active[0]() is encounter
+            and active[1] == threading.get_ident()):
+        return
+    if is_quarantined(encounter) or (world is not None and is_quarantined(world)):
+        raise TransactionalProgressionError(operation + ' is forbidden on a quarantined checkpoint reconstruction')
 
 
 @dataclass(frozen=True)
@@ -29,17 +41,154 @@ class _Binding:
     mode: ProgressionMode
     rng_owner: object
     running: object  # nonblocking control lock, outside the checkpoint graph
+    restore_context: object = None
 
 
 _BINDINGS = {}
 _FACADES = {}
 _LEGACY_USED = {}
 _ROUTED_OWNERSHIP = {}
+_QUARANTINED = weakref.WeakSet()
+_ACTIVE_RESTORED_EXECUTION = None
+
+
+@contextmanager
+def _trusted_local_execution_scope(encounter, context):
+    """Private one-call scope; quarantine markers stay intact outside/inside it."""
+    global _ACTIVE_RESTORED_EXECUTION
+    from checkpoint_restore_dependencies import _PreparedContinuationContext
+    if (type(context) is not _PreparedContinuationContext
+            or mode_of(encounter) != 'legacy' or not is_quarantined(encounter)):
+        raise TransactionalProgressionError('exact quarantined prepared continuation is required')
+    if _ACTIVE_RESTORED_EXECUTION is not None:
+        raise TransactionalProgressionError('nested trusted-local continuation is forbidden')
+    _ACTIVE_RESTORED_EXECUTION = (weakref.ref(encounter), threading.get_ident(), context)
+    try:
+        yield
+    finally:
+        _ACTIVE_RESTORED_EXECUTION = None
+
+
+def _enable_prepared_transactional_progression(encounter, rng_owner, restore_context):
+    """Bind only the reviewed, quarantined time-1 Run continuation context."""
+    from encounter import Encounter
+    from interval_staging import _rng_input
+    active = _ACTIVE_RESTORED_EXECUTION
+    if (type(encounter) is not Encounter or active is None
+            or active[0]() is not encounter or active[1] != threading.get_ident()
+            or active[2] is not restore_context):
+        raise TransactionalProgressionError('trusted-local activation scope is not current')
+    if mode_of(encounter) != 'legacy':
+        raise TransactionalProgressionError('restored native progression is already configured')
+    ed = object.__getattribute__(encounter, '__dict__')
+    facade = _FACADES.get(id(encounter)); used = _LEGACY_USED.get(id(encounter))
+    if (encounter.start_time != 0 or encounter.time != 1
+            or encounter.last_processed_boundary != 1
+            or encounter._coordinator_time != 1 or encounter._interval_start != 1
+            or encounter.finished_action_list or encounter.cancelled_action_list
+            or encounter.fatigue_frame_history or ed.get('_atomic_interval_history')
+            or ed.get('pending_action_list') or (used is not None and used() is encounter)
+            or (facade is not None and facade[0]() is encounter and facade[1]() is not None)):
+        raise TransactionalProgressionError('prepared checkpoint is outside the exact fresh boundary-1 continuation state')
+    role, identity, _ = _rng_input(encounter, None, rng_owner)
+    if role != 'caller_cursor':
+        raise TransactionalProgressionError('trusted-local continuation requires its exclusive private RNG cursor')
+    if encounter._choice_book._counter != restore_context.choice_counter_floor:
+        raise TransactionalProgressionError('ChoiceBook counter differs from imported identity floor')
+    _all_declarations(encounter, 2, rng_owner)
+    descriptor = ProgressionMode('transactional', id(encounter), role, identity)
+    key = id(encounter)
+    binding = _Binding(weakref.ref(encounter,
+        lambda ref: _BINDINGS.pop(key, None)), descriptor, rng_owner,
+        threading.Lock(), restore_context)
+    _BINDINGS[key] = binding
+    try:
+        ed['_transactional_mode'] = descriptor
+    except BaseException:
+        _BINDINGS.pop(key, None)
+        raise
+    return descriptor
+
+
+def _validate_restored_candidate_context(encounter, candidate):
+    """Bind an issued interval to the exact private imported-prefix context."""
+    binding = _BINDINGS.get(id(encounter))
+    if binding is None or binding.encounter() is not encounter:
+        if candidate.pre_action_snapshot.imported_practice_dependency is None:
+            return True
+        raise TransactionalProgressionError('candidate imported practice lacks a current native mode binding')
+    context = binding.restore_context
+    snapshot = candidate.pre_action_snapshot
+    if context is None:
+        if snapshot.imported_practice_dependency is not None:
+            raise TransactionalProgressionError('unbound imported-practice dependency in interval')
+        return True
+    from checkpoint_restore_dependencies import _PreparedContinuationContext
+    from frozen_practice import BatchSkillUse, _validate_imported_prefix
+    if type(context) is not _PreparedContinuationContext:
+        raise TransactionalProgressionError('unsupported private restored continuation binding')
+    _validate_imported_prefix(context.imported_prefix)
+    if (snapshot.imported_practice_dependency != context.evaluation_binding()
+            or snapshot.boundary != 2 or candidate.boundary != 2
+            or snapshot.encounter_id != encounter.id):
+        raise TransactionalProgressionError('candidate differs from its trusted-local boundary-2 dependency')
+    if (set(candidate.supported_candidate.boundary.actions) != set(context.future_action_ids)
+            or any(snapshot.actions[aid].family != 'run' for aid in context.future_action_ids)):
+        raise TransactionalProgressionError('candidate does not cover the admitted Run Action set')
+    choices = encounter._choice_book._choices
+    record = choices.get(context.future_choice_id)
+    if (record is None or tuple(record.view.action_ids) != context.future_action_ids
+            or record.view.state not in ('accepted', 'executing')):
+        raise TransactionalProgressionError('admitted native Choice changed before candidate validation')
+    prior = snapshot.practice_inputs.beings[context.imported_prefix.target_id].prior_uses
+    imported = tuple(use for use in prior if type(use) is BatchSkillUse
+        and use.being_id == context.imported_prefix.target_id
+        and tuple(row.action_id for row in use.exercises) == context.imported_prefix.action_ids)
+    if imported != context.imported_prefix.uses or len(imported) != 1:
+        raise TransactionalProgressionError('imported Target practice is missing or duplicated')
+    return True
+
+
+def quarantine_reconstruction(encounter):
+    """Register an inactive reconstruction in process-local entry-point guards."""
+    world = object.__getattribute__(encounter, '__dict__').get('universe')
+    _QUARANTINED.add(encounter)
+    if world is not None:
+        _QUARANTINED.add(world)
+    object.__getattribute__(encounter, '__dict__')['_checkpoint_quarantined'] = True
+    if world is not None:
+        object.__getattribute__(world, '__dict__')['_checkpoint_quarantined'] = True
+
+
+def quarantine_reconstructed_graph(universe, objects):
+    """Mark private identity-only native objects as quarantined roots.
+
+    This records process-local quarantine state; it does not make native Python
+    objects immutable. Safety for this adapter comes from retaining these
+    references privately and exposing only detached value views.
+    """
+    roots = (universe,) + tuple(objects)
+    for value in roots:
+        data = object.__getattribute__(value, '__dict__')
+        _QUARANTINED.add(value)
+        data['_checkpoint_quarantined'] = True
+
+
+def is_quarantined(value):
+    return value in _QUARANTINED or object.__getattribute__(value, '__dict__').get('_checkpoint_quarantined') is True
 
 
 def mode_of(encounter):
     data=object.__getattribute__(encounter,'__dict__')
     binding=_BINDINGS.get(id(encounter));declared=data.get('_transactional_mode')
+    # A dead weak binding can outlive its Encounter until cyclic GC runs. If
+    # CPython later reuses that object ID for a fresh legacy Encounter, retire
+    # only the dead map entry; live or explicitly marked bindings still fail
+    # closed below.
+    if binding is not None and binding.encounter() is None and declared is None:
+        if _BINDINGS.get(id(encounter)) is binding:
+            _BINDINGS.pop(id(encounter),None)
+        binding=None
     if binding is None and declared is None:return 'legacy'
     if (binding is None or binding.encounter() is not encounter or declared is not binding.mode
             or type(declared) is not ProgressionMode or declared.encounter_identity!=id(encounter)):
@@ -48,6 +197,7 @@ def mode_of(encounter):
 
 
 def guard_legacy_encounter(encounter, operation='legacy consumer'):
+    assert_not_quarantined(encounter, operation)
     if mode_of(encounter)=='transactional':
         raise TransactionalProgressionError(operation+' is unavailable on a transactional Encounter; native step() only (5C3A)')
 
@@ -77,12 +227,15 @@ def guard_legacy_action(action, *, effect=False):
     an unrecorded direct resolver cannot later be mistaken for a fresh graph.
     Pure preparation/geometry/roll calculations are not intercepted.
     """
-    if not _BINDINGS and not effect:return
     ad=object.__getattribute__(action,'__dict__');world=ad.get('universe')
+    if ad.get('_checkpoint_quarantined') is True:
+        raise TransactionalProgressionError('Action resolution/completion is forbidden on a quarantined reconstruction')
+    if not _BINDINGS and not effect:return
     if world is None:return
     wd=object.__getattribute__(world,'__dict__')
     for book in wd.get('_choice_books',()):
         enc=object.__getattribute__(book,'__dict__')['encounter']
+        assert_not_quarantined(enc, 'Action resolution/completion')
         ed=object.__getattribute__(enc,'__dict__')
         related=(ad.get('encounter') is enc or ad.get('_encounter') is enc
             or ad.get('parent_event_id')==ed['id']
@@ -96,17 +249,31 @@ def guard_legacy_action(action, *, effect=False):
 
 
 def validate_publication_entry(encounter,ownership):
+    assert_not_quarantined(encounter, 'interval publication')
     if mode_of(encounter)=='transactional' and _ROUTED_OWNERSHIP.get(id(encounter)) is not ownership:
         raise TransactionalProgressionError('selected transactional Encounters publish only through their native step route')
 
 
 def planning_entry(encounter):
+    assert_not_quarantined(encounter, 'choice/cancellation planning')
     if mode_of(encounter)=='transactional' and _BINDINGS[id(encounter)].running.locked():
         raise TransactionalProgressionError('choice/cancellation editing is allowed only between transactional step calls')
 
 
 def validate_action_contract(encounter,action,*,_force=False):
     """Closed declaration checks before native preparation or publication."""
+    from activities import SpotAction
+    if type(action) is SpotAction:
+        if (type(action.start_time) not in (int, float)
+                or type(action.end_time) not in (int, float)
+                or not math.isfinite(action.start_time) or not math.isfinite(action.end_time)
+                or action.end_time - action.start_time != 6):
+            raise TransactionalProgressionError('deliberate Spot must retain its six-second duration')
+        from discovery import SpottingConditions
+        try:
+            SpottingConditions(action.spotting_conditions)
+        except (TypeError, ValueError) as exc:
+            raise TransactionalProgressionError(str(exc)) from exc
     if not _force and mode_of(encounter)!='transactional':return
     from interval_staging import _guard_methods
     _guard_methods()
@@ -129,7 +296,11 @@ def validate_action_contract(encounter,action,*,_force=False):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
     if type(action) is Action and data['event_type'] not in ('swing','thrust'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
-    if type(action) in (ObserveGroupAction,AskAboutPastAction):objective_action_data(action)
+    if type(action) in (ObserveGroupAction,AskAboutPastAction) or (
+            type(action) is SpotAction and data.get('group_fully_visible') is True):
+        objective_action_data(action)
+    if type(action) is SpotAction and data.get('group_fully_visible') is True:
+        _capture_belief(data['ledger'],data['actor_id'])
     if type(action) is ObserveGroupAction and data['ledger'] is not None:
         _capture_belief(data['ledger'],data['actor_id'])
     if type(action) is AskAboutPastAction and data['received_accounts'] is not None:
@@ -206,10 +377,11 @@ def enable_transactional_progression(encounter, *, quiescent=False, rng_owner=No
         return descriptor
 
 
-def step_transactionally(encounter,duration,velocities,velocity_frame):
+def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_member_candidate=None):
     from atomic_publication import publication_boundary,publish_interval_candidate
     from interval_staging import _motion
     from encounter import EncounterStep
+    assert_not_quarantined(encounter, 'Encounter progression')
     if mode_of(encounter)!='transactional':raise TransactionalProgressionError('explicit transactional selection required')
     binding=_BINDINGS[id(encounter)]
     if not binding.running.acquire(blocking=False):raise TransactionalProgressionError('reentrant/concurrent transactional progression')
@@ -236,9 +408,14 @@ def step_transactionally(encounter,duration,velocities,velocity_frame):
                 if mode_of(encounter)!='transactional':raise TransactionalProgressionError('mode changed')
                 _ROUTED_OWNERSHIP[id(encounter)]=ownership
                 try:
-                    candidate=encounter.prepare_interval_candidate(boundary,velocities=motion,rng_owner=binding.rng_owner)
+                    candidate=encounter.prepare_interval_candidate(boundary,velocities=motion,
+                        rng_owner=binding.rng_owner,_restore_context=binding.restore_context,
+                        adult_member_candidate=adult_member_candidate)
                     receipt=publish_interval_candidate(encounter,candidate,ownership=ownership,rng_owner=binding.rng_owner)
                     completed.extend(receipt.action_ids)
+                    # One non-Action realization request belongs to exactly
+                    # one interval; later boundaries in a long step are normal.
+                    adult_member_candidate=None
                 finally:_ROUTED_OWNERSHIP.pop(id(encounter),None)
         return EncounterStep(start,end,tuple(motion),tuple(completed))
     finally:binding.running.release()

@@ -1,4 +1,4 @@
-"""Belief revision on new evidence, communication, and later skill advancement.
+"""EXPERIMENTAL Group sensor: belief revision, communication, and skill advancement.
 
 Run from repo root: python examples/group_belief_revision.py
 

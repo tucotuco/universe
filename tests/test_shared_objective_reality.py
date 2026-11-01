@@ -12,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 from action_evaluation import capture_snapshot,evaluate_snapshot,UnsupportedEvaluation,EvaluationIntegrityError
 from action_settlement import reconcile_boundary
-from activities import SpotAction
+from activities import RunAction
 from encounter import Encounter
 from group_observation import ObserveGroupAction
 from history_conversation import AskAboutPastAction
@@ -50,14 +50,14 @@ class TestSharedObjectiveReality(unittest.TestCase):
         return ObserveGroupAction(self.world,actor.id,group.id,0,observation={'coarse_range_m':100,'detailed_range_m':50})
 
     def history(self):
-        return self.a.begin_personal_history(earliest=-10,known_through=10,nondeclining_skills=('spot',))
+        return self.a.begin_personal_history(earliest=-10,known_through=10,nondeclining_skills=('run',))
 
     def recipe(self,h,description='Prior lessons',rank=None,extra=(),time=0,topic='lessons'):
         key=h.episode_key(time,topic)
         value={'description':description}
         facts=[]
         if rank is not None:
-            value.update(skill='spot',rank_after=rank);facts.append(Fact(h.skill_key(time,'spot'),rank,'declared_history'))
+            value.update(skill='run',rank_after=rank);facts.append(Fact(h.skill_key(time,'run'),rank,'declared_history'))
         return EpisodeFacts((Fact(key,value,'declared_history'),*facts,*extra))
 
     def ask(self,actor,h,recipe=None,time=0,topic='lessons'):
@@ -65,7 +65,12 @@ class TestSharedObjectiveReality(unittest.TestCase):
             generate=recipe if recipe is not None else self.recipe(h,time=time,topic=topic))
 
     def context(self,*actions):
-        self.enc.schedule_choice(actions);self.enc.time=1
+        self.enc.schedule_choice(actions)
+        for action in actions:
+            if isinstance(action, RunAction):
+                actor=self.world.get_object_by_id(action.actor_id);pos=actor.get_position()
+                actor.set_position(CartesianPosition(pos.x+1,pos.y,pos.z))
+        self.enc.time=1
         return capture_objective_context(self.enc,1)
 
     def raw_state(self):
@@ -211,23 +216,25 @@ class TestSharedObjectiveReality(unittest.TestCase):
         self.assertEqual(h.reality.revision,0)
 
     def test_same_episode_with_conflicting_supporting_rank_rejected(self):
-        h=self.history();rankkey=h.skill_key(1,'spot')
+        h=self.history();rankkey=h.skill_key(1,'run')
         one=self.ask(self.b,h,self.recipe(h,extra=(Fact(rankkey,0),)))
         two=self.ask(self.c,h,self.recipe(h,extra=(Fact(rankkey,1),)))
         ctx=self.context(one,two)
         with self.assertRaises(ImpossibleRealization):self.build(ctx)
 
     def test_new_claim_cannot_overwrite_established_support(self):
-        h=self.history();h.commit_skill_rank(0,'spot',0)
+        h=self.history();h.commit_skill_rank(0,'run',0)
         action=self.ask(self.b,h,self.recipe(h,rank=1));ctx=self.context(action)
         with self.assertRaises(ImpossibleRealization):self.build(ctx)
 
     def joint_context(self,rank):
-        self.a.set_skill_level(self.world.get_skill_dictionary(),'spot',1)
-        self.a.record_skill_use(self.world.get_skill_dictionary(),'spot',1235,action_id='prior',time=-2)
+        self.a.set_skill_level(self.world.get_skill_dictionary(),'run',1)
+        self.a.record_skill_use(self.world.get_skill_dictionary(),'run',1235,action_id='prior',time=-2)
         h=self.history()
-        recipe=self.recipe(h,rank=2,extra=(Fact(h.skill_key(1,'spot'),rank),))
-        actions=(self.ask(self.b,h,recipe),SpotAction(self.world,self.a.id,self.b.id,0,experience=10,die_roll=20),SpotAction(self.world,self.a.id,self.b.id,0,experience=10,die_roll=20))
+        recipe=self.recipe(h,rank=2,extra=(Fact(h.skill_key(1,'run'),rank),))
+        actions=(self.ask(self.b,h,recipe),
+                 RunAction(self.world,self.a.id,0,1,.5,experience=10),
+                 RunAction(self.world,self.a.id,0,1,.5,experience=10))
         return h,self.context(*actions)
 
     def test_joint_history_support_matches_complete_target_practice_transition(self):
@@ -235,8 +242,8 @@ class TestSharedObjectiveReality(unittest.TestCase):
         projection=companion.target(self.a.id).practice_state
         self.assertEqual(len(projection.exercises),2);self.assertEqual(len(projection.transitions),1)
         self.assertEqual(projection.transitions[0].level_after,3)
-        self.assertEqual(candidate.subject(self.a.id).fact(h.skill_key(1,'spot')).value,3)
-        self.assertEqual(self.a.get_skill_level('spot'),2)
+        self.assertEqual(candidate.subject(self.a.id).fact(h.skill_key(1,'run')).value,3)
+        self.assertEqual(self.a.get_skill_level('run'),2)
 
     def test_coincident_boundary_history_cannot_use_fictitious_intermediate_rank(self):
         _,ctx=self.joint_context(2)
@@ -246,13 +253,13 @@ class TestSharedObjectiveReality(unittest.TestCase):
     def test_scoped_nondecline_is_not_inferred_for_every_skill(self):
         h=self.a.begin_personal_history(earliest=-10,known_through=10,nondeclining_skills=('run',))
         action=self.ask(self.b,h,self.recipe(h,'A nontraining episode'))
-        spot=SpotAction(self.world,self.a.id,self.b.id,0,experience=250,die_roll=20)
-        ctx=self.context(action,spot);self.build(ctx)
-        self.assertEqual(evaluate_native_companion(ctx).target(self.a.id).practice_state.level('spot'),1)
+        run=RunAction(self.world,self.a.id,0,1,.5,experience=250)
+        ctx=self.context(action,run);self.build(ctx)
+        self.assertEqual(evaluate_native_companion(ctx).target(self.a.id).practice_state.level('run'),1)
 
     def test_live_history_skill_and_episode_mutation_does_not_change_frozen_truth(self):
         h,ctx=self.joint_context(3);expected=self.build(ctx)
-        self.a.skill_experience['spot']=9999;self.a.current.skills.skills['spot']=99
+        self.a.skill_experience['run']=9999;self.a.current.skills.skills['run']=99
         h.nondeclining_skills=frozenset();h.reality._records.clear();h.known_through=-1
         self.assertEqual(self.build(ctx),expected)
 
@@ -350,7 +357,7 @@ class TestSharedObjectiveReality(unittest.TestCase):
 
     def test_training_episode_missing_required_rank_is_rejected(self):
         h=self.history();key=h.episode_key(0,'lessons')
-        recipe=EpisodeFacts((Fact(key,{'description':'Training','skill':'spot','rank_after':0}),))
+        recipe=EpisodeFacts((Fact(key,{'description':'Training','skill':'run','rank_after':0}),))
         ctx=self.context(self.ask(self.b,h,recipe))
         with self.assertRaises(ImpossibleRealization):self.build(ctx)
 
@@ -361,7 +368,7 @@ class TestSharedObjectiveReality(unittest.TestCase):
         with self.assertRaises(ImpossibleRealization):self.build(ctx)
 
     def test_foreign_subject_fact_is_not_accepted_as_support(self):
-        h=self.history();recipe=self.recipe(h,extra=(Fact(FactKey(self.b.id,'skill_rank',0,'spot'),0),))
+        h=self.history();recipe=self.recipe(h,extra=(Fact(FactKey(self.b.id,'skill_rank',0,'run'),0),))
         ctx=self.context(self.ask(self.b,h,recipe))
         with self.assertRaises(ImpossibleRealization):self.build(ctx)
 

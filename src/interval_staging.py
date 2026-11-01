@@ -170,6 +170,8 @@ class IntervalCandidate:
     remaining_dependencies: tuple = ('5C2_identity_preserving_atomic_publication_and_recovery',
         '5C3_activation_consumers_checkpoint_replay_compatibility')
     integrity_token: str = ''
+    # A typed non-Action world-state operation; never part of Action coverage.
+    adult_member_candidate: object = None
 
 
 @dataclass(frozen=True)
@@ -391,7 +393,8 @@ def _preflight(encounter, boundary):
             raise UnsupportedEvaluation('unreviewed scheduling hook')
         if 'on_completed' in data:
             raise UnsupportedEvaluation('unreviewed completion metadata')
-        if type(action) in (ObserveGroupAction,AskAboutPastAction):
+        if type(action) in (ObserveGroupAction,AskAboutPastAction) or (
+                type(action) is SpotAction and data.get('group_fully_visible') is True):
             from objective_reality import objective_action_data
             objective_action_data(action)
         if any(callable(v) for k,v in data.items() if k != 'generate'):
@@ -514,6 +517,23 @@ def _validate_closure(candidate):
         'inconsistent proposed queues')
     _require(all(r.boundary>candidate.boundary for r in queues.reservations), 'early or missing resource release')
     _require(candidate.provisional_rng.after==supported.boundary.provisional_rng_state, 'RNG projection mismatch')
+    operation=candidate.adult_member_candidate
+    if operation is not None:
+        from group_member_realization import AdultMemberCandidate
+        _require(type(operation) is AdultMemberCandidate
+            and operation.request.publication_boundary==candidate.boundary
+            and operation.first_eligible_boundary==candidate.boundary+1
+            and operation.encounter_id==candidate.encounter_id
+            and operation.encounter_identity==candidate.start_checkpoint.encounter.identity
+            and operation.universe_identity==candidate.start_checkpoint.universe.identity
+            and operation.read_dependencies==candidate.start_checkpoint.read_set,
+            'invalid or stale adult-member system operation')
+        _require(operation.request.group_id in snapshot.entities
+            and operation.member_id not in snapshot.entities
+            and all(operation.member_id not in (getattr(action,'actor_id',None),
+                getattr(action,'target_id',None),getattr(action,'instrument_id',None))
+                for action in snapshot.actions.values()),
+            'adult realization would cross the current shared snapshot boundary')
 
 
 def _native_lock(world):
@@ -524,7 +544,8 @@ def _native_lock(world):
 
 
 def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, velocity_frame='global',
-                               rng_state=None, rng_owner=None):
+                               rng_state=None, rng_owner=None, _restore_context=None,
+                               adult_member_candidate=None):
     """Read one committed checkpoint; return one inactive, detached interval.
 
     The schedule lock protects acceptance/publication during capture. Other
@@ -538,6 +559,19 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
         ed,wd,objects,book=_preflight(encounter,next_boundary)
         role,owner_identity,before_rng=_rng_input(encounter,rng_state,rng_owner)
         read_set=_read_set(encounter)
+        if adult_member_candidate is not None:
+            from group_member_realization import (
+                AdultMemberCandidate, validate_adult_member_candidate,
+            )
+            _require(type(adult_member_candidate) is AdultMemberCandidate,
+                'unsupported non-Action interval operation')
+            _require(_restore_context is None,
+                'adult realization cannot be combined with checkpoint continuation')
+            _require(adult_member_candidate.request.publication_boundary==next_boundary
+                and adult_member_candidate.read_dependencies==read_set,
+                'adult-member candidate boundary or read dependency is stale')
+            group=world.get_object_by_id(adult_member_candidate.request.group_id)
+            validate_adult_member_candidate(encounter,group,adult_member_candidate)
         checkpoint=IntervalCheckpoint(AuthorityReference('encounter',encounter.id,id(encounter)),
             AuthorityReference('universe',world.id,id(world)),ed['time'],ed['last_processed_boundary'],
             wd['_schedule_revision'],read_set,_digest(read_set))
@@ -568,7 +602,25 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             if now<next_boundary:start(now,'before_boundary')
         fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),MappingProxyType(events),
             MappingProxyType(initialization),MappingProxyType(registered),MappingProxyType(states),MappingProxyType(positions))
-        context=capture_observer_context(encounter,next_boundary,rng_state=before_rng,_stage=fence)
+        context=capture_observer_context(encounter,next_boundary,rng_state=before_rng,
+            _stage=fence,_restore_context=_restore_context)
+        if adult_member_candidate is not None:
+            _require(adult_member_candidate.member_id not in context.snapshot.entities,
+                'new adult must be absent from the common interval snapshot')
+            _require(all(adult_member_candidate.member_id not in (
+                getattr(action,'actor_id',None),getattr(action,'target_id',None),
+                getattr(action,'instrument_id',None))
+                for action in context.snapshot.actions.values()),
+                'current-boundary Action already references proposed adult')
+        if _restore_context is not None:
+            from checkpoint_restore_dependencies import _PreparedContinuationContext
+            from frozen_practice import _validate_imported_prefix
+            if type(_restore_context) is not _PreparedContinuationContext:
+                raise EvaluationIntegrityError('unsupported trusted-local practice context')
+            _validate_imported_prefix(_restore_context.imported_prefix)
+            if (_restore_context.evaluation_binding() !=
+                    getattr(context.snapshot, 'imported_practice_dependency', None)):
+                raise EvaluationIntegrityError('imported practice dependency differs from activated context')
         # Shared mutable Target storage would require an additional aliasing
         # contract during identity-preserving application. Refuse it now.
         current_owners={}; spatial_owners={}
@@ -614,8 +666,11 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             'recipients':supported.recipients,'lifecycle':supported.lifecycle,
             'action_metadata':metadata,'queues':queues,'rng':provisional})
         candidate=IntervalCandidate(encounter.id,next_boundary,checkpoint,tuple(movement),tuple(fences),
-            context.snapshot,supported,provisional,changes)
+            context.snapshot,supported,provisional,changes,
+            adult_member_candidate=adult_member_candidate)
         _validate_closure(candidate)
+        from transactional_progression import _validate_restored_candidate_context
+        _validate_restored_candidate_context(encounter,candidate)
         _guard_methods()
         _require(_read_set(encounter)==read_set, 'authoritative dependency changed during interval preparation')
         _require(_rng_input(encounter,rng_state,rng_owner)==(role,owner_identity,before_rng), 'RNG owner changed during preparation')
@@ -642,6 +697,12 @@ def validate_interval_candidate(encounter, candidate, *, rng_state=None, rng_own
     with lock:
         try:
             _preflight(encounter,candidate.boundary)
+            if candidate.adult_member_candidate is not None:
+                from group_member_realization import validate_adult_member_candidate
+                group=world.get_object_by_id(candidate.adult_member_candidate.request.group_id)
+                validate_adult_member_candidate(encounter,group,candidate.adult_member_candidate)
+            from transactional_progression import _validate_restored_candidate_context
+            _validate_restored_candidate_context(encounter,candidate)
             current=_read_set(encounter)
             rng=_rng_input(encounter,rng_state,rng_owner)
         except (ValueError,TypeError,KeyError,AttributeError) as exc:

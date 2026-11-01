@@ -1,4 +1,4 @@
-"""Action-driven nomadic group observation: learned skill, fallible evidence, beliefs.
+"""EXPERIMENTAL Group sensor: Spot-rank observation, fallible evidence, and belief.
 
 Run from repo root: python examples/group_observation_encounter.py
 This is range-gated proxy sensing, *not* simulated light or terrain vision.

@@ -199,7 +199,7 @@ class _Inventory:
             return ('unsupported-reference','external-recipient')
         if tag=='statistical_group.StatisticalGroup' and field=='_conditional_attributes':
             self.issue('conditional_attribute_adapter_missing',ref,field,'ConditionalAttributes owns committed formation-attribute data and a lambda-backed keyed RNG provider; no reviewed detached/rehydration adapter exists in this inventory.')
-        if field in ('ledger','received_accounts') and item is not None and tag in ('group_observation.ObserveGroupAction','history_conversation.AskAboutPastAction'):
+        if field in ('ledger','received_accounts') and item is not None and tag in ('group_observation.ObserveGroupAction','history_conversation.AskAboutPastAction','activities.SpotAction'):
             self.issue('unbound_external_recipient',ref,field,'Caller-owned recipient is not registered with a durable Universe ownership/binding contract.')
         if tag=='realization.RealityLedger' and field=='_validators':
             self.issue('validator_rehydration_required',ref,field,'Executable constraint callbacks cannot be captured; a reviewed owner/type adapter must reconstruct and validate constraints.')

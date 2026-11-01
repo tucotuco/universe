@@ -1,4 +1,4 @@
-"""A choice-driven but deliberately bounded exploration of a traveling caravan.
+"""EXPERIMENTAL Group sensor: bounded exploration of a traveling caravan.
 
 Run: python examples/interactive_discovery.py
      python examples/interactive_discovery.py --seed 392

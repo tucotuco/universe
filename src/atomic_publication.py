@@ -28,7 +28,9 @@ from universe_physical_fatigue_r4 import Profile
 
 
 PHASES = ('movement','registrations','targets','practice','reality','observers',
-          'lifecycle','endpoint_starts','frames_clock','rng','consistency','mark_committed')
+          'lifecycle','endpoint_starts','frames_clock','adult_registry',
+          'adult_group_member','adult_group_realized','adult_group_motion',
+          'adult_encounter_participant','rng','consistency','mark_committed')
 _GATE = threading.RLock()  # Stable lock order: process gate, then world schedule lock.
 _ACTIVE = None
 _PUBLISHING = False
@@ -264,6 +266,7 @@ class _WritePlan:
         self.phases={phase:[] for phase in PHASES}
         self.locations={}
         self.journal=[]
+        self.adult_realization=None  # Detached until its explicit publication phases.
 
     def _add(self,phase,location,operation,chain=False):
         if location in self.locations and not chain:
@@ -376,6 +379,25 @@ def _make_plan(encounter,candidate,rng_owner):
     plan=_WritePlan();world=encounter.universe;book=encounter._choice_book
     objects=world.object_registry.object_instances;changes=candidate.proposed_authoritative_changes
     supported=candidate.supported_candidate;queues=changes['queues'];snapshot=candidate.pre_action_snapshot
+    if candidate.adult_member_candidate is not None:
+        from group_member_realization import (
+            _construct_detached_adult, validate_adult_member_candidate,
+        )
+        operation=candidate.adult_member_candidate
+        group=world.get_object_by_id(operation.request.group_id)
+        try:
+            validate_adult_member_candidate(encounter,group,operation)
+            being,proposed_member=_construct_detached_adult(operation,encounter,group)
+        except (ValueError,TypeError,KeyError,AttributeError) as exc:
+            raise PublicationRejected('adult-member candidate failed publisher preflight') from exc
+        slot=(operation.request.household,'adults',operation.request.index)
+        member=group._members.get(slot)
+        if member is None:member=proposed_member
+        elif member!=proposed_member:raise PublicationRejected('GroupMember identity/placement mismatch')
+        if (being.id in objects or being.id in encounter.being_list
+                or being.id in encounter.non_being_object_list):
+            raise PublicationRejected('adult-member identity collision before publication')
+        plan.adult_realization=(operation,group,being,member,slot)
     events=dict(world.event_history)
     for record in book._choices.values():
         for member in record.members:
@@ -496,6 +518,19 @@ def _make_plan(encounter,candidate,rng_owner):
         encounter.fatigue_frame_history+[_materialize(changes['fatigue_history'][-1])])
     for name,value in changes['clock'].items():
         plan.attr('frames_clock',encounter,{'coordinator_time':'_coordinator_time','interval_start':'_interval_start'}.get(name,name),value)
+    if plan.adult_realization is not None:
+        operation,group,being,member,slot=plan.adult_realization
+        registry_after=dict(objects);registry_after[operation.member_id]=being
+        plan.contents('adult_registry',objects,registry_after)
+        if slot not in group._members:
+            members_after=dict(group._members);members_after[slot]=member
+            plan.contents('adult_group_member',group._members,members_after)
+        realized_after=dict(group._realized_beings);realized_after[operation.member_id]=being
+        plan.contents('adult_group_realized',group._realized_beings,realized_after)
+        motion_after=set(group._motion_attached_native_ids);motion_after.add(operation.member_id)
+        plan.contents('adult_group_motion',group._motion_attached_native_ids,motion_after)
+        participants_after=list(encounter.being_list);participants_after.append(operation.member_id)
+        plan.contents('adult_encounter_participant',encounter.being_list,participants_after)
     receipt=PublishedInterval(encounter.id,candidate.boundary,tuple(supported.boundary.actions),tuple(supported.effects),
         candidate.provisional_rng.after,supported.notification_intents,inspection=prepare_record(encounter,candidate,target_anchors,events))
     plan.append('mark_committed',encounter,'_atomic_interval_history',receipt)
@@ -529,6 +564,20 @@ def _committed_consistency(encounter,candidate,plan):
         if type(objects[key]) is StatisticalGroup:_frozen_group(objects[key])
     for identity,handle in _recipient_handles(encounter,candidate).items():
         if identity.role=='in_world_belief_ledger':_capture_belief(handle,handle.observer_id)
+    if candidate.adult_member_candidate is not None:
+        operation,group,being,member,slot=plan.adult_realization
+        objects=encounter.universe.object_registry.object_instances
+        if (objects.get(operation.member_id) is not being
+                or group._realized_beings.get(operation.member_id) is not being
+                or group._members.get(slot)!=member
+                or operation.member_id not in group._motion_attached_native_ids
+                or encounter.being_list.count(operation.member_id)!=1
+                or operation.member_id in encounter.non_being_object_list
+                or operation.member_id in encounter.awareness
+                or group.__dict__.get('_counts')!=dict(operation.formation_counts)
+                or operation.member_id in candidate.pre_action_snapshot.entities
+                or operation.first_eligible_boundary!=candidate.boundary+1):
+            raise PublicationRejected('adult-member realization post-write consistency failed')
 
 
 def _without_fault(read_set):

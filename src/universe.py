@@ -44,6 +44,9 @@ class Universe(Identifiable):
         self.event_history["0"]=first_event
 
     def to_json(self):
+        from transactional_progression import is_quarantined
+        if is_quarantined(self):
+            raise ValueError('Quarantined checkpoint reconstruction cannot be serialized')
         if any(book.encounter.progression_mode == 'transactional' or book.encounter.__dict__.get('_atomic_interval_history') or
                (book.encounter.boundary_fault or {}).get('kind') == 'atomic_publication'
                for book in self._choice_books):
@@ -86,6 +89,9 @@ class Universe(Identifiable):
         return self.event_history.get(event_id)
 
     def add_object(self, obj):
+        from transactional_progression import is_quarantined
+        if is_quarantined(self):
+            raise ValueError('Quarantined checkpoint reconstruction cannot accept Objects')
         if isinstance(obj, ObjectInstance):
             self.object_registry.add_object(obj)
 
@@ -93,6 +99,9 @@ class Universe(Identifiable):
         return self.object_registry.get_object_by_id(obj_id)
 
     def add_event(self, event):
+        from transactional_progression import is_quarantined
+        if is_quarantined(self):
+            raise ValueError('Quarantined checkpoint reconstruction cannot accept Events')
         from action import Action
         if isinstance(event, Action):
             raise ValueError('Actions must register through native Encounter choice publication')
@@ -100,6 +109,9 @@ class Universe(Identifiable):
             self.event_history[event.id]=event
 
     def save_to_file(self, filename):
+        from transactional_progression import is_quarantined
+        if is_quarantined(self):
+            raise ValueError('Quarantined checkpoint reconstruction cannot be saved')
         for book in self._choice_books:
             book.encounter.assert_checkpoint_exportable()
         for event in self.event_history.values():

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch,Mock
 import uuid
 
@@ -45,12 +46,23 @@ class TestTransactionalProgression(unittest.TestCase):
 
     def raw(self):return publication_fixtures.raw_graph(self.world,self.enc)
 
+    def test_dead_weak_mode_binding_does_not_poison_reused_legacy_encounter_id(self):
+        from transactional_progression import _BINDINGS,mode_of
+        key=id(self.enc);marker=object();previous=_BINDINGS.get(key,marker)
+        _BINDINGS[key]=SimpleNamespace(encounter=lambda:None)
+        try:
+            self.assertEqual(mode_of(self.enc),'legacy')
+            self.assertNotIn(key,_BINDINGS)
+        finally:
+            if previous is marker:_BINDINGS.pop(key,None)
+            else:_BINDINGS[key]=previous
+
     def test_legacy_is_default_and_still_calls_native_resolver(self):
         action=self.f.spot();self.enc.schedule_action(action)
         self.assertEqual(self.enc.progression_mode,'legacy')
         original=SpotAction.resolve;seen=[]
         def resolve(action,dc):seen.append(action.id);return original(action,dc)
-        with patch.object(SpotAction,'resolve',resolve):self.enc.step(1)
+        with patch.object(SpotAction,'resolve',resolve):self.enc.step(6)
         self.assertEqual(seen,[action.id]);self.assertFalse(self.enc.__dict__.get('_atomic_interval_history'))
 
     def test_explicit_mode_is_visible_and_irreversible(self):
@@ -116,7 +128,8 @@ class TestTransactionalProgression(unittest.TestCase):
 
     def test_single_step_matches_direct_c2_candidate_exactly(self):
         self.enable();action=self.f.spot(roll=None);self.enc.schedule_action(action)
-        candidate=self.enc.prepare_interval_candidate(1,rng_owner=self.rng)
+        self.enc.step(5)
+        candidate=self.enc.prepare_interval_candidate(6,rng_owner=self.rng)
         result=self.enc.step(1)
         self.assertEqual(result.completed_action_ids,tuple(candidate.supported_candidate.boundary.actions))
         self.assertEqual(action.resolution,candidate.supported_candidate.boundary.actions[action.id])
@@ -129,8 +142,8 @@ class TestTransactionalProgression(unittest.TestCase):
         # Instance callbacks are intentionally refused, so watch the approved
         # native implementation without replacing its class contract.
         with patch('transactional_progression.guard_legacy_action',side_effect=AssertionError('legacy callback')):
-            self.enc.step(1)
-        self.assertEqual(action.resolution.outcome,'success');self.assertEqual(self.enc.time,1)
+            self.enc.step(6)
+        self.assertEqual(action.resolution.outcome,'success');self.assertEqual(self.enc.time,6)
 
     def test_each_boundary_has_one_owned_native_stage_and_publish(self):
         self.enable()
@@ -193,38 +206,42 @@ class TestTransactionalProgression(unittest.TestCase):
         self.assertEqual(self.a.get_position(),CartesianPosition(0,6,0))
 
     def test_exact_nominal_end_and_nextafter_stay_in_their_respective_batches(self):
-        self.enable();one=self.f.spot();two=self.f.spot(self.c,duration=math.nextafter(1,math.inf));self.enc.schedule_choice((one,two))
-        self.enc.step(1);self.assertIsNotNone(one.resolution);self.assertIsNone(two.resolution)
+        self.enable();one=self.f.spot();start=.25
+        two=SpotAction(self.world,self.c.id,self.b.id,start,die_roll=20);self.enc.schedule_choice((one,two))
+        self.enc.step(6);self.assertIsNotNone(one.resolution);self.assertIsNone(two.resolution)
         self.enc.step(1);self.assertIsNotNone(two.resolution)
-        self.assertEqual(two._atomic_lifecycle.nominal_end,math.nextafter(1,math.inf));self.assertEqual(two._atomic_lifecycle.boundary,2)
+        self.assertEqual(two._atomic_lifecycle.nominal_end,6.25);self.assertEqual(two._atomic_lifecycle.boundary,7)
 
     def test_mixed_group_history_spot_run_complete_route_and_distinct_beliefs(self):
         group=self.f.f.f.group();history=self.f.f.f.history();la,lb=BeliefLedger(self.a.id),BeliefLedger(self.b.id);accounts=[]
         self.enable();one,two=self.f.f.observe(self.a,group,ledger=la),self.f.f.observe(self.b,group,ledger=lb)
         ask=AskAboutPastAction(self.world,self.c.id,self.a.id,0,episode_time=0,topic='lessons',generate=self.f.f.f.recipe(history),received_accounts=accounts)
-        run=RunAction(self.world,self.c.id,0,1,1,experience=7);spot=self.f.spot()
-        self.enc.schedule_choice((one,two,ask,run,spot));result=self.enc.step(1,velocities={self.c.id:(1,0,0)})
+        run=RunAction(self.world,self.c.id,0,6,1,experience=7);spot=self.f.spot()
+        ask.end_time=6
+        self.enc.schedule_choice((one,two,ask,run,spot));result=self.enc.step(6,velocities={self.c.id:(1,0,0)})
         self.assertEqual(set(result.completed_action_ids),{x.id for x in (one,two,ask,run,spot)})
         self.assertEqual(group._composition_reality.revision,1);self.assertNotEqual(la.evidence[0].reported_position,lb.evidence[0].reported_position)
-        self.assertEqual(len(accounts),1);self.assertEqual(self.a.skill_experience['spot'],22);self.assertEqual(self.c.skill_experience['run'],7)
-        self.assertEqual(len(self.a.skill_use_history[-1].exercises),2)
-        self.assertFalse(hasattr(one.resolution,'hp_before'));self.assertEqual(len(target_interval_history(self.a)),1)
+        self.assertEqual(len(accounts),1);self.assertEqual(self.a.skill_experience.get('spot',0),12);self.assertEqual(self.c.skill_experience['run'],7)
+        self.assertEqual(len(self.a.skill_use_history[-1].exercises),1)
+        self.assertFalse(hasattr(one.resolution,'hp_before'));self.assertEqual(len(target_interval_history(self.a)),6)
 
     def test_combined_practice_validates_history_against_full_same_boundary_transition(self):
-        skills=self.world.get_skill_dictionary();self.a.set_skill_level(skills,'spot',1)
-        self.a.record_skill_use(skills,'spot',1230,action_id='prior',time=-2)
-        history=self.f.f.f.history();group=self.f.f.f.group();self.enable()
-        observe=self.f.f.observe(self.a,group);spot=self.f.spot()
-        ask=self.f.f.f.ask(self.c,history,self.f.f.f.recipe(history,rank=2,extra=(Fact(history.skill_key(1,'spot'),3),)))
-        self.enc.schedule_choice((observe,spot,ask));self.enc.step(1)
-        self.assertEqual(self.a.get_skill_level('spot'),3);self.assertEqual(self.a.skill_experience['spot'],1252)
-        self.assertEqual(history.reality.inspect(history.skill_key(1,'spot')).value,3)
+        skills=self.world.get_skill_dictionary();self.a.set_skill_level(skills,'run',1)
+        self.a.record_skill_use(skills,'run',1230,action_id='prior',time=-2)
+        history=self.a.begin_personal_history(earliest=-10,known_through=10,nondeclining_skills=('run',));self.enable()
+        one=RunAction(self.world,self.a.id,0,6,.5,experience=10)
+        two=RunAction(self.world,self.a.id,0,6,.5,experience=12);spot=self.f.spot()
+        ask=self.f.f.f.ask(self.c,history,self.f.f.f.recipe(history,rank=2,extra=(Fact(history.skill_key(6,'run'),3),)))
+        ask.end_time=6
+        self.enc.schedule_choice((one,two,spot,ask));self.enc.step(6,velocities={self.a.id:(1,0,0)})
+        self.assertEqual(self.a.get_skill_level('run'),3);self.assertEqual(self.a.skill_experience['run'],1252)
+        self.assertEqual(history.reality.inspect(history.skill_key(6,'run')).value,3)
         self.assertEqual(self.a.skill_use_history[-1].level_before,2)
 
     def test_unfavorable_and_cancelled_outcomes_commit_without_fault(self):
         self.enable();action=self.f.spot(roll=1);run=RunAction(self.world,self.c.id,0,2,1)
         self.enc.schedule_choice((action,run));self.enc.step(1);self.enc.cancel_action(run.id,reason='stop')
-        self.enc.step(1)
+        self.enc.step(5)
         self.assertEqual(action.resolution.outcome,'failure');self.assertEqual(run.resolution.outcome,'interrupted')
         self.assertIsNone(self.enc.boundary_fault);self.assertIn(run.id,self.enc.cancelled_action_list)
 
@@ -438,8 +455,8 @@ class TestTransactionalProgression(unittest.TestCase):
     def test_existing_start_metadata_can_be_selected_without_legacy_effects(self):
         action=self.f.spot();self.enc.schedule_action(action)
         self.assertTrue(action._activity_started);self.assertIsNone(action.resolution)
-        self.enable();self.enc.step(1)
-        self.assertEqual(action.resolution.outcome,'success');self.assertEqual(self.a.skill_experience['spot'],10)
+        self.enable();self.enc.step(6)
+        self.assertEqual(action.resolution.outcome,'success');self.assertNotIn('spot',self.a.skill_experience)
 
     def test_prepared_native_choices_remain_undoable_before_first_owned_start(self):
         self.enable();action=RunAction(self.world,self.a.id,0,1,1)
@@ -547,7 +564,7 @@ class TestTransactionalLongStep(unittest.TestCase):
             f=fixtures.TestIntervalStaging();f.setUp();rng=RNGCursor(random.Random(18).getstate())
             f.enc.enable_transactional_progression(quiescent=True,rng_owner=rng)
             one=RunAction(f.world,f.a.id,.2,1,1,experience=7)
-            spot=SpotAction(f.world,f.a.id,f.b.id,0,experience=10,die_roll=None)
+            spot=SpotAction(f.world,f.a.id,f.b.id,0,die_roll=None)
             later=SpotAction(f.world,f.c.id,f.b.id,1,die_roll=None)
             run=RunAction(f.world,f.c.id,2,1,1,experience=5)
             f.enc.schedule_choice((one,spot,later,run))

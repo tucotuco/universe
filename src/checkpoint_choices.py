@@ -15,7 +15,7 @@ _DECLARATION_FIELDS = (
     'id', 'universe', 'event_type', 'start_time', 'end_time', 'actor_id',
     'target_id', 'instrument_id', 'parent_event_id', 'encounter', 'reach',
     'kind', 'target_action_id', 'minimum_distance', 'practice_experience',
-    'max_distance', 'declared_roll', 'episode_time', 'topic', 'generate',
+    'max_distance', 'spotting_conditions', 'declared_roll', 'episode_time', 'topic', 'generate',
     'substituted_claim', 'received_accounts', 'seed', 'random_key', 'observer',
     'interpreter', 'ledger', 'experience_policy', 'focus_category',
     'get_instrument', 'damage_potential', '_status', 'on_schedule',
@@ -86,6 +86,8 @@ def _scalar(value, label):
         return ('string', value)
     if type(value) in (int, float):
         return _number(value, label)
+    if type(value) is tuple and all(type(item) is str for item in value):
+        return ('strings', value)
     raise ChoiceDescriptorRejected(f'{label} is not a supported declaration scalar')
 
 
@@ -139,8 +141,8 @@ def _action_descriptor(action, world, encounter):
         'native.spot-action/1': {
             'id','name','type','universe','event_type','start_time','end_time',
             'location','parent_event_id','actor_id','target_id','instrument_id',
-            'strategy','resolution','max_distance','practice_experience',
-            'declared_roll','roll','skill_level_used','path_status','_encounter'},
+            'strategy','resolution','spotting_conditions','declared_roll',
+            'roll','path_status','_encounter','ledger','group_fully_visible'},
     }[adapter]
     _require(not (set(data) - expected), 'unknown native Action fields are not portable')
     action_id = data.get('id')
@@ -178,10 +180,17 @@ def _action_descriptor(action, world, encounter):
     else:
         _require(data.get('target_id') is not None and data.get('_encounter') is None,
                  'SpotAction must be pending and unbound to a live Encounter')
-        _require(data.get('roll') is None and data.get('skill_level_used') is None
+        _require(data.get('ledger') is None and data.get('group_fully_visible') is False,
+                 'Group observation Spot declarations are not yet portable')
+        _require(data.get('roll') is None
                  and data.get('path_status') is None,
                  'SpotAction contains sampled outcome state')
-        specific = ('max_distance','practice_experience','declared_roll')
+        specific = ('spotting_conditions','declared_roll')
+        from discovery import SpottingConditions
+        try:
+            SpottingConditions(data.get('spotting_conditions'))
+        except (TypeError, ValueError) as exc:
+            raise ChoiceDescriptorRejected(str(exc)) from exc
     _require(_registry_ref(world, encounter, data.get('actor_id'), 'actor') != ('null',),
              'Action actor is required')
     actor = world.object_registry.object_instances[data['actor_id']]

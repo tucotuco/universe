@@ -78,8 +78,10 @@ class TestDeveloperPresentation(fixtures.InspectionFixture):
         self.assertIn('Due Action IDs',text);self.assertIn('Start fences',text)
 
     def test_two_exercises_one_target_transition_has_causal_records(self):
-        self.a.record_skill_use(self.world.get_skill_dictionary(),'spot',1240,action_id='prior',time=-2)
-        self.enable();one,two=self.f.spot(),self.f.spot();self.enc.schedule_choice((one,two));self.enc.step(1)
+        self.a.record_skill_use(self.world.get_skill_dictionary(),'run',1240,action_id='prior',time=-2)
+        self.enable();one,two=(RunAction(self.world,self.a.id,0,1,.5,experience=3),
+                              RunAction(self.world,self.a.id,0,1,.5,experience=4))
+        self.enc.schedule_choice((one,two));self.enc.step(1,velocities={self.a.id:(1,0,0)})
         view=self.enc.inspect_committed();text,html=self.render(view)
         self.assertEqual(len(view.target(self.a.id).state.practice_state.transitions),1)
         self.assertIn('BatchSkillUse',text);self.assertIn('CandidatePracticeUse',text)
@@ -209,7 +211,7 @@ class TestDeveloperPresentation(fixtures.InspectionFixture):
         with self.assertRaises(InspectionRejected):self.enc.inspect_committed(receipt=receipt)
 
     def test_cancelled_fractional_action_and_no_movement_are_readable(self):
-        self.enable();spot=self.f.spot(start=.25);run=RunAction(self.world,self.c.id,0,1,1)
+        self.enable();spot=RunAction(self.world,self.a.id,.25,1,.5,experience=1);run=RunAction(self.world,self.c.id,0,1,1)
         self.enc.schedule_choice((spot,run));self.enc.step(1);self.enc.cancel_action(spot.id);self.enc.step(1)
         text,html=self.render(self.enc.inspect_committed())
         self.assertIn('Nominal start: 0.25; nominal end: 1.25',text)
@@ -231,21 +233,24 @@ class TestDeveloperPresentation(fixtures.InspectionFixture):
         self.assertEqual(before,self.raw())
 
     def test_programmatic_demo_uses_real_native_commits(self):
-        before=random.getstate();view=build_demo_view(1);text,html=self.render(view)
+        before=random.getstate();view=build_demo_view(5);text,html=self.render(view)
         self.assertEqual(random.getstate(),before)
-        self.assertEqual((view.boundary,view.latest_boundary),(1,2))
+        self.assertEqual((view.boundary,view.latest_boundary),(5,6))
         self.assertEqual(len(view.actions),1)
         self.assertTrue(view.schedule.pending)
         self.assertIn('Developer',text);self.assertIn('Developer',html)
-        later=build_demo_view();self.assertEqual(later.boundary,2)
+        later=build_demo_view();self.assertEqual(later.boundary,6)
         self.assertIn('success',[action.facts.outcome for action in later.actions.values()])
+        actor_target=next(target for target in later.targets.values()
+                          if target.state.practice_state.skill_experience.get('run') == 7)
+        self.assertNotIn('spot',actor_target.state.practice_state.skill_experience)
 
     def test_demo_cli_writes_only_explicit_stdout(self):
         import io
         output=io.StringIO()
-        with patch('sys.stdout',output):main(['--html','--boundary','1'])
+        with patch('sys.stdout',output):main(['--html','--boundary','5'])
         self.assertTrue(output.getvalue().startswith('<!doctype html>'))
-        self.assertIn('Selected committed boundary: 1',output.getvalue())
+        self.assertIn('Selected committed boundary: 5',output.getvalue())
 
 
 class TestCombatDeveloperPresentation(unittest.TestCase):

@@ -47,6 +47,55 @@ class SightlineResult:
         return self.status == "clear"
 
 
+@dataclass(frozen=True)
+class PhysicalPathIntersection:
+    """A separately modeled physical Entity intersecting a finite path."""
+
+    entity_id: str
+    entry: float
+    exit: float
+
+
+@dataclass(frozen=True)
+class PhysicalPathResult:
+    """Physical path evidence, independent of optical opacity."""
+
+    start: CartesianPosition
+    end: CartesianPosition
+    intersections: tuple[PhysicalPathIntersection, ...]
+    unmodeled_entity_ids: tuple[str, ...]
+
+
+def trace_physical_path(start, end, entities, *, exclude_ids=()):
+    """Trace modeled physical bodies/Objects, excluding Group aggregate bounds.
+
+    A StatisticalGroup footprint is a descriptive aggregate extent, not a
+    collision body. Its unresolved population supplies no inferred locations.
+    Group envelopes do not obstruct this path whether they are visually
+    transparent, opaque, or unmodeled. Other physical Entities retain the
+    existing conservative intersection/unknown behavior; their optical
+    opacity is irrelevant to this physical query.
+    """
+    from statistical_group import StatisticalGroup
+
+    excluded = set(exclude_ids)
+    candidates = []
+    for identity, entity in entities:
+        if identity in excluded:
+            continue
+        if (type(entity) is StatisticalGroup
+                or getattr(entity, "physical_path_role", None) == "aggregate_extent"):
+            continue
+        candidates.append((identity, entity))
+    optical = trace_sightline(start, end, candidates, exclude_ids=excluded)
+    return PhysicalPathResult(
+        start, end,
+        tuple(PhysicalPathIntersection(row.entity_id, row.entry, row.exit)
+              for row in optical.intersections),
+        optical.unmodeled_entity_ids,
+    )
+
+
 
 def trace_sightline(start, end, entities, *, exclude_ids=()):
     """Trace a world-space segment past ``(entity_id, entity)`` candidates.

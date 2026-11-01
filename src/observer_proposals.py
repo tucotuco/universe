@@ -277,14 +277,17 @@ def _capture_belief(ledger, observer_id):
         for key, value in readings.items():
             _check(key in evidence and type(value) is FieldInterpretation
                 and value.observation_id == key and value.observer_id == evidence[key].observer_id, 'invalid existing interpretation')
-    auxiliary = frozen_value({k: data[k] for k in ('_reassessments','communication_log','_inquiry_history')})
+    auxiliary = frozen_value({k: data[k] for k in (
+        '_reassessments','communication_log','_inquiry_history')})
     return FrozenBelief(RecipientIdentity('in_world_belief_ledger', id(ledger)), observer_id, evidence,
         interpretations, current, frozen_value(data['_belief_history']), auxiliary)
 
 
-def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None):
+def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None,
+                             _restore_context=None):
     """Read-only extension of 5B2 capture; callback and recipient adapters are closed."""
-    context = capture_objective_context(encounter, boundary, rng_state=rng_state, _stage=_stage)
+    context = capture_objective_context(encounter, boundary, rng_state=rng_state,
+        _stage=_stage,_restore_context=_restore_context)
     ed = object.__getattribute__(encounter, '__dict__')
     world = object.__getattribute__(ed['universe'], '__dict__')
     book = native_data(ed['_choice_book'], (ChoiceBook,))
@@ -328,6 +331,17 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
                 frozen = _capture_belief(data['ledger'], view.actor_id)
                 recipient = frozen.identity; recipients[recipient] = frozen
             actions[aid] = ObserverActionInputs(aid, sensor, interpreter, seed, key, data['focus_category'], policy, recipient)
+        elif view.family == 'spot' and aid in context.snapshot.objective_inputs.actions:
+            from activities import SpotAction
+            from statistical_group import StatisticalGroup
+            registry = object.__getattribute__(ed['universe'], '__dict__')['object_registry'].object_instances
+            target = registry.get(view.target_id)
+            if (type(action) is not SpotAction or type(target) is not StatisticalGroup
+                    or data.get('group_fully_visible') is not True or data.get('ledger') is None):
+                raise UnsupportedEvaluation('exact Group evidence requires the declared native Spot/visibility/ledger contract')
+            frozen = _capture_belief(data['ledger'], view.actor_id)
+            recipients[frozen.identity] = frozen
+            actions[aid] = ObserverActionInputs(aid, belief_recipient=frozen.identity)
         elif view.family == 'history_request':
             recipient = None; values = data['received_accounts']
             if values is not None:
@@ -369,7 +383,9 @@ def _belief_acquire(frozen, observation, interpretation):
         if evidence[observation.id] != observation or interpretations.get(observation.id) != interpretation:
             raise EvaluationIntegrityError('observation ID conflicts with existing Belief evidence')
         return frozen, False
-    evidence[observation.id] = observation; interpretations[observation.id] = interpretation
+    evidence[observation.id] = observation
+    if interpretation is not None:
+        interpretations[observation.id] = interpretation
     readings = {key: current.get(key, interpretations.get(key)) for key in evidence}
     revisions = belief_revisions(tuple(evidence.values()), readings, observation.group_id,
         'observation', observation.time, observation.id)
@@ -410,9 +426,12 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
         released = [e.object_id for e in owned if type(e) is ReservationReleaseEffect]
         _check(len(released) == len(expected_resources) and set(released) == expected_resources, 'missing/duplicate reservation release')
         action = snapshot.actions[aid]; item = inputs.actions.get(aid)
-        success = action.family == 'observe_group' and proposals[aid].outcome == 'success'
+        success = ((action.family == 'observe_group' or
+                    action.family == 'spot' and aid in inputs.actions)
+                   and proposals[aid].outcome == 'success')
         heard = action.family == 'history_request' and proposals[aid].outcome == 'heard'
-        _check(count(ObservationEffect) == int(success) and count(InterpretationEffect) == int(success)
+        interpretation_required = action.family == 'observe_group' and success
+        _check(count(ObservationEffect) == int(success) and count(InterpretationEffect) == int(interpretation_required)
             and count(TestimonyEffect) == int(heard), 'missing/extra evidence, interpretation or testimony')
         _check(count(BeliefAcquisitionEffect) == int(success and item.belief_recipient is not None)
             and count(AccountDeliveryEffect) == int(heard and item.account_recipient is not None), 'missing/extra authoritative delivery')
@@ -439,8 +458,23 @@ def build_supported_candidate(context, *, notify=False):
         item = inputs.actions[action.id]
         if action.lifecycle == 'cancelled':
             outcomes[action.id] = 'interrupted'; continue
+        if action.family == 'spot':
+            # Deliberate Spot is an ordinary native discovery Action. Its six
+            # second timing, DC, roll and Awareness proposal come from the
+            # frozen core evaluator; Group sensor rules are not reused here.
+            proposal = core_proposals.get(action.id)
+            if proposal is None:
+                raise ObserverProposalError('due Spot Action is missing its native proposal')
+            outcomes[action.id] = proposal.outcome
+            roll = dict(proposal.metadata).get('roll')
+            if roll is not None:
+                roll_metadata[action.id] = (None, roll)
+            if proposal.outcome == 'success' and action.id in inputs.actions:
+                active.add(action.id)
+            continue
         distance = snapshot.distance(action.actor_id,action.target_id)
-        limit = item.observer_config['coarse_range_m'] if action.family == 'observe_group' else action.data['max_distance']
+        limit = (item.observer_config['coarse_range_m']
+                 if action.family == 'observe_group' else action.data['max_distance'])
         outcome = 'unplaced' if distance is None else 'out_of_range' if distance > limit else None
         if outcome is None and action.family == 'history_request':
             outcome = 'heard' if action.target_id in snapshot.awareness.get(action.actor_id,()) else 'not_aware'
@@ -467,7 +501,32 @@ def build_supported_candidate(context, *, notify=False):
         else:
             outcome = outcomes[aid]; effects = []; metadata = []
             actor = action.actor_id; target = action.target_id
-            if action.family == 'observe_group':
+            if action.family == 'spot':
+                proposal = core_proposals[aid]
+                if outcome == 'success' and aid in objective.requests:
+                    from field_observation import CountReport
+                    counts = objective.subject(target).counts
+                    visible_total = counts['humans'] + counts['livestock'] + counts['dogs']
+                    observed = FieldObservation(aid, actor, target, action.nominal_end,
+                        None, None, {'visible_count': CountReport(visible_total, 0)},
+                        'exact_visible_aggregate_count', {}, None)
+                    observed = frozen_value(observed)
+                    observers[actor]['observations'][aid] = observed
+                    _append_effect(rows,snapshot,aid,'observer',0,ObservationEffect(aid,actor,aid))
+                    if item.belief_recipient is not None:
+                        state, acquired = _belief_acquire(
+                            recipient_states[item.belief_recipient], observed, None)
+                        recipient_states[item.belief_recipient] = state
+                        observers[actor]['belief_ids'].add(item.belief_recipient)
+                        _append_effect(rows,snapshot,aid,'delivery',0,
+                            BeliefAcquisitionEffect(aid,actor,item.belief_recipient,aid,acquired))
+                    key = objective.requests[aid].requested_key
+                    metadata.extend((('observation_id',aid),
+                        ('objective_key',(key.entity_id,key.attribute,key.time,key.detail)),
+                        ('evidence_kind','exact_visible_aggregate_count'),
+                        ('visible_count',visible_total)))
+                    proposal = replace(proposal, metadata=proposal.metadata + tuple(metadata))
+            elif action.family == 'observe_group':
                 level, roll = roll_metadata.get(aid,(snapshot.entity(actor).data['skills'].get('spot') or 0,None))
                 metadata.extend((('skill_level_used',level),('roll',roll)))
                 if outcome in ('success','failure'):
@@ -507,7 +566,8 @@ def build_supported_candidate(context, *, notify=False):
                     effect = AccountDeliveryEffect(aid,actor,item.account_recipient,aid)
                     _append_effect(rows,snapshot,aid,'delivery',0,effect)
                     account_delivery_ids.setdefault(item.account_recipient,[]).append(rows[-1].identity)
-            proposal = ActionProposal(aid,actor,() if target is None else (target,),outcome,tuple(effects),metadata=tuple(metadata))
+            if action.family != 'spot':
+                proposal = ActionProposal(aid,actor,() if target is None else (target,),outcome,tuple(effects),metadata=tuple(metadata))
         core_proposals[aid] = proposal
         life = inputs.lifecycle[aid]
         cancelled = action.lifecycle == 'cancelled'

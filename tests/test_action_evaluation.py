@@ -23,6 +23,7 @@ from spatial.state import CartesianPosition
 from spatial.geometry import Sphere, AxisAlignedBox
 from spatial.occlusion import VisualOcclusion
 from universe import Universe
+from statistical_group import StatisticalGroup
 
 
 class TestActionEvaluation(unittest.TestCase):
@@ -263,18 +264,18 @@ class TestActionEvaluation(unittest.TestCase):
         p=evaluate_snapshot(self.snapshot()).proposals[0]
         self.assertEqual(p.outcome,'unplaced');self.assertEqual(p.effects,())
 
-    def test_spot_awareness_and_practice_no_live_writes(self):
-        spot=SpotAction(self.world,self.a.id,self.b.id,0,experience=5,die_roll=20);self.schedule(spot)
+    def test_spot_awareness_has_no_practice_or_live_writes(self):
+        spot=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=20);self.schedule(spot)
         self.enc.clear_awareness(self.a.id,self.b.id)
         s=self.snapshot();p=self.unchanged(lambda:evaluate_snapshot(s)).proposals[0]
         self.assertEqual(p.outcome,'success')
         self.assertTrue(any(isinstance(x,AwarenessEffect) for x in p.effects))
         self.assertFalse(self.enc.is_aware(self.a.id,self.b.id));self.assertIsNone(spot.roll)
 
-    def test_spot_natural_one_fails_with_practice(self):
-        spot=SpotAction(self.world,self.a.id,self.b.id,0,experience=5,die_roll=1);self.schedule(spot)
+    def test_spot_roll_is_a_plain_difficulty_check_without_practice(self):
+        spot=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=1);self.schedule(spot)
         p=evaluate_snapshot(self.snapshot()).proposals[0]
-        self.assertEqual(p.outcome,'failure');self.assertEqual(len(p.effects),1)
+        self.assertEqual(p.outcome,'failure');self.assertEqual(p.effects,())
 
     def test_spot_blockers_and_geometry_are_detached(self):
         spot=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=20);self.schedule(spot)
@@ -384,6 +385,96 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(p.outcome,'blocked')
         self.assertEqual(evaluate_snapshot(s).trace,())
         self.assertEqual(s.path(self.a.id,self.b.id).intersections[0].entity_id,c.id)
+
+    def test_group_envelopes_are_not_physical_blockers_in_frozen_melee(self):
+        import json
+        from action_evaluation import DamageEffect
+
+        action = self.strike()
+        self.schedule(action)
+        config = json.loads((ROOT / 'examples' / 'nomadic_group.json').read_text())
+        groups = []
+        for identity, opacity in (('owning-envelope', 0), ('unrelated-envelope', 1)):
+            local = json.loads(json.dumps(config))
+            local['group_id'] = identity
+            group = StatisticalGroup(identity, identity, local, local['seed'])
+            group.set_position(CartesianPosition(.75, 0, 0))
+            group.set_geometry(Sphere(.6))
+            group.set_visual_occlusion(VisualOcclusion(opacity))
+            group.counts()  # Composition is known; no individual is realized.
+            self.world.add_object(group)
+            self.enc.add_object(group.id)
+            groups.append(group)
+
+        self.enc.time = 4
+        snapshot = capture_snapshot(self.enc, 4, _objective=True)
+        optical = snapshot.path(self.a.id, self.b.id)
+        physical = snapshot.physical_path(self.a.id, self.b.id)
+        self.assertEqual({row.entity_id for row in optical.intersections},
+                         {group.id for group in groups})
+        self.assertEqual(optical.status, 'blocked')  # opaque aggregate still occludes Spot.
+        self.assertEqual(physical.intersections, ())
+        self.assertEqual(physical.unmodeled_entity_ids, ())
+        self.assertEqual(snapshot.melee_status(snapshot.actions[action.id]),
+                         ('in_reach', 1.5))
+        self.assertEqual(action._status(self.enc), ('in_reach', 1.5))
+        self.assertEqual([group.materialized_count for group in groups], [0, 0])
+
+        groups[1].set_visual_occlusion(VisualOcclusion(0))
+        transparent_snapshot = capture_snapshot(self.enc, 4, _objective=True)
+        self.assertEqual(transparent_snapshot.path(self.a.id, self.b.id).status,
+                         'clear')
+        self.assertEqual(transparent_snapshot.physical_path(self.a.id, self.b.id)
+                         .intersections, ())
+        self.assertEqual(snapshot.path(self.a.id, self.b.id).status,
+                         'blocked')  # Existing frozen optical view is detached.
+
+        values = iter((15, 4))
+        def roll(context, dice):
+            value = next(values)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        before_rng = random.getstate()
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            result = evaluate_snapshot(snapshot)
+        self.assertEqual(random.getstate(), before_rng)
+        proposal = result.proposals[0]
+        self.assertEqual(proposal.outcome, 'normal')
+        self.assertIn(DamageEffect(action.id, self.b.id, 4, 'body'), proposal.effects)
+        self.assertTrue(all(group.counts()['humans'] > 0 for group in groups))
+        self.assertEqual([group.materialized_count for group in groups], [0, 0])
+
+    def test_unmodeled_group_is_ignored_but_unmodeled_physical_object_stays_uncertain(self):
+        import json
+        from object import ObjectDefinition, ObjectInstance
+
+        action = self.strike()
+        self.schedule(action)
+        config = json.loads((ROOT / 'examples' / 'nomadic_group.json').read_text())
+        config['group_id'] = 'unmodeled-group'
+        group = StatisticalGroup('Unmodeled group', 'unmodeled-group', config,
+                                 config['seed'])
+        group.set_position(CartesianPosition(.75, 0, 0))
+        group.counts()
+        self.world.add_object(group)
+        self.enc.add_object(group.id)
+        self.enc.time = 4
+        snapshot = capture_snapshot(self.enc, 4, _objective=True)
+        self.assertIn(group.id, snapshot.path(self.a.id, self.b.id).unmodeled_entity_ids)
+        self.assertEqual(snapshot.melee_status(snapshot.actions[action.id]),
+                         ('in_reach', 1.5))
+
+        obstacle = ObjectInstance(
+            ObjectDefinition('unmodeled obstacle', 0, 0, 0, 0, 0, 0, 0),
+            name='Unmodeled physical obstacle')
+        obstacle.set_position(CartesianPosition(.75, 0, 0))
+        self.world.add_object(obstacle)
+        self.enc.add_object(obstacle.id)
+        physical_snapshot = capture_snapshot(self.enc, 4, _objective=True)
+        status = physical_snapshot.melee_status(physical_snapshot.actions[action.id])
+        self.assertEqual(status, ('uncertain_path', 1.5))
+        self.assertEqual(action._status(self.enc), ('uncertain_path', 1.5))
 
     def test_defense_metadata_and_equipment_detached(self):
         attack=self.strike()

@@ -33,14 +33,19 @@ class TestObserverLifecycleProposals(unittest.TestCase):
         self.a,self.b,self.c=self.f.a,self.f.b,self.f.c
         for actor in self.f.beings:actor.set_skill_level(self.world.get_skill_dictionary(),'spot',0)
 
-    def observe(self,actor,group,roll=20,ledger=None,xp=None):
+    def observe(self,actor,group,roll=20,ledger=None,xp=None,start=0):
         key=actor.name
-        seed=next(s for s in range(10000) if observation_rng(s,key,group.id,0,'d20').randint(1,20)==roll)
-        return ObserveGroupAction(self.world,actor.id,group.id,0,seed=seed,random_key=key,
+        seed=next(s for s in range(10000) if observation_rng(s,key,group.id,start,'d20').randint(1,20)==roll)
+        return ObserveGroupAction(self.world,actor.id,group.id,start,seed=seed,random_key=key,
             observation={'coarse_range_m':100,'detailed_range_m':50},ledger=ledger,experience=xp)
 
     def context(self,*actions):
         self.enc.schedule_choice(actions);self.enc.time=max(__import__('math').ceil(a.end_time) for a in actions)
+        # RunAction measures displacement produced while its interval is live.
+        for action in actions:
+            if isinstance(action,RunAction):
+                actor=self.world.get_object_by_id(action.actor_id);pos=actor.get_position()
+                actor.set_position(CartesianPosition(pos.x+1,pos.y,pos.z))
         return capture_observer_context(self.enc,int(self.enc.time))
 
     def build(self,context,**kwargs):
@@ -142,8 +147,10 @@ class TestObserverLifecycleProposals(unittest.TestCase):
         self.assertEqual(dict(c.target(self.b.id).observer_state.heard_accounts),{})
 
     def test_mixed_native_spot_observation_history_has_complete_coverage(self):
-        group=self.f.group();h=self.f.history();observe=self.observe(self.a,group)
-        ask=self.f.ask(self.b,h);spot=SpotAction(self.world,self.c.id,self.a.id,0,die_roll=1,experience=0)
+        group=self.f.group();h=self.f.history();observe=self.observe(self.a,group,start=5)
+        ask=AskAboutPastAction(self.world,self.b.id,self.a.id,5,episode_time=0,
+            topic='lessons',generate=self.f.recipe(h))
+        spot=SpotAction(self.world,self.c.id,self.a.id,0,die_roll=1)
         candidate=self.build(self.context(observe,ask,spot))
         self.assertEqual(set(candidate.boundary.actions),{observe.id,ask.id,spot.id})
         self.assertEqual(candidate.boundary.coverage,'complete_supported_batch')
@@ -152,24 +159,32 @@ class TestObserverLifecycleProposals(unittest.TestCase):
         self.assertEqual(len(candidate.effects),len(set(candidate.effects)))
 
     def joint(self,rank):
-        group=self.f.group()
-        self.a.set_skill_level(self.world.get_skill_dictionary(),'spot',1)
-        self.a.record_skill_use(self.world.get_skill_dictionary(),'spot',1230,action_id='prior',time=-2)
-        h=self.f.history()
-        recipe=self.f.recipe(h,rank=2,extra=(Fact(h.skill_key(1,'spot'),rank),))
-        observe=self.observe(self.a,group)
-        spot=SpotAction(self.world,self.a.id,self.b.id,0,experience=10,die_roll=1)
-        ask=self.f.ask(self.c,h,recipe)
-        return group,h,self.context(observe,spot,ask),observe
+        self.f.group()  # Keep the mixed scenario's objective world available.
+        self.a.set_skill_level(self.world.get_skill_dictionary(),'run',1)
+        self.a.record_skill_use(self.world.get_skill_dictionary(),'run',1490,action_id='prior',time=-2)
+        h=self.a.begin_personal_history(earliest=-10,known_through=10,
+                                        nondeclining_skills=('run',))
+        from objective_reality import EpisodeFacts
+        recipe=EpisodeFacts((
+            Fact(h.episode_key(0,'lessons'),
+                 {'description':'Prior lessons','skill':'run','rank_after':3},
+                 'declared_history'),
+            Fact(h.skill_key(0,'run'),3,'declared_history'),
+            Fact(h.skill_key(6,'run'),rank,'declared_history'),
+        ))
+        spot=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=1)
+        run=RunAction(self.world,self.a.id,0,6,.5,experience=12)
+        ask=AskAboutPastAction(self.world,self.c.id,self.a.id,0,episode_time=0,
+            topic='lessons',generate=recipe,duration=6)
+        return None,h,self.context(spot,run,ask),run
 
-    def test_group_award_changes_combined_transition_and_history_acceptability(self):
+    def test_legitimate_run_award_changes_combined_transition_and_history_acceptability(self):
         _,h,ctx,action=self.joint(3);candidate=self.build(ctx)
         p=candidate.target(self.a.id).practice_state
-        self.assertEqual(p.skill_experience['spot'],1252)
+        self.assertEqual(p.skill_experience['run'],1502)
         self.assertEqual(len(p.transitions),1);self.assertEqual(p.transitions[0].level_after,3)
-        self.assertEqual([use.experience for use in p.exercises],[12,10])
-        self.assertEqual(dict(candidate.boundary.actions[action.id].metadata)['skill_level_used'],2)
-        self.assertEqual(candidate.objective.subject(self.a.id).fact(h.skill_key(1,'spot')).value,3)
+        self.assertEqual([use.experience for use in p.exercises],[12])
+        self.assertEqual(candidate.objective.subject(self.a.id).fact(h.skill_key(6,'run')).value,3)
 
     def test_incompatible_rank_rejected_after_all_actual_awards_without_reroll(self):
         _,_,ctx,_=self.joint(2)

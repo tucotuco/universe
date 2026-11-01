@@ -24,7 +24,7 @@ class Perception:
     target_id: str
     mode: str
     distance: float
-    threshold: float
+    threshold: float | None
 
 
 class RangePerception:

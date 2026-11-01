@@ -36,8 +36,10 @@ class FieldObservation:
     observer_id: str
     group_id: str
     time: float
-    reported_position: CartesianPosition
-    position_uncertainty_m: float
+    # Exact aggregate-only evidence may omit position: an Entity's internal
+    # reference point is not automatically a perceptible feature.
+    reported_position: CartesianPosition | None
+    position_uncertainty_m: float | None
     reports: dict[str, CountReport]
     mode: str
     dubious_candidates: dict[str, int] = field(default_factory=dict)
@@ -343,7 +345,8 @@ class BeliefLedger:
         """Two sightings of the *same observer* provide crude average velocity."""
         observer_id = self.observer_id if observer_id is None else observer_id
         entries = sorted((e for e in self.evidence if e.group_id == group_id
-                          and e.observer_id == observer_id), key=lambda e: e.time)
+                          and e.observer_id == observer_id
+                          and e.reported_position is not None), key=lambda e: e.time)
         if len(entries) < 2 or entries[-1].time == entries[0].time:
             return None
         dt = entries[-1].time - entries[0].time
@@ -358,7 +361,8 @@ class BeliefLedger:
         growth and acceleration; it is a *belief*, not a physically assured path.
         """
         entries = sorted((e for e in self.evidence if e.group_id == group_id
-                          and e.observer_id == self.observer_id), key=lambda e: e.time)
+                          and e.observer_id == self.observer_id
+                          and e.reported_position is not None), key=lambda e: e.time)
         velocity = self.estimated_velocity(group_id)
         if not entries or velocity is None:
             return None

@@ -36,9 +36,15 @@ class BeingDefinition(ObjectDefinition):
                  max_speed=None, abilities=None, skills=None, senses=None, 
                  vulnerabilities=None, resistances=None, immunities=None, languages=None, 
                  psionics=None, spells=None, traits=None, states=None, actions=None, 
-                 reactions=None, body_parts=None, armor_id=None, physiology_id=None):
+                 reactions=None, body_parts=None, armor_id=None, physiology_id=None,
+                 race=None, discovery_dc=None):
+        race = None if race in ('', 'None') else race
+        discovery_dc = None if discovery_dc in ('', 'None') else discovery_dc
         super().__init__(obj_type, length, width, height, weight, cost, hardness, 
-                         hit_points, is_magical, tags, weapon_categories)
+                         hit_points, is_magical, tags, weapon_categories, discovery_dc)
+        if race is not None and (type(race) is not str or not race.strip()):
+            raise ValueError("race must be a nonempty string or None")
+        self.race = race
         self.experience = convert_to_experience(experience)
         self.hit_dice = hit_dice
         self.alignment = alignment
@@ -103,7 +109,9 @@ class BeingDefinition(ObjectDefinition):
             self.reactions.copy(),
             self.body_parts.copy(),
             self.armor_id,
-            self.physiology_id)
+            self.physiology_id,
+            self.race,
+            self.discovery_dc)
         return new_being_definition
 
     def to_json(self):
@@ -143,7 +151,9 @@ class BeingDefinition(ObjectDefinition):
             'reactions': self.reactions,
             'body_parts': self.body_parts,
             'armor_id': self.armor_id,
-            'physiology_id': self.physiology_id
+            'physiology_id': self.physiology_id,
+            'race': self.race,
+            'discovery_dc': self.discovery_dc
             }
         return json.dumps(data)
 
@@ -337,8 +347,11 @@ class BeingInstance(ObjectInstance):
     ''' 
     An ObjectInstance that is a Being based on a BeingDefinition.
     '''
-    def __init__(self, being_definition, name=None):
-        ObjectInstance.__init__(self, being_definition, name)
+    def __init__(self, being_definition, name=None, id=None):
+        # A caller with an already validated native logical identity can supply
+        # it directly, avoiding allocation of a throwaway random UUID before
+        # replacing identity during detached transactional construction.
+        ObjectInstance.__init__(self, being_definition, name, id=id)
         self.original = being_definition
         self.current = being_definition.copy()
         self.possessions = []

@@ -310,13 +310,13 @@ class TestActionSettlement(unittest.TestCase):
         self.assertEqual(self.a.get_position().x,2)
         self.assertEqual(c.target(self.a.id).projected_hp,100)
 
-    def test_spot_awareness_union_retains_individual_causes_without_live_awards(self):
-        one=SpotAction(self.world,self.a.id,self.b.id,0,experience=3,die_roll=20)
-        two=SpotAction(self.world,self.a.id,self.b.id,0,experience=4,die_roll=20)
+    def test_spot_awareness_union_retains_individual_causes_without_practice(self):
+        one=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=20)
+        two=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=20)
         self.enc.clear_awareness(self.a.id,self.b.id)
         s=self.snapshot(one,two);r=evaluate_snapshot(s);c=self.build(s,r);t=c.target(self.a.id)
         self.assertEqual(t.aware_of,frozenset((self.b.id,)))
-        self.assertEqual(len(t.practice),2)
+        self.assertEqual(len(t.practice),0)
         self.assertEqual(len([e for e in t.incoming if type(e.effect) is AwarenessEffect]),2)
         self.assertFalse(self.enc.is_aware(self.a.id,self.b.id))
 
@@ -395,11 +395,11 @@ class TestActionSettlement(unittest.TestCase):
         row=next(row for row in r.identified_effects if type(row.effect) is DefenseEffect)
         with self.assertRaises(SettlementIntegrityError):self.build(s,replace(r,identified_effects=r.identified_effects+(row,)))
 
-    def test_spot_failure_keeps_practice_without_awareness(self):
-        spot=SpotAction(self.world,self.a.id,self.b.id,0,experience=3,die_roll=1)
+    def test_spot_failure_has_no_practice_or_awareness(self):
+        spot=SpotAction(self.world,self.a.id,self.b.id,0,die_roll=1)
         self.enc.clear_awareness(self.a.id,self.b.id)
         s=self.snapshot(spot);r=evaluate_snapshot(s);t=self.build(s,r).target(self.a.id)
-        self.assertEqual(len(t.practice),1);self.assertEqual(t.aware_of,frozenset())
+        self.assertEqual(len(t.practice),0);self.assertEqual(t.aware_of,frozenset())
 
     def test_ordinary_miss_and_unavailable_weapon_are_outcomes(self):
         action=self.attack();s=self.snapshot(action);r=self.evaluate(s,[2])

@@ -25,7 +25,7 @@ class TestPortableChoiceDescriptors(InspectionFixture):
 
     def test_supported_run_and_spot_choice_is_detached_deterministic_and_exact(self):
         run = RunAction(self.world, self.a.id, .125, 1.375, 1.25, experience=7)
-        spot = self.f.spot(self.c, start=1.75, duration=1.125, maximum=12)
+        spot = self.f.spot(self.c, start=1.75)
         view = self.accepted((run, spot))
         before = self.raw()
         one = self.descriptor(view)
@@ -45,10 +45,9 @@ class TestPortableChoiceDescriptors(InspectionFixture):
 
     def test_equivalent_distinct_action_objects_share_logical_descriptor(self):
         self.enable()
-        original = self.f.spot(self.c, start=.375, duration=1.25, maximum=17)
+        original = self.f.spot(self.c, start=.375)
         counterpart = SpotAction(self.world, original.actor_id, original.target_id,
-                                 original.start_time, duration=1.25, max_distance=17,
-                                 experience=original.practice_experience,
+                                 original.start_time, duration=6,
                                  die_roll=original.declared_roll)
         counterpart.id = original.id
         self.assertIsNot(original, counterpart)

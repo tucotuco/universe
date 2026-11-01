@@ -152,7 +152,8 @@ def objective_action_data(action):
     from group_observation import ObserveGroupAction, SampledGroupObservation
     from history_conversation import AskAboutPastAction
     from field_interpretation import FieldInterpreter
-    if type(action) not in (ObserveGroupAction, AskAboutPastAction):
+    from activities import SpotAction
+    if type(action) not in (ObserveGroupAction, AskAboutPastAction, SpotAction):
         raise UnsupportedEvaluation('unreviewed objective Action')
     data = object.__getattribute__(action, '__dict__')
     if any(callable(v) for k, v in data.items() if k != 'generate'):
@@ -171,6 +172,17 @@ def objective_action_data(action):
             copied.append(DeclaredObjectiveFact(_copy_key(fd['key']), freeze(fd['value']), fd['origin']))
         facts = tuple(copied)
         return data, ObjectiveActionInput(data['id'], 'history_request', facts)
+    if type(action) is SpotAction:
+        from statistical_group import StatisticalGroup
+        world = object.__getattribute__(data['universe'], '__dict__')
+        group = world['object_registry'].object_instances.get(data['target_id'])
+        if (type(group) is not StatisticalGroup or data.get('group_fully_visible') is not True
+                or data.get('ledger') is None):
+            raise UnsupportedEvaluation('exact Spot-to-Group evidence requires a fully visible Group premise and owner BeliefLedger')
+        from field_observation import BeliefLedger
+        if type(data['ledger']) is not BeliefLedger or data['ledger'].observer_id != data['actor_id']:
+            raise UnsupportedEvaluation('exact Spot-to-Group evidence ledger owner mismatch')
+        return data, ObjectiveActionInput(data['id'], 'spot')
     observer = native_data(data['observer'], (SampledGroupObservation,))
     native_data(data['interpreter'], (FieldInterpreter,))
     freeze(observer)  # Reject opaque nested sensor configuration, do not sample it.
@@ -214,12 +226,15 @@ def capture_objective_inputs(objects, action_inputs, entity_ids):
     return FrozenObjectiveInputs(MappingProxyType(dict(action_inputs)), MappingProxyType(groups))
 
 
-def capture_objective_context(encounter, boundary, *, rng_state=None, _stage=None):
+def capture_objective_context(encounter, boundary, *, rng_state=None, _stage=None,
+                              _restore_context=None):
     """Opt-in complete frozen read set, with explicitly separated Action coverage."""
     from action_evaluation import capture_snapshot
-    snapshot = capture_snapshot(encounter, boundary, rng_state=rng_state, _objective=True, _stage=_stage)
+    snapshot = capture_snapshot(encounter, boundary, rng_state=rng_state, _objective=True,
+        _stage=_stage,_restore_context=_restore_context)
     inputs = snapshot.objective_inputs
-    excluded = tuple(key for key in snapshot.actions if key in inputs.actions)
+    excluded = tuple(sorted(key for key in snapshot.actions if key in inputs.actions
+                     and snapshot.actions[key].family in ('observe_group', 'history_request')))
     native = replace(snapshot, actions=MappingProxyType({k: a for k, a in snapshot.actions.items() if k not in excluded}),
         objective_inputs=None, omitted_objective_action_ids=excluded)
     return ObjectiveContext(snapshot, native)
@@ -338,16 +353,23 @@ def build_objective_candidate(context, companion, *, active_requests=None):
     snapshot = context.snapshot; native = context.native_snapshot
     _check(type(snapshot) is EvaluationSnapshot and type(native) is EvaluationSnapshot, 'invalid common snapshot types')
     _check(type(snapshot.objective_inputs) is FrozenObjectiveInputs, 'missing objective inputs')
-    excluded = tuple(snapshot.objective_inputs.actions)
-    _check(native.omitted_objective_action_ids == excluded and set(native.actions) == set(snapshot.actions)-set(excluded), 'incompatible fragment coverage')
+    excluded = tuple(sorted(key for key, action in snapshot.actions.items()
+        if action.family in ('observe_group', 'history_request')))
+    spot_group_requests = {key for key, declared in snapshot.objective_inputs.actions.items()
+        if declared.family == 'spot' and snapshot.actions[key].family == 'spot'}
+    _check(type(native.omitted_objective_action_ids) is tuple
+        and len(native.omitted_objective_action_ids) == len(set(native.omitted_objective_action_ids))
+        and set(native.omitted_objective_action_ids) == set(excluded)
+        and set(native.actions) == set(snapshot.actions)-set(excluded), 'incompatible fragment coverage')
     _check(native.encounter_id == snapshot.encounter_id and native.boundary == snapshot.boundary
         and native.entities is snapshot.entities and native.practice_inputs is snapshot.practice_inputs
         and native.awareness is snapshot.awareness and native.fatigue is snapshot.fatigue
         and native.physiology is snapshot.physiology and native.rng_state is snapshot.rng_state
         and native.difficulty == snapshot.difficulty and native.objective_inputs is None
         and all(native.actions[k] is snapshot.actions[k] for k in native.actions), 'different common read boundary')
-    _check(set(excluded) == {k for k, a in snapshot.actions.items()
-        if a.family in ('observe_group', 'history_request')}, 'missing/extra objective declaration')
+    _check(set(snapshot.objective_inputs.actions) == set(excluded) | spot_group_requests
+        and {k for k, a in snapshot.actions.items() if a.family in ('observe_group','history_request')} == set(excluded),
+        'missing/extra objective declaration')
     for key, declared in snapshot.objective_inputs.actions.items():
         _check(type(declared) is ObjectiveActionInput and declared.action_id == key
             and declared.family == snapshot.actions[key].family, 'objective request/declaration identity mismatch')
@@ -369,10 +391,16 @@ def build_objective_candidate(context, companion, *, active_requests=None):
         _check(action.start < snapshot.boundary, 'objective Action not started')
         subject = action.target_id
         distance = snapshot.distance(action.actor_id, subject)
+        group_request = incoming.family in ('observe_group', 'spot')
         key = (FactKey(subject, 'household_count', snapshot.objective_inputs.groups[subject].formation_time)
-               if incoming.family == 'observe_group' else FactKey(subject, 'episode', action.data['episode_time'], action.data['topic']))
-        limit = incoming.coarse_range if incoming.family == 'observe_group' else action.data['max_distance']
-        status = 'unplaced' if distance is None else 'out_of_range' if distance > limit else None
+               if group_request else FactKey(subject, 'episode', action.data['episode_time'], action.data['topic']))
+        if incoming.family == 'spot':
+            # Native Spot's geometric discovery result is the only success gate;
+            # this adapter adds no Group-specific range or success check.
+            status = None
+        else:
+            limit = incoming.coarse_range if incoming.family == 'observe_group' else action.data['max_distance']
+            status = 'unplaced' if distance is None else 'out_of_range' if distance > limit else None
         if status is None and incoming.family == 'history_request' and subject not in snapshot.awareness.get(action.actor_id, ()):
             status = 'not_aware'
         if status is not None:
@@ -381,7 +409,7 @@ def build_objective_candidate(context, companion, *, active_requests=None):
         if active_requests is not None and aid not in active_requests:
             requests[aid] = ObjectiveRequestResult(aid, subject, key, 'not_required', ())
             continue
-        if incoming.family == 'observe_group':
+        if group_request:
             group_requests.setdefault(subject, []).append(aid)
         else:
             history = snapshot.practice_inputs.beings[subject].history

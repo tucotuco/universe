@@ -108,7 +108,6 @@ class TestLegacyTimeline(LegacyEncounterFixture):
     def test_legacy_builtin_duration_constructors_allow_positive_subsecond(self):
         factories = [
             lambda d: RunAction(self.world, self.a.id, 0, d, minimum_distance=1),
-            lambda d: SpotAction(self.world, self.a.id, self.b.id, 0, duration=d),
             lambda d: ObserveGroupAction(self.world, self.a.id, self.b.id, 0,
                 duration=d, observation={'coarse_range_m': 20, 'detailed_range_m': 10}),
             lambda d: AskAboutPastAction(self.world, self.a.id, self.b.id, 0,
@@ -122,6 +121,12 @@ class TestLegacyTimeline(LegacyEncounterFixture):
                     else:
                         with self.assertRaises(ValueError):
                             factory(duration)
+
+    def test_deliberate_spot_duration_is_exactly_six_seconds(self):
+        self.assertEqual(SpotAction(self.world, self.a.id, self.b.id, 0).end_time, 6)
+        for duration in (-1, 0, .25, 1, 1.25, math.nan, math.inf):
+            with self.subTest(duration=duration), self.assertRaises(ValueError):
+                SpotAction(self.world, self.a.id, self.b.id, 0, duration=duration)
 
     def test_legacy_base_action_ignores_supplied_end_and_defaults_to_one_second(self):
         action = Action(self.world, 0, 0, 'inspect', self.a.id, self.b.id, None)

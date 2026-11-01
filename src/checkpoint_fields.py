@@ -91,12 +91,12 @@ FIELD_ADAPTERS = {
         "required": 'actor_id displacement end_time event_type instrument_id location minimum_distance name parent_event_id practice_experience resolution start_position start_time strategy target_id type universe'.split(),
     },
     'activities.SpotAction': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _encounter actor_id canceled_at cancellation_reason declared_roll end_time event_type id instrument_id location max_distance name parent_event_id path_status practice_experience resolution roll skill_level_used start_position start_time strategy target_id threat_at_schedule type universe'.split(),
-        "required": '_encounter actor_id declared_roll end_time event_type instrument_id location max_distance name parent_event_id path_status practice_experience resolution roll skill_level_used start_time strategy target_id type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _encounter actor_id canceled_at cancellation_reason declared_roll end_time event_type group_fully_visible id instrument_id ledger location name parent_event_id path_status resolution roll spotting_conditions start_position start_time strategy target_id threat_at_schedule type universe'.split(),
+        "required": '_encounter actor_id declared_roll end_time event_type group_fully_visible instrument_id ledger location name parent_event_id path_status resolution roll spotting_conditions start_time strategy target_id type universe'.split(),
     },
     'armor.ArmorDefinition': {
-        "allowed": 'armor_check_penalty cost defenses dexterity_check_penalty hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
-        "required": 'armor_check_penalty cost defenses dexterity_check_penalty hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
+        "allowed": 'armor_check_penalty cost defenses dexterity_check_penalty discovery_dc hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
+        "required": 'armor_check_penalty cost defenses dexterity_check_penalty discovery_dc hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
     },
     'armor.ArmorDictionary': {
         "allowed": 'object_categories objects'.split(),
@@ -119,8 +119,8 @@ FIELD_ADAPTERS = {
         "required": 'boundary encounter_id state'.split(),
     },
     'being.BeingDefinition': {
-        "allowed": 'abilities actions alignment armor_class armor_id body_parts challenge_rating cost experience hardness height hit_dice hit_points immunities is_magical languages length max_speed obj_type physiology_id psionics reactions resistances senses skills spells states tags traits vulnerabilities weapon_categories weight width'.split(),
-        "required": 'abilities actions alignment armor_class armor_id body_parts challenge_rating cost experience hardness height hit_dice hit_points immunities is_magical languages length max_speed obj_type physiology_id psionics reactions resistances senses skills spells states tags traits vulnerabilities weapon_categories weight width'.split(),
+        "allowed": 'abilities actions alignment armor_class armor_id body_parts challenge_rating cost discovery_dc experience hardness height hit_dice hit_points immunities is_magical languages length max_speed obj_type physiology_id psionics race reactions resistances senses skills spells states tags traits vulnerabilities weapon_categories weight width'.split(),
+        "required": 'abilities actions alignment armor_class armor_id body_parts challenge_rating cost discovery_dc experience hardness height hit_dice hit_points immunities is_magical languages length max_speed obj_type physiology_id psionics race reactions resistances senses skills spells states tags traits vulnerabilities weapon_categories weight width'.split(),
     },
     'being.BeingDictionary': {
         "allowed": 'object_categories objects'.split(),
@@ -267,8 +267,8 @@ FIELD_ADAPTERS = {
         "required": 'actor_id defended_action_ids encounter end_time event_type instrument_id kind location name parent_event_id ready_at resolution result start_time strategy success target_action_id target_id threat_at_schedule type universe'.split(),
     },
     'object.ObjectDefinition': {
-        "allowed": 'cost hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
-        "required": 'cost hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
+        "allowed": 'cost discovery_dc hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
+        "required": 'cost discovery_dc hardness height hit_points is_magical length obj_type tags weapon_categories weight width'.split(),
     },
     'object.ObjectDictionary': {
         "allowed": 'object_categories objects'.split(),
@@ -455,8 +455,8 @@ FIELD_ADAPTERS = {
         "required": 'critical_floor critical_fresh fast_budget fast_recovery peak_curve peak_floor slow_baseline slow_depletion slow_recovery_awake slow_recovery_sleep'.split(),
     },
     'weapon.WeaponDefinition': {
-        "allowed": 'attacks cost hardness height hit_points is_magical length obj_type tags weapon_categories weapon_size weight width'.split(),
-        "required": 'attacks cost hardness height hit_points is_magical length obj_type tags weapon_categories weapon_size weight width'.split(),
+        "allowed": 'attacks cost discovery_dc hardness height hit_points is_magical length obj_type tags weapon_categories weapon_size weight width'.split(),
+        "required": 'attacks cost discovery_dc hardness height hit_points is_magical length obj_type tags weapon_categories weapon_size weight width'.split(),
     },
     'weapon.WeaponDictionary': {
         "allowed": 'object_categories objects'.split(),
@@ -465,5 +465,69 @@ FIELD_ADAPTERS = {
     'weapon.WeaponInstance': {
         "allowed": '_atomic_target_history current front_facing geometry id name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
         "required": 'current front_facing geometry name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
+    },
+}
+
+# Semantic scope certified by 5D2C3.  FIELD_ADAPTERS supplies the reviewed
+# closed field vocabulary; this table adds role-specific treatment for the
+# native Run/Spot dependency graph.  It deliberately does not claim closure
+# for unrelated Library dictionaries or checkpoint reconstruction.
+RUN_SPOT_FIELD_CLOSURE = {
+    'universe.Universe': {
+        'authoritative': ('id', 'name', 'library', 'object_registry', 'event_history',
+                          '_schedule_revision', '_choice_books'),
+        'derived': ('type',),
+        'transient': ('_schedule_lock',),
+    },
+    'library.Library': {
+        'authoritative': ('id', 'name', 'being_dictionary', 'skill_dictionary'),
+        'derived': ('type',),
+        'out_of_scope': ('action_dictionary', 'armor_dictionary',
+                         'object_dictionary', 'weapon_dictionary'),
+    },
+    'being.BeingDictionary': {
+        'authoritative': ('objects',),
+        'derived': (),
+        'out_of_scope': ('object_categories',),
+    },
+    'skill.SkillDictionary': {
+        'authoritative': ('skills',),
+        'derived': (),
+        'entry_schema': ('exact-dict', ('is_ordinary', 'is_progressive'),
+                         ('bool', 'bool')),
+    },
+    'being.BeingInstance': {
+        'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',
+                          'top_facing', 'front_facing', 'spatial_state', 'geometry',
+                          'visual_occlusion', 'possessions', 'weapons', 'strategy',
+                          'physical_fatigue', 'physiology_id', 'fatigue_level',
+                          'effective_fitness', 'exertion', 'skill_experience',
+                          'skill_use_history', '_skill_practice_baselines',
+                          'personal_history', '_atomic_target_history'),
+        'derived': ('type',),
+        'optional_values': {
+            'spatial_state': ('null', 'spatial.SpatialState'),
+            'geometry': ('null', 'spatial.geometry.Sphere',
+                         'spatial.geometry.AxisAlignedBox'),
+            'visual_occlusion': ('null', 'spatial.occlusion.VisualOcclusion'),
+            '_atomic_target_history': ('absent-before-first-commit',
+                                       'list-matching-receipts'),
+            'physiology_id': ('null', 'registered PhysiologyRegistry ID'),
+            'personal_history': ('null-only-in-this-subset',),
+        },
+        'unsupported_optional': ('alignment', 'current_armor_class'),
+    },
+    'being.BeingDefinition': {
+        'authoritative': ('obj_type', 'length', 'width', 'height', 'weight',
+                          'cost', 'hardness', 'hit_points', 'is_magical',
+                          'tags', 'weapon_categories', 'experience',
+                          'hit_dice', 'alignment', 'armor_class',
+                          'challenge_rating', 'max_speed', 'abilities',
+                          'skills', 'senses', 'vulnerabilities', 'resistances',
+                          'immunities', 'languages', 'psionics', 'spells',
+                          'traits', 'states', 'actions', 'reactions',
+                          'body_parts', 'armor_id', 'physiology_id', 'race',
+                          'discovery_dc'),
+        'derived': (),
     },
 }

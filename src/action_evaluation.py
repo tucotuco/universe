@@ -16,7 +16,7 @@ from utils import experience_level, saving_throw_experience_modifier
 from spatial.state import CartesianPosition, SpatialState
 from spatial.geometry import Sphere, AxisAlignedBox
 from spatial.occlusion import VisualOcclusion
-from spatial.visibility import trace_sightline
+from spatial.visibility import trace_sightline, trace_physical_path
 
 
 class UnsupportedEvaluation(TypeError):
@@ -70,6 +70,7 @@ class EntityView:
     geometry: object
     visual_occlusion: object
     data: object
+    physical_path_role: str = 'physical_entity'
 
     def get_position(self):
         return self.position
@@ -110,6 +111,7 @@ class EvaluationSnapshot:
     practice_inputs: object = None
     objective_inputs: object = None
     omitted_objective_action_ids: tuple = ()
+    imported_practice_dependency: object = None
 
     def entity(self, identity):
         try:
@@ -130,13 +132,21 @@ class EvaluationSnapshot:
         return trace_sightline(self.entity(first).position, self.entity(second).position,
             ((key, self.entity(key)) for key in self.participant_ids), exclude_ids=(first, second))
 
+    def physical_path(self, first, second):
+        distance = self.distance(first, second)
+        if distance is None or distance == 0:
+            return None
+        return trace_physical_path(self.entity(first).position, self.entity(second).position,
+            ((key, self.entity(key)) for key in self.participant_ids), exclude_ids=(first, second))
+
     def melee_status(self, action):
         distance = self.distance(action.actor_id, action.target_id)
-        path = self.path(action.actor_id, action.target_id) if distance is not None and 0 < distance <= action.data['reach'] else None
+        path = self.physical_path(action.actor_id, action.target_id) if distance is not None and 0 < distance <= action.data['reach'] else None
         return melee_path_status(distance, action.data['reach'], path)
 
 
-def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _stage=None):
+def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _stage=None,
+                     _restore_context=None):
     """Freeze the current state at an explicit, non-dispatching evaluation fence.
 
     Caller must first advance physical state to this boundary without resolving
@@ -160,6 +170,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     from physical_fatigue import PhysicalFatigueState
     from encounter_fatigue_bridge import FrozenFatigueFrame
     from physiology_registry import PhysiologyRegistry
+    from statistical_group import StatisticalGroup
     ed = native_data(encounter, (Encounter,))
     if _stage is not None:
         from interval_staging import _StagedReadFence
@@ -196,6 +207,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     if _objective:
         from group_observation import ObserveGroupAction
         from history_conversation import AskAboutPastAction
+        from statistical_group import StatisticalGroup
         from objective_reality import objective_action_data
         families.update({ObserveGroupAction: 'observe_group', AskAboutPastAction: 'history_request'})
     pending_ids = freeze(ed['pending_action_list'])
@@ -204,7 +216,12 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         action = wd['event_history'].get(aid)
         if type(action) not in families:
             raise UnsupportedEvaluation('Action family requires a pure adapter (Reality/evidence staging deferred)')
-        if _objective and type(action) in (ObserveGroupAction, AskAboutPastAction):
+        action_data = object.__getattribute__(action, '__dict__')
+        target = objects.get(action_data.get('target_id'))
+        spot_group = (_objective and type(action) is SpotAction
+                      and type(target) is StatisticalGroup
+                      and action_data.get('group_fully_visible') is True)
+        if _objective and (type(action) in (ObserveGroupAction, AskAboutPastAction) or spot_group):
             ad, objective = objective_action_data(action)
             objective_actions[aid] = objective
         else:
@@ -242,9 +259,11 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         for key in ('reach','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason'):
             if key in ad:
                 selected[key] = freeze(ad[key])
+        if type(action) is SpotAction:
+            selected['group_fully_visible'] = freeze(ad['group_fully_visible'])
         if type(action) is RunAction:
             selected['start_position'] = position(ad['start_position'])
             selected['started'] = ad.get('_activity_started', False)
@@ -264,10 +283,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             freeze(ad['target_id']), freeze(ad['instrument_id']), freeze(ad['start_time']),
             end, math.ceil(end), -1 if type(action) is MeleeDefense else 0, order,
             'cancelled' if cancelled else 'pending', MappingProxyType(selected))
-    object_classes = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance)
-    if _objective:
-        from statistical_group import StatisticalGroup
-        object_classes += (StatisticalGroup,)
+    object_classes = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance,
+                      StatisticalGroup)
     entities = {}
     wanted = set(participants)
     for a in actions.values():
@@ -313,13 +330,15 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         optics = od['visual_occlusion']
         if optics is not None:
             optics = VisualOcclusion(**freeze(native_data(optics, (VisualOcclusion,))))
-        data = {'hardness': freeze(cd['hardness'])}
+        data = {'hardness': freeze(cd['hardness']),
+                'discovery_dc': freeze(cd.get('discovery_dc'))}
         category = 'object'
         if type(obj) is BeingInstance:
             category = 'being'
             skills = native_data(cd['skills'], (Skills,))
             abilities = freeze(native_data(cd['abilities'], (Abilities,))['abilities'])
             data.update(skills=freeze(skills['skills']), weapon_skills=freeze(skills['weapon_skills']),
+                race=freeze(cd.get('race')),
                 abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
                 body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),
@@ -341,8 +360,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         elif type(obj) is ArmorInstance:
             category = 'armor'
             data['defenses'] = freeze(cd['defenses'])
+        spatial_role = ('aggregate_extent' if type(obj) is StatisticalGroup
+                        else 'physical_entity')
         entities[key] = EntityView(key, category, freeze(cd['hit_points']), freeze(cd['obj_type']),
-                                   pos, shape, optics, MappingProxyType(data))
+                                   pos, shape, optics, MappingProxyType(data), spatial_role)
     # Reuse the existing Q/B/profile equations; detach the resulting frame too.
     physiology_registry = ed['_physiology_registry']
     if physiology_registry is not None:
@@ -362,7 +383,21 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 profiles[key][mode] = {f.name: (freeze({p.name: getattr(resolved.profile, p.name) for p in fields(resolved.profile)})
                     if f.name == 'profile' else freeze(getattr(resolved, f.name))) for f in fields(resolved)}
     from frozen_practice import capture_practice_inputs
-    practice_inputs = capture_practice_inputs(world, objects, entities)
+    imported_dependency = None
+    if _restore_context is None:
+        practice_inputs = capture_practice_inputs(world, objects, entities)
+    else:
+        from checkpoint_restore_dependencies import _PreparedContinuationContext
+        from frozen_practice import (_capture_prepared_practice_inputs,
+            _validate_imported_prefix)
+        if type(_restore_context) is not _PreparedContinuationContext:
+            raise EvaluationIntegrityError('unsupported trusted-local practice context')
+        _validate_imported_prefix(_restore_context.imported_prefix)
+        imported_dependency = _restore_context.evaluation_binding()
+        practice_ids = tuple(key for key, view in entities.items()
+                             if view.category == 'being')
+        practice_inputs = _capture_prepared_practice_inputs(world, objects,
+            practice_ids, _restore_context.imported_prefix)
     objective_inputs = None
     if _objective:
         from objective_reality import capture_objective_inputs
@@ -370,7 +405,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     snapshot = EvaluationSnapshot(ed['id'], boundary, freeze(ed['difficulty_class']),
         MappingProxyType(entities), participants, MappingProxyType(actions), freeze(ed['awareness']),
         freeze(frame.to_dict()), freeze(profiles), freeze(random.getstate() if rng_state is None else rng_state),
-        practice_inputs=practice_inputs, objective_inputs=objective_inputs)
+        practice_inputs=practice_inputs, objective_inputs=objective_inputs,
+        imported_practice_dependency=imported_dependency)
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -423,7 +459,7 @@ class AwarenessEffect:
     target_id: str
     observed_id: str
     distance: float
-    max_distance: float
+    max_distance: float | None
     basis: str = 'spot_check_geometric_path'
 
 
@@ -668,12 +704,8 @@ def _activity(snapshot, action, rng):
     else:
         target = snapshot.entity(action.target_id)
         distance = snapshot.distance(actor.id, target.id)
-        rank = actor.data['skills'].get('spot', 0) or 0
-        metadata.append(('skill_level_used', rank))
         if distance is None:
             outcome = 'unplaced'
-        elif distance > action.data['max_distance']:
-            outcome = 'out_of_range'
         elif target.geometry is None:
             outcome = 'unmodeled_target'
         else:
@@ -686,10 +718,17 @@ def _activity(snapshot, action, rng):
                 if roll is None:
                     roll = rng.roll('1d20')
                 metadata.append(('roll', roll))
-                outcome = 'success' if check_succeeds(roll, rank, snapshot.difficulty) else 'failure'
+                from discovery import SpottingConditions, discovery_dc, racial_discovery_bonus
+                conditions = SpottingConditions(action.data['spotting_conditions'])
+                base_dc = discovery_dc(target.data['discovery_dc'])
+                adjustment = conditions.dc_adjustment
+                racial = racial_discovery_bonus(actor.data['race'], 'spot')
+                dc = base_dc + adjustment
+                metadata.extend((('discovery_dc', base_dc), ('spotting_dc_adjustment', adjustment),
+                                 ('racial_action_bonus', racial), ('effective_dc', dc)))
+                outcome = 'success' if roll + racial >= dc else 'failure'
                 if outcome == 'success':
-                    effects.append(AwarenessEffect(action.id, actor.id, target.id, distance, action.data['max_distance']))
-        effects.append(PracticeEffect(action.id, actor.id, 'spot', action.data['practice_experience']))
+                    effects.append(AwarenessEffect(action.id, actor.id, target.id, distance, None))
     return ActionProposal(action.id, actor.id, () if action.target_id is None else (action.target_id,),
                           outcome, tuple(effects), metadata=tuple(metadata))
 
@@ -758,12 +797,19 @@ class RealityAdapterRequest:
 def future_reality_request(action):
     from group_observation import ObserveGroupAction
     from history_conversation import AskAboutPastAction
-    if type(action) not in (ObserveGroupAction, AskAboutPastAction):
+    from activities import SpotAction
+    if type(action) not in (ObserveGroupAction, AskAboutPastAction, SpotAction):
         raise UnsupportedEvaluation('not a native Reality inquiry')
+    if type(action) is SpotAction:
+        if object.__getattribute__(action, '__dict__').get('group_fully_visible') is not True:
+            raise UnsupportedEvaluation('ordinary Spot does not declare a shared-Reality request')
+        from objective_reality import objective_action_data
+        objective_action_data(action)  # checked target type, visibility premise, and owner ledger
     # Do not run native_data's callable rejection: history deliberately stores
     # a generator. Read only primitive declaration fields, never the generator.
     data = object.__getattribute__(action, '__dict__')
     key = (('group-composition', freeze(data['target_id'])) if type(action) is ObserveGroupAction
+           or type(action) is SpotAction and data.get('group_fully_visible') is True
            else ('personal-history', freeze(data['target_id']), freeze(data['episode_time']), freeze(data['topic'])))
     return RealityAdapterRequest(freeze(data['id']), freeze(data['actor_id']),
         freeze(data['target_id']), freeze(data['event_type']), key)

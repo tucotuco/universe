@@ -19,7 +19,7 @@ class Library(Identifiable):
     '''
     A container for dictionaries of type definitions.
     '''
-    def __init__(self, config_dir="./config", name=None, id=None):
+    def __init__(self, config_dir="./config", name=None, id=None, *, load_definitions=True):
         Identifiable.__init__(self, name, id)
         self.action_dictionary = None
         self.armor_dictionary = None
@@ -28,7 +28,10 @@ class Library(Identifiable):
         self.skill_dictionary = None
         self.weapon_dictionary = None
 
-        self.load_library(config_dir)
+        if type(load_definitions) is not bool:
+            raise TypeError("load_definitions must be a bool")
+        if load_definitions:
+            self.load_library(config_dir)
 
     def load_library(self, config_dir):
         try:

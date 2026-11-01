@@ -89,10 +89,12 @@ _OUTCOMES = {
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'parried', 'dodged'},
     'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
-    'spot': frozenset(('unplaced', 'out_of_range', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
+    'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
 }
 _METADATA = {'combat': (), 'melee': ('distance',), 'defense': (), 'run': ('displacement',),
-             'spot': ('skill_level_used', 'path_status', 'roll'),
+             'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
+                      'racial_action_bonus', 'effective_dc', 'observation_id',
+                      'objective_key', 'evidence_kind', 'visible_count'),
              'observe_group': ('skill_level_used', 'roll', 'observation_id', 'objective_key'),
              'history_request': ('account_id', 'objective_key', 'newly_constructed')}
 
@@ -136,6 +138,8 @@ def _effect(effect):
             _identity(values[key])
     for key in ('amount', 'incoming', 'passed', 'distance', 'max_distance'):
         if key in values:
+            if key == 'max_distance' and values[key] is None and type(effect) is AwarenessEffect:
+                continue
             _number(values[key], nonnegative=True)
     if 'experience' in values:
         _require(type(values['experience']) is int and values['experience'] >= 0, 'invalid practice award')
@@ -260,10 +264,9 @@ def _validate_effect(effect, proposal, action, actions, entities, participants):
         _require(action.family != 'combat', 'base Action has no native practice adapter')
         if action.family == 'run':
             _require(effect.skill == 'run' and proposal.outcome in ('partial', 'success'), 'invalid Run practice')
-        elif action.family in ('spot', 'observe_group'):
-            _require(effect.skill == 'spot', 'invalid Spot practice')
-            if action.family == 'observe_group':
-                _require(proposal.outcome in ('success', 'failure'), 'ineligible observation practice')
+        elif action.family == 'observe_group':
+            _require(effect.skill == 'spot', 'invalid Group observation practice')
+            _require(proposal.outcome in ('success', 'failure'), 'ineligible observation practice')
         elif action.family == 'defense':
             _require(proposal.outcome in ('deflected', 'evaded', 'failed'), 'ineligible defense practice')
             skill = entities[action.instrument_id].data['original_type'] if action.data['kind'] == 'parry' else 'tumble'
@@ -277,9 +280,14 @@ def _validate_effect(effect, proposal, action, actions, entities, participants):
     _identity(effect.observed_id)
     _require(effect.observed_id == action.target_id and effect.observed_id in participants
         and effect.target_id in participants and effect.observed_id != effect.target_id, 'invalid awareness reference')
-    _number(effect.distance, nonnegative=True); _number(effect.max_distance, nonnegative=True)
+    _number(effect.distance, nonnegative=True)
     basis = {'spot':'spot_check_geometric_path', 'observe_group':'sampled_group_observation', 'history_request':'heard_account_range_scaffold'}[action.family]
-    _require(effect.max_distance > 0 and effect.distance <= effect.max_distance and effect.basis == basis, 'invalid awareness evidence')
+    if action.family == 'spot':
+        _require(effect.max_distance is None and effect.basis == basis,
+                 'Spot has no adopted fixed distance threshold')
+    else:
+        _number(effect.max_distance, nonnegative=True)
+        _require(effect.max_distance > 0 and effect.distance <= effect.max_distance and effect.basis == basis, 'invalid awareness evidence')
     return effect.target_id, ('awareness', action.id, effect.target_id, effect.observed_id, effect.basis)
 
 
@@ -297,8 +305,6 @@ def _validate_complete_outcome(proposal, action, entities):
             expected_practice = (skill, 10)
         elif action.family == 'observe_group' and proposal.outcome in ('success', 'failure'):
             expected_practice = ('spot', action.data['experience_policy'][proposal.outcome])
-        elif action.family == 'spot':
-            expected_practice = ('spot', action.data['practice_experience'])
         elif action.family == 'run' and proposal.outcome in ('success', 'partial'):
             expected_practice = ('run', action.data['practice_experience'])
     _require(len(practice) == (0 if expected_practice is None else 1), 'missing/extra qualifying practice proposal')

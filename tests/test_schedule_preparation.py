@@ -98,12 +98,9 @@ class TestSchedulePreparation(unittest.TestCase):
         self.enc.schedule_action(action)
         self.assertEqual(action.start_position, self.a.get_position())
 
-    def test_failed_short_run_and_spot_do_not_publish_start_bindings(self):
-        actions = [RunAction(self.world, self.a.id, 0, .5, minimum_distance=1),
-                   SpotAction(self.world, self.a.id, self.b.id, 0, duration=.5)]
-        for action in actions:
-            with self.subTest(action=type(action).__name__):
-                self.unchanged_attempt(action, lambda: self.enc.schedule_action(action), ValueError)
+    def test_failed_short_run_does_not_publish_start_binding(self):
+        action = RunAction(self.world, self.a.id, 0, .5, minimum_distance=1)
+        self.unchanged_attempt(action, lambda: self.enc.schedule_action(action), ValueError)
 
     def test_spot_binding_is_staged(self):
         action = SpotAction(self.world, self.a.id, self.b.id, 0)

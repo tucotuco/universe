@@ -35,7 +35,8 @@ class InspectionFixture(unittest.TestCase):
         return publication_fixtures.raw_graph(self.world, self.enc), self.rng.state, random.getstate()
 
     def commit(self):
-        self.enable(); action = self.f.spot(); self.enc.schedule_action(action); self.enc.step(1)
+        self.enable(); action = RunAction(self.world,self.a.id,0,1,.5,experience=1)
+        self.enc.schedule_action(action); self.enc.step(1,velocities={self.a.id:(1,0,0)})
         return action
 
 
@@ -56,10 +57,10 @@ class TestCommittedInspection(InspectionFixture):
         with self.assertRaises(TypeError): view.target(self.a.id).state.practice_state.skill_experience['spot'] = 0
 
     def test_historical_positions_and_practice_remain_boundary_owned(self):
-        self.enable(); one = self.f.spot(); self.enc.schedule_action(one)
+        self.enable(); one = RunAction(self.world,self.a.id,0,1,.5,experience=1); self.enc.schedule_action(one)
         self.enc.step(1, velocities={self.a.id:(1,0,0)})
         first = self.enc.inspect_committed()
-        two = self.f.spot(start=1); self.enc.schedule_action(two)
+        two = RunAction(self.world,self.a.id,1,1,.5,experience=1); self.enc.schedule_action(two)
         self.enc.step(1, velocities={self.a.id:(1,0,0)})
         old = self.enc.inspect_committed(1); latest = self.enc.inspect_committed()
         self.assertEqual(old.targets, first.targets); self.assertEqual(old.actions, first.actions)
@@ -178,16 +179,17 @@ class TestCommittedInspection(InspectionFixture):
         self.assertTrue(all(f.established_before for f in view.objective[group.id].facts.values()))
 
     def test_practice_two_exercises_one_target_transition(self):
-        self.a.record_skill_use(self.world.get_skill_dictionary(),'spot',1240,action_id='prior',time=-2)
-        self.enable(); one,two=self.f.spot(),self.f.spot()
-        self.enc.schedule_choice((one,two)); self.enc.step(1); view=self.enc.inspect_committed()
+        self.a.record_skill_use(self.world.get_skill_dictionary(),'run',1240,action_id='prior',time=-2)
+        self.enable(); one,two=(RunAction(self.world,self.a.id,0,1,.5,experience=3),
+                              RunAction(self.world,self.a.id,0,1,.5,experience=4))
+        self.enc.schedule_choice((one,two)); self.enc.step(1,velocities={self.a.id:(1,0,0)}); view=self.enc.inspect_committed()
         practice=view.target(self.a.id).state.practice_state
         self.assertEqual(len(practice.exercises),2); self.assertEqual(len(practice.transitions),1)
         self.assertEqual({e.action_id for e in practice.exercises},{one.id,two.id})
         self.assertFalse(hasattr(view.action(one.id),'level_after'))
 
     def test_fractional_timing_and_cancelled_action_remain_readable(self):
-        self.enable(); one=self.f.spot(start=.25); self.enc.schedule_action(one)
+        self.enable(); one=RunAction(self.world,self.a.id,.25,1,.5,experience=1); self.enc.schedule_action(one)
         self.enc.step(1); self.assertIsNone(one.resolution)
         self.enc.cancel_action(one.id); self.enc.step(1)
         view=self.enc.inspect_committed(); action=view.action(one.id)
@@ -198,7 +200,7 @@ class TestCommittedInspection(InspectionFixture):
 
     def test_read_from_every_publication_phase_refuses_without_mutation(self):
         from atomic_publication import _WritePlan, PHASES
-        self.enable(); self.enc.schedule_action(self.f.spot())
+        self.enable(); self.enc.schedule_action(RunAction(self.world,self.a.id,0,1,.5,experience=1))
         apply = _WritePlan.apply_phase; seen=[]
         def inspect_phase(plan, phase):
             apply(plan, phase); before=self.raw()

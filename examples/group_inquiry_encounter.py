@@ -1,4 +1,4 @@
-"""Belief discrepancy -> targeted observation Action -> new evidence and history.
+"""EXPERIMENTAL Group sensor: discrepancy -> targeted observation -> evidence.
 
 Run from repository root: python examples/group_inquiry_encounter.py
 Seeded for reproducible tests; not a scripted correct observation.

@@ -51,9 +51,10 @@ class MeleeStrike(Action):
     conversion or personal reach formula is assumed here.
 
     An obstructed or indeterminate reference-point path is conservatively
-    unavailable, even if an intervening solid object is transparent. An open
-    straight segment does not certify that a swing has enough room. Facing,
-    body-part reach and simultaneous impacts are next.
+    unavailable, even if an intervening modeled physical Entity is transparent.
+    StatisticalGroup footprint envelopes are descriptive bounds, not physical
+    Entities for this test. An open straight segment does not certify that a
+    swing has enough room. Facing, body-part reach and simultaneous impacts are next.
     """
 
     def __init__(self, encounter, actor_id, target_id, weapon_id,
@@ -77,7 +78,7 @@ class MeleeStrike(Action):
     def _status(self, encounter):
         from action_calculations import melee_path_status
         distance = encounter.distance_between_beings(self.actor_id, self.target_id)
-        path = (encounter.line_of_sight(self.actor_id, self.target_id)
+        path = (encounter.physical_path(self.actor_id, self.target_id)
                 if distance is not None and 0 < distance <= self.reach else None)
         return melee_path_status(distance, self.reach, path)
 
