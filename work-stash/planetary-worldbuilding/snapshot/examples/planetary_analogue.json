@@ -1,0 +1,22 @@
+{
+  "name": "Illustrative Earth–Moon analogue",
+  "epoch": "simulation time zero; northern winter solstice near the planet's positive inertial x-axis",
+  "star": {"name": "Primary", "mass_kg": 1.98847e30, "luminosity_w": 3.828e26},
+  "planet": {
+    "name": "World", "mass_kg": 5.9722e24, "radius_m": 6371000.0,
+    "rotation_period_s": 86164.0905, "obliquity_rad": 0.4090928,
+    "rotation_phase_at_epoch_rad": 3.141592653589793,
+    "orbit": {
+      "semi_major_axis_m": 149597870700.0, "period_s": 31558149.8,
+      "eccentricity": 0.0167, "mean_anomaly_at_epoch_rad": 0.0
+    }
+  },
+  "moons": [{
+    "name": "Companion", "mass_kg": 7.342e22, "radius_m": 1737400.0,
+    "orbit": {
+      "semi_major_axis_m": 384400000.0, "period_s": 2360591.5,
+      "eccentricity": 0.0549, "mean_anomaly_at_epoch_rad": 3.141592653589793,
+      "inclination_rad": 0.08979719
+    }
+  }]
+}

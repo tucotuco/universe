@@ -1,0 +1,14 @@
+const fs=require('fs'),assert=require('node:assert/strict'),path=require('path');
+const root=path.resolve(__dirname,'..');
+const js=fs.readFileSync(path.join(root,'static/app.js'),'utf8');
+const html=fs.readFileSync(path.join(root,'static/index.html'),'utf8');
+const python=fs.readFileSync(path.join(root,'workbench.py'),'utf8');
+assert.doesNotMatch(js,/grapple-fatigue-scale/);
+assert.match(js,/Universal Q\/B physical-check table/);
+assert.match(js,/\/api\/manual-card/);
+assert.match(js,/seconds recover/);
+assert.match(html,/BUILD R4\.9 · UNIVERSAL FATIGUE/);
+assert.match(python,/R4\.9 · UNIVERSAL FATIGUE/);
+assert.ok(html.indexOf('SCENARIO ACTIVITY EDITOR')<html.indexOf('REFERENCE PARAMETERS'));
+assert.match(html,/manual-card-button/);
+console.log('PASS: R4.9 names, activity order, export control and diagnostics present');

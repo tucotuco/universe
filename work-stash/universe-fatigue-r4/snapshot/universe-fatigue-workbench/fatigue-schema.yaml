@@ -1,0 +1,107 @@
+schema_version: 1
+domain: physical_fatigue
+engine_revision: R4
+parameters:
+  critical_fresh:
+    label: Sustainable fraction
+    unit: fraction
+    min: 0.01
+    max: 1.0
+    slider_min: 0.05
+    slider_max: 0.95
+    step: 0.005
+    description: Fresh sustainable output / fresh peak
+  critical_floor:
+    label: Sustainable floor
+    unit: fraction
+    min: 0.01
+    max: 1.0
+    slider_min: 0.05
+    slider_max: 1.0
+    step: 0.01
+    description: Sustainable threshold fraction at B=0
+  peak_floor:
+    label: Peak output floor
+    unit: fraction
+    min: 0.01
+    max: 1.0
+    slider_min: 0.05
+    slider_max: 1.0
+    step: 0.01
+    description: Brief peak output fraction at B=0
+  peak_curve:
+    label: Immediate reserve response
+    unit: exponent
+    min: 0.2
+    max: 8.0
+    slider_min: 0.2
+    slider_max: 6.0
+    step: 0.1
+    description: Exponent controlling maximum-output sensitivity to Q
+  fast_budget:
+    label: Fast work budget
+    unit: seconds
+    min: 0.1
+    max: 10000000.0
+    slider_min: 1.0
+    slider_max: 200.0
+    step: 0.5
+    description: Seconds of normalized work above threshold
+  fast_recovery:
+    label: Immediate recovery
+    unit: seconds
+    min: 0.1
+    max: 100000000.0
+    slider_min: 5.0
+    slider_max: 600.0
+    step: 5.0
+    description: Q recovery time at zero workload
+  slow_depletion:
+    label: Endurance depletion
+    unit: seconds
+    min: 1.0
+    max: 1000000000.0
+    slider_min: 600.0
+    slider_max: 40000.0
+    step: 100.0
+    description: B depletion time at high workload
+  slow_recovery_awake:
+    label: Awake recovery
+    unit: seconds
+    min: 1.0
+    max: 1000000000.0
+    slider_min: 3600.0
+    slider_max: 345600.0
+    step: 3600.0
+    description: B recovery time awake at complete rest
+  slow_recovery_sleep:
+    label: Sleep recovery
+    unit: seconds
+    min: 1.0
+    max: 1000000000.0
+    slider_min: 3600.0
+    slider_max: 259200.0
+    step: 3600.0
+    description: B recovery time while asleep
+  slow_baseline:
+    label: Slow wear threshold
+    unit: fraction
+    min: 0.0
+    max: 0.99
+    slider_min: 0.0
+    slider_max: 0.8
+    step: 0.01
+    description: No slow wear accumulates at or below this demand
+workload_scaling:
+  reference_fitness:
+    label: Reference Fitness
+    min: 1
+    max: 100
+    step: 0.5
+    description: Fitness score against which identical-task demand is authored
+  fitness_exponent:
+    label: Fitness sensitivity
+    min: 0
+    max: 3
+    step: 0.05
+    description: '0: demand unchanged; 1: task demand scales inversely with Fitness'

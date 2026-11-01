@@ -1,0 +1,335 @@
+{
+  "format": "universe.ai-encounter",
+  "version": 2,
+  "seed": 17,
+  "commands": [
+    {
+      "command": "swing",
+      "effort": {
+        "attack": 2,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "east",
+    "east",
+    "wait",
+    {
+      "command": "guard",
+      "effort": {
+        "attack": 0,
+        "defense": 2,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "west",
+    "west",
+    "west",
+    "west",
+    {
+      "command": "dodge",
+      "effort": {
+        "attack": 0,
+        "defense": 2,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "wait",
+    {
+      "command": "swing",
+      "effort": {
+        "attack": 2,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "east",
+    "east",
+    "east",
+    {
+      "command": "guard",
+      "effort": {
+        "attack": 0,
+        "defense": 2,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "east",
+    {
+      "command": "parry",
+      "effort": {
+        "attack": 0,
+        "defense": 2,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "wait",
+    "wait",
+    {
+      "command": "swing",
+      "effort": {
+        "attack": 2,
+        "defense": 0,
+        "timing": 0,
+        "extra_damage": 0
+      }
+    },
+    "wait",
+    "wait",
+    "wait",
+    {
+      "command": "swing",
+      "effort": {
+        "attack": 0,
+        "defense": 0,
+        "timing": 2,
+        "extra_damage": 0
+      }
+    },
+    "wait"
+  ],
+  "ai_decisions": [
+    {
+      "choice": {
+        "command": "thrust",
+        "reason": "Initiate an available weapon attack.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "swing",
+        "reason": "Initiate an available weapon attack.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "west",
+        "reason": "Close toward the perceived opponent.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "west",
+        "reason": "Close toward the perceived opponent.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "dodge",
+        "reason": "An observed incoming blow allows time for a dodge.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "thrust",
+        "reason": "Initiate an available weapon attack.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "swing",
+        "reason": "Initiate an available weapon attack.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    },
+    {
+      "choice": {
+        "command": "wait",
+        "reason": "Finish the current timed action.",
+        "effort": null
+      },
+      "fallback": null
+    }
+  ],
+  "checks": [
+    "950618d65db5dfcac3ca7ba9816a84f920e94f1507848c31f57fa44b957bfd65",
+    "c7abb59709101da8f19e70e254d324ee9c70789286b9d074057223c51975beac",
+    "310e3bc5946650c681d4545e85131bdea9cf0c2b04f10ca23fbd413391438340",
+    "f83980190bb01d2f132f38331e314e6e557d9ecf70c39f46aa743d7d95398313",
+    "ed5c9515799b84656eafeaa6dbcefca0acf23690970f70b9cfe68d8a0f84847c",
+    "1e67136c72dbddfe84f7d88f5a48d07c7ef5444b2a46c53f48c0b5ad2d4ce497",
+    "93ec185975226f81f5e1a6add09bc1a6eb834967ca7184cde980b5033922008c",
+    "c042eedc5f6ce279de629ad3081c2c3e2580f101ede837ae0fd952172e4a3465",
+    "ecc7da16384748d7917418d93f655a63b136f7d3f7a98ef4711a9920e1ba49df",
+    "82f6c111c188559eb6bfad0b46577cb3b19b2664db80acb9324ce6308ed51017",
+    "95e385d1153c271943f821f958825873f54c3274cc947f661fc8d0d70c12a27e",
+    "2659ebbf667573d319f979b0d8706b3367d55f6572c0195aad664ccadf2d868b",
+    "de60f05d397a04d396ca065737400956b00e5fd5dc7ee23460c32cfe5641c283",
+    "5bea14bc68be0df53f267bf2535cfe49f4a8a2cbe87a3f707a3b2e4449501d1c",
+    "ed4a4edd74288bbb33332ec8b407644007b8c83e5483336b25e14d9e0dbeb56d",
+    "29e4ce2a76ea4c4dd57018cef1b2478d480dc11dc16aeeaa0f61e9a51ebebe44",
+    "4cae1d6b1158ccd68df0566355b6442da025a773945e258cb0e6683994807914",
+    "b7361c729c287403d31cf5cd6b1a61e45da673a32f011b3f48ad4e624af494c5",
+    "9241274a3cb696b00d889470b0c46fe5d6fc5d7b05931790ef2870dd3205d191",
+    "adbf0d18a0ab6f1df6d90019263b657222639aeefa3b281dc84988091a07c305",
+    "8cbc4d24cad70d13e082f5a9914916e4746270ea3fef4346dc20f62bf0a5a0e7",
+    "640875e4445b30e81399b97c8acb4e692af878ae1c1199effdae6e52fa1fda6b",
+    "39fca357cf35362dc8b6f228a334ab3014a4ba6cccba7fbd934c96466353d4f8",
+    "3a7959fbb11c0ae1e853406250303d337dc8431481bac09d900d6249bbc0900f",
+    "5a254b63a8afc371b12f2d3d7c620fe6eaaa0d3ff3f621a4281cec1b191fa607",
+    "6da7bef70d90a59e2f548ddd2c900466807fb9711159647ec14d2b21d1a2f5e2"
+  ]
+}

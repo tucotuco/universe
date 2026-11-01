@@ -1,0 +1,465 @@
+"""Experimental Agent-relative observation and belief; never authoritative reality.
+
+Count reports are deliberately noisy and intentionally *not* Bayesian truth.
+They demonstrate incorrect, repeated, and communicated evidence. Future
+perception and inference policies can replace this provisional instrument.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, asdict
+import math
+
+from perception import RangePerception
+from spatial.state import CartesianPosition
+from spatial.frame import LocalFrame, LocalPosition
+
+
+@dataclass(frozen=True)
+class CountReport:
+    estimate: int
+    uncertainty: int  # inclusive half-width: estimate +/- uncertainty
+
+    def __post_init__(self):
+        if not isinstance(self.estimate, int) or not isinstance(self.uncertainty, int):
+            raise TypeError("count report requires integers")
+        if self.uncertainty < 0:
+            raise ValueError("uncertainty must be nonnegative")
+
+    @property
+    def interval(self):
+        return (max(0, self.estimate - self.uncertainty),
+                self.estimate + self.uncertainty)
+
+
+@dataclass(frozen=True)
+class FieldObservation:
+    id: str
+    observer_id: str
+    group_id: str
+    time: float
+    # Exact aggregate-only evidence may omit position: an Entity's internal
+    # reference point is not automatically a perceptible feature.
+    reported_position: CartesianPosition | None
+    position_uncertainty_m: float | None
+    reports: dict[str, CountReport]
+    mode: str
+    dubious_candidates: dict[str, int] = field(default_factory=dict)
+    focus_category: str | None = None
+    # Raw, potentially misclassified candidate counts. These cues suggest
+    # suspect candidates; they do not reveal objective species identity.
+
+
+@dataclass(frozen=True)
+class KnownWaypoint:
+    """Scenario-seeded, owner-bound spatial knowledge, not world position.
+
+    This record represents an explicitly supplied source item. It is not
+    produced by group observation, and its local point is meaningful only in
+    the stored immutable LocalFrame.
+    """
+    id: str
+    owner_id: str
+    source_id: str
+    acquired_at: float
+    position: LocalPosition
+    frame: LocalFrame
+
+    def __post_init__(self):
+        for name, value in (("id", self.id), ("owner_id", self.owner_id),
+                            ("source_id", self.source_id)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a nonempty string")
+        if isinstance(self.acquired_at, bool) or not isinstance(self.acquired_at, (int, float)) \
+                or not math.isfinite(self.acquired_at):
+            raise ValueError("waypoint acquisition time must be finite")
+        object.__setattr__(self, "acquired_at", float(self.acquired_at))
+        if type(self.position) is not LocalPosition:
+            raise TypeError("waypoint position must use LocalPosition")
+        if type(self.frame) is not LocalFrame:
+            raise TypeError("waypoint must include its LocalFrame")
+
+
+class FieldObserver:
+    """Instrument-scaffold: range gates plus controlled errors (not optical vision)."""
+
+    def __init__(self, coarse_range_m, detailed_range_m):
+        if not 0 < detailed_range_m <= coarse_range_m:
+            raise ValueError("range limits must be positive and ordered")
+        self.coarse_range_m = float(coarse_range_m)
+        self.detailed_range_m = float(detailed_range_m)
+
+    def observe(self, encounter, observer_id, group, observation_id, *,
+                count_bias=None, position_error=(0, 0, 0),
+                dubious_candidates=None):
+        """Generate imperfect evidence; sampling objective counts cannot copy guesses.
+
+        The observer must be a placed Being close enough to notice the group.
+        Count biases are controlled experimental inputs, not truths about the
+        group. They may remain correlated across repeated observations.
+        """
+        perceived = encounter.perceive(observer_id, RangePerception(self.coarse_range_m))
+        if not any(item.target_id == group.id for item in perceived):
+            return None
+        distance = encounter.distance_between_entities(observer_id, group.id)
+        detailed = distance <= self.detailed_range_m
+        uncertainty = 1 if detailed else 3
+        count_bias = count_bias or {}
+        truth = group.counts()
+        reports = {
+            key: CountReport(max(0, truth[key] + int(count_bias.get(key, 0))), uncertainty)
+            for key in ("humans", "livestock", "dogs")
+        }
+        dubious_candidates = {} if dubious_candidates is None else dict(dubious_candidates)
+        for category, count in dubious_candidates.items():
+            if category not in reports or isinstance(count, bool) or not isinstance(count, int) \
+                    or count < 0 or count > reports[category].estimate:
+                raise ValueError("dubious candidate count must fit a reported category")
+        error = tuple(float(v) for v in position_error)
+        if len(error) != 3 or not all(math.isfinite(v) for v in error):
+            raise ValueError("position_error must be a finite three-vector")
+        location = CartesianPosition(*(value + delta for value, delta in zip(
+            group.get_position().as_tuple(), error)))
+        return FieldObservation(observation_id, observer_id, group.id,
+                                encounter.time, location, 15.0 if detailed else 80.0,
+                                reports, "detailed_range_proxy" if detailed else "coarse_range_proxy",
+                                dubious_candidates)
+
+
+@dataclass(frozen=True)
+class BeliefRevision:
+    """A dated snapshot of one Agent's estimate, not a claim about reality.
+
+    ``time=None`` means the acquisition time was not supplied. Revision order
+    always follows the ledger append order; it is not an inferred world time.
+    """
+    group_id: str
+    category: str
+    estimate: float
+    evidence_ids: tuple[str, ...]
+    trigger: str  # observation, communication, or reinterpretation
+    time: float | None
+    disputed: bool
+    trigger_observation_id: str
+
+
+
+@dataclass(frozen=True)
+class InquiryProposal:
+    """An Agent's evidence-based decision to seek clarification, not a fact."""
+    observer_id: str
+    group_id: str
+    category: str
+    reason: str  # conflicting_reports or uncertain_estimate
+    evidence_ids: tuple[str, ...]
+    time: float
+
+
+@dataclass(frozen=True)
+class InquiryRecord:
+    """Provenance linking an inquiry decision to the Action it motivated."""
+    proposal: InquiryProposal
+    action_id: str
+
+
+@dataclass(frozen=True)
+class EvidenceReassessment:
+    """A later reading of one's own evidence; original interpretation survives."""
+    observation_id: str
+    time: float | None
+    interpretation: object  # FieldInterpretation; avoid module import cycle
+
+
+def _valid_history_time(time):
+    if time is None:
+        return None
+    if isinstance(time, bool) or not isinstance(time, (int, float)) or not math.isfinite(time):
+        raise ValueError("history time must be finite or None")
+    return float(time)
+
+
+class BeliefLedger:
+    """An Agent's evidence with provenance; never edits the observed Entity.
+
+    Inferred count estimates are illustrative summaries only. Contradictions
+    are retained as investigation targets instead of silently reconciled.
+    """
+    def __init__(self, observer_id, *, initial_waypoints=()):
+        self.observer_id = observer_id
+        self._evidence = {}
+        self._interpretations = {}
+        self._reassessments = []
+        self._current_reassessments = {}
+        self._belief_history = []
+        self.communication_log = []
+        self._inquiry_history = []
+        if type(initial_waypoints) is not tuple:
+            raise TypeError("initial_waypoints must be a tuple of native records")
+        self._known_waypoints = {}
+        for waypoint in initial_waypoints:
+            if type(waypoint) is not KnownWaypoint:
+                raise TypeError("initial waypoints must be native KnownWaypoint records")
+            if waypoint.owner_id != observer_id:
+                raise ValueError("initial waypoint belongs to a different BeliefLedger owner")
+            if waypoint.id in self._known_waypoints:
+                raise ValueError("duplicate initial waypoint identity")
+            self._known_waypoints[waypoint.id] = waypoint
+
+    @property
+    def evidence(self):
+        return tuple(self._evidence.values())
+
+    @property
+    def belief_history(self):
+        """Chronological acquisition/reassessment snapshots (append-only)."""
+        return tuple(self._belief_history)
+
+    @property
+    def reassessments(self):
+        return tuple(self._reassessments)
+
+    @property
+    def inquiry_history(self):
+        return tuple(self._inquiry_history)
+
+    @property
+    def known_waypoints(self):
+        """Immutable view of source-labeled waypoints seeded for this owner."""
+        return tuple(self._known_waypoints.values())
+
+    def known_waypoint(self, waypoint_id, *, owner_id, frame):
+        """Retrieve this owner's waypoint only in its declared local frame."""
+        if owner_id != self.observer_id:
+            raise PermissionError("waypoint lookup owner does not match this BeliefLedger")
+        waypoint = self._known_waypoints.get(waypoint_id)
+        if waypoint is None:
+            return None
+        if type(frame) is not LocalFrame or frame != waypoint.frame:
+            raise ValueError("waypoint coordinate frame does not match the requested frame")
+        return waypoint
+
+    def record_inquiry(self, proposal, action_id):
+        """Record a scheduled response to specific evidence, not its success.
+
+        Scheduling is the caller's responsibility; record only after the
+        Encounter has accepted the Action. This method cannot see group truth.
+        """
+        if not isinstance(proposal, InquiryProposal) or proposal.observer_id != self.observer_id:
+            raise ValueError("inquiry must belong to this Agent")
+        if not isinstance(action_id, str) or not action_id:
+            raise ValueError("inquiry must reference an Action ID")
+        if proposal.reason not in ("conflicting_reports", "uncertain_estimate"):
+            raise ValueError("unsupported inquiry reason")
+        if _valid_history_time(proposal.time) is None:
+            raise ValueError("inquiry must have a concrete decision time")
+        if not proposal.evidence_ids or len(set(proposal.evidence_ids)) != len(proposal.evidence_ids):
+            raise ValueError("inquiry must cite distinct existing evidence")
+        for evidence_id in proposal.evidence_ids:
+            evidence = self._evidence.get(evidence_id)
+            if evidence is None or evidence.group_id != proposal.group_id:
+                raise ValueError("inquiry must cite known evidence for its group")
+            if proposal.time < evidence.time:
+                raise ValueError("inquiry cannot predate its evidence")
+        if not any(proposal.category in self.reports_for_observation(evidence_id)
+                   for evidence_id in proposal.evidence_ids):
+            raise ValueError("inquiry category must appear in cited evidence")
+        if any(record.action_id == action_id for record in self._inquiry_history):
+            raise ValueError("inquiry Action is already recorded")
+        record = InquiryRecord(proposal, action_id)
+        self._inquiry_history.append(record)
+        return record
+
+    def interpretation_for(self, observation_id):
+        """Original interpretation at the time of observation; never revised."""
+        return self._interpretations.get(observation_id)
+
+    def current_interpretation_for(self, observation_id):
+        """Owner's most recent re-reading, else source's original reading."""
+        return self._current_reassessments.get(observation_id,
+                                                self.interpretation_for(observation_id))
+
+    def _reports_for(self, observation):
+        interpretation = self.current_interpretation_for(observation.id)
+        return interpretation.reports if interpretation is not None else observation.reports
+
+    def reports_for_observation(self, observation_id):
+        """Current interpreted reports, without exposing internal ledger storage."""
+        if observation_id not in self._evidence:
+            raise KeyError(observation_id)
+        return dict(self._reports_for(self._evidence[observation_id]))
+
+    def learn(self, observation, *, communicated_by=None, interpretation=None,
+              at_time=None):
+        if not isinstance(observation, FieldObservation):
+            raise TypeError("evidence must be a FieldObservation")
+        at_time = _valid_history_time(at_time)
+        if at_time is not None and at_time < observation.time:
+            raise ValueError("cannot acquire evidence before it was observed")
+        if interpretation is not None:
+            from field_interpretation import FieldInterpretation
+            if not isinstance(interpretation, FieldInterpretation) or \
+                    interpretation.observation_id != observation.id or \
+                    interpretation.observer_id != observation.observer_id:
+                raise ValueError("interpretation must belong to the original observer and evidence")
+        if observation.id in self._evidence:
+            if (self._evidence[observation.id] != observation or
+                    (interpretation is not None and
+                     self._interpretations.get(observation.id) != interpretation)):
+                raise ValueError("observation ID conflicts with existing evidence")
+            return False
+        self._evidence[observation.id] = observation
+        if interpretation is not None:
+            self._interpretations[observation.id] = interpretation
+        if communicated_by is not None:
+            self.communication_log.append((observation.id, communicated_by))
+        self._record_belief(observation.group_id,
+                            "communication" if communicated_by is not None else "observation",
+                            observation.time if at_time is None and communicated_by is None else at_time,
+                            observation.id)
+        return True
+
+    def share_from(self, other, *, at_time=None):
+        """Exchange source evidence/interpretations, preserving source provenance."""
+        if not isinstance(other, BeliefLedger):
+            raise TypeError("can share only another BeliefLedger")
+        at_time = _valid_history_time(at_time)
+        return sum(self.learn(e, communicated_by=other.observer_id,
+                              interpretation=other.interpretation_for(e.id),
+                              at_time=at_time)
+                   for e in other.evidence)
+
+    def _record_belief(self, group_id, trigger, time, observation_id):
+        readings = {e.id: self.current_interpretation_for(e.id) for e in self.evidence}
+        self._belief_history.extend(belief_revisions(self.evidence, readings,
+            group_id, trigger, time, observation_id))
+
+    def reconsider(self, observation_id, observer, interpreter, *, at_time=None):
+        """Reinterpret an original personal observation using present skill.
+
+        Neither raw evidence nor historical/source interpretation changes.
+        Shared evidence cannot be presented as one's own sighting. No XP is
+        awarded merely for reading evidence again.
+        """
+        at_time = _valid_history_time(at_time)
+        observation = self._evidence.get(observation_id)
+        if observation is None:
+            raise KeyError(observation_id)
+        if observer.id != self.observer_id or observation.observer_id != observer.id:
+            raise ValueError("only the original observer may reconsider own evidence")
+        if at_time is not None and at_time < observation.time:
+            raise ValueError("reassessment cannot precede observation")
+        from field_interpretation import FieldInterpreter
+        if not isinstance(interpreter, FieldInterpreter):
+            raise TypeError("interpreter must be a FieldInterpreter")
+        new = interpreter.interpret(observation, observer)
+        if new == self.current_interpretation_for(observation_id):
+            return False
+        self._current_reassessments[observation_id] = new
+        self._reassessments.append(EvidenceReassessment(observation_id, at_time, new))
+        self._record_belief(observation.group_id, "reinterpretation", at_time,
+                            observation_id)
+        return True
+
+    def to_dict(self):
+        """Portable representation of evidence and all belief change provenance.
+
+        The source observation and initial interpretation are retained even if
+        the present assessment has changed. This is an export, not a loader.
+        """
+        return {
+            "observer_id": self.observer_id,
+            "known_waypoints": [
+                {"id": item.id, "owner_id": item.owner_id,
+                 "source_id": item.source_id, "acquired_at": item.acquired_at,
+                 "position": item.position.as_tuple(),
+                 "frame": item.frame.to_dict()}
+                for item in self.known_waypoints],
+            "evidence": [asdict(e) for e in self.evidence],
+            "original_interpretations": {
+                key: asdict(value) for key, value in self._interpretations.items()},
+            "reassessments": [asdict(entry) for entry in self.reassessments],
+            "belief_history": [asdict(entry) for entry in self.belief_history],
+            "communication_log": list(self.communication_log),
+            "inquiry_history": [asdict(entry) for entry in self.inquiry_history],
+        }
+
+    def count_estimate(self, group_id, category):
+        """Uncalibrated weighted evidence summary; *not* a posterior distribution."""
+        reports = [self._reports_for(e)[category] for e in self.evidence
+                   if e.group_id == group_id and category in self._reports_for(e)]
+        if not reports:
+            return None
+        weights = [1 / (1 + report.uncertainty)**2 for report in reports]
+        return sum(r.estimate * w for r, w in zip(reports, weights)) / sum(weights)
+
+    def discrepancies(self, group_id):
+        """Return count disagreements with nonoverlapping reported intervals."""
+        group_evidence = [e for e in self.evidence if e.group_id == group_id]
+        conflicts = []
+        for i, first in enumerate(group_evidence):
+            for other in group_evidence[i + 1:]:
+                a, b = self._reports_for(first), self._reports_for(other)
+                for key in sorted(a.keys() & b.keys()):
+                    lo1, hi1 = a[key].interval
+                    lo2, hi2 = b[key].interval
+                    if hi1 < lo2 or hi2 < lo1:
+                        conflicts.append((key, first.id, other.id))
+        return conflicts
+
+    def estimated_velocity(self, group_id, observer_id=None):
+        """Two sightings of the *same observer* provide crude average velocity."""
+        observer_id = self.observer_id if observer_id is None else observer_id
+        entries = sorted((e for e in self.evidence if e.group_id == group_id
+                          and e.observer_id == observer_id
+                          and e.reported_position is not None), key=lambda e: e.time)
+        if len(entries) < 2 or entries[-1].time == entries[0].time:
+            return None
+        dt = entries[-1].time - entries[0].time
+        return tuple((b - a) / dt for a, b in zip(
+            entries[0].reported_position.as_tuple(),
+            entries[-1].reported_position.as_tuple()))
+
+    def predict_position(self, group_id, future_time):
+        """Uncertain straight-line extrapolation from this Scout's own sightings.
+
+        Does not consult the true group motion. Deliberately omits uncertainty
+        growth and acceleration; it is a *belief*, not a physically assured path.
+        """
+        entries = sorted((e for e in self.evidence if e.group_id == group_id
+                          and e.observer_id == self.observer_id
+                          and e.reported_position is not None), key=lambda e: e.time)
+        velocity = self.estimated_velocity(group_id)
+        if not entries or velocity is None:
+            return None
+        latest = entries[-1]
+        future_time = float(future_time)
+        if not math.isfinite(future_time) or future_time < latest.time:
+            raise ValueError("predicted time must be finite and not precede last sighting")
+        dt = future_time - latest.time
+        return CartesianPosition(*(p + v * dt for p, v in zip(
+            latest.reported_position.as_tuple(), velocity)))
+
+
+@dataclass(frozen=True)
+class _EvidenceReads:
+    evidence: tuple
+    readings: object
+
+    def _reports_for(self, observation):
+        reading = self.readings.get(observation.id)
+        return reading.reports if reading is not None else observation.reports
+
+
+_BELIEF_COUNT_NATIVE = BeliefLedger.count_estimate
+_BELIEF_DISCREPANCIES_NATIVE = BeliefLedger.discrepancies
+
+
+def belief_revisions(evidence, readings, group_id, trigger, time, observation_id):
+    """Shared native append calculations; no ledger mutation or live lookup."""
+    view = _EvidenceReads(tuple(evidence), readings)
+    relevant = [e for e in view.evidence if e.group_id == group_id]
+    categories = sorted(set().union(*(view._reports_for(e).keys() for e in relevant)))
+    conflicts = {category for category, _, _ in _BELIEF_DISCREPANCIES_NATIVE(view, group_id)}
+    return tuple(BeliefRevision(group_id, category,
+        _BELIEF_COUNT_NATIVE(view, group_id, category),
+        tuple(e.id for e in relevant if category in view._reports_for(e)),
+        trigger, time, category in conflicts, observation_id) for category in categories)

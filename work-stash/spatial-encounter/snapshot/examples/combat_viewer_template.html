@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universe | Combat replay</title>
+<style>
+  :root {font-family:system-ui,-apple-system,sans-serif;color:#e7edf4;background:#0d1722;color-scheme:dark}
+  body {max-width:1200px;padding:18px;margin:auto}
+  header {display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  h1 {margin:0;font-size:1.7rem} h2 {font-size:1rem;margin:0 0 12px}
+  .sub {color:#b5c3d3;font-size:.88rem;margin:6px 0 14px}
+  .controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px;background:#18283a;padding:12px;border-radius:10px;margin:12px 0 18px}
+  button,select {background:#29445b;color:#f2f6fc;border:1px solid #58718a;border-radius:7px;padding:9px 13px;cursor:pointer;font:inherit}
+  button:hover {background:#355a78} button:focus-visible,select:focus-visible {outline:2px solid #f7be5f}
+  .time {margin-left:auto;font-variant-numeric:tabular-nums;font-weight:700}
+  .layout {display:grid;grid-template-columns:minmax(330px,1.5fr) minmax(280px,1fr);gap:15px}
+  .panel {border:1px solid #2d4154;background:#142333;border-radius:10px;padding:16px;min-width:0}
+  #map {display:block;width:100%;height:auto;background:#14202b;border-radius:8px;border:1px solid #405064}
+  .label {font-size:11px;fill:#f3f6fa;text-anchor:middle}
+  .gridline {stroke:#334252;stroke-width:1}
+  .being {stroke:#f2f6fc;stroke-width:2}
+  .muted {color:#9aafc2} .small {font-size:.82rem}
+  .stat {display:flex;justify-content:space-between;gap:12px;margin:7px 0}
+  .stat span:last-child {font-variant-numeric:tabular-nums;text-align:right}
+  .combatant {border-top:1px solid #304557;padding:12px 0}
+  .combatant h3 {font-size:1rem;margin:0 0 8px}
+  .log {margin:6px 0 0;padding-left:18px} .log li {margin:6px 0;line-height:1.45}
+  .footer {margin:18px 0;color:#b7c8d7;font-size:.83rem}
+  #upcoming {line-height:1.5}
+  @media (max-width:750px){.layout{grid-template-columns:1fr}.time{margin-left:0}}
+</style>
+</head>
+<body>
+<header><div><h1>Universe · Combat replay</h1><p class="sub" id="subtitle"></p></div>
+<div class="small muted">SIMULATED · One-on-one melee<br>Authoritative Encounter snapshots</div></header>
+<div class="controls" role="group" aria-label="Playback controls">
+<button id="prev" aria-label="Previous second">◀ Previous</button>
+<button id="next" aria-label="Next second">Next ▶</button>
+<button id="play">▶ Play</button>
+<label for="perspective">Perspective</label><select id="perspective"></select>
+<span class="time" id="clock"></span>
+</div>
+<div class="layout">
+<section class="panel" aria-label="Positions"><h2>Position · Top-down X/Y</h2>
+<svg id="map" viewBox="0 0 640 380" role="img" aria-label="Combatant position map"></svg>
+<p class="small muted" id="perception"></p>
+<h2>Current intentions and scheduled actions</h2><div id="upcoming" class="small"></div>
+</section>
+<section class="panel" aria-label="Combatant status"><h2>State · Equipment · Skills &amp; XP</h2><div id="states"></div></section>
+<section class="panel" aria-label="Actions"><h2>Decisions and movement</h2><ul class="log" id="decisions"></ul></section>
+<section class="panel" aria-label="Combat events"><h2>Resolved actions and consequences</h2><ul class="log" id="events"></ul></section>
+</div>
+<p class="footer">Perceived views restrict displayed data to the observer's own state and range-based awareness; enemy HP, skills, location, and decisions are hidden. This offline replay embeds the full developer audit trace and is <strong>not a security boundary</strong>. Decisions are scripted, not autonomous AI. Coordinates use Encounter units; melee reach is explicitly provided, not derived from weapon geometry. Experience follows the current progressive-skill rules.</p>
+<script>
+'use strict';
+const trace = __COMBAT_TRACE__;
+const frames = trace.frames;
+let index = 0, timer = null;
+const $ = id => document.getElementById(id);
+const perspective = $('perspective');
+const all = frames[0].beings;
+const choices = [{value:'audit', label:'Developer audit'}, ...all.map(b=>({value:b.id,label:b.name+' (limited view)'}))];
+for (const choice of choices) {const option=document.createElement('option');option.value=choice.value;option.textContent=choice.label;perspective.appendChild(option)}
+perspective.value = all[0].id; // Default is not omniscient.
+$('subtitle').textContent = `${trace.title} · Seed ${trace.seed}`;
+const svgNS='http://www.w3.org/2000/svg';
+function element(tag, attrs={}, text=null) {const node=document.createElementNS(svgNS,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);if(text!==null)node.textContent=text;return node}
+function line(id, text){const li=document.createElement('li');li.textContent=text;$(id).appendChild(li)}
+function clear(id){$(id).replaceChildren()}
+function visible(frame,b){return perspective.value==='audit'||b.id===perspective.value||((frame.beings.find(x=>x.id===perspective.value)||{}).aware_of||[]).includes(b.id)}
+function canSeeEvent(frame,event){return perspective.value==='audit'||event.actor_id===perspective.value||visible(frame,frame.beings.find(b=>b.id===event.actor_id))}
+function eventForView(frame,event){
+  if(perspective.value==='audit')return event.text;
+  const actor=frame.beings.find(b=>b.id===event.actor_id);
+  const own=event.actor_id===perspective.value;
+  if(event.outcome===undefined)return own?'Range observation establishes awareness.':'Range observation detected.';
+  return `${actor.name} ${event.motion}: ${event.outcome}${own && event.experience!==undefined?`; +${event.experience} weapon XP`:''}.`;
+}
+function render(){
+ const frame=frames[index], audit=perspective.value==='audit';
+ $('clock').textContent=`Time ${frame.time.toFixed(0)} s / ${frames[frames.length-1].time.toFixed(0)} s`;
+ $('prev').disabled=index===0;$('next').disabled=index===frames.length-1;
+ $('map').replaceChildren();
+ for(let x=65;x<640;x+=75)$('map').appendChild(element('line',{x1:x,y1:0,x2:x,y2:380,class:'gridline'}));
+ for(let y=40;y<380;y+=65)$('map').appendChild(element('line',{x1:0,y1:y,x2:640,y2:y,class:'gridline'}));
+ $('map').appendChild(element('text',{x:12,y:20,fill:'#90a9c2','font-size':12},'X →, Y ↑ · schematic scale'));
+ const positions=frame.beings.filter(b=>visible(frame,b)&&b.position);
+ // Fixed scale: 95 px per coordinate unit. Changing perspective does not recenter.
+ for(const b of positions){if(!audit && b.id!==perspective.value)continue; // Range alone gives no bearing.
+   const x=190+b.position[0]*95,y=215-b.position[1]*95;
+   $('map').appendChild(element('circle',{cx:x,cy:y,r:18,fill:b.id===all[0].id?'#4c99cf':'#d9924f',class:'being'}));
+   $('map').appendChild(element('text',{x,y:y+36,class:'label'},b.name));
+ }
+ if(!audit){const known=positions.filter(b=>b.id!==perspective.value).map(b=>b.name);
+   if(known.length)$('map').appendChild(element('text',{x:20,y:355,fill:'#e4c38a','font-size':14},'Known nearby: '+known.join(', ')+' (bearing unresolved)'));
+ }
+ $('perception').textContent=audit?'Audit view: objective positions and states.':trace.perception_model+' · Detection does not establish target bearing or current exact position.';
+ clear('states');
+ for(const b of frame.beings.filter(b=>visible(frame,b))){const own=audit||b.id===perspective.value, box=document.createElement('div');box.className='combatant';
+   const h=document.createElement('h3');h.textContent=b.name;box.appendChild(h);
+   const stats=own?[["HP",String(b.hp)],["Position",b.position?b.position.map(n=>n.toFixed(2)).join(', '):'unplaced'],["Weapon",b.weapon||'none'],["Weapon skill",String(b.skill_rank??'unknown')],["Weapon XP",String(b.experience??0)],["Recorded skill uses",String(b.skill_uses)]]:[["Presence","Detected (range model)"],["HP / skill / XP","Not observed"],["Position",'Not established by range detection']];
+   for(const [key,value] of stats){const row=document.createElement('div');row.className='stat';const a=document.createElement('span'),v=document.createElement('span');a.textContent=key;v.textContent=value;row.append(a,v);box.appendChild(row)}$('states').appendChild(box)}
+ $('upcoming').replaceChildren();const plans=frame.pending.filter(a=>audit||a.actor_id===perspective.value);
+ $('upcoming').textContent=plans.length?plans.map(a=>`${frame.beings.find(b=>b.id===a.actor_id).name}: ${a.motion} due at t=${a.due}s`).join(' · '):'No known pending actions.';
+ clear('decisions');clear('events');
+ for(let j=0;j<=index;j++){const past=frames[j];for(const decision of past.decisions)if(audit||decision.actor_id===perspective.value)line('decisions',`t=${past.time}: ${decision.text}`);
+ for(const event of past.events)if(canSeeEvent(past,event))line('events',`t=${past.time}: ${eventForView(past,event)}`)}
+ if(!$('decisions').children.length)line('decisions','No decisions recorded from this perspective.');
+ if(!$('events').children.length)line('events','No observable resolved events yet.');
+}
+function stop(){if(timer!==null){clearInterval(timer);timer=null}$('play').textContent='▶ Play'}
+$('prev').addEventListener('click',()=>{stop();index=Math.max(0,index-1);render()});
+$('next').addEventListener('click',()=>{stop();index=Math.min(frames.length-1,index+1);render()});
+$('play').addEventListener('click',()=>{if(timer!==null){stop();return}if(index===frames.length-1)index=0;timer=setInterval(()=>{if(index<frames.length-1){index++;render()}else stop()},800);$('play').textContent='❚❚ Pause'});
+perspective.addEventListener('change',render);
+render();
+</script></body></html>

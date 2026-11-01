@@ -1,0 +1,53 @@
+{
+  "format": "universe.planetary-solar-design",
+  "version": 1,
+  "seed": 2031,
+  "known": {
+    "season_phase_deg": 0,
+    "hour_angle_deg": 45
+  },
+  "conditions": [
+    {
+      "metric": "solar_day_hours",
+      "target": 30,
+      "tolerance": 0.2,
+      "latitude_deg": 40,
+      "time_s": 0
+    },
+    {
+      "metric": "daylight_hours",
+      "target": 11.45,
+      "tolerance": 0.45,
+      "latitude_deg": 40,
+      "time_s": 0
+    }
+  ],
+  "priors": {
+    "solar_day_hours": [
+      12,
+      40
+    ],
+    "axial_tilt_deg": [
+      0,
+      50
+    ],
+    "season_phase_deg": [
+      0,
+      360
+    ],
+    "hour_angle_deg": [
+      -180,
+      180
+    ],
+    "orbital_year_days": [
+      180,
+      800
+    ],
+    "sidereal_rotation_hours": [
+      6,
+      60
+    ]
+  },
+  "commits": [],
+  "revision": 2
+}

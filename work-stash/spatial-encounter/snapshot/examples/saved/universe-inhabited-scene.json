@@ -1,0 +1,437 @@
+{
+  "format": "universe-inhabited-scene",
+  "version": 2,
+  "configuration": {
+    "terrain_candidate_index": 2,
+    "lantern_lit": true
+  },
+  "events": [
+    {
+      "operation": "look_lantern",
+      "args": {}
+    },
+    {
+      "operation": "approach",
+      "args": {}
+    },
+    {
+      "operation": "look_lantern",
+      "args": {}
+    },
+    {
+      "operation": "scan",
+      "args": {}
+    },
+    {
+      "operation": "observe",
+      "args": {}
+    },
+    {
+      "operation": "survey",
+      "args": {
+        "x_km": 4.1,
+        "y_km": -0.4
+      }
+    },
+    {
+      "operation": "sky",
+      "args": {}
+    },
+    {
+      "operation": "survey",
+      "args": {
+        "x_km": 4.1,
+        "y_km": -0.4
+      }
+    },
+    {
+      "operation": "look_lantern",
+      "args": {}
+    }
+  ],
+  "expected_state": {
+    "version": 2,
+    "time_s": 121,
+    "scene": {
+      "daypart": "dusk",
+      "village": "Valley village"
+    },
+    "traveler": {
+      "map_km": [
+        4.24,
+        -0.5
+      ],
+      "position_m": [
+        240,
+        0,
+        0
+      ],
+      "spot_level": 2
+    },
+    "companion": {
+      "map_km": [
+        4.08,
+        -0.45
+      ],
+      "nearby": false
+    },
+    "caravan": {
+      "map_km": [
+        4.45,
+        -0.5
+      ],
+      "aggregate_composition_realized": true,
+      "individuals_realized": 0,
+      "objective_counts": {
+        "adults": 9,
+        "children": 6,
+        "livestock": 25,
+        "dogs": 7,
+        "humans": 15,
+        "households": 4
+      },
+      "noticed": true
+    },
+    "terrain": {
+      "revision": 1,
+      "committed_tiles": [
+        [
+          2,
+          0
+        ]
+      ],
+      "unresolved_tiles": 7
+    },
+    "lantern": {
+      "location_km": [
+        5.8,
+        -1.8
+      ],
+      "lit": true,
+      "assessment": {
+        "geometry": "clear",
+        "physical_visibility": "detectable_candidate",
+        "missing_terrain_tiles": [],
+        "blocking_sample_km": null,
+        "distance_m": 2030.66,
+        "samples": 81,
+        "sample_spacing_max_m": 25,
+        "illuminance_lux_lower_bound": 0.001214656,
+        "dusk_threshold_lux": 0.00015,
+        "lit": true,
+        "assumptions": [
+          "straight sampled line of sight; unsampled terrain not certified",
+          "terrain bounds from GeographicalDesign",
+          "fixed dusk contrast threshold and exponential attenuation",
+          "no intervening objects, fog, visual adaptation or planetary curvature"
+        ],
+        "source": "LanternInquiry + GeographicalDesign"
+      }
+    },
+    "perceptions": [
+      {
+        "id": "lantern-observation-1",
+        "source": "lantern_proxy",
+        "time": 0,
+        "reported_glow": true,
+        "statement": "Possible lantern glow reported",
+        "limitations": "sampled terrain + dusk photometry; heuristic detection and false alarm rates",
+        "observer": "traveler",
+        "mode": "direct_visual_proxy"
+      },
+      {
+        "id": "lantern-observation-2",
+        "source": "lantern_proxy",
+        "time": 120,
+        "reported_glow": true,
+        "statement": "Possible lantern glow reported",
+        "limitations": "sampled terrain + dusk photometry; heuristic detection and false alarm rates",
+        "observer": "traveler",
+        "mode": "direct_visual_proxy"
+      },
+      {
+        "source": "range_proxy",
+        "time": 120,
+        "statement": "Detected nearby: caravan, companion",
+        "limitations": "range only; no optical visibility"
+      },
+      {
+        "source": "terrain_proxy",
+        "time": 121,
+        "statement": "Local surface sampled; no visual/terrain-occlusion model",
+        "limitations": "numerical height is objective model output, not traveler knowledge"
+      },
+      {
+        "source": "environmental_condition",
+        "time": 121,
+        "statement": "The scene is established as dusk.",
+        "limitations": "not an astronomical observation or sunset calculation"
+      },
+      {
+        "source": "terrain_proxy",
+        "time": 121,
+        "statement": "Local surface sampled; no visual/terrain-occlusion model",
+        "limitations": "numerical height is objective model output, not traveler knowledge"
+      },
+      {
+        "id": "lantern-observation-3",
+        "source": "lantern_proxy",
+        "time": 121,
+        "reported_glow": true,
+        "statement": "Possible lantern glow reported",
+        "limitations": "sampled terrain + dusk photometry; heuristic detection and false alarm rates",
+        "observer": "traveler",
+        "mode": "direct_visual_proxy"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "observation-1",
+        "source": "traveler",
+        "mode": "sampled_detailed_range_proxy",
+        "time_s": 121,
+        "counts": {
+          "humans": {
+            "estimate": 14,
+            "uncertainty": 3
+          },
+          "livestock": {
+            "estimate": 26,
+            "uncertainty": 5
+          },
+          "dogs": {
+            "estimate": 6,
+            "uncertainty": 2
+          }
+        },
+        "acquired_as": "direct"
+      }
+    ],
+    "beliefs": {
+      "lantern": {
+        "belief": "possible_glow",
+        "evidence_ids": [
+          "lantern-observation-1",
+          "lantern-observation-2",
+          "lantern-observation-3"
+        ]
+      },
+      "estimates": {
+        "humans": 14,
+        "livestock": 26,
+        "dogs": 6
+      },
+      "disputes": [],
+      "revisions": 3
+    },
+    "history": [
+      {
+        "index": 1,
+        "time_s": 0,
+        "operation": "look_lantern",
+        "args": {},
+        "result": {
+          "physical_visibility": "detectable_candidate",
+          "perceived": true,
+          "evidence_id": "lantern-observation-1",
+          "detection_probability": 0.8,
+          "objective_realized": [
+            "terrain_tile:2,0"
+          ],
+          "assessment": {
+            "geometry": "clear",
+            "physical_visibility": "detectable_candidate",
+            "missing_terrain_tiles": [],
+            "blocking_sample_km": null,
+            "distance_m": 2220.36,
+            "samples": 88,
+            "sample_spacing_max_m": 25,
+            "illuminance_lux_lower_bound": 0.000982646,
+            "dusk_threshold_lux": 0.00015,
+            "lit": true,
+            "assumptions": [
+              "straight sampled line of sight; unsampled terrain not certified",
+              "terrain bounds from GeographicalDesign",
+              "fixed dusk contrast threshold and exponential attenuation",
+              "no intervening objects, fog, visual adaptation or planetary curvature"
+            ],
+            "source": "LanternInquiry + GeographicalDesign"
+          }
+        }
+      },
+      {
+        "index": 2,
+        "time_s": 120,
+        "operation": "approach",
+        "args": {},
+        "result": {
+          "position_m": [
+            240,
+            0,
+            0
+          ],
+          "elapsed_s": 120,
+          "movement": "kinematic_placeholder",
+          "objective_realized": []
+        }
+      },
+      {
+        "index": 3,
+        "time_s": 120,
+        "operation": "look_lantern",
+        "args": {},
+        "result": {
+          "physical_visibility": "detectable_candidate",
+          "perceived": true,
+          "evidence_id": "lantern-observation-2",
+          "detection_probability": 0.8,
+          "objective_realized": [],
+          "assessment": {
+            "geometry": "clear",
+            "physical_visibility": "detectable_candidate",
+            "missing_terrain_tiles": [],
+            "blocking_sample_km": null,
+            "distance_m": 2030.66,
+            "samples": 81,
+            "sample_spacing_max_m": 25,
+            "illuminance_lux_lower_bound": 0.001214656,
+            "dusk_threshold_lux": 0.00015,
+            "lit": true,
+            "assumptions": [
+              "straight sampled line of sight; unsampled terrain not certified",
+              "terrain bounds from GeographicalDesign",
+              "fixed dusk contrast threshold and exponential attenuation",
+              "no intervening objects, fog, visual adaptation or planetary curvature"
+            ],
+            "source": "LanternInquiry + GeographicalDesign"
+          }
+        }
+      },
+      {
+        "index": 4,
+        "time_s": 120,
+        "operation": "scan",
+        "args": {},
+        "result": {
+          "perceived": [
+            "caravan",
+            "companion"
+          ],
+          "mode": "range_proxy",
+          "objective_realized": []
+        }
+      },
+      {
+        "index": 5,
+        "time_s": 121,
+        "operation": "observe",
+        "args": {},
+        "result": {
+          "outcome": "success",
+          "distance_m": 210,
+          "evidence_created": true,
+          "spot_roll": 17,
+          "objective_realized": [
+            "caravan:aggregate_composition"
+          ]
+        }
+      },
+      {
+        "index": 6,
+        "time_s": 121,
+        "operation": "survey",
+        "args": {
+          "x_km": 4.1,
+          "y_km": -0.4
+        },
+        "result": {
+          "x_km": 4.1,
+          "y_km": -0.4,
+          "tile": [
+            2,
+            0
+          ],
+          "elevation_m": 497.19,
+          "objective_realized": [],
+          "source": "GeographicalDesign"
+        }
+      },
+      {
+        "index": 7,
+        "time_s": 121,
+        "operation": "sky",
+        "args": {},
+        "result": {
+          "known_daypart": "dusk",
+          "sunset_prediction": null,
+          "missing": [
+            "local solar phase",
+            "axial tilt",
+            "astronomical time and latitude"
+          ],
+          "objective_realized": []
+        }
+      },
+      {
+        "index": 8,
+        "time_s": 121,
+        "operation": "survey",
+        "args": {
+          "x_km": 4.1,
+          "y_km": -0.4
+        },
+        "result": {
+          "x_km": 4.1,
+          "y_km": -0.4,
+          "tile": [
+            2,
+            0
+          ],
+          "elevation_m": 497.19,
+          "objective_realized": [],
+          "source": "GeographicalDesign"
+        }
+      },
+      {
+        "index": 9,
+        "time_s": 121,
+        "operation": "look_lantern",
+        "args": {},
+        "result": {
+          "physical_visibility": "detectable_candidate",
+          "perceived": true,
+          "evidence_id": "lantern-observation-3",
+          "detection_probability": 0.8,
+          "objective_realized": [],
+          "assessment": {
+            "geometry": "clear",
+            "physical_visibility": "detectable_candidate",
+            "missing_terrain_tiles": [],
+            "blocking_sample_km": null,
+            "distance_m": 2030.66,
+            "samples": 81,
+            "sample_spacing_max_m": 25,
+            "illuminance_lux_lower_bound": 0.001214656,
+            "dusk_threshold_lux": 0.00015,
+            "lit": true,
+            "assumptions": [
+              "straight sampled line of sight; unsampled terrain not certified",
+              "terrain bounds from GeographicalDesign",
+              "fixed dusk contrast threshold and exponential attenuation",
+              "no intervening objects, fog, visual adaptation or planetary curvature"
+            ],
+            "source": "LanternInquiry + GeographicalDesign"
+          }
+        }
+      }
+    ],
+    "authorities": {
+      "terrain": "GeographicalDesign",
+      "population": "StatisticalGroup",
+      "position_and_awareness": "Universe / Encounter",
+      "belief": "BeliefLedger",
+      "established_environment": "RealityLedger",
+      "lamp_and_visibility": "RealityLedger / LanternInquiry / GeographicalDesign"
+    }
+  }
+}

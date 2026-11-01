@@ -1,0 +1,35 @@
+schema_version: 1
+source: 'Encounters adopted R60: Attack Motions, Grab/Hold, Grapple, Appendix IV defense actions'
+note: >-
+  This schema supports scripted combat cases A-C. Resolved Grapple D additionally uses
+  the Encounters one-second Touch and opposed Grab/Grapple checks in grapple_encounter.py.
+  Neither implementation represents the full combat action catalog.
+  Touch time is scenario-authored; its success is assumed in isolated grapple tests.
+actions:
+  strike:
+    timing: weapon
+    description: 'Strike timing from weapon attack motion; no damage or hit roll in fatigue tests'
+  parry:
+    timing: weapon_minus_one
+    description: 'Parry preparation: defender weapon timing minus one second'
+  dodge:
+    timing: fixed
+    seconds: 2
+  grab:
+    timing: fixed
+    seconds: 1
+  grapple:
+    timing: fixed
+    seconds: 6
+  hold:
+    timing: fixed
+    seconds: 6
+  touch:
+    timing: authored
+    description: 'Scenario touch-attack preparation: configurable; success assumed'
+  delay:
+    timing: authored
+  rest:
+    timing: authored
+  footwork:
+    timing: authored

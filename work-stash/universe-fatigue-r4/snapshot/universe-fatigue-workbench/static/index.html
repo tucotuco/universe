@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Universe · Fatigue Workbench · R4.9 universal Q/B check table</title>
+  <link rel="stylesheet" href="/style.css?v=r4-9-universal-table">
+  <script defer src="/app.js?v=r4-9-universal-table"></script>
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">U</span><div><span class="brand-name">UNIVERSE</span><span class="brand-sub">PHYSIOLOGY LAB / R4.9</span></div></div>
+    <div class="top-actions"><span class="build-id" id="build-id">BUILD R4.9 · UNIVERSAL FATIGUE</span><span class="status"><span class="status-dot"></span><span id="run-status">Ready</span></span><button class="ghost" id="load-button">Load YAML</button><input id="upload" type="file" accept=".yaml,.yml,text/yaml" hidden><button class="ghost" id="reset-button">Reset changes</button><button class="primary" id="save-button">Export YAML ↓</button></div>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <section class="panel-head"><div class="eyebrow">CONFIGURATION</div><h1>Fatigue workbench</h1><p>Explore physiological parameters and observe their consequences in the actual Revision 4 model.</p></section>
+      <section class="control-block">
+        <div class="label-row"><label for="profile">Physiology profile</label><span class="hint" id="profile-meta"></span></div>
+        <select id="profile"></select>
+        <div class="small-help" id="profile-source"></div>
+      </section>
+      <div class="section-rule"></div>
+      <div class="eyebrow">SCENARIO ACTIVITY EDITOR</div>
+      <p class="sidebar-note">Work demands are normalized to each actor's fresh capability. Scenario values are illustrative.</p>
+      <div id="segments"></div>
+      <button class="ghost" id="manual-card-button" type="button">Export activity/recovery card ↓</button>
+      <div class="section-rule"></div>
+      <div class="controls-head"><div><div class="eyebrow">REFERENCE PARAMETERS</div><p>Changes override this profile's inherited values.</p></div><button id="clear-overrides" class="plain">Clear overrides</button></div>
+      <section id="parameters" class="parameter-list"></section>
+      <div class="section-rule"></div>
+      <div class="eyebrow">WORKLOAD INTERPRETATION</div>
+      <p class="sidebar-note">For a fixed external task, convert reference effort to the selected Being’s relative demand. Individually chosen effort retains its original value.</p>
+      <section id="workload-parameters" class="workload-parameters"></section>
+    </aside>
+    <section class="content">
+      <div class="heading-row"><div><div class="eyebrow">SCENARIO EXPLORER</div><h2>Consequences, not guesses.</h2><p>Compare an unmodified baseline with a candidate configuration. Both are run through the same numerical engine.</p></div><div class="engine-tag">ENGINE: R4 · EXPERIMENTAL</div></div>
+      <div class="selections"><div class="selection-col"><label for="scenario">Scenario</label><select id="scenario"></select></div><div class="selection-col"><label for="actor">Being / actor</label><select id="actor"></select></div><div class="selection-col"><label for="time-axis">Horizontal axis</label><select id="time-axis"><option value="auto">Automatic units</option><option value="seconds">Seconds</option><option value="minutes">Minutes</option><option value="hours">Hours</option></select></div></div>
+      <div id="scenario-description" class="scenario-desc"></div>
+      <section class="metrics">
+        <div class="metric"><span>IMMEDIATE RESERVE <b>Q</b></span><strong id="q-now">—</strong><small id="q-delta">baseline —</small></div>
+        <div class="metric"><span>ENDURANCE RESERVE <b>B</b></span><strong id="b-now">—</strong><small id="b-delta">baseline —</small></div>
+        <div class="metric"><span>MAXIMUM AVAILABLE OUTPUT <b>M</b></span><strong id="m-now">—</strong><small id="m-delta">baseline —</small></div>
+        <div class="metric"><span>TASK FEASIBILITY</span><strong class="metric-status" id="feas-now">—</strong><small id="feas-extra">—</small></div>
+      </section>
+      <section class="chart-panel">
+        <div class="chart-head"><div><h3>Fatigue trajectory · Being characteristics</h3><p>Percent remaining, relative to the relevant reserve or fresh peak output</p></div><div class="chart-control"><label><input type="checkbox" id="show-base" checked> Show baseline</label><label for="chart-window">View</label><select id="chart-window"><option value="auto">Automatic</option><option value="all">Full timeline</option><option value="28800">First 8 h</option><option value="86400">First day</option></select></div></div>
+        <div class="chart-legend"><span><i style="background:#2563eb"></i> Immediate Q</span><span><i style="background:#059669"></i> Endurance B</span><span><i style="background:#ea580c"></i> Available M</span><span><i style="background:#9a4dd1"></i> Realized effort</span><span class="legend-baseline">Dashed = baseline</span></div>
+        <div class="viz-grid">
+          <div class="chart-area"><canvas id="chart" height="360" aria-label="Time series plot of fatigue reserves and available output" role="img"></canvas><div id="hover-info" class="hover-info"></div></div>
+          <aside class="being-panel" aria-label="Selected Being abilities">
+            <div class="eyebrow">BEING ABILITIES · R4.9</div>
+            <h4 id="being-title">—</h4>
+            <p class="being-physiology" id="being-physiology">—</p>
+            <div class="being-ability-grid" id="being-abilities"></div>
+            <div class="being-subhead">CURRENT CHECK FATIGUE</div>
+            <div id="being-contest-feedback" class="being-training">—</div>
+            <div class="being-subhead">TRAINING</div>
+            <div class="being-training" id="being-training"></div>
+            <div class="being-subhead">WORKLOAD AT THIS FITNESS</div>
+            <div class="being-workload" id="being-workload"></div>
+            <p class="being-footnote">Missing ability scores are unspecified, not assumed. Only Fitness and applicable Run scaling affect this fatigue demonstration.</p>
+          </aside>
+        </div>
+        <div class="chart-footer"><span id="duration-summary"></span><span>Configuration changes do not alter historical states automatically.</span></div>
+      </section>
+      <section class="insight-panel" id="combat-details" hidden></section>
+      <div class="bottom-grid">
+        <section class="insight-panel"><div class="minor-head"><h3>Comparison</h3><span>Baseline → candidate</span></div><div id="comparison"></div></section>
+        <section class="insight-panel"><div class="minor-head"><h3>Configuration changes</h3><span id="change-count">0 edits</span></div><div id="diff" class="diff"></div></section>
+      </div>
+      <div class="error-message" id="error" hidden></div>
+      <footer>Experimental calibration tool · Parameters are hypotheses, not established biological constants · Local browser interface</footer>
+    </section>
+  </main>
+</div>
+</body>
+</html>

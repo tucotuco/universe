@@ -1,0 +1,565 @@
+diff --git a/docs/universe4-checkpoint-compatibility-contract-draft.md b/docs/universe4-checkpoint-compatibility-contract-draft.md
+index e6af03c..facbe6f 100644
+--- a/docs/universe4-checkpoint-compatibility-contract-draft.md
++++ b/docs/universe4-checkpoint-compatibility-contract-draft.md
+@@ -219,3 +219,172 @@ Supported declarations are exact, pending native Run and Spot Actions in an acce
+ A future restore adapter must select the exact stable adapter tag under a compatible rules/source version; allocate native Universe, Encounter, entities and Actions; bind each logical reference uniquely; reconstruct only the whitelisted constructor inputs; rerun native validation/preparation under the owned scheduling lock; compare the newly derived portable declaration, ordered members, prepared timing, dependencies and reservations to the descriptor; and then compute fresh destination-process `action_choice.declaration()` signatures for the live ChoiceBook. It must not copy signatures from this descriptor or transplant signatures from another process. Whole-choice publication must still be atomic and preserve reservation ownership. This procedure is a contract only: no allocation, registration, save/load, restore, receipt issuance or replay has been added.
+ 
+ This descriptor removes the 5D2B accepted-signature portability blocker for the supported Run/Spot subset. It does not address process-local committed receipt issuance/anchors, the global definition/dictionary/alias semantic proof, unsupported Action families, or durable authenticated file schema. Therefore overall `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false; all serialization and restoration refusals remain in force.
++
++## 12. 5D2C2 inactive committed-receipt descriptor
++
++### Bounded data contract
++
++`src/checkpoint_receipts.py` defines the frozen `universe.committed-native-receipt-chain/1` projection and a versioned `universe.committed-native-rebinding-plan/1`. The supported source is an authenticated, same-process committed inspection of exactly one or two consecutive boundaries in a transactional Encounter. The committed receipt Actions are exact native Run/Spot families. The descriptor includes stable Universe, Encounter, Being, Action and Choice IDs; exact integer/binary64 numeric tags; native Action declarations and outcomes; ordered boundary, Action and effect references; supported effect payloads; Target-owned candidate state/history (including legitimate simultaneous `BatchSkillUse`); start-fence data; committed Choice membership; accepted wholly-future Run/Spot choice descriptors; and caller-owned private RNG cursor state under the explicit `exclusive_encounter` ownership assertion.
++
++The projection is a nested tuple data tree, not a file format. It contains no receipt authenticity token, weak reference, process address, Action/Target anchor, Python class/function, callable or mutable native object. It preserves issuer effect order and each Action's causal effect references. It preserves Target-owned results as Target candidate records; it does not derive an Action's experience, damage or HP changes from aggregate Target state. Validation cross-checks Action/effect/lifecycle/Choice references, Run/Spot declarations, awareness/practice recipient and skill links, Target incoming/outgoing links, Target-owned practice exercises, chronology, schemas, and accepted future choice IDs.
++
++Capture requires the existing transactional ownership access protocol, a caller quiescence assertion, an exact private `RNGCursor`, an explicit exclusive-Encounter scope assertion, fresh authentic receipts, complete Target history, and no known shared cursor. These checks do not prove the absence of arbitrary external aliases; the host still attests that no other owner writes the cursor or Encounter during capture.
++
++### Reconstruction and rebinding obligations
++
++The companion plan lists logical Entity, Action and Choice IDs, committed boundary sequence, and these required future stages: select compatible rule/adapter versions; allocate new native objects; bind each ID uniquely; rebuild only whitelisted Run/Spot declarations; revalidate Target-owned practice and chronological receipt coverage; reconstruct the ChoiceBook and private RNG cursor under exclusive ownership; regenerate process-local Action/Target/storage anchors from rebound objects; and authenticate/register new receipts only after the complete candidate passes validation. The plan records obligations only. No object allocation, receipt reissuance, authenticity registration, checkpoint export/import, replay or restore is implemented. Receipt authenticity must not be copied across processes or inferred from descriptor content.
++
++### Explicitly unsupported and readiness
++
++The descriptor rejects unsupported Action/effect families; active pending, executing, cancelled or incomplete choices; missing, stale, duplicate, forged or out-of-order receipts; nonconsecutive or longer histories; non-Being Target records; incomplete Target history; objective Reality/history constraints; observer evidence, Belief and testimony; personal-history-bound practice (`history_revision`); custom callbacks; unknown schema fields/versions; and ambiguous/shared RNG ownership. It also refuses when receipt/Target causal links do not close. These are bounded adapter exclusions, not new simulation rules.
++
++This descriptor does not resolve the broader 5D2B semantic/alias closure gaps or prove durable definition and entity reconstruction. `receipt_rebinding_required` remains in checkpoint diagnostics. `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false, and `require_complete()` plus all existing transactional serialization/restoration refusals remain unchanged. A subsequent increment would need separately authorized allocation/rebinding and issuance semantics, freshness/identity guarantees, failure safety, and continuation tests before any readiness claim.
++
++## 13. 5D2C3 bounded Run/Spot semantic field closure
++
++### Local certificate and declared subset
++
++Native inventory mode may include `native.run-spot-field-closure/1` plus the diagnostic `bounded_run_spot_closure_verified`. This is a **local field/dependency proof**, never a checkpoint readiness flag. It covers one exact Universe/Library/Encounter graph with a selected Encounter whose participant and referenced entity IDs resolve uniquely to exact registered Beings; no other registered object, non-Being participant, pending/cancelled Action, external recipient binding, unsupported event, or more than two committed receipt boundaries; exact Run/Spot accepted choices; the 5D2C2 authenticated receipt descriptor; and a private caller-owned `RNGCursor`. Capture does not execute callbacks, roll RNG, or mutate the graph. The existing portable choice and receipt descriptors provide the Action, reservation, lifecycle, chronology, effect, Target-history and accepted-future-choice coverage.
++
++### A/D/T/U classification
++
++| Classification | Bounded native Run/Spot treatment |
++|---|---|
++| **A — authoritative** | Universe ID/name, Library logical ID, Encounter participants/queues/clock and current scheduling state; the complete exact registered BeingDefinition rows needed by participating Beings; the native SkillDictionary rows (including `run` and `spot`); each selected Being's logical ID, original/current definitions, spatial and Q/B state, skill ranks, practice, and Target-owned history where committed; plus portable accepted choices and committed receipts through 5D2C1/5D2C2. |
++| **D — derived/reissued** | Native class tags; accepted-choice signatures are not copied and must be regenerated from fresh destination objects; receipt/Target/Action/storage authenticity anchors must be freshly rebound and reissued only after full future restore validation. The existing live signatures and receipt issuer are unchanged. |
++| **T — transient** | Universe/ChoiceBook locks, active ownership leases, live boundary/dispatch state, and process-local identity/authenticity data. Fresh synchronization and runtime anchors are future restore work. |
++| **U — outside this proof** | Other Library dictionaries and their semantic definitions; `BeingDictionary.object_categories`; non-Being world objects; unrelated group/formation/conditional state; Belief/testimony/external recipients; Reality additions and personal-history constraints; unsupported Action/event/callback families; unreviewed instance overrides and aliases outside selected Being current definitions. Their presence cannot become checkpoint readiness from this local certificate. |
++
++`src/checkpoint_fields.py` supplies the exact A/D/T/U vocabulary for the bounded owner types, and the adapter verifies that those classifications partition each corresponding closed-field adapter. BeingDictionary entries must be exact BeingDefinitions keyed by their matching `obj_type`; every selected Being's `original` must be that exact shared Library definition. Current BeingDefinitions are detached from their originals, exclusive per Being, recursively closed over native data, and may not share mutable subobjects with another Being or Library definition. SkillDictionary entries have the exact `(is_ordinary, is_progressive)` boolean schema and unique mutable row ownership; every selected current rank must resolve to a definition. Logical references must resolve by exact registered ID. Physiology IDs, when present, must resolve through the exact Encounter registry; Q/B remain frozen data and no fatigue settlement is activated.
++
++The native optional-value contract permits missing pre-first-commit Target-history storage or a list validated against receipts; `spatial_state` may be `None` or exact native SpatialState; geometry and visual occlusion may be absent or exact native values; physiology ID may be absent or registered. `personal_history` must be `None` for this subset. Instance-level `alignment` and `current_armor_class` overrides refuse because their legacy storage/consumer semantics are not part of the Run/Spot contract. Required definition and skill fields are checked for exact types and finite numeric values; unknown fields, malformed dictionaries, dangling identities, wrong original-definition bindings, mutable sharing and stale recaptures refuse or produce an explicit `bounded_run_spot_closure_refused` diagnostic.
++
++`BeingDictionary.object_categories` is deliberately classified U: `Library.load_library()` currently calls `self.being_dictionary.load_object_categories(categories_filename)` for the object category file, and those category members are not necessarily BeingDefinition keys (for example, ordinary Object names). This local Run/Spot proof does not reinterpret or repair that existing contract. Whole-checkpoint `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false; `semantic_closure_adapter_incomplete`, `receipt_rebinding_required`, and all export/restore refusals remain. No file schema, receipt issuance, restoration, replay, or live integration is implemented.
++
++## 14. 5D2C4 inactive bounded Run/Spot envelope
++
++`src/checkpoint_envelope.py` composes one coordinated `NativeInventory` capture into the frozen in-memory `universe.native-run-spot-checkpoint-envelope/1` candidate. Its authoritative state is the complete detached native inventory tree from that capture; explicit sections identify the 5D2C3 field-closure certificate, accepted future Run/Spot choice descriptors, zero-to-two committed receipt boundaries and their chain descriptor, current private caller-owned RNGCursor state, compatibility fingerprint, root logical IDs, diagnostics, and reconstruction obligations. Choice/receipt/certificate sections are cross-checked against that same state tree. The source inventory performs coordinated ownership, read-set and compatibility checks before returning; envelope assembly does not reread the Universe or stitch captures from different revisions. Numeric values retain the existing exact integer/binary64 tags, ordered collections remain ordered, and the envelope contains only detached data values and tuples.
++
++`bounded_envelope_validated` is an explicit local status for successful assembly and same-process freshness validation. The content digest detects candidate edits but is not an authenticity seal. The validator requires the exact issued in-process candidate, checks its digest and internal component closure, then delegates freshness validation to the existing native inventory validator. It does not grant process-independent identity, receipt authenticity, save, restore, or continuation. `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false, and the existing save/export/restore refusals are unchanged.
++
++Future restoration still requires a compatible native allocator; reconstruction of Library/Being/Encounter/ChoiceBook, accepted Action declarations and fresh process-local choice signatures; exact reference/alias rebinding; and authenticated receipt reissuance with regenerated Action, Target, and storage anchors after full validation. The envelope remains limited to the exact 5D2C3 Run/Spot subset. Other Action families, non-Being entities, external recipients, Reality/history additions, custom callbacks, shared/module RNG, unsupported definition dictionaries/categories, multiple Encounters, and unreviewed aliases remain refused or outside the certificate.
++
++## 15. 5D2C5 detached Run/Spot wire representation
++
++`src/checkpoint_wire.py` defines `universe.native-run-spot-checkpoint-wire/1`, a strict canonical UTF-8 JSON byte representation of the complete 5D2C4 detached envelope DTO. The top-level object has exactly `schema`, `envelope`, and `sha256`; unknown or duplicate keys refuse. The envelope payload is an ordered array representation of the immutable tuple data, retaining explicit nulls, booleans, absent fields, ordered sequences/maps, logical reference tags, and exact integer/binary64 string tags. Untagged JSON floats, noncanonical number encodings, dangling inventory references, duplicate logical/alias nodes, duplicate map/field keys, unknown native fields/tags, mismatched choice/receipt/effect/Target links, and unsupported families refuse. Encoder/decoder limits are 32 MiB, 128 nesting levels, one million data nodes, one million characters per string, and 4,096 decimal digits per integer.
++
++The payload includes the existing source/rule compatibility fingerprint for inspection. A decoder can read and preserve it, but this wire codec does not establish runtime compatibility or cross-version rule equivalence; a future restore must apply an explicitly reviewed compatibility policy. Version 1 is closed: changing required envelope or field semantics requires a new wire schema version. Version-1 readers reject unknown required fields and tags rather than ignoring them. The SHA-256 digest detects accidental corruption only; it is not an authenticity credential.
++
++`decode_run_spot_wire()` returns a detached `DecodedRunSpotWire` DTO and `reencode_decoded_run_spot_wire()` reproduces canonical bytes in another Python process. The DTO carries no live object, process address, issuance token, receipt seal, or native registry binding. It is not a `NativeRunSpotCheckpointEnvelope` issued by the same-process capture path and cannot satisfy the native freshness validator or authorize receipt use/restoration. The decoder uses the static field vocabulary but does not need the original Universe, Encounter, `checkpoint_inventory` candidate registry, or receipt issuance registry. This establishes only bounded byte-format validity and data round-trip.
++
++Global `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false. File save/load/export, native reconstruction, fresh choice-signature generation, receipt reissuance/authentication, replay, and deterministic continuation remain unimplemented. Existing save/export/restore refusals remain unchanged.
++
++## 16. 5D2C6 quarantined initial Run/Spot reconstruction
++
++`src/checkpoint_reconstruction.py` adds `reconstruct_initial_run_spot(DecodedRunSpotWire)`, a developer/test adapter for one exact, zero-committed-boundary Universe/Encounter graph. It repeats strict detached wire validation and requires the current exact implementation/runtime/rule fingerprint, false global readiness flags, the fixed reconstruction-obligation contract, an exclusive caller-owned MT19937 cursor, and the existing 5D2C3 bounded field certificate. A decoded checksum is still only corruption detection; this adapter does not authenticate a world.
++
++The supported initial graph contains the native Universe root (`id="0"`), one Encounter at its original time cursor, the origin Event, one native ChoiceBook, registered BeingInstances and their complete BeingDefinition/SkillDictionary dependencies. The other Library dictionaries must be present as native, empty Action/Armor/Object/Weapon catalogs. Reviewed data-only constructors rebuild the supported Being definitions and their Abilities, Speed, Skills, States, Strategy, Exertion, Q/B, continuous position, Sphere geometry, and VisualOcclusion values. Logical IDs and definition/entity aliases are rebound to newly allocated process objects; constructors must reproduce every captured field exactly. Containment, equipment/body-part ownership, non-Being Objects, physiology profiles/IDs, personal histories, skill-use records, Reality, recipients, callbacks, and nonempty out-of-scope definition catalogs are refused.
++
++Accepted future Run/Spot choices are reconstructed only from `universe.accepted-action-choice/1` descriptors. The adapter creates fresh Action objects, preserves their logical IDs, fractional intervals and declaration data, then uses the ordinary native ChoiceBook schedule/validate/accept path. It compares the rebuilt portable descriptor and prepared schedule with the wire descriptor; the in-process declaration signatures and prepared identity anchors are newly generated and never copied. The current scheduler counter is retained after native acceptance. Unsupported Action families, bad identities, dangling references, stale compatibility, invalid RNG state, or any committed boundary/receipt refuse before a result is returned.
++
++Every successful result is explicitly marked quarantined. The public `QuarantinedReconstruction` exposes a detached immutable `QuarantinedReconstructionView`: stable logical identities, Being state snapshots, accepted Run/Spot declarations and reservations, fractional timing, and private RNG metadata/state. It does not expose native Universe, Encounter, Being, Action, definition, mutable container, or RNG cursor references through supported public fields. The native graph is retained in a process-local weak-keyed private store for future reviewed internal rebinding; this is cooperative API encapsulation, not a security boundary against Python reflection, `__dict__` access, monkeypatching, or malicious private-code access. The existing process-local guards still protect Encounter/Universe gameplay entry points. The graph is not published into an existing Universe and does not authorize save/load, receipt reissuance, replay, or deterministic continuation. Source graphs and module RNG are unchanged; the view contains the exact detached private RNG state. `Library(..., load_definitions=False)` is an opt-in constructor mode used to avoid loading host configuration while building a reviewed Library; existing constructor behavior remains the default.
++
++All three global readiness flags remain false. The support boundary is intentionally initial-only: even valid one- and two-boundary receipt envelopes are refused. Native catalogs beyond the declared Being/Skill subset and unresolved profile or ownership relations remain limitations rather than inferred mappings. Existing transactional serialization and restoration refusals remain in force.
++
++## 17. 5D2C7 one-boundary reconstruction refusal
++
++No one-boundary graph is reconstructed by 5D2C7. A source-process envelope may contain a valid `universe.committed-native-receipt-chain/1` descriptor, but the only native committed-history reader, `inspect_encounter()`, accepts `PublishedInterval` rows only when `_COMMITTED_RECEIPTS` contains the exact process-local object, Encounter weak reference, and fingerprint. `publish_interval_candidate()` creates that entry only after live publication succeeds. Recreating the entry from decoded bytes would reissue an authority credential, which is expressly excluded.
++
++The descriptor is portable data and does not itself supply an approved constructor/adapter for the complete post-resolution Run/Spot Action graph and Target-owned native history. The existing reconstruction adapter covers unstarted Actions and requires the original clock, empty lifecycle queues, empty fatigue frame history, and no receipt rows. There is no separate quarantine-only native historical projection API. 5D2C7 therefore leaves the initial-only preflight intact and refuses a one-boundary envelope before graph allocation, with an explicit diagnostic identifying the missing projection contract and prohibited process-local receipt issuance. The data-only descriptor remains available for later adapter design; it is not attached as native history or treated as authenticated state.
++
++This increment adds no receipt, Action, Target-history, or historical inspection adapter. `inspect_committed()` continues to reject the reconstructed initial graph and no historical graph can be used for normal inspection. Global `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false. A future bounded step must first specify and validate a detached quarantine-only mapping from `PortableCommittedAction` and `PortableTargetRecord` to fresh native post-boundary Action/Target records, while keeping those records outside `_atomic_interval_history` and preserving the native receipt authentication guard.
++
++## 18. 5D2C8 detached one-boundary Spot projection
++
++`src/checkpoint_projection.py` adds `project_quarantined_spot_boundary(DecodedRunSpotWire)`. It repeats strict version-1 wire validation, then accepts exactly one initial integer boundary, one committed Choice, and one or more exact native Spot Actions sharing the same registered actor and observed Being. It rejects future accepted choices, multiple boundaries, Run/mixed families, any nonzero damage/fatal state, observer evidence or recipient bindings, personal-history-bound practice, unsupported effects, or extra participant Target records.
++
++The return value is `QuarantinedSpotBoundaryProjection/1`, a frozen tree of immutable tuples and scalars with explicit logical IDs. It retains each Action's declaration, outcome, exact tagged start/end values and causal effect references; each typed effect identity/payload; each Target's exact candidate-state data, HP/position, incoming/outgoing effects and awareness; and the committed Choice and private RNG-after data. Target-owned exercises and common before/after transitions remain separate from Action causes. The batch practice row is projected from the Target transition and exercises using the existing `atomic_publication._make_plan()` aggregation that writes `BatchSkillUse`; it does not assign per-Action rank changes or resolve Actions again.
++
++The API is data-only. It allocates no native simulation entities, does not import or consult `atomic_publication` or `Encounter`, does not touch receipt issuance, does not write authoritative histories, and has no progression or native inspection method. Its schema and `quarantined` marker confer no authenticity. The source wire digest remains an integrity check only. Existing `reconstruct_initial_run_spot()` retains the 5D2C7 one-boundary refusal.
++
++The supported example includes two simultaneous Spot Actions by one Being against one observed Being and one shared Target-owned `BatchSkillUse` transition with both causal practice effects. Exact tagged times are preserved without numeric coercion. Future accepted choices are refused by this projection; later boundaries, other Action families, damage, observers/Belief, Reality/history, callbacks, and live fatigue are unsupported. Global `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false. This remains an inactive value projection, not native post-boundary reconstruction or simulation authority.
++
++## 19. 5D2C9B quarantine-only native identity binding
++
++`src/checkpoint_binding.py` adds `bind_quarantined_spot_boundary(decoded, projection=None)` for the exact one-boundary/two-simultaneous-Spot case. It re-encodes and re-decodes the supplied DTO to verify its digest, repeats the 5D2C8 projection, compares any supplied projection exactly, checks the runtime compatibility fingerprint and exclusive caller-cursor RNG, and cross-validates participant Objects, Encounter membership/cursor, finished Action queues, native ChoiceBook membership, action declarations, causal IDs and the single Target-owned batch transition. The accepted Choice is exactly one Choice containing the two projected Spot Actions; future choices, Run/mixed families, extra boundaries/Targets, invalid references, host bindings and unsupported graphs refuse.
++
++The factory uses the reviewed BeingDefinition, BeingInstance and SpotAction constructors to allocate fresh process-local identities with the checkpoint's logical IDs. At 5D2C9B it did not construct an Encounter, accept or register a Choice, insert the Actions into native event/finished queues, execute them, or copy post-boundary practice/history into native history. As extended by 5D2C10 below, the private Being objects carry the exact represented current state while committed Target histories and causal practice remain in the frozen `QuarantinedSpotHistoricalSidecar`, bound by logical IDs. At that stage the private Universe had only its origin Event; section 21 records the later addition of one empty quarantined Encounter Event. The RNG cursor remains private and unchanged.
++
++The public binding exposes only frozen identity/timing views and the detached historical sidecar. The native Universe, Being and Action objects and RNG cursor are retained in a process-local weak-keyed module-private store. Quarantine markers and the direct Action guard keep these shells non-executable through supported APIs. As with the 5D2C9A reconstruction view, this is cooperative API containment, not a sandbox against reflection or malicious private-code access. No `_COMMITTED_RECEIPTS`, `_atomic_interval_history`, Action resolution, Target history, or publisher state is written. This does not authenticate the descriptor, install authoritative history, continue gameplay, or enable serialization/restoration. The original `reconstruct_initial_run_spot()` committed-boundary refusal and all global false readiness flags remain unchanged.
++
++## 20. 5D2C10 quarantine-only post-boundary Being state materialization
++
++`bind_quarantined_spot_boundary()` now allocates fresh private native Being instances from the same validated one-boundary/two-Spot representation and hydrates their captured current fields through the existing reviewed `_Graph.native()` constructors, `BeingInstance` constructor, and the initial reconstruction adapter's field/setter path. The accepted closed instance field set covers original/current BeingDefinition references, current HP and other definition-owned fields, facing, container ID, physiology, legacy fatigue level, effective fitness, skill experience and practice baselines, possessions/weapons, spatial state, geometry, visual occlusion, Q/B physical-fatigue state, strategy and exertion. The local compatibility fingerprint and exact field inventory still gate this adapter. Unknown/missing fields or unsupported constructor values refuse.
++
++Before returning a result, the binder compares materialized HP and position with the Target candidate, current ordinary/weapon skill levels, practice baseline and experience with the complete Target practice projection, and the source Target-owned native `BatchSkillUse` and its two causal exercises with the detached historical sidecar. The represented actor skill experience is 24 (pre-boundary 17 plus the one 7-experience batch); no `record_skill_use()` call occurs. Newly constructed native Beings retain empty `skill_use_history` and have no `_atomic_target_history`; the one batch, both separate Action contributions, causal links and effect IDs remain only in the immutable sidecar.
++
++The source schema stores awareness on `Encounter.awareness`, not on `BeingInstance`. The binder cross-validates that captured mapping against both projected Target `aware_of` sets and includes each Being's detached awareness observers in its immutable current-state view. D2C11A now places the validated directed awareness mapping in a new quarantined Encounter as described in section 21. Public Being views carry frozen state snapshots and identify their role as verified quarantined post-boundary current state; historical explanations remain separately labeled. Private native references and RNG ownership remain module-private and quarantined. Source graph, module RNG, receipt registries and live simulation state remain untouched. This is still not receipt-authorized restoration or an executable/resumable Universe; all global checkpoint-readiness flags remain false, and the existing committed `reconstruct_initial_run_spot()` refusal is unchanged.
++
++## 21. 5D2C11A private advanced-time Encounter construction
++
++`Encounter.__init__` continues to refuse ordinary `time != start_time` construction with its existing unsupported-migration invariant. A separate underscore-private constructor path, `Encounter._construct_quarantined_post_boundary()`, accepts only an internal validated plan for the exact `start_time=0`, `time=1`, two-native-Being case. It validates the isolated Universe registry and origin Event, participant identity/ownership, complete directed awareness references, no prior Universe scheduling/Event context, and a valid exclusive private caller RNG cursor before construction.
++
++The path initializes the Encounter at its captured start and advanced cursor in one constructor call; it does not create an Encounter at time zero and patch clock fields afterward. Native constructor invariants establish `last_processed_boundary=1`, `_coordinator_time=1`, `_interval_start=1`, no active boundary/fault/reentrancy, and a fresh ChoiceBook with empty drafts, choices, reservations, registration and lifecycle maps. It registers only the new Encounter Event in the private Universe, then quarantines the Encounter, Universe and participants before returning to its internal binder. The caller RNG stays private and unchanged; it is not attached as a progression mode.
++
++The 5D2C10 binder now uses this private path and exposes only a frozen `QuarantinedNativeEncounterView` with the clock, next boundary, participants, awareness, empty live queues/scheduler and private RNG state. The weak-keyed private binding keeps the native Encounter, Universe, Being instances, inert Action identity shells and RNG owner under one binding identity. The immutable binding result cross-links that identity through the Encounter/Being/Action logical IDs, historical Choice ID and Target-owned sidecar; each historical Action view and practice contribution retains its own Choice/Action/Target causal references. Historical Spot Actions remain inert detached identity objects and are not registered in the Event history, ChoiceBook, finished queue or receipt/history registries. The historical sidecar is not attached to the native Encounter. `step()`, `run()` and supported progression entry points remain blocked by quarantine. This adds a validated construction prerequisite only: it does not authenticate the data, restore or resume an Encounter, enable save/load or replay, attach historical outcomes, or change global checkpoint readiness flags.
++
++## 22. 5D2C12C1 inert imported Spot practice input
++
++`src/frozen_practice.py` now provides `freeze_imported_spot_practice()` and `merge_imported_practice_uses()` as inactive data adapters. The first accepts only the existing exact quarantined one-boundary/two-Spot sidecar. It cross-checks the Target, Action, Choice and effect identities; exercise order and amounts; batch and transition totals/timing; the no-personal-history subset; and the projected post-boundary rank, baseline and skill experience. It converts both separate `PracticeExerciseProjection` causes to the existing frozen `CandidatePracticeUse`/`EffectIdentity` types, assembles one Target-owned `BatchSkillUse`, and routes it through the existing `_copy_use()` validator. It does not install that row into a Being or grant receipt authority.
++
++The returned `ImportedPracticePrefix/1` is frozen and contains only logical IDs, immutable practice data and a deterministic content digest. The digest is a future read-dependency token only; it is not a signature, authenticity claim or readiness certificate. The merge helper returns a detached tuple in the existing `FrozenBeingPractice.prior_uses` shape, followed by validated native suffix rows in chronological order. It rejects duplicate Action/skill causes, wrong Target ownership, stale prefix digest, unsupported practice variants, and suffix rows at or before the imported boundary. Current XP/ranks are passed through unchanged; imported exercise amounts are not summed into authoritative state again.
++
++The public `capture_practice_inputs(world, objects, entity_views)` signature and ordinary behavior remain unchanged. 5D2C12C5 adds a private prepared-context adapter that enters the same closed definition/history/use-copy validators and produces the same `FrozenPracticeInputs` and `FrozenBeingPractice` records, merging this prefix once into the Target's `prior_uses`. It does not apply XP or mutate native practice history, Target history, receipts, RNG, Action/Event/Choice registries, quarantine state, or Encounter progression. Personal-history-bearing imports, other Action families, multiple/imported boundaries and cross-process trust remain unsupported. Global `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false.
++
++## 23. 5D2C12C2 inactive historical identity reservation plan
++
++`src/checkpoint_identity_reservations.py` adds a pure plan for the same closed one-boundary/two-Spot sidecar. It first reuses `freeze_imported_spot_practice()` so Choice membership, Action identities, actor/Target ownership, causal effect links and supported-history closure are validated before the identity set is described. The frozen plan lists the historical Choice ID, both Action IDs, root/Event namespace IDs, Target Object IDs and composite causal effect identities. It does not install or reserve any of them in native stores.
++
++Source conventions establish separate scopes: `ChoiceBook._id(kind)` increments one Encounter-local integer and returns `<encounter-id>/<kind>/<counter>`; accepted Choice IDs retain the originating `draft` ID. A historical Choice therefore proves the minimum counter floor given by its positive canonical decimal suffix, and a subsequent draft allocator must start above that floor. Draft and transient validation allocations share the counter, but the supported sidecar omits prior validation/token allocations, so the original exact counter is unknown; the plan reports `source_counter_exact=False` and does not claim an exact resume value. Action IDs are `Identifiable` IDs and are registered in `Universe.event_history` through Choice publication. Thus the origin Event (`0`), Encounter Event and imported Action IDs share the Event key namespace. Target Being IDs belong to the Object registry namespace. Effect identities are composite `(Encounter, boundary, Action, channel, slot)` causal references, not independently allocated IDs.
++
++`validate_future_identity_ids()` checks a proposed new draft ID is in the native Encounter `draft/N` form above the recorded floor and checks proposed Action IDs for duplicates or collisions with imported/root/current Event IDs. It separately checks Choice IDs against current Choice IDs; it does not incorrectly merge the Choice and Event namespaces. Both APIs return detached frozen data or refuse. They do not modify the ChoiceBook counter, native registries, Actions, receipts, histories, RNG, quarantine state or global readiness flags. The plan digest is an edit-detection checksum only, not authentication. No trusted restore binding, allocation, scheduling or continuation is enabled; all checkpoint readiness flags remain false.
++
++## 24. 5D2C12C3 trusted-local preparation, still quarantined
++
++`src/checkpoint_restore_preparation.py` adds a private two-call host policy boundary: host-owned code that has made an out-of-band trusted-local decision calls `_host_authorize_trusted_local_restore(binding)`, then passes the returned process-local opaque capability to `_prepare_trusted_local_restore(binding, capability)`. The capability is tied by object identity to the already privately bound checkpoint and is single-use on successful preparation. No wire field, `trusted=true` value, digest, or imported receipt can create it. This is a trusted-local host policy, not cryptographic origin authentication or a Python security boundary; the repository has no user-facing checkpoint loader and these underscore-prefixed calls are not such a loader.
++
++Preparation recomputes the 5D2C12C1 imported-practice prefix and 5D2C12C2 identity plan from the exact immutable historical sidecar. It cross-checks Universe/Encounter/Being/Spot Action/Choice/Target/effect references, Target-owned practice against already materialized skill state, time and next boundary, current native RNG against the detached views, quarantine markers, and empty Event/Choice/action/receipt/history stores. The frozen public result carries the prior `QuarantinedSpotBindingView` plus distinctly labeled `host-authorized imported checkpoint history; not native receipt history`, including the immutable practice prefix/digest. It exposes no native handle.
++
++After preflight, `_initialize_quarantined_choice_counter_floor()` acquires the private ChoiceBook lock and permits only the fresh, empty, quarantined boundary-1 book at counter zero. It sets `_counter` to the proven minimum historical draft suffix, so the next allocator value will exceed that Choice ID. `source_counter_exact` remains false. The full immutable Event/Action exclusion plan remains in the private prepared-context store for a later scheduler gate; neither Action nor Choice is registered. Publication of the private context is failure-atomic with rollback of this one scalar if context registration raises. Preparation does not alter any queues, registry/container identity, practice, RNG, receipts, history, progression mode or checkpoint-readiness flags. Normal scheduling, `step()`, Action resolution and transactional mode activation remain blocked by quarantine.
++
++This is not restoration or resumability. Imported practice is not connected to live frozen-practice capture/read sets; historical Actions and Target histories are not installed; no receipts are issued or authenticated. Global `closure_validated`, `portable_schema_defined`, and `restore_verified` remain false.
++
++## 25. 5D2C12C4 inactive prospective boundary-2 dependency
++
++`src/checkpoint_restore_dependencies.py` adds `create_prepared_boundary2_read_dependency()` and `preflight_boundary2_identity_ids()`. The frozen dependency captures the C1 prefix schema/content digest, exact practice Target, Action causes, C2 Choice/Event/Action exclusions and plan digest, the C3 private prepared-context revision, boundary 1 → prospective boundary 2, counter floor, and a digest of the bounded prepared native read. Its private issued-token map ties it to the exact prepared handle; a caller-created or edited dependency is rejected even if its digest is recomputed. The read fingerprint folds process-local native/container identity into a digest, while the external DTO contains only data. No digest authenticates checkpoint origin.
++
++The check re-runs C1/C2/C3 closed validation and compares current native Being snapshots with the immutable C3 view; it also checks clock/coordinator, private RNG, Event/Object registries, ChoiceBook stores/counter and action shells. A mismatch, stale prefix/state, wrong context revision, Encounter or practice Target, non-boundary-2 request, duplicate IDs, historical ID reuse, or current Event collision refuses. Future Choice/Action values are data-only; no native objects are created.
++
++This C4 dependency by itself did not call `interval_staging._read_set()` or `capture_practice_inputs()`. C5 adds a separate read-only bridge for an already issued C4 dependency and accepted two-Spot identity preflight. Under the native scheduler lock it revalidates C4, calls the actual `interval_staging._read_set()` on the quarantined time-1 Encounter, calls the shared frozen-practice capture/validation implementation with the private native Being identities and imported prefix, then repeats both checks and rejects any read-set drift. The returned frozen diagnostic binds the prefix schema/digest, prepared-context revision, C4 digest, prospective identities, actual read-set digest/value, and standard `FrozenPracticeInputs`; it exposes no native handle. It contains no standalone imported-prefix revision because the native prefix type defines none: the immutable content digest and issuing prepared-context revision jointly identify the current input. Neither is a signature or authenticity claim.
++
++The bridge does not call `validate_interval_candidate()`, create an `IntervalCandidate`, capture an action-evaluation snapshot, stage movement, or invoke evaluators. It cannot yet feed this diagnostic `FrozenPracticeInputs` into a real boundary-2 candidate, because the candidate path has no imported-prefix context parameter and the quarantined time-1 Encounter cannot satisfy the post-movement boundary-2 capture fence without later authorized staging. It is still detached read-only preparation and confers no execution authority. All readiness flags remain false.
++
++## 26. 5D2C12C5 frozen read-capture bridge
++
++`src/checkpoint_restore_dependencies.py` adds underscore-private `_capture_prepared_boundary2_frozen_read()` and `_validate_prepared_boundary2_frozen_read()` as read-only diagnostics for the exact C3/C4 prepared handle. Capture requires the issued C4 token and accepted data-only boundary-2 Choice/two-Action identity preflight, revalidates C1/C2/C3/C4 while holding the same native scheduler lock helper used by interval staging, and snapshots the real `_read_set(encounter)` both before and after frozen practice capture. The diagnostic includes the native read-set digest and detached read-set tuple, C4/prepared revision references, imported-prefix schema/digest, and the normal immutable `FrozenPracticeInputs`. Recheck recaptures the exact bundle and rejects stale or edited dependencies.
++
++`src/frozen_practice.py` leaves the public capture signature unchanged and factors the existing definition, use-copy, duplicate-cause, historical-constraint and Target ownership checks into one internal implementation. The ordinary evaluator calls it with its existing `EntityView` rows. The prepared adapter calls the same implementation with raw reviewed native Being skill maps and the validated C1 prefix; that path merges the imported `BatchSkillUse` once into `FrozenBeingPractice.prior_uses`. It reads current skill definitions, rank, baseline, XP and history but does not award XP. The supported fixture captures Target Spot XP/rank as 24/2, preserving both distinct source Action/effect causes.
++
++Focused equivalence tests show definitions, ranks, weapon ranks, baselines, XP and history match ordinary practice capture; the only expected difference is the imported Target's one prior batch. The full detached read captures current Encounter/Universe/registry/definition/scheduler dependencies through `_read_set`; C4 revalidation separately covers private RNG state, imported prefix digest, context revision, counter floor, historical identity exclusions and native Being state. The adapter allocates no Action or Choice, consumes no RNG, performs no Action evaluation, creates no candidate, calls no publisher, leaves all live queues/histories and receipts untouched, and retains quarantine.
++
++The read set contains process-local identity numbers and is valid only in the current process/prepared-context handle. The C1 prefix has no independent revision field; its schema/content digest plus C3 context revision is the available source-grounded version binding. The bridge does not provide authenticity or durable resumability. It is not yet consumed by a candidate: a future controlled demonstration must add an explicitly authorized path that stages movement to boundary 2, passes imported practice into the ordinary candidate snapshot capture, and uses the existing native publisher only for the new boundary. No global readiness flag changes.
++
++## 27. 5D2C12C6 one bounded trusted-local boundary-2 continuation
++
++`src/checkpoint_restore_continuation.py` adds only the underscore-private `_continue_one_spot_boundary2()` operation. Its inputs must be the current process-local C3 host-authorized prepared handle, an issued/current C4 dependency, its exact boundary-2 identity preflight, and one explicit new Action ID. It holds the existing atomic publication gate and native scheduler lock, consumes C4/C5 validation again, seals the C1–C5 state into a private continuation context, and enters a thread-bound one-call execution scope. That scope does not remove or edit quarantine markers. Only within it, `_enable_prepared_transactional_progression()` binds the exact quarantined time-1 Encounter to its private caller-owned `RNGCursor`; the ordinary public `enable_transactional_progression()` continues to refuse this graph.
++
++The operation creates exactly one native Spot Action at time 1 with duration 1 and the preflighted explicit logical Action ID. It admits the complete singleton Choice through the ordinary `Encounter.schedule_choice()`/ChoiceBook validation and acceptance rules. The C2 historical counter floor determines the auto-created native Choice ID (`<encounter>/draft/<minimum-next-suffix>`), which is checked against the C4 preflight. The ordinary `Encounter.step(1, velocities=...)` then uses the existing movement-to-boundary coordinator, `interval_staging.prepare_interval_candidate()`, immutable evaluation and Target/practice reconciliation, `validate_interval_candidate()`, and `atomic_publication.publish_interval_candidate()`. No historical Action is queued, evaluated, replayed or registered. The only receipt issued and added to `_COMMITTED_RECEIPTS` is the newly published boundary-2 interval.
++
++The private evaluation context binds the exact prepared revision, C4 digest, C1 prefix schema/digest, C2 identity-plan digest and counter floor, historical/future Choice and Action IDs, and C5 frozen-read digest. `capture_snapshot()` uses the shared `_capture_prepared_practice_inputs()` path, so the imported boundary-1 Target `BatchSkillUse` is present once in frozen practice input while the already-materialized Target XP/rank is not awarded again. Candidate validation requires the same dependency binding, exact singleton Spot coverage, unchanged accepted Choice and one imported batch. The B2 receipt and Target-owned record contain only B2 native effects/history; imported B1 provenance stays in the immutable sidecar and is not registered as a receipt or installed as native B1 Target history.
++
++After success, the diagnostic result exposes only immutable boundary evidence, not native graph handles. Quarantine remains active; ordinary calls outside the private operation still refuse, and full `inspect_committed()` correctly refuses a suffix-only native receipt chain rather than treating the imported prefix as native-issued history. The private operation is limited to one new Spot Choice at boundary 2 and cannot be used as a general loader, resumption loop, save/restore API, replay path or public unquarantine mechanism. Candidate-construction failures discard the admitted private Choice/mode, and an injected publisher failure after the practice phase exercises the existing rollback and explicit recovery contract before the private Choice/mode are discarded. Broader process crash recovery, uncoordinated arbitrary Python writes, future Action families, further boundaries and readiness are not established. All global checkpoint readiness flags remain false.
+diff --git a/examples/first_spotting_encounter.py b/examples/first_spotting_encounter.py
+index 56c73b7..7f4d5b8 100644
+--- a/examples/first_spotting_encounter.py
++++ b/examples/first_spotting_encounter.py
+@@ -11,7 +11,7 @@ from library import Library
+ from spatial import CartesianPosition, Sphere
+ from universe import Universe
+ 
+-world = Universe('Observation practice', library=Library(config_dir=str(ROOT / 'src' / 'config')))
++world = Universe('Deliberate Spot', library=Library(config_dir=str(ROOT / 'src' / 'config')))
+ observer_id = world.make_being('Human', 'Observer')
+ known_id = world.make_being('Human', 'Partner')
+ target_id = world.make_object('Brick', 'Object to discover')
+@@ -19,23 +19,18 @@ observer = world.get_object_by_id(observer_id)
+ observer.set_position(CartesianPosition(0, 0, 0))
+ world.get_object_by_id(known_id).set_position(CartesianPosition(0, 5, 0))
+ world.get_object_by_id(known_id).set_geometry(Sphere(0.5))
+-world.get_object_by_id(target_id).set_position(CartesianPosition(10, 0, 0))
++world.get_object_by_id(target_id).set_position(CartesianPosition(100, 0, 0))
+ world.get_object_by_id(target_id).set_geometry(Sphere(0.5))
+-encounter = Encounter(world, difficulty_class=11, start_time=0)
++encounter = Encounter(world, difficulty_class=99, start_time=0, initiated=True)
+ encounter.add_being(observer_id)
+ encounter.add_being(known_id)
+ encounter.add_object(target_id)
+ encounter.mark_aware(observer_id, known_id)
+-encounter.decide_to_act(observer_id, known_id, 'search area')
+ 
+-for xp in (250, 0):
+-    action = SpotAction(world, observer_id, target_id, encounter.time,
+-                        duration=1, max_distance=15, die_roll=10,
+-                        experience=xp)
+-    encounter.schedule_action(action)
+-    encounter.step()
+-    print('Outcome:', action.resolution.outcome,
+-          'roll:', action.roll, 'skill used:', action.skill_level_used,
+-          'new rank:', observer.get_skill_level('spot'),
+-          'aware:', encounter.is_aware(observer_id, target_id))
+-print('Skill-use history:', [record.to_dict() for record in observer.skill_use_history])
++# Discovery uses the target's DC (15 by default), not Encounter attack DC.
++action = SpotAction(world, observer_id, target_id, encounter.time, die_roll=15)
++encounter.schedule_action(action)
++encounter.step(duration=6)
++print('Outcome:', action.resolution.outcome, 'roll:', action.roll,
++      'aware:', encounter.is_aware(observer_id, target_id))
++print('Spot is an Action; Spot skill XP:', observer.get_skill_experience('spot'))
+diff --git a/src/checkpoint_adapters.py b/src/checkpoint_adapters.py
+index 4329916..33d4e50 100644
+--- a/src/checkpoint_adapters.py
++++ b/src/checkpoint_adapters.py
+@@ -15,7 +15,7 @@ import statistical_group
+ from statistical_group import StatisticalGroup, validate_composition_records
+ from personal_history import PersonalHistory
+ from realization import RealityLedger, CommittedFact, FactKey
+-from field_observation import BeliefLedger
++from field_observation import BeliefLedger, KnownWaypoint
+ from being import BeingDefinition, BeingInstance
+ from frozen_practice import _copy_use, _capture_history
+ 
+@@ -137,9 +137,9 @@ class NativeInventory(_Inventory):
+ 
+     def _recipient_aliases(self,ledger):
+         d=_fields(ledger)
+-        for name in ('_evidence','_interpretations','_current_reassessments','_belief_history','_reassessments','communication_log','_inquiry_history'):
++        for name in ('_evidence','_interpretations','_current_reassessments','_known_waypoints','_belief_history','_reassessments','communication_log','_inquiry_history'):
+             value=d[name]
+-            _require(type(value) is (dict if name in ('_evidence','_interpretations','_current_reassessments') else list),'opaque recipient container')
++            _require(type(value) is (dict if name in ('_evidence','_interpretations','_current_reassessments','_known_waypoints') else list),'opaque recipient container')
+             _require(id(value) not in self.mutable_recipients,'unsupported shared recipient internal container')
+             self.mutable_recipients[id(value)]=(id(ledger),name)
+ 
+@@ -180,6 +180,13 @@ class NativeInventory(_Inventory):
+         finally:self.stack.discard(id(value))
+ 
+     def field(self,tag,field,item,ref,path,depth):
++        if tag=='field_observation.BeliefLedger' and field=='_known_waypoints':
++            owner=self._objects_by_identity.get(self._owner_identity(ref))
++            _require(type(item) is dict and owner is not None
++                     and all(type(key) is str and type(value) is KnownWaypoint
++                         and value.id==key and value.owner_id==owner.observer_id
++                         for key,value in item.items()),
++                     'invalid owner-bound waypoint knowledge')
+         if tag=='action_choice._Accepted' and field=='signatures':
+             from checkpoint_choices import describe_accepted_choice, ChoiceDescriptorRejected
+             record=self._objects_by_identity.get(self._owner_identity(ref))
+diff --git a/src/checkpoint_fields.py b/src/checkpoint_fields.py
+index d5e3043..ef70c1c 100644
+--- a/src/checkpoint_fields.py
++++ b/src/checkpoint_fields.py
+@@ -183,8 +183,8 @@ FIELD_ADAPTERS = {
+         "required": 'expert_level skill_name'.split(),
+     },
+     'field_observation.BeliefLedger': {
+-        "allowed": '_belief_history _current_reassessments _evidence _inquiry_history _interpretations _reassessments communication_log observer_id'.split(),
+-        "required": '_belief_history _current_reassessments _evidence _inquiry_history _interpretations _reassessments communication_log observer_id'.split(),
++        "allowed": '_belief_history _current_reassessments _evidence _inquiry_history _interpretations _known_waypoints _reassessments communication_log observer_id'.split(),
++        "required": '_belief_history _current_reassessments _evidence _inquiry_history _interpretations _known_waypoints _reassessments communication_log observer_id'.split(),
+     },
+     'field_observation.BeliefRevision': {
+         "allowed": 'category disputed estimate evidence_ids group_id time trigger trigger_observation_id'.split(),
+@@ -210,6 +210,10 @@ FIELD_ADAPTERS = {
+         "allowed": 'action_id proposal'.split(),
+         "required": 'action_id proposal'.split(),
+     },
++    'field_observation.KnownWaypoint': {
++        "allowed": 'acquired_at frame id owner_id position source_id'.split(),
++        "required": 'acquired_at frame id owner_id position source_id'.split(),
++    },
+     'frozen_practice.CandidatePracticeUse': {
+         "allowed": 'action_id effect_identity experience nominal_end outcome resolved_at skill_name'.split(),
+         "required": 'action_id effect_identity experience nominal_end outcome resolved_at skill_name'.split(),
+@@ -410,6 +414,10 @@ FIELD_ADAPTERS = {
+         "allowed": 'origin x_axis y_axis z_axis'.split(),
+         "required": 'origin x_axis y_axis z_axis'.split(),
+     },
++    'spatial.frame.LocalPosition': {
++        "allowed": 'x y z'.split(),
++        "required": 'x y z'.split(),
++    },
+     'spatial.geometry.AxisAlignedBox': {
+         "allowed": 'size_x size_y size_z'.split(),
+         "required": 'size_x size_y size_z'.split(),
+diff --git a/src/checkpoint_inventory.py b/src/checkpoint_inventory.py
+index 59fe143..59db66c 100644
+--- a/src/checkpoint_inventory.py
++++ b/src/checkpoint_inventory.py
+@@ -66,14 +66,14 @@ _CATALOG = {
+     'library':'Library', 'actiondictionary':'ActionDictionary ActionDefinition',
+     'skill':'SkillDictionary SkillDefinition Skills', 'abilities':'Abilities', 'states':'States',
+     'speeds':'Speed', 'strategy':'Strategy', 'exertion':'Exertion',
+-    'spatial.state':'SpatialState CartesianPosition', 'spatial.frame':'LocalFrame',
++    'spatial.state':'SpatialState CartesianPosition', 'spatial.frame':'LocalFrame LocalPosition',
+     'spatial.geometry':'Sphere AxisAlignedBox', 'spatial.occlusion':'VisualOcclusion',
+     'physical_fatigue':'PhysicalFatigueState',
+     'physiology_registry':'PhysiologyRegistry PhysiologyDefinition ResolvedPhysiology',
+     'universe_physical_fatigue_r4':'Profile',
+     'encounter_fatigue_bridge':'FrozenFatigueFrame FrozenFatigueView',
+     'personal_history':'PersonalHistory', 'realization':'RealityLedger FactKey CommittedFact Fact',
+-    'field_observation':'BeliefLedger FieldObservation CountReport BeliefRevision EvidenceReassessment InquiryProposal InquiryRecord',
++    'field_observation':'BeliefLedger FieldObservation CountReport BeliefRevision EvidenceReassessment InquiryProposal InquiryRecord KnownWaypoint',
+     'field_interpretation':'FieldInterpreter FieldInterpretation',
+     'experience':'SkillUse BatchSkillUse', 'frozen_practice':'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
+     'objective_reality':'EpisodeFacts DeclaredObjectiveFact ObjectiveFact SubjectRealityCandidate',
+diff --git a/src/checkpoint_receipts.py b/src/checkpoint_receipts.py
+index e4ad022..355d06f 100644
+--- a/src/checkpoint_receipts.py
++++ b/src/checkpoint_receipts.py
+@@ -875,3 +875,4 @@ def _receipt_data(value):
+         tuple(row.to_data() for row in value.receipts),
+         tuple(row.to_data() for row in value.committed_choices),
+         tuple(row.to_data() for row in value.accepted_future_choices),value.rng_ownership)
++
+diff --git a/src/encounter_inspection.py b/src/encounter_inspection.py
+index aa5c3e8..b3d9d33 100644
+--- a/src/encounter_inspection.py
++++ b/src/encounter_inspection.py
+@@ -156,13 +156,14 @@ def detached(value):
+             'objective_reality': 'ObjectiveFact SubjectRealityCandidate',
+             'experience': 'SkillUse BatchSkillUse',
+             'realization': 'FactKey',
+-            'field_observation': 'FieldObservation CountReport BeliefRevision EvidenceReassessment InquiryProposal InquiryRecord',
++            'field_observation': 'FieldObservation CountReport BeliefRevision EvidenceReassessment InquiryProposal InquiryRecord KnownWaypoint',
+             'field_interpretation': 'FieldInterpretation',
+             'history_conversation': 'HeardAccount',
+             'interval_staging': 'AuthorityReference StartFence RegistrationIntent QueueProjection',
+             'atomic_publication': 'TargetIntervalRecord PublishedInterval',
+             'action_choice': 'Reservation',
+             'spatial.state': 'CartesianPosition',
++            'spatial.frame': 'LocalFrame LocalPosition',
+             'encounter_inspection': 'CommittedBoundaryRecord EntityInspection ActionInspection TargetInspection BoundaryInspection ObjectiveFactInspection ObjectiveInspection EncounterInspection',
+         }
+         allowed = set()
+diff --git a/src/field_observation.py b/src/field_observation.py
+index 6aa1078..f6611ed 100644
+--- a/src/field_observation.py
++++ b/src/field_observation.py
+@@ -11,6 +11,7 @@ import math
+ 
+ from perception import RangePerception
+ from spatial.state import CartesianPosition
++from spatial.frame import LocalFrame, LocalPosition
+ 
+ 
+ @dataclass(frozen=True)
+@@ -48,6 +49,36 @@ class FieldObservation:
+     # suspect candidates; they do not reveal objective species identity.
+ 
+ 
++@dataclass(frozen=True)
++class KnownWaypoint:
++    """Scenario-seeded, owner-bound spatial knowledge, not world position.
++
++    This record represents an explicitly supplied source item. It is not
++    produced by group observation, and its local point is meaningful only in
++    the stored immutable LocalFrame.
++    """
++    id: str
++    owner_id: str
++    source_id: str
++    acquired_at: float
++    position: LocalPosition
++    frame: LocalFrame
++
++    def __post_init__(self):
++        for name, value in (("id", self.id), ("owner_id", self.owner_id),
++                            ("source_id", self.source_id)):
++            if not isinstance(value, str) or not value.strip():
++                raise ValueError(f"{name} must be a nonempty string")
++        if isinstance(self.acquired_at, bool) or not isinstance(self.acquired_at, (int, float)) \
++                or not math.isfinite(self.acquired_at):
++            raise ValueError("waypoint acquisition time must be finite")
++        object.__setattr__(self, "acquired_at", float(self.acquired_at))
++        if type(self.position) is not LocalPosition:
++            raise TypeError("waypoint position must use LocalPosition")
++        if type(self.frame) is not LocalFrame:
++            raise TypeError("waypoint must include its LocalFrame")
++
++
+ class FieldObserver:
+     """Instrument-scaffold: range gates plus controlled errors (not optical vision)."""
+ 
+@@ -152,7 +183,7 @@ class BeliefLedger:
+     Inferred count estimates are illustrative summaries only. Contradictions
+     are retained as investigation targets instead of silently reconciled.
+     """
+-    def __init__(self, observer_id):
++    def __init__(self, observer_id, *, initial_waypoints=()):
+         self.observer_id = observer_id
+         self._evidence = {}
+         self._interpretations = {}
+@@ -161,6 +192,17 @@ class BeliefLedger:
+         self._belief_history = []
+         self.communication_log = []
+         self._inquiry_history = []
++        if type(initial_waypoints) is not tuple:
++            raise TypeError("initial_waypoints must be a tuple of native records")
++        self._known_waypoints = {}
++        for waypoint in initial_waypoints:
++            if type(waypoint) is not KnownWaypoint:
++                raise TypeError("initial waypoints must be native KnownWaypoint records")
++            if waypoint.owner_id != observer_id:
++                raise ValueError("initial waypoint belongs to a different BeliefLedger owner")
++            if waypoint.id in self._known_waypoints:
++                raise ValueError("duplicate initial waypoint identity")
++            self._known_waypoints[waypoint.id] = waypoint
+ 
+     @property
+     def evidence(self):
+@@ -179,6 +221,22 @@ class BeliefLedger:
+     def inquiry_history(self):
+         return tuple(self._inquiry_history)
+ 
++    @property
++    def known_waypoints(self):
++        """Immutable view of source-labeled waypoints seeded for this owner."""
++        return tuple(self._known_waypoints.values())
++
++    def known_waypoint(self, waypoint_id, *, owner_id, frame):
++        """Retrieve this owner's waypoint only in its declared local frame."""
++        if owner_id != self.observer_id:
++            raise PermissionError("waypoint lookup owner does not match this BeliefLedger")
++        waypoint = self._known_waypoints.get(waypoint_id)
++        if waypoint is None:
++            return None
++        if type(frame) is not LocalFrame or frame != waypoint.frame:
++            raise ValueError("waypoint coordinate frame does not match the requested frame")
++        return waypoint
++
+     def record_inquiry(self, proposal, action_id):
+         """Record a scheduled response to specific evidence, not its success.
+ 
+@@ -309,6 +367,12 @@ class BeliefLedger:
+         """
+         return {
+             "observer_id": self.observer_id,
++            "known_waypoints": [
++                {"id": item.id, "owner_id": item.owner_id,
++                 "source_id": item.source_id, "acquired_at": item.acquired_at,
++                 "position": item.position.as_tuple(),
++                 "frame": item.frame.to_dict()}
++                for item in self.known_waypoints],
+             "evidence": [asdict(e) for e in self.evidence],
+             "original_interpretations": {
+                 key: asdict(value) for key, value in self._interpretations.items()},
+diff --git a/src/group_observation.py b/src/group_observation.py
+index c54c314..1f913a6 100644
+--- a/src/group_observation.py
++++ b/src/group_observation.py
+@@ -1,8 +1,10 @@
+-"""Provisional, simulated statistical-group observation through Encounter Actions.
++"""Experimental, provisional statistical-group observation through Encounter Actions.
+ 
+ Objective composition is read only by the evidence generator.  The interpreter
+ receives *only* the imperfect evidence.  No tactical line-of-sight or terrain
+ visibility is asserted: range merely gates the currently modeled sensor.
++Its Spot-skill-based sampling and practice are a separate unresolved Group
++sensor model; they are not adopted deliberate Spot rules.
+ """
+ from __future__ import annotations
+ 
+diff --git a/src/observer_proposals.py b/src/observer_proposals.py
+index 8a32350..73e469e 100644
+--- a/src/observer_proposals.py
++++ b/src/observer_proposals.py
+@@ -17,9 +17,10 @@ from group_observation import (ObserveGroupAction, SampledGroupObservation,
+     observation_rng, group_check, sample_group_evidence)
+ from field_interpretation import FieldInterpreter, FieldInterpretation, interpret_field
+ from field_observation import (BeliefLedger, FieldObservation, CountReport, BeliefRevision,
+-    EvidenceReassessment, InquiryProposal, InquiryRecord, belief_revisions)
++    EvidenceReassessment, InquiryProposal, InquiryRecord, KnownWaypoint, belief_revisions)
+ from history_conversation import AskAboutPastAction, HeardAccount
+ from spatial.state import CartesianPosition
++from spatial.frame import LocalFrame, LocalPosition
+ from objective_reality import (ObjectiveContext, capture_objective_context,
+     evaluate_native_companion, build_objective_candidate, revalidate_complete_objective)
+ 
+@@ -36,7 +37,8 @@ from melee_combat import MeleeStrike
+ from melee_defense import MeleeDefense
+ _NATIVE_RESOLVERS = {cls:cls.resolve for cls in (Action,RunAction,SpotAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction)}
+ _RECORDS = (FieldObservation, CountReport, FieldInterpretation, BeliefRevision,
+-    EvidenceReassessment, InquiryProposal, InquiryRecord, HeardAccount, CartesianPosition)
++    EvidenceReassessment, InquiryProposal, InquiryRecord, KnownWaypoint, HeardAccount,
++    CartesianPosition, LocalPosition, LocalFrame)
+ 
+ 
+ def _check(test, reason):
+@@ -269,6 +271,8 @@ def _capture_belief(ledger, observer_id):
+     _check(data['observer_id'] == observer_id, 'Belief ledger belongs to a different observer')
+     if any(type(data[k]) is not dict for k in ('_evidence','_interpretations','_current_reassessments')) or any(type(data[k]) is not list for k in ('_belief_history','_reassessments','communication_log','_inquiry_history')):
+         raise UnsupportedEvaluation('unreviewed Belief storage container')
++    if type(data.get('_known_waypoints')) is not dict:
++        raise UnsupportedEvaluation('unreviewed waypoint knowledge storage')
+     evidence = frozen_value(data['_evidence']); interpretations = frozen_value(data['_interpretations'])
+     current = frozen_value(data['_current_reassessments'])
+     for key, value in evidence.items():
+@@ -277,8 +281,15 @@ def _capture_belief(ledger, observer_id):
+         for key, value in readings.items():
+             _check(key in evidence and type(value) is FieldInterpretation
+                 and value.observation_id == key and value.observer_id == evidence[key].observer_id, 'invalid existing interpretation')
++    waypoints = frozen_value(data['_known_waypoints'])
++    for key, value in waypoints.items():
++        _check(type(key) is str and type(value) is KnownWaypoint and key == value.id
++            and value.owner_id == observer_id and type(value.position) is LocalPosition
++            and type(value.frame) is LocalFrame and type(value.source_id) is str
++            and value.source_id.strip()
++            and math.isfinite(value.acquired_at), 'invalid owner-bound waypoint knowledge')
+     auxiliary = frozen_value({k: data[k] for k in (
+-        '_reassessments','communication_log','_inquiry_history')})
++        '_reassessments','communication_log','_inquiry_history','_known_waypoints')})
+     return FrozenBelief(RecipientIdentity('in_world_belief_ledger', id(ledger)), observer_id, evidence,
+         interpretations, current, frozen_value(data['_belief_history']), auxiliary)
+ 
+diff --git a/tests/test_group_member_realization_candidate.py b/tests/test_group_member_realization_candidate.py
+index 3d22974..259092a 100644
+--- a/tests/test_group_member_realization_candidate.py
++++ b/tests/test_group_member_realization_candidate.py
+@@ -70,6 +70,7 @@ def state_snapshot(world, encounter, group, observer, ledger, rng):
+         "rng": rng.state,
+         "observer": (ledger.evidence, ledger.belief_history,
+                      tuple(ledger._interpretations.items()),
++                     tuple(ledger._known_waypoints.items()),
+                      tuple(ledger._inquiry_history)),
+         "module_rng": random.getstate(),
+         "observer_identity": observer.id,
+diff --git a/tests/test_transactional_group_member_realization.py b/tests/test_transactional_group_member_realization.py
+index 4e6dd82..a343872 100644
+--- a/tests/test_transactional_group_member_realization.py
++++ b/tests/test_transactional_group_member_realization.py
+@@ -137,7 +137,8 @@ class TestTransactionalAdultRealization(unittest.TestCase):
+         realization = prepare_adult_member_candidate(encounter, group, request)
+         rng_before = rng.state
+         views_before = (ledger.evidence, ledger.belief_history,
+-                       tuple(ledger._interpretations.items()))
++                       tuple(ledger._interpretations.items()),
++                       tuple(ledger._known_waypoints.items()))
+         initial_registry = world.object_registry.object_instances
+         initial_members = group._members
+         initial_realized = group._realized_beings
+@@ -177,7 +178,8 @@ class TestTransactionalAdultRealization(unittest.TestCase):
+         self.assertIs(group._motion_attached_native_ids, initial_motion)
+         self.assertIs(encounter.being_list, initial_participants)
+         self.assertEqual((ledger.evidence, ledger.belief_history,
+-                          tuple(ledger._interpretations.items())), views_before)
++                          tuple(ledger._interpretations.items()),
++                          tuple(ledger._known_waypoints.items())), views_before)
+         self.assertEqual(rng.state, rng_before)
+ 
+         # Registration is accepted only after boundary 1. The next snapshot can
