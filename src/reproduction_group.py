@@ -805,7 +805,10 @@ class ReproductionGroupRegistry:
                     raise ReproductionGroupPublicationError("progressive group ID collides with a native Object ID")
                 if set(all_children) & self._group_id_reservations:
                     raise ReproductionGroupPublicationError("progressive offspring ID collides with a group ID")
-                if set(all_children) & set(self._world.object_registry.object_instances):
+                # Previously materialized logical offspring are legitimate
+                # identity bindings. Only newly proposed children can collide
+                # with an existing native Object during a progressive append.
+                if set(new_children) & set(self._world.object_registry.object_instances):
                     raise ReproductionGroupPublicationError("progressive offspring ID collides with a native Object ID")
 
             revision = self._revision + 1
