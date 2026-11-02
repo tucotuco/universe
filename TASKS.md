@@ -6,7 +6,7 @@
 
 ## ACTIVE — one development objective
 
-- [ ] **U-REL-001 · ACTIVE — Develop on-demand world-level reproductive generation.** D4A/B provide authored candidates and a no-Encounter publisher; V1/V2 demonstrate test-only one-shot and progressive outcomes; V3 demonstrates linked multigenerational ReproductionGroups and derived known kinship. All profiles and ticks remain test-only; this is not adopted biology, native Being materialization, persistence, or a complete-family claim. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [ ] **U-REL-001 · ACTIVE — Develop on-demand world-level reproductive generation.** D4A/B provide authored candidates and a no-Encounter publisher; V1/V2 demonstrate test-only one-shot and progressive outcomes; V3 demonstrates linked multigenerational ReproductionGroups and derived known kinship; V4 demonstrates bounded reproduction-domain checkpoint continuation. Profiles and ticks remain test-only; this is not adopted biology, native Being materialization, general Universe persistence, or a complete-family claim. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## NEXT
 
@@ -38,7 +38,7 @@
 - [ ] **U-GRP-006 — Agent-interest-triggered private selection of unresolved members.** Aggregate Belief does not provide a hidden member ID. Define authority, selection, timing and observer-information rules first. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [ ] **U-ATT-001 · DEFERRED, strategic priority — Persistent mutable Attention.** Define whether Agents attend to categories, known entities, Groups or happenings. Events (such as moonrise) remain a distinct ontology from Objects. Attention is not guaranteed discovery. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [ ] **U-SPOT-002 — Category-directed discovery and Search.** Current native Spot is target-directed; candidate selection, multiple matches and broader Search semantics remain unapproved. See [Encounter engine](docs/tasks/encounter-engine.md).
-- [ ] **U-PER-002 — General file-based save/load and deterministic continuation.** Extend beyond the bounded Run-only demonstration to mixed Actions, observers, stochastic state and broader Universe data. See [Encounter engine](docs/tasks/encounter-engine.md).
+- [ ] **U-PER-002 — General Universe file-based save/load and deterministic continuation.** The V4 reproduction-domain checkpoint is separate and does not support general Universe state; extend beyond the bounded Run-only Encounter demonstration to mixed Actions, observers, stochastic state and broader Universe data. See [Encounter engine](docs/tasks/encounter-engine.md) and [generation and Attention](docs/tasks/generation-and-attention.md).
 - [ ] **U-RULE-001 — Resolve or retire provisional `ObserveGroupAction` skill/XP behavior.** The experimental Group sampler is not the adopted six-second Spot rule. Do not infer sensing mechanics from the prototype. See [Encounter engine](docs/tasks/encounter-engine.md).
 - [ ] **U-LOC-002 — Action-acquired location evidence.** Define a supported observer-owned location/evidence effect before adding waypoints derived from sensed Objects. See [broader Universe roadmap](docs/tasks/broader-universe.md).
 - [ ] **U-UI-001 — Observer-facing Encounter presentation.** Adapt inspection to individual knowledge and committed effects; developer-omniscient traces are not player perception. See [broader Universe roadmap](docs/tasks/broader-universe.md).
