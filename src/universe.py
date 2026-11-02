@@ -142,6 +142,22 @@ class Universe(Identifiable):
             _fail_after=_fail_after,
         )
 
+    def publish_progressive_reproduction(self, candidate, *, request_key, expected_revision,
+                                         _fail_after=None):
+        """Append a validated suffix of one explicitly test-only period profile."""
+        return self._reproduction_group_registry.publish_progressive_reproduction(
+            candidate, request_key=request_key, expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
+
+    def resolve_progressive_reproduction(self, request, *, request_key, expected_revision,
+                                         _fail_after=None):
+        """Resolve and publish a progressive test-profile suffix idempotently."""
+        return self._reproduction_group_registry.resolve_progressive_reproduction(
+            request, request_key=request_key, expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
+
     def add_event(self, event):
         from transactional_progression import is_quarantined
         if is_quarantined(self):

@@ -169,6 +169,12 @@ _STATISTICAL_PUBLICATION_PHASES = (
     "person_reservations", "group_reservation", "generation_outcome",
     "generation_scope", "idempotency", "revision", "consistency",
 )
+_PROGRESSIVE_PUBLICATION_PHASES = (
+    "progressive_group", "progressive_parent_set_index", "progressive_offspring_indexes",
+    "progressive_origin_ticks", "progressive_person_reservations",
+    "progressive_group_reservation", "progressive_history", "progressive_scope",
+    "progressive_idempotency", "progressive_revision", "progressive_consistency",
+)
 
 
 @dataclass(frozen=True)
@@ -234,6 +240,9 @@ class ReproductionGroupRegistrySnapshot:
     offspring_origin_ticks: tuple[tuple[str, int], ...]
     generation_outcomes: tuple[object, ...]
     generation_parent_set_scopes: tuple[tuple[tuple[str, ...], str], ...]
+    progressive_histories: tuple[object, ...]
+    progressive_parent_set_scopes: tuple[tuple[tuple[str, ...], str], ...]
+    progressive_request_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -269,6 +278,9 @@ class ReproductionGroupRegistry:
         self._offspring_origin_ticks: dict[str, int] = {}
         self._generation_requests: dict[str, object] = {}
         self._generation_parent_set_scopes: dict[tuple[str, ...], str] = {}
+        self._progressive_histories: dict[tuple[str, ...], object] = {}
+        self._progressive_parent_set_scopes: dict[tuple[str, ...], str] = {}
+        self._progressive_requests: dict[str, object] = {}
         self._revision = 0
 
     @property
@@ -295,6 +307,11 @@ class ReproductionGroupRegistry:
                     for key in sorted(self._generation_requests)
                 ),
                 generation_parent_set_scopes=tuple(sorted(self._generation_parent_set_scopes.items())),
+                progressive_histories=tuple(
+                    self._progressive_histories[key] for key in sorted(self._progressive_histories)
+                ),
+                progressive_parent_set_scopes=tuple(sorted(self._progressive_parent_set_scopes.items())),
+                progressive_request_keys=tuple(sorted(self._progressive_requests)),
             )
 
     def get_group(self, group_id: str) -> ReproductionGroupRecord | None:
@@ -347,6 +364,8 @@ class ReproductionGroupRegistry:
                 raise ReproductionGroupPublicationError("registry is not owned by this Universe")
             if request_key in self._generation_requests:
                 raise ReproductionGroupPublicationError("request key is reserved by a statistical outcome")
+            if request_key in self._progressive_requests:
+                raise ReproductionGroupPublicationError("request key is reserved by a progressive outcome")
             prior = self._requests.get(request_key)
             if prior is not None:
                 self._assert_consistent()
@@ -475,11 +494,15 @@ class ReproductionGroupRegistry:
                 return previous.outcome
             if request_key in self._requests:
                 raise ReproductionGroupPublicationError("request key is already used by authored publication")
+            if request_key in self._progressive_requests:
+                raise ReproductionGroupPublicationError("request key is already used by progressive publication")
             if expected_revision != candidate.base_revision or expected_revision != self._revision:
                 raise StaleReproductionGroupRevision(
                     f"statistical candidate read revision {candidate.base_revision}; current is {self._revision}"
                 )
             self._validate_no_encounter_context()
+            if candidate.parent_ids in self._progressive_parent_set_scopes:
+                raise ReproductionGroupPublicationError("exact parent set already has progressive test-profile history")
             if candidate.parent_ids in self._generation_parent_set_scopes:
                 raise ReproductionGroupPublicationError(
                     "this exact parent set already has a bounded generation outcome"
@@ -591,6 +614,215 @@ class ReproductionGroupRegistry:
                 _fail_after=_fail_after,
             )
 
+    def publish_progressive_reproduction(self, candidate, *, request_key: str,
+                                         expected_revision: int,
+                                         _fail_after: str | None = None):
+        """Atomically append the uncommitted suffix of one test-profile history."""
+        from reproduction_generation import (
+            ProgressiveReproductionRequest, TestOnlyIntervalReproductionProfile,
+            ProgressiveReproductionHistory, ProgressiveReproductionResult,
+            _ProgressiveIdempotencyRecord, _progressive_inputs,
+            _progressive_history_digest, _progressive_periods,
+            _progressive_scope_digest, normalized_progressive_candidate,
+        )
+        from reproduction_generation import PreparedProgressiveReproduction
+        if type(candidate) is not PreparedProgressiveReproduction:
+            raise ReproductionGroupPublicationError("progressive publication requires a prepared candidate")
+        if type(request_key) is not str or not request_key.strip():
+            raise ReproductionGroupPublicationError("request_key must be nonempty text")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ReproductionGroupPublicationError("expected_revision must be nonnegative")
+        if _fail_after is not None and _fail_after not in _PROGRESSIVE_PUBLICATION_PHASES:
+            raise ReproductionGroupPublicationError("unknown progressive publication fault phase")
+        try:
+            profile = TestOnlyIntervalReproductionProfile(
+                candidate.profile_id, candidate.profile_version,
+                candidate.weighted_counts_per_period,
+            )
+            request = ProgressiveReproductionRequest(
+                candidate.parent_ids, candidate.world_seed, candidate.target_period, profile,
+            )
+            scope = _progressive_scope_digest(request)
+            expected = _progressive_periods(
+                scope, candidate.previous_through_period + 1, candidate.target_period,
+                profile.weighted_counts_per_period,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ReproductionGroupPublicationError(f"invalid progressive candidate: {exc}") from exc
+        expected_group = f"RG-PROG-{scope[:24]}"
+        expected_source = f"test-only-interval-count-profile/1:{profile.profile_id}@{profile.version}:{scope}"
+        if (candidate.world_identity != self.world_identity
+                or candidate.scope_digest != scope
+                or candidate.algorithm != "python-mt19937-hash-derived-period-stream/1"
+                or candidate.profile_schema != "test-only-interval-count-profile/1"
+                or candidate.proposed_group_id != expected_group
+                or candidate.source_reference != expected_source
+                or candidate.target_period <= candidate.previous_through_period
+                or candidate.new_periods != expected):
+            raise ReproductionGroupPublicationError("progressive candidate does not match its deterministic request")
+        normalized = normalized_progressive_candidate(candidate)
+        normalized_inputs = _progressive_inputs(request) + (request.target_period,)
+
+        with self._world._schedule_lock:
+            if self._world._reproduction_group_registry is not self:
+                raise ReproductionGroupPublicationError("registry is not owned by this Universe")
+            previous_request = self._progressive_requests.get(request_key)
+            if previous_request is not None:
+                self._assert_consistent()
+                if previous_request.normalized_request != normalized:
+                    raise ReproductionGroupPublicationError("progressive request key reused with different inputs")
+                return previous_request.result
+            if request_key in self._requests or request_key in self._generation_requests:
+                raise ReproductionGroupPublicationError("request key is already used by another publication path")
+            if expected_revision != candidate.base_revision or expected_revision != self._revision:
+                raise StaleReproductionGroupRevision(
+                    f"progressive candidate read revision {candidate.base_revision}; current is {self._revision}"
+                )
+            self._validate_no_encounter_context()
+            history = self._progressive_histories.get(candidate.parent_ids)
+            if history is None:
+                if candidate.previous_through_period != -1 or candidate.previous_history_digest is not None:
+                    raise StaleReproductionGroupRevision("progressive initial-history dependency changed")
+                if (candidate.parent_ids in self._group_id_by_parent_set
+                        or candidate.parent_ids in self._generation_parent_set_scopes):
+                    raise ReproductionGroupPublicationError(
+                        "exact parent set already has an authored or V1 reproductive history"
+                    )
+                prior_periods = ()
+                prior_group_id = None
+            else:
+                if history.scope_digest != candidate.scope_digest:
+                    raise ReproductionGroupPublicationError("parent set has a different progressive seed/profile")
+                if (candidate.previous_through_period != history.through_period
+                        or candidate.previous_history_digest != _progressive_history_digest(history)):
+                    raise StaleReproductionGroupRevision("progressive history prefix changed after preparation")
+                if candidate.target_period <= history.through_period:
+                    raise ReproductionGroupPublicationError("overlapping progressive horizons are unsupported")
+                prior_periods = history.periods
+                prior_group_id = history.group_id
+
+            if self._progressive_parent_set_scopes.get(candidate.parent_ids, candidate.scope_digest) != candidate.scope_digest:
+                raise ReproductionGroupPublicationError("parent set has a conflicting progressive scope")
+            new_children = tuple(child for row in candidate.new_periods for child in row.offspring_ids)
+            if len(set(new_children)) != len(new_children) or any(child in self._group_id_by_offspring for child in new_children):
+                raise ReproductionGroupPublicationError("progressive offspring identity conflicts with established Reality")
+            if set(new_children) & self._person_id_reservations:
+                raise ReproductionGroupPublicationError("progressive offspring identity is already reserved as a Person")
+            if set(candidate.parent_ids) & set(self._group_id_reservations):
+                raise ReproductionGroupPublicationError("progressive parent ID collides with a group ID")
+            if set(candidate.parent_ids) & set(self._world.object_registry.object_instances):
+                raise ReproductionGroupPublicationError("progressive parent ID collides with a native Object ID")
+            if set(new_children) & set(candidate.parent_ids):
+                raise ReproductionGroupPublicationError("progressive child identity collides with a parent identity")
+
+            all_periods = prior_periods + candidate.new_periods
+            all_children = tuple(child for row in all_periods for child in row.offspring_ids)
+            has_children = bool(all_children)
+            group_id = prior_group_id or (candidate.proposed_group_id if has_children else None)
+            if has_children:
+                if group_id != candidate.proposed_group_id:
+                    raise ReproductionGroupPublicationError("progressive group identity changed across horizons")
+                if prior_group_id is None:
+                    if group_id in self._groups_by_id or group_id in self._group_id_reservations:
+                        raise ReproductionGroupPublicationError("progressive group ID is already reserved")
+                    if group_id in self._person_id_reservations or group_id in self._world.object_registry.object_instances:
+                        raise ReproductionGroupPublicationError("progressive group ID collides with another identity")
+                elif group_id in self._world.object_registry.object_instances:
+                    raise ReproductionGroupPublicationError("progressive group ID collides with a native Object ID")
+                if set(all_children) & self._group_id_reservations:
+                    raise ReproductionGroupPublicationError("progressive offspring ID collides with a group ID")
+                if set(all_children) & set(self._world.object_registry.object_instances):
+                    raise ReproductionGroupPublicationError("progressive offspring ID collides with a native Object ID")
+
+            revision = self._revision + 1
+            history_after = ProgressiveReproductionHistory(
+                self.world_identity, candidate.parent_ids, candidate.world_seed,
+                candidate.profile_id, candidate.profile_version, candidate.profile_schema,
+                candidate.weighted_counts_per_period, candidate.algorithm, candidate.scope_digest,
+                candidate.target_period, group_id, all_periods, revision,
+            )
+            result = ProgressiveReproductionResult(
+                self.world_identity, request_key, candidate.scope_digest, candidate.parent_ids,
+                candidate.previous_through_period + 1, candidate.target_period,
+                candidate.new_periods, group_id, all_children, revision,
+            )
+            undo = self._capture_undo()
+            try:
+                if has_children:
+                    group = ReproductionGroupRecord(
+                        self.world_identity, group_id, candidate.parent_ids, all_children,
+                        candidate.source_reference, revision,
+                    )
+                    self._groups_by_id[group_id] = group
+                    self._maybe_fail(_fail_after, "progressive_group")
+                    if prior_group_id is None:
+                        self._group_id_by_parent_set[candidate.parent_ids] = group_id
+                        self._maybe_fail(_fail_after, "progressive_parent_set_index")
+                    for child in new_children:
+                        self._group_id_by_offspring[child] = group_id
+                        self._parent_set_by_offspring[child] = candidate.parent_ids
+                    self._maybe_fail(_fail_after, "progressive_offspring_indexes")
+                    for row in candidate.new_periods:
+                        for child in row.offspring_ids:
+                            self._offspring_origin_ticks[child] = row.period
+                    self._maybe_fail(_fail_after, "progressive_origin_ticks")
+                    self._person_id_reservations.update(candidate.parent_ids)
+                    self._person_id_reservations.update(new_children)
+                    self._maybe_fail(_fail_after, "progressive_person_reservations")
+                    if prior_group_id is None:
+                        self._group_id_reservations.add(group_id)
+                        self._maybe_fail(_fail_after, "progressive_group_reservation")
+                self._progressive_histories[candidate.parent_ids] = history_after
+                self._maybe_fail(_fail_after, "progressive_history")
+                self._progressive_parent_set_scopes[candidate.parent_ids] = candidate.scope_digest
+                self._maybe_fail(_fail_after, "progressive_scope")
+                self._progressive_requests[request_key] = _ProgressiveIdempotencyRecord(
+                    normalized, normalized_inputs, result
+                )
+                self._maybe_fail(_fail_after, "progressive_idempotency")
+                self._revision = revision
+                self._maybe_fail(_fail_after, "progressive_revision")
+                self._assert_consistent()
+                self._maybe_fail(_fail_after, "progressive_consistency")
+                return result
+            except BaseException:
+                self._restore_undo(undo)
+                raise
+
+    def resolve_progressive_reproduction(self, request, *, request_key: str,
+                                         expected_revision: int,
+                                         _fail_after: str | None = None):
+        """Prepare/publish a period suffix; cached retries return before any draw."""
+        from reproduction_generation import (
+            ProgressiveReproductionRequest, _progressive_inputs,
+            prepare_progressive_reproduction,
+        )
+        if type(request) is not ProgressiveReproductionRequest:
+            raise ReproductionGroupPublicationError("request must be ProgressiveReproductionRequest")
+        if type(request_key) is not str or not request_key.strip():
+            raise ReproductionGroupPublicationError("request_key must be nonempty text")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ReproductionGroupPublicationError("expected_revision must be nonnegative")
+        normalized_inputs = _progressive_inputs(request) + (request.target_period,)
+        with self._world._schedule_lock:
+            previous = self._progressive_requests.get(request_key)
+            if previous is not None:
+                self._assert_consistent()
+                if previous.normalized_inputs != normalized_inputs:
+                    raise ReproductionGroupPublicationError("progressive request key reused with different inputs")
+                return previous.result
+            if request_key in self._requests or request_key in self._generation_requests:
+                raise ReproductionGroupPublicationError("request key is already used by another publication path")
+            if expected_revision != self._revision:
+                raise StaleReproductionGroupRevision(
+                    f"expected reproduction revision {expected_revision}, current revision is {self._revision}"
+                )
+            candidate = prepare_progressive_reproduction(self._world, request)
+            return self.publish_progressive_reproduction(
+                candidate, request_key=request_key, expected_revision=expected_revision,
+                _fail_after=_fail_after,
+            )
+
     def _validate_no_encounter_context(self) -> None:
         from encounter import Encounter
         if (any(isinstance(event, Encounter) for event in self._world.event_history.values())
@@ -632,6 +864,10 @@ class ReproductionGroupRegistry:
         if candidate.parent_ids in self._generation_parent_set_scopes:
             raise ReproductionGroupPublicationError(
                 "this exact parent set already has a bounded generation outcome"
+            )
+        if candidate.parent_ids in self._progressive_parent_set_scopes:
+            raise ReproductionGroupPublicationError(
+                "this exact parent set already has progressive test-profile history"
             )
         if candidate.group_id in self._person_id_reservations:
             raise ReproductionGroupPublicationError("group ID collides with a reserved Person ID")
@@ -739,6 +975,66 @@ class ReproductionGroupRegistry:
                 expected_origin_ticks.update(zip(outcome.offspring_ids, outcome.origin_ticks))
         if expected_scopes != self._generation_parent_set_scopes:
             raise RuntimeError("statistical parent-set scope index is inconsistent")
+        from reproduction_generation import (
+            INTERVAL_PROFILE_SCHEMA, PROGRESSIVE_ALGORITHM,
+            ProgressiveReproductionHistory, ProgressiveReproductionRequest,
+            TestOnlyIntervalReproductionProfile, _progressive_inputs,
+        )
+        expected_progressive_scopes = {}
+        for parent_ids, history in self._progressive_histories.items():
+            if (type(history) is not ProgressiveReproductionHistory
+                    or history.world_identity != self.world_identity
+                    or history.parent_ids != parent_ids
+                    or history.profile_schema != INTERVAL_PROFILE_SCHEMA
+                    or history.algorithm != PROGRESSIVE_ALGORITHM
+                    or parent_ids in expected_scopes
+                    or history.scope_digest != self._progressive_parent_set_scopes.get(parent_ids)
+                    or type(history.revision) is not int or not 1 <= history.revision <= self._revision):
+                raise RuntimeError("progressive history ownership or scope is inconsistent")
+            expected_progressive_scopes[parent_ids] = history.scope_digest
+            children = tuple(child for row in history.periods for child in row.offspring_ids)
+            if len(set(children)) != len(children):
+                raise RuntimeError("progressive history repeats an offspring identity")
+            if children:
+                group = self._groups_by_id.get(history.group_id)
+                expected_group_id = f"RG-PROG-{history.scope_digest[:24]}"
+                expected_source = (f"{INTERVAL_PROFILE_SCHEMA}:{history.profile_id}@"
+                                   f"{history.profile_version}:{history.scope_digest}")
+                if (history.group_id != expected_group_id or group is None
+                        or group.parent_ids != parent_ids or group.offspring_ids != children
+                        or group.source_reference != expected_source):
+                    raise RuntimeError("progressive history does not match its authoritative group")
+                expected_origin_ticks.update(
+                    (child, row.period) for row in history.periods for child in row.offspring_ids
+                )
+            elif history.group_id is not None or parent_ids in self._group_id_by_parent_set:
+                raise RuntimeError("zero-only progressive history created an empty group")
+        if expected_progressive_scopes != self._progressive_parent_set_scopes:
+            raise RuntimeError("progressive parent-set scope index is inconsistent")
+        all_request_keys = set(self._requests) | set(self._generation_requests)
+        if all_request_keys & set(self._progressive_requests):
+            raise RuntimeError("publication request-key spaces overlap")
+        if set(self._progressive_requests) != {
+                record.result.request_key for record in self._progressive_requests.values()}:
+            raise RuntimeError("progressive idempotency request index is inconsistent")
+        for request_key, record in self._progressive_requests.items():
+            result = record.result
+            history = self._progressive_histories.get(result.parent_ids)
+            if (result.world_identity != self.world_identity or result.request_key != request_key
+                    or history is None or result.scope_digest != history.scope_digest
+                    or result.through_period > history.through_period
+                    or result.all_offspring_ids != tuple(
+                        child for row in history.periods for child in row.offspring_ids
+                    )[:len(result.all_offspring_ids)]):
+                raise RuntimeError("progressive idempotency result is inconsistent with its history")
+            request = ProgressiveReproductionRequest(
+                result.parent_ids, history.world_seed, result.through_period,
+                TestOnlyIntervalReproductionProfile(
+                    history.profile_id, history.profile_version, history.weighted_counts_per_period
+                ),
+            )
+            if record.normalized_inputs != _progressive_inputs(request) + (result.through_period,):
+                raise RuntimeError("progressive idempotency request inputs are inconsistent")
         if expected_origin_ticks != self._offspring_origin_ticks:
             raise RuntimeError("offspring origin-time index is inconsistent")
 
@@ -755,6 +1051,9 @@ class ReproductionGroupRegistry:
             dict(self._offspring_origin_ticks),
             dict(self._generation_requests),
             dict(self._generation_parent_set_scopes),
+            dict(self._progressive_histories),
+            dict(self._progressive_parent_set_scopes),
+            dict(self._progressive_requests),
         )
 
     def _restore_undo(self, undo) -> None:
@@ -767,6 +1066,9 @@ class ReproductionGroupRegistry:
             (self._offspring_origin_ticks, undo[8]),
             (self._generation_requests, undo[9]),
             (self._generation_parent_set_scopes, undo[10]),
+            (self._progressive_histories, undo[11]),
+            (self._progressive_parent_set_scopes, undo[12]),
+            (self._progressive_requests, undo[13]),
         )
         for target, original in maps:
             target.clear()
