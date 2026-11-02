@@ -348,6 +348,11 @@ class ReproductionGroupRegistry:
         self._progressive_histories: dict[tuple[str, ...], object] = {}
         self._progressive_parent_set_scopes: dict[tuple[str, ...], str] = {}
         self._progressive_requests: dict[str, object] = {}
+        # Exact-ID native Being bindings are a separate, explicit bridge. They
+        # do not change reproductive facts and are excluded from V4 checkpoint
+        # payloads; the checkpoint API refuses worlds containing them.
+        self._native_beings_by_person_id: dict[str, object] = {}
+        self._native_being_requests: dict[str, object] = {}
         self._revision = 0
 
     @property
@@ -1123,6 +1128,29 @@ class ReproductionGroupRegistry:
                 raise RuntimeError("progressive idempotency request inputs are inconsistent")
         if expected_origin_ticks != self._offspring_origin_ticks:
             raise RuntimeError("offspring origin-time index is inconsistent")
+        from being import BeingInstance
+        native_bindings = self._native_beings_by_person_id
+        if set(native_bindings) - set(self._group_id_by_offspring):
+            raise RuntimeError("native Being binding does not refer to an established offspring")
+        if len({id(being) for being in native_bindings.values()}) != len(native_bindings):
+            raise RuntimeError("one native Being is bound to multiple logical offspring identities")
+        for person_id, being in native_bindings.items():
+            if (not isinstance(being, BeingInstance) or being.id != person_id
+                    or self._world.object_registry.get_object_by_id(person_id) is not being):
+                raise RuntimeError("native Being identity binding is inconsistent with ObjectRegistry")
+        native_reproduction_ids = set(self._person_id_reservations) & set(self._world.object_registry.object_instances)
+        if native_reproduction_ids != set(native_bindings):
+            raise RuntimeError("logical Person/Object identity collision lacks an explicit native binding")
+        if set(self._native_being_requests) & all_request_keys:
+            raise RuntimeError("native Being materialization request keys overlap reproduction publication keys")
+        if set(self._native_being_requests) != {
+                record.request_key for record in self._native_being_requests.values()}:
+            raise RuntimeError("native Being materialization request index is inconsistent")
+        for request_key, record in self._native_being_requests.items():
+            if (record.request_key != request_key
+                    or self._native_beings_by_person_id.get(record.person_id) is not record.being
+                    or record.being.id != record.person_id):
+                raise RuntimeError("native Being materialization record is inconsistent")
 
     def _capture_undo(self):
         return (
@@ -1140,6 +1168,8 @@ class ReproductionGroupRegistry:
             dict(self._progressive_histories),
             dict(self._progressive_parent_set_scopes),
             dict(self._progressive_requests),
+            dict(self._native_beings_by_person_id),
+            dict(self._native_being_requests),
         )
 
     def _restore_undo(self, undo) -> None:
@@ -1155,6 +1185,8 @@ class ReproductionGroupRegistry:
             (self._progressive_histories, undo[11]),
             (self._progressive_parent_set_scopes, undo[12]),
             (self._progressive_requests, undo[13]),
+            (self._native_beings_by_person_id, undo[14]),
+            (self._native_being_requests, undo[15]),
         )
         for target, original in maps:
             target.clear()
