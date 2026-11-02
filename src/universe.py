@@ -122,6 +122,26 @@ class Universe(Identifiable):
             _fail_after=_fail_after,
         )
 
+    def publish_statistical_reproduction(self, candidate, *, request_key, expected_revision,
+                                         _fail_after=None):
+        """Publish one bounded test-distribution result without an Encounter."""
+        return self._reproduction_group_registry.publish_statistical_reproduction(
+            candidate,
+            request_key=request_key,
+            expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
+
+    def resolve_statistical_reproduction(self, request, *, request_key, expected_revision,
+                                         _fail_after=None):
+        """Resolve and atomically publish one bounded statistical request."""
+        return self._reproduction_group_registry.resolve_statistical_reproduction(
+            request,
+            request_key=request_key,
+            expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
+
     def add_event(self, event):
         from transactional_progression import is_quarantined
         if is_quarantined(self):

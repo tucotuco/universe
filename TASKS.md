@@ -6,7 +6,7 @@
 
 ## ACTIVE — one development objective
 
-- [ ] **U-REL-001 · ACTIVE — Design and test on-demand world-level reproductive relationships.** D4A established pure authored candidates; D4B adds an in-memory, no-Encounter atomic publication proof for a nonempty group and first offspring. Neither implements generation or completeness. Continue with a bounded D4C on-demand authoring/resolution demonstration after reviewing its scope. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [ ] **U-REL-001 · ACTIVE — Develop on-demand world-level reproductive generation.** D4A/B provide authored candidates and a no-Encounter publisher; V1 now demonstrates one explicitly test-only seeded distribution, bounded abstract ticks, and atomic positive/zero outcomes. This is not an adopted biological distribution, general historical generator, or complete-family claim. Continue only with separately reviewed rules and scope. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## NEXT
 

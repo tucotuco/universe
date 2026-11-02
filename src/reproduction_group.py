@@ -164,6 +164,11 @@ _PUBLICATION_PHASES = (
     "revision",
     "consistency",
 )
+_STATISTICAL_PUBLICATION_PHASES = (
+    "group", "parent_set_index", "offspring_indexes", "origin_ticks",
+    "person_reservations", "group_reservation", "generation_outcome",
+    "generation_scope", "idempotency", "revision", "consistency",
+)
 
 
 @dataclass(frozen=True)
@@ -226,6 +231,9 @@ class ReproductionGroupRegistrySnapshot:
     person_id_reservations: tuple[str, ...]
     group_id_reservations: tuple[str, ...]
     request_keys: tuple[str, ...]
+    offspring_origin_ticks: tuple[tuple[str, int], ...]
+    generation_outcomes: tuple[object, ...]
+    generation_parent_set_scopes: tuple[tuple[tuple[str, ...], str], ...]
 
 
 @dataclass(frozen=True)
@@ -258,6 +266,9 @@ class ReproductionGroupRegistry:
         self._person_id_reservations: set[str] = set()
         self._group_id_reservations: set[str] = set()
         self._requests: dict[str, _IdempotencyRecord] = {}
+        self._offspring_origin_ticks: dict[str, int] = {}
+        self._generation_requests: dict[str, object] = {}
+        self._generation_parent_set_scopes: dict[tuple[str, ...], str] = {}
         self._revision = 0
 
     @property
@@ -278,6 +289,12 @@ class ReproductionGroupRegistry:
                 person_id_reservations=tuple(sorted(self._person_id_reservations)),
                 group_id_reservations=tuple(sorted(self._group_id_reservations)),
                 request_keys=tuple(sorted(self._requests)),
+                offspring_origin_ticks=tuple(sorted(self._offspring_origin_ticks.items())),
+                generation_outcomes=tuple(
+                    self._generation_requests[key].outcome
+                    for key in sorted(self._generation_requests)
+                ),
+                generation_parent_set_scopes=tuple(sorted(self._generation_parent_set_scopes.items())),
             )
 
     def get_group(self, group_id: str) -> ReproductionGroupRecord | None:
@@ -328,6 +345,8 @@ class ReproductionGroupRegistry:
         with self._world._schedule_lock:
             if self._world._reproduction_group_registry is not self:
                 raise ReproductionGroupPublicationError("registry is not owned by this Universe")
+            if request_key in self._generation_requests:
+                raise ReproductionGroupPublicationError("request key is reserved by a statistical outcome")
             prior = self._requests.get(request_key)
             if prior is not None:
                 self._assert_consistent()
@@ -393,18 +412,226 @@ class ReproductionGroupRegistry:
                 self._restore_undo(undo)
                 raise
 
-    def _validate_current_state(self, candidate) -> None:
+    def publish_statistical_reproduction(self, candidate, *, request_key: str,
+                                         expected_revision: int,
+                                         _fail_after: str | None = None):
+        """Atomically publish one bounded seeded outcome (positive or zero).
+
+        This API consumes only the explicitly test-only candidate type. Zero
+        outcomes publish a request/horizon record and no group or Person IDs.
+        Positive outcomes publish their group, child parentage and ordered tick
+        facts in the same critical section. Existing Encounter publication is
+        deliberately outside this registry's supported scope.
+        """
+        from reproduction_generation import (
+            PreparedStatisticalReproduction, StatisticalReproductionOutcome,
+            _GenerationIdempotencyRecord,
+            _normalized_request, normalized_prepared_request,
+        )
+        if type(candidate) is not PreparedStatisticalReproduction:
+            raise ReproductionGroupPublicationError(
+                "statistical publication requires a prepared bounded demo outcome"
+            )
+        if type(request_key) is not str or not request_key.strip():
+            raise ReproductionGroupPublicationError("request_key must be nonempty text")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ReproductionGroupPublicationError("expected_revision must be nonnegative")
+        if _fail_after is not None and _fail_after not in _STATISTICAL_PUBLICATION_PHASES:
+            raise ReproductionGroupPublicationError("unknown statistical publication fault phase")
+        normalized = normalized_prepared_request(candidate)
+        try:
+            # Independently verify deterministic IDs, count, times and digest;
+            # a frozen instance can still be tampered with via object.__setattr__.
+            from reproduction_generation import (
+                StatisticalReproductionRequest, TestOnlyOffspringCountDistribution,
+                _normalized_request, _sample,
+            )
+            request = StatisticalReproductionRequest(
+                candidate.parent_ids, candidate.seed, candidate.horizon_tick,
+                candidate.eligible_origin_ticks,
+                TestOnlyOffspringCountDistribution(candidate.distribution_id,
+                    candidate.distribution_version, candidate.weighted_counts),
+            )
+            # Recompute from the immutable request and its captured revision;
+            # this does not query current authority or advance global RNG.
+            expected = _sample(request, candidate.base_revision, self.world_identity)
+        except (TypeError, ValueError) as exc:
+            raise ReproductionGroupPublicationError(f"invalid statistical candidate: {exc}") from exc
+        if normalized_prepared_request(expected) != normalized:
+            raise ReproductionGroupPublicationError("statistical candidate does not match its deterministic request")
+        if expected.scope_digest != candidate.scope_digest:
+            raise ReproductionGroupPublicationError("statistical request digest mismatch")
+
+        with self._world._schedule_lock:
+            if self._world._reproduction_group_registry is not self:
+                raise ReproductionGroupPublicationError("registry is not owned by this Universe")
+            previous = self._generation_requests.get(request_key)
+            if previous is not None:
+                self._assert_consistent()
+                if previous.normalized_request != normalized:
+                    raise ReproductionGroupPublicationError(
+                        "request key was reused with different statistical inputs"
+                    )
+                return previous.outcome
+            if request_key in self._requests:
+                raise ReproductionGroupPublicationError("request key is already used by authored publication")
+            if expected_revision != candidate.base_revision or expected_revision != self._revision:
+                raise StaleReproductionGroupRevision(
+                    f"statistical candidate read revision {candidate.base_revision}; current is {self._revision}"
+                )
+            self._validate_no_encounter_context()
+            if candidate.parent_ids in self._generation_parent_set_scopes:
+                raise ReproductionGroupPublicationError(
+                    "this exact parent set already has a bounded generation outcome"
+                )
+            self._validate_generated_parent_ids(candidate)
+            if candidate.parent_ids in self._group_id_by_parent_set:
+                raise ReproductionGroupPublicationError(
+                    "exact parent set already has an established ReproductionGroup"
+                )
+            if candidate.offspring_count:
+                self._validate_generated_identities(candidate)
+            revision = self._revision + 1
+            outcome = StatisticalReproductionOutcome(
+                world_identity=self.world_identity,
+                request_key=request_key,
+                scope_digest=candidate.scope_digest,
+                parent_ids=candidate.parent_ids,
+                horizon_tick=candidate.horizon_tick,
+                eligible_origin_ticks=candidate.eligible_origin_ticks,
+                count=candidate.offspring_count,
+                group_id=candidate.group_id,
+                offspring_ids=candidate.offspring_ids,
+                origin_ticks=candidate.origin_ticks,
+                seed=candidate.seed,
+                distribution_id=candidate.distribution_id,
+                distribution_version=candidate.distribution_version,
+                distribution_schema=candidate.distribution_schema,
+                weighted_counts=candidate.weighted_counts,
+                algorithm=candidate.algorithm,
+                source_reference=candidate.source_reference,
+                revision=revision,
+            )
+            undo = self._capture_undo()
+            try:
+                if candidate.offspring_count:
+                    record = ReproductionGroupRecord(
+                        self.world_identity, candidate.group_id, candidate.parent_ids,
+                        candidate.offspring_ids, candidate.source_reference, revision,
+                    )
+                    self._groups_by_id[candidate.group_id] = record
+                    self._maybe_fail(_fail_after, "group")
+                    self._group_id_by_parent_set[candidate.parent_ids] = candidate.group_id
+                    self._maybe_fail(_fail_after, "parent_set_index")
+                    for person_id in candidate.offspring_ids:
+                        self._group_id_by_offspring[person_id] = candidate.group_id
+                        self._parent_set_by_offspring[person_id] = candidate.parent_ids
+                    self._maybe_fail(_fail_after, "offspring_indexes")
+                    self._offspring_origin_ticks.update(zip(candidate.offspring_ids, candidate.origin_ticks))
+                    self._maybe_fail(_fail_after, "origin_ticks")
+                    self._person_id_reservations.update(candidate.parent_ids)
+                    self._person_id_reservations.update(candidate.offspring_ids)
+                    self._maybe_fail(_fail_after, "person_reservations")
+                    self._group_id_reservations.add(candidate.group_id)
+                    self._maybe_fail(_fail_after, "group_reservation")
+                self._generation_requests[request_key] = _GenerationIdempotencyRecord(
+                    normalized, _normalized_request(request), outcome
+                )
+                self._maybe_fail(_fail_after, "generation_outcome")
+                self._generation_parent_set_scopes[candidate.parent_ids] = candidate.scope_digest
+                self._maybe_fail(_fail_after, "generation_scope")
+                self._maybe_fail(_fail_after, "idempotency")
+                self._revision = revision
+                self._maybe_fail(_fail_after, "revision")
+                self._assert_consistent()
+                self._maybe_fail(_fail_after, "consistency")
+                return outcome
+            except BaseException:
+                self._restore_undo(undo)
+                raise
+
+    def resolve_statistical_reproduction(self, request, *, request_key: str,
+                                         expected_revision: int,
+                                         _fail_after: str | None = None):
+        """Resolve and publish one request, replaying without another draw.
+
+        This narrow orchestration keeps the pure candidate preparer separate
+        while providing a retry surface that can recognize an already
+        committed normalized request before constructing a local RNG.
+        """
+        from reproduction_generation import (
+            StatisticalReproductionRequest, _normalized_request,
+            prepare_statistical_reproduction,
+        )
+        if type(request) is not StatisticalReproductionRequest:
+            raise ReproductionGroupPublicationError("request must be a statistical reproduction request")
+        if type(request_key) is not str or not request_key.strip():
+            raise ReproductionGroupPublicationError("request_key must be nonempty text")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ReproductionGroupPublicationError("expected_revision must be nonnegative")
+        normalized_inputs = _normalized_request(request)
+        with self._world._schedule_lock:
+            prior = self._generation_requests.get(request_key)
+            if prior is not None:
+                self._assert_consistent()
+                if prior.normalized_inputs != normalized_inputs:
+                    raise ReproductionGroupPublicationError(
+                        "request key was reused with different statistical inputs"
+                    )
+                return prior.outcome
+            if request_key in self._requests:
+                raise ReproductionGroupPublicationError("request key is already used by authored publication")
+            if expected_revision != self._revision:
+                raise StaleReproductionGroupRevision(
+                    f"expected reproduction revision {expected_revision}, current revision is {self._revision}"
+                )
+            candidate = prepare_statistical_reproduction(self._world, request)
+            return self.publish_statistical_reproduction(
+                candidate, request_key=request_key, expected_revision=expected_revision,
+                _fail_after=_fail_after,
+            )
+
+    def _validate_no_encounter_context(self) -> None:
         from encounter import Encounter
         if (any(isinstance(event, Encounter) for event in self._world.event_history.values())
                 or self._world._choice_books):
             raise ReproductionGroupPublicationError(
-                "D4B publication is supported only in a Universe with no Encounter/ChoiceBook context"
+                "world-level reproduction is supported only in a Universe with no Encounter/ChoiceBook context"
             )
+
+    def _validate_generated_identities(self, candidate) -> None:
+        if candidate.group_id is None:
+            raise ReproductionGroupPublicationError("positive outcome has no ReproductionGroup identity")
+        if candidate.group_id in self._groups_by_id or candidate.group_id in self._group_id_reservations:
+            raise ReproductionGroupPublicationError("generated group identity is already reserved")
+        if candidate.group_id in self._person_id_reservations:
+            raise ReproductionGroupPublicationError("generated group ID collides with a Person identity")
+        person_ids = set(candidate.parent_ids) | set(candidate.offspring_ids)
+        if person_ids & self._group_id_reservations:
+            raise ReproductionGroupPublicationError("generated Person identity collides with a group ID")
+        object_ids = set(self._world.object_registry.object_instances)
+        if (candidate.group_id in object_ids or person_ids & object_ids):
+            raise ReproductionGroupPublicationError("generated logical identity collides with a native Object ID")
+        if any(person_id in self._group_id_by_offspring for person_id in candidate.offspring_ids):
+            raise ReproductionGroupPublicationError("generated offspring already has an established parent set")
+
+    def _validate_generated_parent_ids(self, candidate) -> None:
+        if set(candidate.parent_ids) & self._group_id_reservations:
+            raise ReproductionGroupPublicationError("reproductive parent ID collides with a group ID")
+        if set(candidate.parent_ids) & set(self._world.object_registry.object_instances):
+            raise ReproductionGroupPublicationError("reproductive parent ID collides with a native Object ID")
+
+    def _validate_current_state(self, candidate) -> None:
+        self._validate_no_encounter_context()
         if candidate.group_id in self._groups_by_id or candidate.group_id in self._group_id_reservations:
             raise ReproductionGroupPublicationError("group ID is already reserved in this Universe")
         if candidate.parent_ids in self._group_id_by_parent_set:
             raise ReproductionGroupPublicationError(
                 "this exact parent set already has an authoritative ReproductionGroup"
+            )
+        if candidate.parent_ids in self._generation_parent_set_scopes:
+            raise ReproductionGroupPublicationError(
+                "this exact parent set already has a bounded generation outcome"
             )
         if candidate.group_id in self._person_id_reservations:
             raise ReproductionGroupPublicationError("group ID collides with a reserved Person ID")
@@ -465,6 +692,55 @@ class ReproductionGroupRegistry:
                     or group.offspring_ids != result.offspring_ids
                     or group.source_reference != result.source_reference):
                 raise RuntimeError("idempotency record is inconsistent with published world state")
+        if set(self._generation_requests) != {
+                record.outcome.request_key for record in self._generation_requests.values()}:
+            raise RuntimeError("statistical idempotency request index is inconsistent")
+        expected_scopes = {}
+        expected_origin_ticks = {}
+        from reproduction_generation import SAMPLING_ALGORITHM
+        for request_key, record in self._generation_requests.items():
+            outcome = record.outcome
+            expected_inputs = (
+                outcome.parent_ids, outcome.seed, outcome.horizon_tick,
+                outcome.eligible_origin_ticks, outcome.distribution_id,
+                outcome.distribution_version, outcome.weighted_counts,
+                outcome.distribution_schema,
+                SAMPLING_ALGORITHM,
+            )
+            if (outcome.world_identity != self.world_identity or outcome.request_key != request_key
+                    or request_key in self._requests
+                    or record.normalized_inputs != expected_inputs
+                    or type(outcome.revision) is not int or not 1 <= outcome.revision <= self._revision
+                    or type(outcome.horizon_tick) is not int or outcome.horizon_tick < 0
+                    or type(outcome.count) is not int or outcome.count < 0
+                    or len(outcome.offspring_ids) != outcome.count
+                    or len(outcome.origin_ticks) != outcome.count
+                    or outcome.origin_ticks != tuple(sorted(outcome.origin_ticks))
+                    or any(type(tick) is not int or tick < 0 or tick > outcome.horizon_tick
+                           for tick in outcome.origin_ticks)
+                    or outcome.parent_ids in expected_scopes
+                    or outcome.parent_ids not in self._generation_parent_set_scopes
+                    or self._generation_parent_set_scopes[outcome.parent_ids] != outcome.scope_digest
+                    or outcome.coverage_scope != "this-parent-set-request-through-inclusive-horizon"
+                    or outcome.parent_offspring_enumeration_complete is not False):
+                raise RuntimeError("statistical generation scope or ownership is inconsistent")
+            expected_scopes[outcome.parent_ids] = outcome.scope_digest
+            if outcome.count == 0:
+                if (outcome.group_id is not None or outcome.offspring_ids or outcome.origin_ticks
+                        or outcome.parent_ids in self._group_id_by_parent_set):
+                    raise RuntimeError("zero outcome incorrectly publishes a group or offspring")
+            else:
+                group = self._groups_by_id.get(outcome.group_id)
+                if (group is None or group.parent_ids != outcome.parent_ids
+                        or group.offspring_ids != outcome.offspring_ids
+                        or tuple(self._offspring_origin_ticks.get(child) for child in outcome.offspring_ids)
+                        != outcome.origin_ticks):
+                    raise RuntimeError("positive statistical outcome lacks matching published facts")
+                expected_origin_ticks.update(zip(outcome.offspring_ids, outcome.origin_ticks))
+        if expected_scopes != self._generation_parent_set_scopes:
+            raise RuntimeError("statistical parent-set scope index is inconsistent")
+        if expected_origin_ticks != self._offspring_origin_ticks:
+            raise RuntimeError("offspring origin-time index is inconsistent")
 
     def _capture_undo(self):
         return (
@@ -476,6 +752,9 @@ class ReproductionGroupRegistry:
             set(self._group_id_reservations),
             dict(self._requests),
             self._revision,
+            dict(self._offspring_origin_ticks),
+            dict(self._generation_requests),
+            dict(self._generation_parent_set_scopes),
         )
 
     def _restore_undo(self, undo) -> None:
@@ -485,6 +764,9 @@ class ReproductionGroupRegistry:
             (self._group_id_by_offspring, undo[2]),
             (self._parent_set_by_offspring, undo[3]),
             (self._requests, undo[6]),
+            (self._offspring_origin_ticks, undo[8]),
+            (self._generation_requests, undo[9]),
+            (self._generation_parent_set_scopes, undo[10]),
         )
         for target, original in maps:
             target.clear()
