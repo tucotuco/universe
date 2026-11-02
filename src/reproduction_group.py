@@ -244,6 +244,73 @@ class ReproductionGroupRegistrySnapshot:
     progressive_parent_set_scopes: tuple[tuple[tuple[str, ...], str], ...]
     progressive_request_keys: tuple[str, ...]
 
+    def known_parents(self, person_id: str) -> tuple[str, ...] | None:
+        """Exact known parent set for this published child, or ``None`` if unknown."""
+        return dict(self.parent_set_by_offspring).get(person_id)
+
+    def known_full_siblings(self, person_id: str) -> tuple[str, ...]:
+        """Known other offspring in the child's exact ReproductionGroup only."""
+        group_id = dict(self.group_id_by_offspring).get(person_id)
+        if group_id is None:
+            return ()
+        groups = {group.group_id: group for group in self.groups}
+        group = groups.get(group_id)
+        if group is None:
+            raise RuntimeError("offspring index references an unavailable group")
+        return tuple(child for child in group.offspring_ids if child != person_id)
+
+    def known_shared_parent_relatives(self, person_id: str) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+        """Return ``(other child, shared parents, other exact parent set)`` facts.
+
+        This deliberately uses relationship-neutral wording. For parent sets
+        larger than two it does not assign a sibling category.
+        """
+        parents = self.known_parents(person_id)
+        if parents is None:
+            return ()
+        rows = []
+        for group in self.groups:
+            if group.parent_ids == parents:
+                continue
+            shared = tuple(sorted(set(parents) & set(group.parent_ids)))
+            if not shared:
+                continue
+            for other in group.offspring_ids:
+                if other != person_id:
+                    rows.append((other, shared, group.parent_ids))
+        return tuple(sorted(set(rows)))
+
+    def known_half_siblings(self, person_id: str) -> tuple[str, ...]:
+        """Known one-parent overlaps between two-parent groups only."""
+        parents = self.known_parents(person_id)
+        if parents is None:
+            return ()
+        if len(parents) != 2:
+            raise UnsupportedReproductionKinshipQuery(
+                "half-sibling labels are supported only for two-parent groups"
+            )
+        return tuple(sorted({other for other, shared, other_parents
+                             in self.known_shared_parent_relatives(person_id)
+                             if len(other_parents) == 2 and len(shared) == 1}))
+
+    def known_grandparent_paths(self, person_id: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Known two-step parentage paths, without completeness claims."""
+        parents = self.known_parents(person_id)
+        if parents is None:
+            return ()
+        paths = []
+        for parent in parents:
+            grandparents = self.known_parents(parent)
+            if grandparents is not None:
+                if person_id in grandparents or parent in grandparents:
+                    raise ValueError("cyclic parentage cannot be presented as a grandparent path")
+                paths.append((parent, grandparents))
+        return tuple(paths)
+
+
+class UnsupportedReproductionKinshipQuery(ValueError):
+    """A requested family label cannot be derived from the supported facts."""
+
 
 @dataclass(frozen=True)
 class _IdempotencyRecord:
@@ -508,6 +575,7 @@ class ReproductionGroupRegistry:
                     "this exact parent set already has a bounded generation outcome"
                 )
             self._validate_generated_parent_ids(candidate)
+            self._validate_parentage_addition(candidate.parent_ids, candidate.offspring_ids)
             if candidate.parent_ids in self._group_id_by_parent_set:
                 raise ReproductionGroupPublicationError(
                     "exact parent set already has an established ReproductionGroup"
@@ -714,6 +782,7 @@ class ReproductionGroupRegistry:
                 raise ReproductionGroupPublicationError("progressive parent ID collides with a native Object ID")
             if set(new_children) & set(candidate.parent_ids):
                 raise ReproductionGroupPublicationError("progressive child identity collides with a parent identity")
+            self._validate_parentage_addition(candidate.parent_ids, new_children)
 
             all_periods = prior_periods + candidate.new_periods
             all_children = tuple(child for row in all_periods for child in row.offspring_ids)
@@ -885,6 +954,23 @@ class ReproductionGroupRegistry:
                 raise ReproductionGroupPublicationError(
                     "offspring already has a parent-set assignment in this world"
                 )
+        self._validate_parentage_addition(candidate.parent_ids, candidate.offspring_ids)
+
+    def _validate_parentage_addition(self, parent_ids, offspring_ids) -> None:
+        """Refuse only a parentage edge that closes a known directed cycle."""
+        for child in offspring_ids:
+            pending = list(parent_ids)
+            seen = set()
+            while pending:
+                ancestor = pending.pop()
+                if ancestor == child:
+                    raise ReproductionGroupPublicationError(
+                        "parentage assignment would create a known ancestry cycle"
+                    )
+                if ancestor in seen:
+                    continue
+                seen.add(ancestor)
+                pending.extend(self._parent_set_by_offspring.get(ancestor, ()))
 
     def _assert_consistent(self) -> None:
         if self._revision < 1:

@@ -6,7 +6,7 @@
 
 ## ACTIVE — one development objective
 
-- [ ] **U-REL-001 · ACTIVE — Develop on-demand world-level reproductive generation.** D4A/B provide authored candidates and a no-Encounter publisher; V1 demonstrates bounded one-shot test-profile outcomes and V2 demonstrates deterministic per-period T1→T2 extension. Both use explicit test-only profiles and atomic positive/zero publication. Neither is adopted biology, a general historical generator, or a complete-family claim. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [ ] **U-REL-001 · ACTIVE — Develop on-demand world-level reproductive generation.** D4A/B provide authored candidates and a no-Encounter publisher; V1/V2 demonstrate test-only one-shot and progressive outcomes; V3 demonstrates linked multigenerational ReproductionGroups and derived known kinship. All profiles and ticks remain test-only; this is not adopted biology, native Being materialization, persistence, or a complete-family claim. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## NEXT
 
