@@ -84,6 +84,32 @@ class ProgressiveReproductionTests(unittest.TestCase):
         self.assertEqual(group.offspring_ids, positive.all_offspring_ids)
         self.assertEqual(len(set(positive.all_offspring_ids)), len(positive.all_offspring_ids))
 
+    def test_zero_to_positive_extension_faults_roll_back_group_creation(self):
+        phases = (
+            "progressive_group", "progressive_parent_set_index", "progressive_offspring_indexes",
+            "progressive_origin_ticks", "progressive_person_reservations",
+            "progressive_group_reservation", "progressive_history", "progressive_scope",
+            "progressive_idempotency", "progressive_revision", "progressive_consistency",
+        )
+        for phase in phases:
+            with self.subTest(phase=phase):
+                world = make_world()
+                zero = self.prepare_publish(world, request(25, 0, ("P-SOLO",)), "zero")
+                self.assertIsNone(zero.group_id)
+                before = world.reproduction_group_snapshot()
+                candidate = prepare_progressive_reproduction(world, request(25, 1, ("P-SOLO",)))
+                with self.assertRaises(InjectedReproductionGroupFailure):
+                    world.publish_progressive_reproduction(
+                        candidate, request_key="positive", expected_revision=candidate.base_revision,
+                        _fail_after=phase,
+                    )
+                self.assertEqual(world.reproduction_group_snapshot(), before)
+                self.assertEqual(world.reproduction_group_snapshot().groups, ())
+                result = self.prepare_publish(world, request(25, 1, ("P-SOLO",)), "positive")
+                self.assertIsNotNone(result.group_id)
+                self.assertEqual(world.get_reproduction_group(result.group_id).offspring_ids,
+                                 result.all_offspring_ids)
+
     def test_idempotent_retry_returns_before_private_rng_and_rejects_key_reuse(self):
         world = make_world()
         req = request(8, 1)
