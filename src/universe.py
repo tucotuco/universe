@@ -122,6 +122,14 @@ class Universe(Identifiable):
             _fail_after=_fail_after,
         )
 
+    def elaborate_reproduction_group(self, candidate, *, request_key, expected_revision,
+                                     _fail_after=None):
+        """Atomically add known parent members or complete an existing group."""
+        return self._reproduction_group_registry.elaborate(
+            candidate, request_key=request_key, expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
+
     def publish_statistical_reproduction(self, candidate, *, request_key, expected_revision,
                                          _fail_after=None):
         """Publish one bounded test-distribution result without an Encounter."""
@@ -129,6 +137,14 @@ class Universe(Identifiable):
             candidate,
             request_key=request_key,
             expected_revision=expected_revision,
+            _fail_after=_fail_after,
+        )
+
+    def resolve_reproduction_group_elaboration(self, proposal, *, request_key,
+                                               expected_revision=None, _fail_after=None):
+        """Prepare and atomically publish an authored parent-membership update."""
+        return self._reproduction_group_registry.resolve_elaboration(
+            proposal, request_key=request_key, expected_revision=expected_revision,
             _fail_after=_fail_after,
         )
 

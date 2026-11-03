@@ -182,6 +182,38 @@ def _authored_result_from_data(value):
     )
 
 
+def _group_to_data(group):
+    """V1 wire representation; this schema is complete-parentage only."""
+    if not group.parents_complete:
+        raise ReproductionCheckpointValidationError(
+            "reproduction checkpoint V1 does not support incomplete parent membership"
+        )
+    return {
+        "world_identity": group.world_identity,
+        "group_id": group.group_id,
+        "parent_ids": list(group.parent_ids),
+        "offspring_ids": list(group.offspring_ids),
+        "source_reference": group.source_reference,
+        "revision": group.revision,
+    }
+
+
+def _authored_result_to_data(result):
+    if not result.parents_complete:
+        raise ReproductionCheckpointValidationError(
+            "reproduction checkpoint V1 does not support incomplete parent membership"
+        )
+    return {
+        "world_identity": result.world_identity,
+        "group_id": result.group_id,
+        "parent_ids": list(result.parent_ids),
+        "offspring_ids": list(result.offspring_ids),
+        "source_reference": result.source_reference,
+        "request_key": result.request_key,
+        "revision": result.revision,
+    }
+
+
 def _period_from_data(value):
     if type(value) is dict and set(value) == {"$period"}:
         value = value["$period"]
@@ -298,9 +330,14 @@ def _compatible_context(world, *, require_empty=False):
 
 
 def _registry_data(registry):
+    if any(record.normalized_request and record.normalized_request[0] == "elaborate-membership"
+           for record in registry._requests.values()):
+        raise ReproductionCheckpointValidationError(
+            "reproduction checkpoint V1 does not preserve parent-membership elaboration requests"
+        )
     return {
         "revision": registry._revision,
-        "groups": [_data_fields(registry._groups_by_id[key]) for key in sorted(registry._groups_by_id)],
+        "groups": [_group_to_data(registry._groups_by_id[key]) for key in sorted(registry._groups_by_id)],
         "indexes": {
             "group_id_by_parent_set": [[list(key), value] for key, value in sorted(registry._group_id_by_parent_set.items())],
             "group_id_by_offspring": [list(item) for item in sorted(registry._group_id_by_offspring.items())],
@@ -313,7 +350,7 @@ def _registry_data(registry):
         },
         "authored_requests": [
             {"request_key": key, "normalized_request": _normalization_to_data(record.normalized_request),
-             "result": _data_fields(record.result)}
+             "result": _authored_result_to_data(record.result)}
             for key, record in sorted(registry._requests.items())
         ],
         "generation_requests": [
@@ -350,6 +387,15 @@ def encode_reproduction_checkpoint(world) -> str:
                   registry._progressive_requests)):
             raise ReproductionCheckpointValidationError(
                 "revision-zero registry contains unpublished records"
+            )
+        if any(not group.parents_complete for group in registry._groups_by_id.values()):
+            raise ReproductionCheckpointValidationError(
+                "reproduction checkpoint V1 refuses groups with incomplete parent membership"
+            )
+        if any(record.normalized_request and record.normalized_request[0] == "elaborate-membership"
+               for record in registry._requests.values()):
+            raise ReproductionCheckpointValidationError(
+                "reproduction checkpoint V1 does not preserve parent-membership elaboration requests"
             )
         payload = _registry_data(registry)
         source_identity = registry.world_identity

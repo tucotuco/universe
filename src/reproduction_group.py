@@ -38,6 +38,8 @@ class ReproductionGroupProposal:
 
     ``group_id`` is a proposed stable group identity, not a reservation in any
     authoritative registry. Input lists are defensively copied to tuples.
+    ``parent_ids`` are the known structural parent members. ``parents_complete``
+    says whether they are the full set; it does not affect offspring enumeration.
     Duplicate identities and empty parent/offspring sets are rejected during
     pure preparation so callers receive one explicit validation boundary.
     """
@@ -46,6 +48,7 @@ class ReproductionGroupProposal:
     parent_ids: tuple[str, ...]
     offspring_ids: tuple[str, ...]
     source_reference: str
+    parents_complete: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "group_id", _identifier(self.group_id, "group_id"))
@@ -54,6 +57,8 @@ class ReproductionGroupProposal:
         object.__setattr__(
             self, "source_reference", _identifier(self.source_reference, "source_reference")
         )
+        if type(self.parents_complete) is not bool:
+            raise ReproductionGroupValidationError("parents_complete must be explicitly boolean")
 
 
 @dataclass(frozen=True)
@@ -61,15 +66,18 @@ class PreparedReproductionGroupCandidate:
     """Detached, immutable candidate; not an authoritative group or commit."""
 
     group_id: str
-    parent_ids: tuple[str, ...]  # canonical exact unordered parent-set key
+    parent_ids: tuple[str, ...]  # canonical known membership; exact iff complete
     offspring_ids: tuple[str, ...]  # authored order retained; enumeration is partial
     source_reference: str
+    parents_complete: bool = True
 
     def __post_init__(self) -> None:
         group_id = _identifier(self.group_id, "group_id")
         parents = _identifier_tuple(self.parent_ids, "parent_ids")
         offspring = _identifier_tuple(self.offspring_ids, "offspring_ids")
         source = _identifier(self.source_reference, "source_reference")
+        if type(self.parents_complete) is not bool:
+            raise ReproductionGroupValidationError("parents_complete must be boolean")
         if not parents or len(set(parents)) != len(parents):
             raise ReproductionGroupValidationError(
                 "a prepared candidate requires a nonempty, unique parent set"
@@ -96,7 +104,16 @@ class PreparedReproductionGroupCandidate:
 
     @property
     def parent_set_key(self) -> tuple[str, ...]:
-        """Canonical complete parent identity set for equality comparisons."""
+        """The exact uniqueness key; unavailable until parent membership is complete."""
+        if not self.parents_complete:
+            raise ReproductionGroupValidationError(
+                "an incomplete known-parent subset is not an exact parent-set key"
+            )
+        return self.parent_ids
+
+    @property
+    def known_parent_members(self) -> tuple[str, ...]:
+        """Canonical known membership, whether complete or still partial."""
         return self.parent_ids
 
 
@@ -139,6 +156,122 @@ def prepare_reproduction_group(
         parent_ids=tuple(sorted(proposal.parent_ids)),
         offspring_ids=proposal.offspring_ids,
         source_reference=proposal.source_reference,
+        parents_complete=proposal.parents_complete,
+    )
+
+
+@dataclass(frozen=True)
+class ReproductionGroupElaborationProposal:
+    """World-authored addition or completion of an existing partial group."""
+
+    group_id: str
+    expected_parent_ids: tuple[str, ...]
+    added_parent_ids: tuple[str, ...]
+    parents_complete: bool
+
+    def __post_init__(self):
+        object.__setattr__(self, "group_id", _identifier(self.group_id, "group_id"))
+        object.__setattr__(self, "expected_parent_ids",
+                           _identifier_tuple(self.expected_parent_ids, "expected_parent_ids"))
+        object.__setattr__(self, "added_parent_ids",
+                           _identifier_tuple(self.added_parent_ids, "added_parent_ids"))
+        if not self.expected_parent_ids or len(set(self.expected_parent_ids)) != len(self.expected_parent_ids):
+            raise ReproductionGroupValidationError("existing parent membership must be unique and nonempty")
+        if len(set(self.added_parent_ids)) != len(self.added_parent_ids):
+            raise ReproductionGroupValidationError("added parent members must be unique")
+        if set(self.expected_parent_ids) & set(self.added_parent_ids):
+            raise ReproductionGroupValidationError("added parent members cannot repeat known membership")
+        if type(self.parents_complete) is not bool:
+            raise ReproductionGroupValidationError("parents_complete must be explicitly boolean")
+
+
+@dataclass(frozen=True)
+class PreparedReproductionGroupElaboration:
+    """Detached read-set-bound amendment to one existing group's membership."""
+
+    world_identity: int
+    base_revision: int
+    group_id: str
+    prior_parent_ids: tuple[str, ...]
+    added_parent_ids: tuple[str, ...]
+    parent_ids: tuple[str, ...]
+    offspring_ids: tuple[str, ...]
+    source_reference: str
+    parents_complete: bool
+
+    def __post_init__(self):
+        if type(self.world_identity) is not int or self.world_identity <= 0:
+            raise ReproductionGroupValidationError("elaboration world identity is invalid")
+        if type(self.base_revision) is not int or self.base_revision < 0:
+            raise ReproductionGroupValidationError("elaboration base revision is invalid")
+        _identifier(self.group_id, "group_id")
+        prior = _identifier_tuple(self.prior_parent_ids, "prior_parent_ids")
+        added = _identifier_tuple(self.added_parent_ids, "added_parent_ids")
+        parents = _identifier_tuple(self.parent_ids, "parent_ids")
+        offspring = _identifier_tuple(self.offspring_ids, "offspring_ids")
+        _identifier(self.source_reference, "source_reference")
+        if not prior or prior != tuple(sorted(set(prior))):
+            raise ReproductionGroupValidationError("prior parent membership must be canonical and nonempty")
+        if len(set(added)) != len(added) or set(prior) & set(added):
+            raise ReproductionGroupValidationError("elaboration additions duplicate prior membership")
+        if parents != tuple(sorted(set((*prior, *added)))):
+            raise ReproductionGroupValidationError("elaborated parent membership is not canonical")
+        if not offspring or len(set(offspring)) != len(offspring):
+            raise ReproductionGroupValidationError("elaboration must preserve nonempty unique offspring")
+        if not added and not self.parents_complete:
+            raise ReproductionGroupValidationError("elaboration must add membership or complete the set")
+        if type(self.parents_complete) is not bool:
+            raise ReproductionGroupValidationError("parents_complete must be boolean")
+        object.__setattr__(self, "prior_parent_ids", prior)
+        object.__setattr__(self, "added_parent_ids", added)
+        object.__setattr__(self, "parent_ids", parents)
+        object.__setattr__(self, "offspring_ids", offspring)
+
+
+def prepare_reproduction_group_elaboration(
+    world, proposal: ReproductionGroupElaborationProposal,
+) -> PreparedReproductionGroupElaboration:
+    """Prepare one additive membership update from the world's detached snapshot."""
+    if type(proposal) is not ReproductionGroupElaborationProposal:
+        raise ReproductionGroupValidationError("proposal must be a ReproductionGroupElaborationProposal")
+    snapshot = world.reproduction_group_snapshot()
+    groups = {group.group_id: group for group in snapshot.groups}
+    group = groups.get(proposal.group_id)
+    if group is None:
+        raise ReproductionGroupPublicationError("membership elaboration references an unknown group")
+    if group.parents_complete:
+        raise ReproductionGroupPublicationError("a completed parent set cannot be elaborated")
+    expected = tuple(sorted(proposal.expected_parent_ids))
+    if group.parent_ids != expected:
+        raise StaleReproductionGroupRevision("known parent membership changed since proposal preparation")
+    parents = tuple(sorted((*group.parent_ids, *proposal.added_parent_ids)))
+    if not proposal.added_parent_ids and not proposal.parents_complete:
+        raise ReproductionGroupValidationError("incomplete elaboration must add a parent member")
+    if set(parents) & set(group.offspring_ids):
+        raise ReproductionGroupPublicationError("parent membership would create self-parentage")
+    if set(proposal.added_parent_ids) & set(world.object_registry.object_instances):
+        raise ReproductionGroupPublicationError("parent membership collides with a native Object ID")
+    if proposal.parents_complete:
+        completed_group = dict(snapshot.group_id_by_parent_set).get(parents)
+        if completed_group is not None and completed_group != group.group_id:
+            raise ReproductionGroupPublicationError("completed exact parent set already belongs to another group")
+        if (parents in {key for key, _ in snapshot.generation_parent_set_scopes}
+                or parents in {key for key, _ in snapshot.progressive_parent_set_scopes}):
+            raise ReproductionGroupPublicationError("completed exact parent set conflicts with a generation scope")
+    for child in group.offspring_ids:
+        pending, seen = list(parents), set()
+        while pending:
+            ancestor = pending.pop()
+            if ancestor == child:
+                raise ReproductionGroupPublicationError("membership elaboration would create an ancestry cycle")
+            if ancestor in seen:
+                continue
+            seen.add(ancestor)
+            pending.extend(snapshot.known_parents(ancestor) or ())
+    return PreparedReproductionGroupElaboration(
+        snapshot.world_identity, snapshot.revision, group.group_id, group.parent_ids,
+        tuple(sorted(proposal.added_parent_ids)), parents, group.offspring_ids,
+        group.source_reference, proposal.parents_complete,
     )
 
 
@@ -164,6 +297,10 @@ _PUBLICATION_PHASES = (
     "revision",
     "consistency",
 )
+_ELABORATION_PHASES = (
+    "group_membership", "completed_parent_set_index", "offspring_parent_membership",
+    "person_reservations", "idempotency", "revision", "consistency",
+)
 _STATISTICAL_PUBLICATION_PHASES = (
     "group", "parent_set_index", "offspring_indexes", "origin_ticks",
     "person_reservations", "group_reservation", "generation_outcome",
@@ -187,6 +324,7 @@ class ReproductionGroupRecord:
     offspring_ids: tuple[str, ...]
     source_reference: str
     revision: int
+    parents_complete: bool = True
 
     def __post_init__(self) -> None:
         if type(self.world_identity) is not int or self.world_identity <= 0:
@@ -203,6 +341,8 @@ class ReproductionGroupRecord:
             raise ReproductionGroupValidationError("group ID must be distinct from Person IDs")
         if type(self.revision) is not int or self.revision <= 0:
             raise ReproductionGroupValidationError("published group revision must be positive")
+        if type(self.parents_complete) is not bool:
+            raise ReproductionGroupValidationError("parents_complete must be boolean")
         object.__setattr__(self, "parent_ids", parents)
         object.__setattr__(self, "offspring_ids", offspring)
 
@@ -222,6 +362,11 @@ class ReproductionGroupPublicationResult:
     source_reference: str
     request_key: str
     revision: int
+    parents_complete: bool = True
+
+    def __post_init__(self):
+        if type(self.parents_complete) is not bool:
+            raise ReproductionGroupValidationError("result parents_complete must be boolean")
 
 
 @dataclass(frozen=True)
@@ -233,6 +378,8 @@ class ReproductionGroupRegistrySnapshot:
     groups: tuple[ReproductionGroupRecord, ...]
     group_id_by_parent_set: tuple[tuple[tuple[str, ...], str], ...]
     group_id_by_offspring: tuple[tuple[str, str], ...]
+    # Derived lookup from each offspring's owning ReproductionGroup; not a
+    # second parentage authority. Values may be incomplete known membership.
     parent_set_by_offspring: tuple[tuple[str, tuple[str, ...]], ...]
     person_id_reservations: tuple[str, ...]
     group_id_reservations: tuple[str, ...]
@@ -245,8 +392,18 @@ class ReproductionGroupRegistrySnapshot:
     progressive_request_keys: tuple[str, ...]
 
     def known_parents(self, person_id: str) -> tuple[str, ...] | None:
-        """Exact known parent set for this published child, or ``None`` if unknown."""
+        """Known parent members derived from its ReproductionGroup, or ``None``."""
         return dict(self.parent_set_by_offspring).get(person_id)
+
+    def parents_complete_for(self, person_id: str) -> bool | None:
+        """Whether the child's group has explicitly completed its parent set."""
+        group_id = dict(self.group_id_by_offspring).get(person_id)
+        if group_id is None:
+            return None
+        group = next((item for item in self.groups if item.group_id == group_id), None)
+        if group is None:
+            raise RuntimeError("offspring index references an unavailable group")
+        return group.parents_complete
 
     def known_full_siblings(self, person_id: str) -> tuple[str, ...]:
         """Known other offspring in the child's exact ReproductionGroup only."""
@@ -260,7 +417,7 @@ class ReproductionGroupRegistrySnapshot:
         return tuple(child for child in group.offspring_ids if child != person_id)
 
     def known_shared_parent_relatives(self, person_id: str) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
-        """Return ``(other child, shared parents, other exact parent set)`` facts.
+        """Return ``(other child, shared known members, other known members)`` facts.
 
         This deliberately uses relationship-neutral wording. For parent sets
         larger than two it does not assign a sibling category.
@@ -268,9 +425,12 @@ class ReproductionGroupRegistrySnapshot:
         parents = self.known_parents(person_id)
         if parents is None:
             return ()
+        own_group_id = dict(self.group_id_by_offspring).get(person_id)
         rows = []
         for group in self.groups:
-            if group.parent_ids == parents:
+            # Two partial groups may currently expose the same known subset.
+            # They remain separate groups and may later resolve differently.
+            if group.group_id == own_group_id:
                 continue
             shared = tuple(sorted(set(parents) & set(group.parent_ids)))
             if not shared:
@@ -285,13 +445,21 @@ class ReproductionGroupRegistrySnapshot:
         parents = self.known_parents(person_id)
         if parents is None:
             return ()
+        own_group_id = dict(self.group_id_by_offspring).get(person_id)
+        groups = {group.group_id: group for group in self.groups}
+        own_group = groups.get(own_group_id)
+        if own_group is None or not own_group.parents_complete:
+            raise UnsupportedReproductionKinshipQuery(
+                "half-sibling labels require a complete parent set for the queried Person"
+            )
         if len(parents) != 2:
             raise UnsupportedReproductionKinshipQuery(
                 "half-sibling labels are supported only for two-parent groups"
             )
         return tuple(sorted({other for other, shared, other_parents
                              in self.known_shared_parent_relatives(person_id)
-                             if len(other_parents) == 2 and len(shared) == 1}))
+                             if len(other_parents) == 2 and len(shared) == 1
+                             and self.parents_complete_for(other) is True}))
 
     def known_grandparent_paths(self, person_id: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
         """Known two-step parentage paths, without completeness claims."""
@@ -336,8 +504,12 @@ class ReproductionGroupRegistry:
         # distinguishes worlds without claiming cross-process durability.
         self.world_identity = id(world)
         self._groups_by_id: dict[str, ReproductionGroupRecord] = {}
+        # This index contains only groups whose parent membership is explicit
+        # complete; partial known-member tuples are never uniqueness keys.
         self._group_id_by_parent_set: dict[tuple[str, ...], str] = {}
         self._group_id_by_offspring: dict[str, str] = {}
+        # Derived query acceleration. ReproductionGroup records remain the
+        # single authority; each value may be incomplete known membership.
         self._parent_set_by_offspring: dict[str, tuple[str, ...]] = {}
         self._person_id_reservations: set[str] = set()
         self._group_id_reservations: set[str] = set()
@@ -401,7 +573,7 @@ class ReproductionGroupRegistry:
         try:
             validated = prepare_reproduction_group(ReproductionGroupProposal(
                 candidate.group_id, candidate.parent_ids,
-                candidate.offspring_ids, candidate.source_reference,
+                candidate.offspring_ids, candidate.source_reference, candidate.parents_complete,
             ))
         except (TypeError, ValueError) as exc:
             raise ReproductionGroupPublicationError(f"invalid candidate: {exc}") from exc
@@ -419,6 +591,8 @@ class ReproductionGroupRegistry:
             candidate.offspring_ids,
             candidate.source_reference,
         )
+        if not candidate.parents_complete:
+            normalized += (False,)
         return normalized
 
     def publish(self, candidate, *, request_key: str, expected_revision: int,
@@ -460,6 +634,7 @@ class ReproductionGroupRegistry:
                 offspring_ids=candidate.offspring_ids,
                 source_reference=candidate.source_reference,
                 revision=new_revision,
+                parents_complete=candidate.parents_complete,
             )
             result = ReproductionGroupPublicationResult(
                 world_identity=self.world_identity,
@@ -469,13 +644,15 @@ class ReproductionGroupRegistry:
                 source_reference=record.source_reference,
                 request_key=request_key,
                 revision=new_revision,
+                parents_complete=record.parents_complete,
             )
             undo = self._capture_undo()
             try:
                 self._groups_by_id[candidate.group_id] = record
                 self._maybe_fail(_fail_after, "group")
 
-                self._group_id_by_parent_set[candidate.parent_ids] = candidate.group_id
+                if candidate.parents_complete:
+                    self._group_id_by_parent_set[candidate.parent_ids] = candidate.group_id
                 self._maybe_fail(_fail_after, "parent_set_index")
 
                 for person_id in candidate.offspring_ids:
@@ -502,6 +679,149 @@ class ReproductionGroupRegistry:
             except BaseException:
                 self._restore_undo(undo)
                 raise
+
+    def elaborate(self, candidate, *, request_key: str, expected_revision: int,
+                  _fail_after: str | None = None) -> ReproductionGroupPublicationResult:
+        """Atomically add known parent members or complete an existing group."""
+        if type(candidate) is not PreparedReproductionGroupElaboration:
+            raise ReproductionGroupPublicationError("elaboration requires a prepared membership candidate")
+        try:
+            validated = PreparedReproductionGroupElaboration(
+                candidate.world_identity, candidate.base_revision, candidate.group_id,
+                candidate.prior_parent_ids, candidate.added_parent_ids, candidate.parent_ids,
+                candidate.offspring_ids, candidate.source_reference, candidate.parents_complete,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ReproductionGroupPublicationError(f"invalid membership candidate: {exc}") from exc
+        if validated != candidate:
+            raise ReproductionGroupPublicationError("membership candidate is not canonical detached data")
+        if type(request_key) is not str or not request_key.strip():
+            raise ReproductionGroupPublicationError("request_key must be nonempty text")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ReproductionGroupPublicationError("expected_revision must be nonnegative")
+        if _fail_after is not None and _fail_after not in _ELABORATION_PHASES:
+            raise ReproductionGroupPublicationError("unknown membership fault-injection phase")
+        normalized = (
+            "elaborate-membership", candidate.group_id, candidate.prior_parent_ids,
+            candidate.added_parent_ids, candidate.parent_ids, candidate.offspring_ids,
+            candidate.source_reference, candidate.parents_complete,
+        )
+        with self._world._schedule_lock:
+            if self._world._reproduction_group_registry is not self:
+                raise ReproductionGroupPublicationError("registry is not owned by this Universe")
+            if request_key in self._generation_requests or request_key in self._progressive_requests:
+                raise ReproductionGroupPublicationError("request key is reserved by another reproduction operation")
+            previous = self._requests.get(request_key)
+            if previous is not None:
+                self._assert_consistent()
+                if previous.normalized_request != normalized:
+                    raise ReproductionGroupPublicationError("request key was already used for different normalized content")
+                return previous.result
+            if candidate.world_identity != self.world_identity:
+                raise ReproductionGroupPublicationError("membership candidate belongs to another Universe")
+            if expected_revision != candidate.base_revision or expected_revision != self._revision:
+                raise StaleReproductionGroupRevision(
+                    f"membership candidate read revision {candidate.base_revision}; current is {self._revision}"
+                )
+            self._validate_no_encounter_context()
+            current = self._groups_by_id.get(candidate.group_id)
+            if current is None:
+                raise ReproductionGroupPublicationError("membership elaboration references an unknown group")
+            if current.parents_complete:
+                raise ReproductionGroupPublicationError("a completed parent set cannot be elaborated")
+            if (current.parent_ids != candidate.prior_parent_ids
+                    or current.offspring_ids != candidate.offspring_ids
+                    or current.source_reference != candidate.source_reference):
+                raise StaleReproductionGroupRevision("group membership or offspring changed after preparation")
+            if not candidate.added_parent_ids and not candidate.parents_complete:
+                raise ReproductionGroupPublicationError("membership elaboration must add a member or complete the set")
+            added = set(candidate.added_parent_ids)
+            if added & set(self._world.object_registry.object_instances):
+                raise ReproductionGroupPublicationError("added parent identity collides with a native Object ID")
+            if added & self._group_id_reservations:
+                raise ReproductionGroupPublicationError("added parent identity collides with a ReproductionGroup ID")
+            if set(candidate.parent_ids) & set(candidate.offspring_ids):
+                raise ReproductionGroupPublicationError("parent membership would create direct self-parentage")
+            self._validate_parentage_addition(candidate.parent_ids, candidate.offspring_ids)
+            if candidate.parents_complete:
+                owner = self._group_id_by_parent_set.get(candidate.parent_ids)
+                if owner is not None and owner != candidate.group_id:
+                    raise ReproductionGroupPublicationError("completed exact parent set already belongs to another group")
+                if (candidate.parent_ids in self._generation_parent_set_scopes
+                        or candidate.parent_ids in self._progressive_parent_set_scopes):
+                    raise ReproductionGroupPublicationError("completed exact parent set conflicts with a generation scope")
+
+            revision = self._revision + 1
+            updated = ReproductionGroupRecord(
+                self.world_identity, current.group_id, candidate.parent_ids, current.offspring_ids,
+                current.source_reference, revision, candidate.parents_complete,
+            )
+            result = ReproductionGroupPublicationResult(
+                self.world_identity, updated.group_id, updated.parent_ids, updated.offspring_ids,
+                updated.source_reference, request_key, revision, updated.parents_complete,
+            )
+            undo = self._capture_undo()
+            try:
+                self._groups_by_id[current.group_id] = updated
+                self._maybe_fail(_fail_after, "group_membership")
+                if updated.parents_complete:
+                    self._group_id_by_parent_set[updated.parent_ids] = updated.group_id
+                self._maybe_fail(_fail_after, "completed_parent_set_index")
+                for child in updated.offspring_ids:
+                    self._parent_set_by_offspring[child] = updated.parent_ids
+                self._maybe_fail(_fail_after, "offspring_parent_membership")
+                self._person_id_reservations.update(candidate.added_parent_ids)
+                self._maybe_fail(_fail_after, "person_reservations")
+                self._requests[request_key] = _IdempotencyRecord(normalized, result)
+                self._maybe_fail(_fail_after, "idempotency")
+                self._revision = revision
+                self._maybe_fail(_fail_after, "revision")
+                self._assert_consistent()
+                self._maybe_fail(_fail_after, "consistency")
+                return result
+            except BaseException:
+                self._restore_undo(undo)
+                raise
+
+    def resolve_elaboration(self, proposal, *, request_key: str,
+                            expected_revision: int | None = None,
+                            _fail_after: str | None = None) -> ReproductionGroupPublicationResult:
+        """Prepare/publish a membership request, replaying exact keys idempotently."""
+        if type(proposal) is not ReproductionGroupElaborationProposal:
+            raise ReproductionGroupPublicationError("proposal must be ReproductionGroupElaborationProposal")
+        if type(request_key) is not str or not request_key.strip():
+            raise ReproductionGroupPublicationError("request_key must be nonempty text")
+        with self._world._schedule_lock:
+            prior = self._requests.get(request_key)
+            if prior is not None:
+                normalized = prior.normalized_request
+                if (not normalized or normalized[0] != "elaborate-membership"
+                        or len(normalized) != 8
+                        or normalized[1] != proposal.group_id
+                        or normalized[2] != tuple(sorted(proposal.expected_parent_ids))
+                        or normalized[3] != tuple(sorted(proposal.added_parent_ids))
+                        or normalized[4] != tuple(sorted((*proposal.expected_parent_ids,
+                                                           *proposal.added_parent_ids)))
+                        or normalized[7] is not proposal.parents_complete):
+                    raise ReproductionGroupPublicationError(
+                        "request key was already used for different normalized membership content"
+                    )
+                self._assert_consistent()
+                return prior.result
+            if request_key in self._generation_requests or request_key in self._progressive_requests:
+                raise ReproductionGroupPublicationError("request key is already used by another publication path")
+            revision = self._revision if expected_revision is None else expected_revision
+            if type(revision) is not int or revision < 0:
+                raise ReproductionGroupPublicationError("expected revision must be nonnegative")
+            if revision != self._revision:
+                raise StaleReproductionGroupRevision(
+                    f"expected reproduction revision {revision}, current revision is {self._revision}"
+                )
+            candidate = prepare_reproduction_group_elaboration(self._world, proposal)
+            return self.elaborate(
+                candidate, request_key=request_key, expected_revision=revision,
+                _fail_after=_fail_after,
+            )
 
     def publish_statistical_reproduction(self, candidate, *, request_key: str,
                                          expected_revision: int,
@@ -934,15 +1254,15 @@ class ReproductionGroupRegistry:
         self._validate_no_encounter_context()
         if candidate.group_id in self._groups_by_id or candidate.group_id in self._group_id_reservations:
             raise ReproductionGroupPublicationError("group ID is already reserved in this Universe")
-        if candidate.parent_ids in self._group_id_by_parent_set:
+        if candidate.parents_complete and candidate.parent_ids in self._group_id_by_parent_set:
             raise ReproductionGroupPublicationError(
                 "this exact parent set already has an authoritative ReproductionGroup"
             )
-        if candidate.parent_ids in self._generation_parent_set_scopes:
+        if candidate.parents_complete and candidate.parent_ids in self._generation_parent_set_scopes:
             raise ReproductionGroupPublicationError(
                 "this exact parent set already has a bounded generation outcome"
             )
-        if candidate.parent_ids in self._progressive_parent_set_scopes:
+        if candidate.parents_complete and candidate.parent_ids in self._progressive_parent_set_scopes:
             raise ReproductionGroupPublicationError(
                 "this exact parent set already has progressive test-profile history"
             )
@@ -985,8 +1305,7 @@ class ReproductionGroupRegistry:
             raise RuntimeError("published state has no committed revision")
         if set(self._groups_by_id) != self._group_id_reservations:
             raise RuntimeError("group identity reservation index is inconsistent")
-        if len(self._groups_by_id) != len(self._group_id_by_parent_set):
-            raise RuntimeError("group and exact-parent-set indexes differ in size")
+        expected_complete_index = {}
         expected_people = set()
         expected_offspring = {}
         for group_id, group in self._groups_by_id.items():
@@ -996,14 +1315,18 @@ class ReproductionGroupRegistry:
                 raise RuntimeError("group parent set is empty, duplicated or noncanonical")
             if not group.offspring_ids:
                 raise RuntimeError("published group is empty")
-            if self._group_id_by_parent_set.get(group.parent_ids) != group_id:
-                raise RuntimeError("exact-parent-set index is inconsistent")
+            if group.parents_complete:
+                if group.parent_ids in expected_complete_index:
+                    raise RuntimeError("two completed groups share one exact parent set")
+                expected_complete_index[group.parent_ids] = group_id
             expected_people.update(group.parent_ids)
             expected_people.update(group.offspring_ids)
             for person_id in group.offspring_ids:
                 if person_id in expected_offspring:
                     raise RuntimeError("offspring identity is assigned more than once")
                 expected_offspring[person_id] = (group_id, group.parent_ids)
+        if self._group_id_by_parent_set != expected_complete_index:
+            raise RuntimeError("completed exact-parent-set index is inconsistent")
         if expected_people != self._person_id_reservations:
             raise RuntimeError("Person identity reservations are inconsistent")
         expected_group_by_child = {person: value[0] for person, value in expected_offspring.items()}
@@ -1017,10 +1340,35 @@ class ReproductionGroupRegistry:
         for request_key, record in self._requests.items():
             result = record.result
             group = self._groups_by_id.get(result.group_id)
-            if (result.world_identity != self.world_identity or result.request_key != request_key
-                    or group is None or group.parent_ids != result.parent_ids
-                    or group.offspring_ids != result.offspring_ids
-                    or group.source_reference != result.source_reference):
+            common_invalid = (
+                result.world_identity != self.world_identity or result.request_key != request_key
+                or group is None or not set(result.parent_ids).issubset(group.parent_ids)
+                or group.offspring_ids != result.offspring_ids
+                or group.source_reference != result.source_reference
+                or result.revision > group.revision
+            )
+            normalized = record.normalized_request
+            if normalized and normalized[0] == "elaborate-membership":
+                operation_invalid = (
+                    len(normalized) != 8 or normalized[1] != result.group_id
+                    or normalized[2] != tuple(sorted(set(normalized[2])))
+                    or normalized[3] != tuple(sorted(set(normalized[3])))
+                    or normalized[4] != tuple(sorted(set((*normalized[2], *normalized[3]))))
+                    or normalized[4] != result.parent_ids or normalized[5] != result.offspring_ids
+                    or normalized[6] != result.source_reference
+                    or normalized[7] != result.parents_complete
+                )
+            else:
+                expected_normalized = (
+                    (result.group_id, result.parent_ids, result.offspring_ids, result.source_reference)
+                    if result.parents_complete else
+                    (result.group_id, result.parent_ids, result.offspring_ids,
+                     result.source_reference, False)
+                )
+                operation_invalid = normalized != expected_normalized
+            if (common_invalid or operation_invalid
+                    or (result.parents_complete and
+                        (not group.parents_complete or group.parent_ids != result.parent_ids))):
                 raise RuntimeError("idempotency record is inconsistent with published world state")
         if set(self._generation_requests) != {
                 record.outcome.request_key for record in self._generation_requests.values()}:

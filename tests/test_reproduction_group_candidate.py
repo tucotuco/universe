@@ -50,6 +50,16 @@ class ReproductionGroupCandidateTests(unittest.TestCase):
         self.assertEqual(candidate.offspring_ids, ("A1",))
         self.assertFalse(hasattr(candidate, "gender"))
 
+    def test_incomplete_known_members_are_not_exposed_as_an_exact_parent_set_key(self):
+        candidate = prepare_reproduction_group(
+            ReproductionGroupProposal(
+                "RG-PARTIAL", ("P",), ("C",), "author", parents_complete=False,
+            )
+        )
+        self.assertEqual(candidate.known_parent_members, ("P",))
+        with self.assertRaisesRegex(ReproductionGroupValidationError, "not an exact parent-set key"):
+            _ = candidate.parent_set_key
+
     def test_multiple_children_do_not_claim_enumeration_completeness(self):
         candidate = prepare_reproduction_group(
             proposal(offspring=("C1", "C2"))
