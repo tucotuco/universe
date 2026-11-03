@@ -130,10 +130,34 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         reproduction._assert_consistent()
 
         # The bridge's exact retry is a no-write read in an Encounter world.
+        retry_before = (
+            id(world.object_registry.object_instances),
+            tuple((key, id(value)) for key, value in world.object_registry.object_instances.items()),
+            id(group._members), tuple(group._members.items()),
+            id(group._realized_beings), tuple((key, id(value)) for key, value in group._realized_beings.items()),
+            id(encounter.being_list), tuple(encounter.being_list),
+            id(reproduction._native_beings_by_person_id),
+            tuple((key, id(value)) for key, value in reproduction._native_beings_by_person_id.items()),
+            id(reproduction._native_being_requests),
+            tuple((key, id(value)) for key, value in reproduction._native_being_requests.items()),
+            reproduction.revision, rng.state,
+        )
         replay = materialize_reproductive_offspring(
             world, child_id, being_definition=world.get_being_definition("Human"),
             name="C", request_key="bind-C", expected_revision=reproduction.revision)
         self.assertIs(replay, being)
+        self.assertEqual(retry_before, (
+            id(world.object_registry.object_instances),
+            tuple((key, id(value)) for key, value in world.object_registry.object_instances.items()),
+            id(group._members), tuple(group._members.items()),
+            id(group._realized_beings), tuple((key, id(value)) for key, value in group._realized_beings.items()),
+            id(encounter.being_list), tuple(encounter.being_list),
+            id(reproduction._native_beings_by_person_id),
+            tuple((key, id(value)) for key, value in reproduction._native_beings_by_person_id.items()),
+            id(reproduction._native_being_requests),
+            tuple((key, id(value)) for key, value in reproduction._native_being_requests.items()),
+            reproduction.revision, rng.state,
+        ))
         self.assertEqual(group.counts(), counts_before)
         self.assertEqual(group.realized_being_count, 1)
         with self.assertRaisesRegex(ReproductionBeingBridgeError, "different Being properties"):
@@ -182,7 +206,8 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
     def test_faults_after_both_reproduction_binding_writes_and_consistency_restore_everything(self):
         phases = ("adult_registry", "adult_group_member", "adult_group_realized",
                   "adult_group_motion", "adult_encounter_participant",
-                  "adult_reproduction_binding", "adult_reproduction_request", "consistency")
+                  "adult_reproduction_binding", "adult_reproduction_request",
+                  "rng", "consistency")
         publisher = atomic_publication.publish_interval_candidate
         for phase in phases:
             with self.subTest(phase=phase):
