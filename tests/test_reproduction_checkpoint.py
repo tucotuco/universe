@@ -22,7 +22,8 @@ from reproduction_generation import (
     TestOnlyIntervalReproductionProfile, TestOnlyOffspringCountDistribution,
 )
 from reproduction_group import (
-    InjectedReproductionGroupFailure, ReproductionGroupProposal, prepare_reproduction_group,
+    InjectedReproductionGroupFailure, ReproductionGroupElaborationProposal,
+    ReproductionGroupProposal, prepare_reproduction_group,
 )
 from library import Library
 from universe import Universe
@@ -62,6 +63,18 @@ def _retag(envelope):
     return json.dumps(envelope, sort_keys=True, ensure_ascii=True, indent=2) + "\n"
 
 
+def _legacy_v1_reproduction_wire(text):
+    """Recreate the original V1 shape from complete-only V2 contents."""
+    envelope = json.loads(text)
+    envelope["version"] = 1
+    envelope["registry_contract"] = "logical-reproduction-registry/1"
+    for group in envelope["payload"]["groups"]:
+        group.pop("parents_complete")
+    for request in envelope["payload"]["authored_requests"]:
+        request["result"].pop("parents_complete")
+    return _retag(envelope)
+
+
 def _container_refs(world):
     registry = world._reproduction_group_registry
     names = (
@@ -75,6 +88,23 @@ def _container_refs(world):
 
 
 class ReproductionCheckpointTests(unittest.TestCase):
+    def test_legacy_v4_v1_complete_group_wire_restores_with_original_complete_meaning(self):
+        source = make_world("legacy V1 source")
+        create = prepare_reproduction_group(ReproductionGroupProposal(
+            "RG-LEGACY", ("P", "Q"), ("X",), "legacy:fixture",
+        ))
+        source.publish_reproduction_group(create, request_key="legacy-create", expected_revision=0)
+        old_wire = _legacy_v1_reproduction_wire(encode_reproduction_checkpoint(source))
+        detached = decode_reproduction_checkpoint(old_wire)
+        self.assertEqual(detached.wire_version, 1)
+        self.assertIs(detached.groups[0].parents_complete, True)
+        target = make_world("legacy V1 restored")
+        restored = restore_reproduction_checkpoint(target, old_wire)
+        group = target.get_reproduction_group("RG-LEGACY")
+        self.assertEqual(group.parent_ids, ("P", "Q"))
+        self.assertIs(group.parents_complete, True)
+        self.assertEqual(restored.group_id_by_parent_set, (( ("P", "Q"), "RG-LEGACY"),))
+
     def test_round_trip_preserves_authored_v1_v2_and_zero_registry_records(self):
         source = make_world("all reproduction contracts")
         source.publish_reproduction_group(
@@ -238,6 +268,36 @@ class ReproductionCheckpointTests(unittest.TestCase):
                     restore_reproduction_checkpoint(target, detached, _fail_after=phase)
                 self.assertEqual(target.reproduction_group_snapshot(), before)
                 self.assertTrue(all(a is b for a, b in zip(_container_refs(target), refs)))
+
+    def test_partial_membership_checkpoint_restore_rolls_back_at_every_phase(self):
+        source = make_world("partial source")
+        source.publish_reproduction_group(
+            prepare_reproduction_group(ReproductionGroupProposal(
+                "G", ("A",), ("X", "SIB"), "test:partial", parents_complete=False,
+            )), request_key="create-G", expected_revision=0,
+        )
+        source.resolve_reproduction_group_elaboration(
+            ReproductionGroupElaborationProposal("G", ("A",), ("B",), False),
+            request_key="add-B", expected_revision=1,
+        )
+        checkpoint = decode_reproduction_checkpoint(encode_reproduction_checkpoint(source))
+        for phase in RESTORE_FAILURE_PHASES:
+            with self.subTest(phase=phase):
+                target = make_world("partial rollback target")
+                refs = _container_refs(target)
+                before = target.reproduction_group_snapshot()
+                rng_before = random.getstate()
+                with self.assertRaises(ReproductionCheckpointRestoreError):
+                    restore_reproduction_checkpoint(target, checkpoint, _fail_after=phase)
+                self.assertEqual(target.reproduction_group_snapshot(), before)
+                self.assertTrue(all(a is b for a, b in zip(_container_refs(target), refs)))
+                self.assertEqual(random.getstate(), rng_before)
+                restore_reproduction_checkpoint(target, checkpoint)
+                restored = target.get_reproduction_group("G")
+                self.assertEqual((restored.parent_ids, restored.offspring_ids),
+                                 (("A", "B"), ("X", "SIB")))
+                self.assertIs(restored.parents_complete, False)
+                self.assertIn("add-B", target._reproduction_group_registry._requests)
 
     def test_restore_rejects_nonempty_target_before_writing(self):
         source = make_world("source")

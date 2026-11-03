@@ -31,8 +31,10 @@ from reproduction_group import (
 
 
 CHECKPOINT_SCHEMA = "universe-reproduction-domain-checkpoint"
-CHECKPOINT_VERSION = 1
-REGISTRY_CONTRACT = "logical-reproduction-registry/1"
+CHECKPOINT_VERSION = 2
+LEGACY_CHECKPOINT_VERSION = 1
+REGISTRY_CONTRACT = "logical-reproduction-registry/2"
+LEGACY_REGISTRY_CONTRACT = "logical-reproduction-registry/1"
 RESTORE_FAILURE_PHASES = (
     "groups", "indexes", "authored_requests", "v1_records", "v2_records",
     "revision", "consistency",
@@ -72,6 +74,7 @@ class DetachedReproductionCheckpoint:
     progressive_histories: tuple[ProgressiveReproductionHistory, ...]
     progressive_parent_set_scopes: tuple
     progressive_requests: tuple
+    wire_version: int = CHECKPOINT_VERSION
 
 
 def _fail(message):
@@ -159,35 +162,43 @@ def _data_fields(instance):
     return {field.name: _normalization_to_data(getattr(instance, field.name)) for field in fields(instance)}
 
 
-def _group_from_data(value):
-    row = _strict_object(value, {"world_identity", "group_id", "parent_ids", "offspring_ids",
-                                 "source_reference", "revision"}, "group record")
+def _group_from_data(value, *, version):
+    keys = {"world_identity", "group_id", "parent_ids", "offspring_ids", "source_reference", "revision"}
+    if version >= 2:
+        keys.add("parents_complete")
+    row = _strict_object(value, keys, "group record")
+    complete = True if version == 1 else row["parents_complete"]
+    if type(complete) is not bool:
+        _fail("group parents_complete must be explicitly boolean in checkpoint V2")
     return ReproductionGroupRecord(
         _int(row["world_identity"], "group world identity", 1), _str(row["group_id"], "group ID"),
         _tuple_strings(row["parent_ids"], "group parents", True),
         _tuple_strings(row["offspring_ids"], "group offspring", True),
         _str(row["source_reference"], "group source"), _int(row["revision"], "group revision", 1),
+        complete,
     )
 
 
-def _authored_result_from_data(value):
-    row = _strict_object(value, {"world_identity", "group_id", "parent_ids", "offspring_ids",
-                                 "source_reference", "request_key", "revision"}, "authored result")
+def _authored_result_from_data(value, *, version):
+    keys = {"world_identity", "group_id", "parent_ids", "offspring_ids",
+            "source_reference", "request_key", "revision"}
+    if version >= 2:
+        keys.add("parents_complete")
+    row = _strict_object(value, keys, "authored result")
+    complete = True if version == 1 else row["parents_complete"]
+    if type(complete) is not bool:
+        _fail("authored result parents_complete must be explicitly boolean in checkpoint V2")
     return ReproductionGroupPublicationResult(
         _int(row["world_identity"], "result world identity", 1), _str(row["group_id"], "result group ID"),
         _tuple_strings(row["parent_ids"], "result parents", True),
         _tuple_strings(row["offspring_ids"], "result offspring", True),
         _str(row["source_reference"], "result source"), _str(row["request_key"], "result request key"),
-        _int(row["revision"], "result revision", 1),
+        _int(row["revision"], "result revision", 1), complete,
     )
 
 
 def _group_to_data(group):
-    """V1 wire representation; this schema is complete-parentage only."""
-    if not group.parents_complete:
-        raise ReproductionCheckpointValidationError(
-            "reproduction checkpoint V1 does not support incomplete parent membership"
-        )
+    """V2 wire representation, explicit about parent-membership completeness."""
     return {
         "world_identity": group.world_identity,
         "group_id": group.group_id,
@@ -195,14 +206,11 @@ def _group_to_data(group):
         "offspring_ids": list(group.offspring_ids),
         "source_reference": group.source_reference,
         "revision": group.revision,
+        "parents_complete": group.parents_complete,
     }
 
 
 def _authored_result_to_data(result):
-    if not result.parents_complete:
-        raise ReproductionCheckpointValidationError(
-            "reproduction checkpoint V1 does not support incomplete parent membership"
-        )
     return {
         "world_identity": result.world_identity,
         "group_id": result.group_id,
@@ -211,6 +219,7 @@ def _authored_result_to_data(result):
         "source_reference": result.source_reference,
         "request_key": result.request_key,
         "revision": result.revision,
+        "parents_complete": result.parents_complete,
     }
 
 
@@ -330,11 +339,6 @@ def _compatible_context(world, *, require_empty=False):
 
 
 def _registry_data(registry):
-    if any(record.normalized_request and record.normalized_request[0] == "elaborate-membership"
-           for record in registry._requests.values()):
-        raise ReproductionCheckpointValidationError(
-            "reproduction checkpoint V1 does not preserve parent-membership elaboration requests"
-        )
     return {
         "revision": registry._revision,
         "groups": [_group_to_data(registry._groups_by_id[key]) for key in sorted(registry._groups_by_id)],
@@ -388,15 +392,6 @@ def encode_reproduction_checkpoint(world) -> str:
             raise ReproductionCheckpointValidationError(
                 "revision-zero registry contains unpublished records"
             )
-        if any(not group.parents_complete for group in registry._groups_by_id.values()):
-            raise ReproductionCheckpointValidationError(
-                "reproduction checkpoint V1 refuses groups with incomplete parent membership"
-            )
-        if any(record.normalized_request and record.normalized_request[0] == "elaborate-membership"
-               for record in registry._requests.values()):
-            raise ReproductionCheckpointValidationError(
-                "reproduction checkpoint V1 does not preserve parent-membership elaboration requests"
-            )
         payload = _registry_data(registry)
         source_identity = registry.world_identity
         envelope = {
@@ -426,8 +421,10 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
     if (type(envelope["schema"]) is not str or envelope["schema"] != CHECKPOINT_SCHEMA
             or type(envelope["version"]) is not int):
         _fail("unsupported checkpoint schema or version")
-    if (envelope["version"] != CHECKPOINT_VERSION or type(envelope["registry_contract"]) is not str
-            or envelope["registry_contract"] != REGISTRY_CONTRACT):
+    version = envelope["version"]
+    expected_contract = (LEGACY_REGISTRY_CONTRACT if version == LEGACY_CHECKPOINT_VERSION
+                         else REGISTRY_CONTRACT if version == CHECKPOINT_VERSION else None)
+    if type(envelope["registry_contract"]) is not str or envelope["registry_contract"] != expected_contract:
         _fail("unsupported reproduction registry contract")
     source_identity = _int(envelope["source_world_identity"], "source world identity", 1)
     if type(envelope["sha256"]) is not str or len(envelope["sha256"]) != 64:
@@ -440,7 +437,8 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
     payload = _strict_object(envelope["payload"], {"revision", "groups", "indexes", "authored_requests",
         "generation_requests", "progressive_histories", "progressive_requests"}, "checkpoint payload")
     revision = _int(payload["revision"], "registry revision", 0)
-    groups = tuple(_group_from_data(item) for item in _array(payload["groups"], "group records"))
+    groups = tuple(_group_from_data(item, version=version)
+                   for item in _array(payload["groups"], "group records"))
     indexes = _strict_object(payload["indexes"], {
         "group_id_by_parent_set", "group_id_by_offspring", "parent_set_by_offspring",
         "person_id_reservations", "group_id_reservations", "offspring_origin_ticks",
@@ -466,7 +464,7 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
         row = _strict_object(item, {"request_key", "normalized_request", "result"}, "authored request")
         authored.append((_str(row["request_key"], "authored key"),
                          _normalization_from_data(row["normalized_request"]),
-                         _authored_result_from_data(row["result"])))
+                         _authored_result_from_data(row["result"], version=version)))
 
     generation = []
     for item in _array(payload["generation_requests"], "V1 request records"):
@@ -489,7 +487,7 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
     candidate = DetachedReproductionCheckpoint(
         source_identity, revision, groups, parent_group, child_group, child_parents,
         person_reservations, group_reservations, origin_ticks, tuple(authored), generation_scopes,
-        tuple(generation), histories, progressive_scopes, tuple(progressive),
+        tuple(generation), histories, progressive_scopes, tuple(progressive), version,
     )
     groups_by_id = [row.group_id for row in groups]
     history_keys = [row.parent_ids for row in histories]
@@ -575,18 +573,80 @@ def _validate_detached(candidate):
                     (record.outcome for record in registry._generation_requests.values()) if outcome.count > 0}
     generated_v2 = {parents for parents, history in registry._progressive_histories.items() if history.group_id}
     authored_sets = {result.parent_ids for result in
-                     (record.result for record in registry._requests.values())}
+                     (record.result for record in registry._requests.values())
+                     if result.parents_complete}
     if (authored_sets & (set(registry._generation_parent_set_scopes) | set(registry._progressive_parent_set_scopes))
             or generated_v1 & generated_v2):
         _fail("authored, V1 and V2 parent-set scopes overlap incompatibly")
     group_origins = {}
+    authored_by_group = {}
     for key, record in registry._requests.items():
         normalized, result = record.normalized_request, record.result
         if result.world_identity != candidate.source_world_identity or result.request_key != key:
             _fail("authored request result owner or key is inconsistent")
-        if normalized != (result.group_id, result.parent_ids, result.offspring_ids, result.source_reference):
-            _fail("authored idempotency request data is inconsistent")
-        group_origins[result.group_id] = result.revision
+        if type(normalized) is not tuple or not normalized:
+            _fail("authored idempotency normalization is malformed")
+        if len(normalized) == 8 and normalized[0] == "elaborate-membership":
+            if candidate.wire_version < 2 or len(normalized) != 8:
+                _fail("membership-elaboration history requires reproduction checkpoint V2")
+            (_operation, group_id, prior, added, resulting, offspring, source, complete) = normalized
+            if (type(group_id) is not str or type(prior) is not tuple or not prior
+                    or type(added) is not tuple or type(resulting) is not tuple
+                    or type(offspring) is not tuple or type(source) is not str
+                    or type(complete) is not bool
+                    or prior != tuple(sorted(set(prior)))
+                    or added != tuple(sorted(set(added)))
+                    or set(prior) & set(added)
+                    or resulting != tuple(sorted((*prior, *added)))
+                    or resulting != result.parent_ids or offspring != result.offspring_ids
+                    or group_id != result.group_id or source != result.source_reference
+                    or complete is not result.parents_complete):
+                _fail("membership-elaboration request and result disagree")
+            authored_by_group.setdefault(group_id, []).append((result.revision, normalized, result))
+        else:
+            expected = (result.group_id, result.parent_ids, result.offspring_ids, result.source_reference)
+            if not result.parents_complete:
+                expected += (False,)
+            if normalized != expected:
+                _fail("authored idempotency request data is inconsistent")
+            authored_by_group.setdefault(result.group_id, []).append((result.revision, normalized, result))
+
+    # Validate each group's complete authored evolution from its first
+    # publication through every membership amendment. This preserves request
+    # idempotency history, not only the latest membership snapshot.
+    for group_id, history in authored_by_group.items():
+        history.sort(key=lambda item: item[0])
+        creators = [item for item in history
+                    if not (len(item[1]) == 8 and item[1][0] == "elaborate-membership")]
+        if len(creators) != 1:
+            _fail("each authored ReproductionGroup must have exactly one creation request")
+        creation_revision, creation_norm, creation_result = creators[0]
+        group = registry._groups_by_id.get(group_id)
+        if group is None:
+            _fail("authored request history references an unavailable ReproductionGroup")
+        if len(creation_norm) not in (4, 5):
+            _fail("authored group-creation request has unsupported normalized data")
+        current_parents = creation_result.parent_ids
+        current_complete = creation_result.parents_complete
+        latest_revision = creation_revision
+        for revision, normalized, result in history:
+            if revision < creation_revision:
+                _fail("membership request predates its ReproductionGroup")
+            if len(normalized) != 8 or normalized[0] != "elaborate-membership":
+                continue
+            if revision <= latest_revision or current_complete:
+                _fail("membership request order or completion history is inconsistent")
+            if normalized[2] != current_parents:
+                _fail("membership request does not extend the preceding known parent members")
+            current_parents = normalized[4]
+            current_complete = normalized[7]
+            latest_revision = revision
+        if (group.parent_ids != current_parents or group.parents_complete is not current_complete
+                or group.offspring_ids != creation_result.offspring_ids
+                or group.source_reference != creation_result.source_reference
+                or group.revision != latest_revision):
+            _fail("current ReproductionGroup state does not match its membership request history")
+        group_origins[group_id] = latest_revision
     for key, record in registry._generation_requests.items():
         outcome = record.outcome
         if outcome.world_identity != candidate.source_world_identity or outcome.request_key != key:
@@ -606,6 +666,9 @@ def _validate_detached(candidate):
         if record.normalized_inputs != _normalized_request(request):
             _fail("V1 idempotency inputs are inconsistent")
         if outcome.group_id is not None:
+            generated_group = registry._groups_by_id.get(outcome.group_id)
+            if generated_group is None or not generated_group.parents_complete:
+                _fail("V1 generated groups must have complete parent membership")
             group_origins[outcome.group_id] = outcome.revision
     history_by_parent = registry._progressive_histories
     intervals = {}
@@ -646,6 +709,9 @@ def _validate_detached(candidate):
         if not ordered or ordered[-1][2] != history.revision:
             _fail("V2 history revision is not bound to its final published extension")
         if history.group_id is not None:
+            generated_group = registry._groups_by_id.get(history.group_id)
+            if generated_group is None or not generated_group.parents_complete:
+                _fail("V2 generated groups must have complete parent membership")
             group_origins[history.group_id] = history.revision
     if (set(group_origins) != set(registry._groups_by_id)
             or any(registry._groups_by_id[group_id].revision != revision

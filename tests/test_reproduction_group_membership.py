@@ -1,5 +1,7 @@
 """Partial ReproductionGroup membership and atomic elaboration regressions."""
 from pathlib import Path
+import hashlib
+import json
 import random
 import sys
 import unittest
@@ -10,7 +12,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from field_observation import BeliefLedger
 from library import Library
 from reproduction_checkpoint import (
-    ReproductionCheckpointValidationError, encode_reproduction_checkpoint,
+    ReproductionCheckpointValidationError,
+    decode_reproduction_checkpoint, encode_reproduction_checkpoint,
+    restore_reproduction_checkpoint,
 )
 from reproduction_group import (
     InjectedReproductionGroupFailure, ReproductionGroupElaborationProposal,
@@ -31,6 +35,14 @@ def create(w, group, parents, children, *, complete, key):
             group, parents, children, f"author:{key}", parents_complete=complete,
         )), request_key=key, expected_revision=w.reproduction_group_snapshot().revision,
     )
+
+
+def retag_checkpoint(envelope):
+    unsigned = {key: value for key, value in envelope.items() if key != "sha256"}
+    canonical = json.dumps(unsigned, sort_keys=True, ensure_ascii=True,
+                           separators=(",", ":"), allow_nan=False)
+    envelope["sha256"] = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+    return json.dumps(envelope, sort_keys=True, ensure_ascii=True, indent=2) + "\n"
 
 
 class ReproductionGroupMembershipTests(unittest.TestCase):
@@ -108,6 +120,25 @@ class ReproductionGroupMembershipTests(unittest.TestCase):
         with self.assertRaises(StaleReproductionGroupRevision):
             w.elaborate_reproduction_group(candidate, request_key="stale", expected_revision=revision)
 
+    def test_authored_group_id_may_equal_membership_operation_marker(self):
+        w = world()
+        created = create(w, "elaborate-membership", ("A",), ("X",), complete=False, key="create-marker")
+        encoded = encode_reproduction_checkpoint(w)
+        target = world()
+        restore_reproduction_checkpoint(target, encoded)
+        self.assertEqual(target.get_reproduction_group("elaborate-membership").group_id,
+                         "elaborate-membership")
+        replay = target.publish_reproduction_group(
+                prepare_reproduction_group(ReproductionGroupProposal(
+                    "elaborate-membership", ("A",), ("X",), "author:create-marker",
+                    parents_complete=False,
+                )), request_key="create-marker", expected_revision=0,
+            )
+        self.assertEqual((replay.group_id, replay.parent_ids, replay.offspring_ids,
+                          replay.parents_complete, replay.revision),
+                         (created.group_id, created.parent_ids, created.offspring_ids,
+                          created.parents_complete, created.revision))
+
     def test_completed_set_collision_is_refused_without_merging_or_losing_facts(self):
         w = world()
         create(w, "G", ("A", "B"), ("X",), complete=True, key="g")
@@ -153,19 +184,63 @@ class ReproductionGroupMembershipTests(unittest.TestCase):
                 self.assertEqual(result.parent_ids, ("A", "B"))
                 self.assertEqual(w.reproduction_group_snapshot().revision, before.revision + 1)
 
-    def test_checkpoint_v1_refuses_partial_state_and_elaboration_history(self):
+    def test_checkpoint_v2_round_trips_partial_state_and_membership_history(self):
         w = world()
         create(w, "G", ("A",), ("X",), complete=False, key="g")
-        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "incomplete parent membership"):
-            encode_reproduction_checkpoint(w)
-        revision = w.reproduction_group_snapshot().revision
-        w.resolve_reproduction_group_elaboration(
+        source = encode_reproduction_checkpoint(w)
+        detached = decode_reproduction_checkpoint(source)
+        self.assertEqual(detached.wire_version, 2)
+        self.assertIs(detached.groups[0].parents_complete, False)
+        restored = world()
+        restore_reproduction_checkpoint(restored, source)
+        self.assertIs(restored.get_reproduction_group("G").parents_complete, False)
+        self.assertEqual(restored.reproduction_group_snapshot().known_parents("X"), ("A",))
+        revision = restored.reproduction_group_snapshot().revision
+        restored.resolve_reproduction_group_elaboration(
             ReproductionGroupElaborationProposal("G", ("A",), ("B",), True),
             request_key="complete-g", expected_revision=revision,
         )
-        # V1's complete-group wire cannot faithfully carry the amendment request history.
-        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "does not preserve parent-membership"):
-            encode_reproduction_checkpoint(w)
+        after = encode_reproduction_checkpoint(restored)
+        target = world()
+        restore_reproduction_checkpoint(target, after)
+        self.assertEqual(target.get_reproduction_group("G").parent_ids, ("A", "B"))
+        self.assertIs(target.get_reproduction_group("G").parents_complete, True)
+        self.assertEqual(set(target._reproduction_group_registry._requests), {"g", "complete-g"})
+
+    def test_v2_requires_explicit_completeness_and_validates_membership_history(self):
+        w = world()
+        create(w, "G", ("A",), ("X",), complete=False, key="g")
+        w.resolve_reproduction_group_elaboration(
+            ReproductionGroupElaborationProposal("G", ("A",), ("B",), True),
+            request_key="complete-g", expected_revision=1,
+        )
+        encoded = encode_reproduction_checkpoint(w)
+        group_omission = json.loads(encoded)
+        group_omission["payload"]["groups"][0].pop("parents_complete")
+        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "missing or unknown fields"):
+            decode_reproduction_checkpoint(retag_checkpoint(group_omission))
+
+        authored_omission = json.loads(encoded)
+        authored_omission["payload"]["authored_requests"][0]["result"].pop("parents_complete")
+        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "missing or unknown fields"):
+            decode_reproduction_checkpoint(retag_checkpoint(authored_omission))
+
+        forged = world()
+        create(forged, "G", ("A",), ("X",), complete=False, key="g")
+        forged_completeness = json.loads(encode_reproduction_checkpoint(forged))
+        forged_completeness["payload"]["groups"][0]["parents_complete"] = True
+        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "inconsistent"):
+            decode_reproduction_checkpoint(retag_checkpoint(forged_completeness))
+
+        altered_history = json.loads(encoded)
+        history = next(row for row in altered_history["payload"]["authored_requests"]
+                       if row["request_key"] == "complete-g")
+        history["normalized_request"][3] = ["C"]  # contradicts the committed A -> A,B transition
+        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "inconsistent"):
+            decode_reproduction_checkpoint(retag_checkpoint(altered_history))
+
+        with self.assertRaisesRegex(ReproductionCheckpointValidationError, "digest mismatch"):
+            decode_reproduction_checkpoint(encoded.replace('"parents_complete": true', '"parents_complete": false', 1))
 
 
 if __name__ == "__main__":

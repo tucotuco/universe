@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from library import Library
 from reproduction_checkpoint import (
-    encode_reproduction_checkpoint, logical_reproduction_checkpoint_digest,
+    CHECKPOINT_VERSION, encode_reproduction_checkpoint, logical_reproduction_checkpoint_digest,
     restore_reproduction_checkpoint,
 )
 from reproduction_generation import (
@@ -135,7 +135,8 @@ def phase_save(checkpoint: Path):
     establish_prefix(world)
     write_new(checkpoint, encode_reproduction_checkpoint(world))
     print(f"SAVE pid={os.getpid()} revision={world.reproduction_group_snapshot().revision} "
-          f"groups={len(world.reproduction_group_snapshot().groups)} format=JSON-v1")
+          f"groups={len(world.reproduction_group_snapshot().groups)} "
+          f"format=reproduction-v{CHECKPOINT_VERSION}")
 
 
 def phase_resume(checkpoint: Path, output: Path):

@@ -34,7 +34,8 @@ from reproduction_checkpoint import (
 
 
 COMBINED_SCHEMA = "universe-reproduction-native-being-checkpoint"
-COMBINED_VERSION = 1
+COMBINED_VERSION = 2
+LEGACY_COMBINED_VERSION = 1
 BEING_CONTRACT = "authored-pristine-being-instance/1"
 _RESTORE_PHASES = (
     "reproduction_groups", "reproduction_indexes", "reproduction_authored_requests",
@@ -298,7 +299,8 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
         raise CombinedBeingCheckpointError(f"combined checkpoint JSON is invalid: {exc}") from exc
     _strict(envelope, {"schema", "version", "being_contract", "reproduction_checkpoint", "being", "sha256"},
             "combined envelope")
-    if envelope["schema"] != COMBINED_SCHEMA or type(envelope["version"]) is not int or envelope["version"] != COMBINED_VERSION:
+    if (envelope["schema"] != COMBINED_SCHEMA or type(envelope["version"]) is not int
+            or envelope["version"] not in (LEGACY_COMBINED_VERSION, COMBINED_VERSION)):
         _fail("unsupported combined checkpoint schema or version")
     if envelope["being_contract"] != BEING_CONTRACT:
         _fail("unsupported native Being reconstruction contract")
@@ -312,6 +314,9 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
         reproductive = decode_reproduction_checkpoint(envelope["reproduction_checkpoint"])
     except ReproductionCheckpointValidationError as exc:
         raise CombinedBeingCheckpointError(f"embedded reproduction checkpoint refused: {exc}") from exc
+    expected_reproduction_version = 1 if envelope["version"] == LEGACY_COMBINED_VERSION else 2
+    if reproductive.wire_version != expected_reproduction_version:
+        _fail("combined and embedded reproduction checkpoint versions are incompatible")
     row = _strict(envelope["being"], {"person_id", "name", "request_key", "definition", "state"}, "Being record")
     for name in ("person_id", "name", "request_key"):
         if type(row[name]) is not str or not row[name].strip():

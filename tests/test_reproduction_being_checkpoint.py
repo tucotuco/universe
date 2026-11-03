@@ -23,6 +23,7 @@ from reproduction_being_checkpoint import (
 )
 from reproduction_checkpoint import encode_reproduction_checkpoint
 from reproduction_generation import ProgressiveReproductionRequest, TestOnlyIntervalReproductionProfile
+from reproduction_group import ReproductionGroupProposal, prepare_reproduction_group
 from skill import Skills
 from universe import Universe
 
@@ -82,6 +83,21 @@ def retag(text, change):
     return json.dumps(envelope, sort_keys=True, ensure_ascii=True, indent=2, allow_nan=False) + "\n"
 
 
+def legacy_v1_reproduction(text):
+    envelope = json.loads(text)
+    envelope["version"] = 1
+    envelope["registry_contract"] = "logical-reproduction-registry/1"
+    for group in envelope["payload"]["groups"]:
+        group.pop("parents_complete")
+    for request in envelope["payload"]["authored_requests"]:
+        request["result"].pop("parents_complete")
+    unsigned = {key: value for key, value in envelope.items() if key != "sha256"}
+    envelope["sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
+    ).hexdigest()
+    return json.dumps(envelope, sort_keys=True, ensure_ascii=True, indent=2, allow_nan=False) + "\n"
+
+
 def container_refs(instance):
     r = instance._reproduction_group_registry
     return (r._groups_by_id, r._group_id_by_parent_set, r._group_id_by_offspring,
@@ -94,6 +110,61 @@ def container_refs(instance):
 
 
 class ReproductionBeingCheckpointTests(unittest.TestCase):
+    def test_legacy_v6_v1_combined_checkpoint_remains_readable(self):
+        _source, child, _being, encoded = ready()
+        decoded = decode_combined_being_checkpoint(encoded)
+        old = retag(encoded, lambda envelope: (
+            envelope.update(version=1),
+            envelope.update(reproduction_checkpoint=legacy_v1_reproduction(decoded.reproduction_checkpoint)),
+        ))
+        target = world("legacy V6 V1 target")
+        being = restore_combined_being_checkpoint(target, old)
+        group = next(row for row in target.reproduction_group_snapshot().groups
+                     if child in row.offspring_ids)
+        self.assertIs(group.parents_complete, True)
+        self.assertIs(target.get_object_by_id(child), being)
+        self.assertEqual(being.id, child)
+
+    def test_v6_v2_partial_group_with_native_being_restores_and_rolls_back_atomically(self):
+        import reproduction_being_checkpoint as combined
+        source = world("partial V6 source")
+        source.publish_reproduction_group(
+            prepare_reproduction_group(ReproductionGroupProposal(
+                "PARTIAL-G", ("PARENT-A",), ("NATIVE-X",), "test:partial-v6",
+                parents_complete=False,
+            )), request_key="create-partial", expected_revision=0,
+        )
+        native = materialize_reproductive_offspring(
+            source, "NATIVE-X", being_definition=definition(), name="Bound X",
+            request_key="bind-X", expected_revision=1,
+        )
+        encoded = encode_combined_being_checkpoint(source)
+        self.assertEqual(decode_combined_being_checkpoint(encoded).person_id, native.id)
+
+        for phase in combined._RESTORE_PHASES:
+            with self.subTest(phase=phase):
+                target = world("partial V6 rollback")
+                registry = target._reproduction_group_registry
+                before = target.reproduction_group_snapshot()
+                object_map = target.object_registry.object_instances
+                object_items = dict(object_map)
+                refs = container_refs(target)
+                rng_before = random.getstate()
+                with self.assertRaises(InjectedCombinedBeingCheckpointFailure):
+                    restore_combined_being_checkpoint(target, encoded, _fail_after=phase)
+                self.assertEqual(target.reproduction_group_snapshot(), before)
+                self.assertIs(target.object_registry.object_instances, object_map)
+                self.assertEqual(object_map, object_items)
+                self.assertEqual(registry._native_beings_by_person_id, {})
+                self.assertTrue(all(a is b for a, b in zip(container_refs(target), refs)))
+                self.assertEqual(random.getstate(), rng_before)
+                restored = restore_combined_being_checkpoint(target, encoded)
+                group = target.get_reproduction_group("PARTIAL-G")
+                self.assertIs(group.parents_complete, False)
+                self.assertEqual(group.parent_ids, ("PARENT-A",))
+                self.assertIs(type(restored), BeingInstance)
+                self.assertEqual(restored.id, "NATIVE-X")
+
     def test_real_native_instance_round_trips_and_v4_refusal_remains(self):
         source, child, original, encoded = ready()
         with self.assertRaisesRegex(ValueError, "logical reproduction IDs collide with native Objects"):
@@ -163,7 +234,7 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
     def test_corrupt_version_unknown_identity_definition_and_state_refuse(self):
         _source, _child, _being, encoded = ready()
         with self.assertRaisesRegex(CombinedBeingCheckpointError, "unsupported.*version"):
-            decode_combined_being_checkpoint(encoded.replace('"version": 1', '"version": 2', 1))
+            decode_combined_being_checkpoint(encoded.replace('"version": 2', '"version": 99', 1))
         bad_digest = json.loads(encoded)
         bad_digest["sha256"] = "0" * 64
         with self.assertRaisesRegex(CombinedBeingCheckpointError, "digest mismatch"):
@@ -247,6 +318,20 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         self.assertIn("separate Python processes=true", result.stdout)
         self.assertIn("uninterrupted digest match=True", result.stdout)
         self.assertIn("V4 reproduction-only refusal=preserved", result.stdout)
+
+    def test_v11_partial_membership_demo_uses_fresh_processes(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "examples/partial_reproduction_checkpoint_continuation.py")],
+            cwd=ROOT, check=True, text=True, capture_output=True,
+        )
+        output = result.stdout
+        self.assertIn("checkpoint=reproduction-v2", output)
+        self.assertIn("replay_revision_unchanged=true", output)
+        self.assertIn("conflicting_key_refused=true", output)
+        self.assertIn("same uninterrupted logical state=True", output)
+        self.assertIn("native identity stable=X", output)
+        self.assertIn("separate processes=true reproduction=", output)
+        self.assertIn("combined-native=", output)
 
 
 if __name__ == "__main__":

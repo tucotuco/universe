@@ -1,6 +1,6 @@
 # U-REL-001D3 — On-demand ReproductionGroups and completeness
 
-**HISTORICAL DESIGN RECORD.** Parent-set and existence semantics in §1 were user-confirmed. D4A/B and V1–V10R have since implemented bounded world-only slices. The V10R partial-membership correction below supersedes D3 statements that required a fully resolved parent set before a ReproductionGroup could exist. The broader biology, chronology, completeness, legacy-profile, and persistence proposals in this document remain unadopted unless separately approved.
+**HISTORICAL DESIGN RECORD.** Parent-set and existence semantics in §1 were user-confirmed. D4A/B and V1–V11 have since implemented bounded world-only slices. The V10R partial-membership correction below supersedes D3 statements that required a fully resolved parent set before a ReproductionGroup could exist. V11 adds versioned checkpoint support for that correction; broader biology, chronology, completeness, legacy-profile, and persistence proposals in this document remain unadopted unless separately approved.
 
 ## V10R correction — structural parent membership may be partial
 
@@ -8,7 +8,7 @@
 
 Only completed exact parent sets are unique and indexed by their full canonical unordered set. Incomplete groups are not merged or keyed by their current member subset; overlapping known members are insufficient to infer the same group. If completion collides with an already completed set, publication refuses atomically; no merge policy is introduced. Parent lookup tables are derived indexes of ReproductionGroup membership, not a second authoritative parentage ledger.
 
-The current V4 reproduction checkpoint and V6 combined checkpoint preserve their old complete-group wire meaning. They fail closed for incomplete groups and for membership-elaboration request history, including groups later completed through that operation. No partial-membership restore or schema migration is claimed.
+At V10R, V4 reproduction and V6 combined checkpoints preserved complete-group state only and could not represent partial membership or elaboration history. V11 introduces reproduction-checkpoint V2 and combined-checkpoint V2 to represent both. V1 reproduction and combined checkpoints remain readable with their original complete-parent-set meaning; a V1 checkpoint cannot encode partial membership or membership-elaboration history. Digests detect corruption but do not authenticate checkpoint provenance.
 
 Accordingly, the following D3 language is superseded: §3's requirement to instantiate only after the exact set is resolved; §4's “Do not instantiate while the parent set is unresolved”; §7's candidate requirement for an exact parent-set index on every initial group; and acceptance/example statements that assume every initially published group's parent set is complete. The true constraints retained are: each group is nonempty, all of its offspring share the same actual complete reproductive-parent set, known members are objective facts, and exact-set uniqueness applies when completeness is established.
 

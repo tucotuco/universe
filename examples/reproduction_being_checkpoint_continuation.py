@@ -88,7 +88,8 @@ def phase_save(path):
     checkpoint = encode_combined_being_checkpoint(world)
     path.write_text(checkpoint, encoding="utf-8")
     print(f"SAVE pid={__import__('os').getpid()} child={child} native={type(being).__name__}:{being.id}")
-    print(f"groups={len(world.reproduction_group_snapshot().groups)} format=combined-json-v{1}")
+    from reproduction_being_checkpoint import COMBINED_VERSION
+    print(f"groups={len(world.reproduction_group_snapshot().groups)} format=combined-json-v{COMBINED_VERSION}")
     print("V4 reproduction-only refusal=preserved; combined checkpoint written")
 
 
@@ -144,7 +145,7 @@ def phase_resume(path):
         raise AssertionError("native Being identity or authored attributes changed")
     # Corruption is rejected before any target world is supplied or modified.
     try:
-        decode_combined_being_checkpoint(checkpoint.replace('"version": 1', '"version": 2', 1))
+        decode_combined_being_checkpoint(checkpoint.replace('"version": 2', '"version": 99', 1))
     except CombinedBeingCheckpointError:
         pass
     else:

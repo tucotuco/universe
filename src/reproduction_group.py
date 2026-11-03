@@ -795,8 +795,8 @@ class ReproductionGroupRegistry:
             prior = self._requests.get(request_key)
             if prior is not None:
                 normalized = prior.normalized_request
-                if (not normalized or normalized[0] != "elaborate-membership"
-                        or len(normalized) != 8
+                if (not normalized or len(normalized) != 8
+                        or normalized[0] != "elaborate-membership"
                         or normalized[1] != proposal.group_id
                         or normalized[2] != tuple(sorted(proposal.expected_parent_ids))
                         or normalized[3] != tuple(sorted(proposal.added_parent_ids))
@@ -1348,7 +1348,7 @@ class ReproductionGroupRegistry:
                 or result.revision > group.revision
             )
             normalized = record.normalized_request
-            if normalized and normalized[0] == "elaborate-membership":
+            if normalized and len(normalized) == 8 and normalized[0] == "elaborate-membership":
                 operation_invalid = (
                     len(normalized) != 8 or normalized[1] != result.group_id
                     or normalized[2] != tuple(sorted(set(normalized[2])))
