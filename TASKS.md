@@ -4,9 +4,9 @@
 > repository. Keep this index compact; topic files hold scope and acceptance
 > detail. A completed checkbox means only the bounded deliverable stated here.
 
-## ACTIVE — one development objective
+## ACTIVE
 
-- [ ] **U-WORLD-001B · ACTIVE — Verify a second explicit genealogy/population identity binding in a distinct native spatial fixture.** Keep reproductive parentage, counted Group membership and placement as separately authored facts; preserve count conservation, identity, atomic publication and the no-automatic-knowledge boundary. This is a second bounded integration case, not general Group membership or multi-Group residence. See [generation and Attention](docs/tasks/generation-and-attention.md).
+No implementation task is active; choose the next bounded objective after review of U-WORLD-001B.
 
 ## NEXT
 
@@ -29,6 +29,7 @@
 - [x] **U-GRP-003 — Narrow identity-free Spot adapter (5E2S).** The adapter accepts only a unique eligible unfamiliar participating Being; it is not the general Spot or Attention specification. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [x] **U-GRP-004 — Integrated Group observation, independent realization, discovery and Thrust example (5E2U).** The bounded example records Group count 28, independently realizes one counted adult, later discovers that Being, and resolves Thrust for 4 damage and 10 Dagger XP. Group obstruction classification was corrected in 5E2M. Agent interest does not yet select an unresolved member. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [x] **U-WORLD-001A — Bind one explicitly authored logical offspring to one counted StatisticalGroup member and native spatial Being.** The stable adult-slot ID is shared across ReproductionGroup offspring, native ObjectRegistry, Group realization, Encounter participation and Cartesian position; the counted total is conserved and binding commits within the existing interval publisher with rollback. Parentage does not infer population membership or place, and the operation grants no observer knowledge. This is one adult-Human fixture, not generalized population/genealogy integration. See [generation and Attention](docs/tasks/generation-and-attention.md).
+- [x] **U-WORLD-001B — Observe a population-linked genealogical Being through native Spot.** An independent Encounter participant resolves a seeded six-second revision-60 Spot against the same counted adult Being. The publisher adds Awareness only to that observer; the second observer, genealogy, Group counts and Being position remain unchanged. Spot adds no Group-count evidence, parentage, Belief or Spot XP. The target ID and scenario geometry remain explicitly supplied by this bounded developer fixture; this does not implement discovery of an unknown target. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [x] **U-LOC-001 — Initial waypoint belief and landmark counterfactual experiment (5E1F–5E1G).** Demonstrated in interrupted work, not part of the committed CORE implementation; snapshots remain under `work-stash/`. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [x] **U-INT-001 — Narrow spatial Encounter and motion demonstrations.** Continuous position, derived TriFold context and simple Run movement are demonstrated in bounded examples; this is not global geography or terrain integration. See [broader Universe roadmap](docs/tasks/broader-universe.md).
 
