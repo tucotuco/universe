@@ -34,11 +34,12 @@ from reproduction_checkpoint import (
 
 
 COMBINED_SCHEMA = "universe-reproduction-native-being-checkpoint"
-COMBINED_VERSION = 2
+COMBINED_VERSION = 3
 LEGACY_COMBINED_VERSION = 1
+PREVIOUS_COMBINED_VERSION = 2
 BEING_CONTRACT = "authored-pristine-being-instance/1"
 _RESTORE_PHASES = (
-    "reproduction_groups", "reproduction_indexes", "reproduction_authored_requests",
+    "reproduction_groups", "reproduction_indexes", "reproduction_aliases", "reproduction_authored_requests",
     "reproduction_v1_records", "reproduction_v2_records", "reproduction_revision",
     "reproduction_consistency", "reproduction_complete", "object_registry",
     "binding_index", "request_index", "combined_consistency",
@@ -60,6 +61,7 @@ class DetachedCombinedBeingCheckpoint:
     name: str
     request_key: str
     definition_json: str
+    wire_version: int = COMBINED_VERSION
 
 
 def _fail(message):
@@ -300,7 +302,7 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
     _strict(envelope, {"schema", "version", "being_contract", "reproduction_checkpoint", "being", "sha256"},
             "combined envelope")
     if (envelope["schema"] != COMBINED_SCHEMA or type(envelope["version"]) is not int
-            or envelope["version"] not in (LEGACY_COMBINED_VERSION, COMBINED_VERSION)):
+            or envelope["version"] not in (LEGACY_COMBINED_VERSION, PREVIOUS_COMBINED_VERSION, COMBINED_VERSION)):
         _fail("unsupported combined checkpoint schema or version")
     if envelope["being_contract"] != BEING_CONTRACT:
         _fail("unsupported native Being reconstruction contract")
@@ -314,7 +316,7 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
         reproductive = decode_reproduction_checkpoint(envelope["reproduction_checkpoint"])
     except ReproductionCheckpointValidationError as exc:
         raise CombinedBeingCheckpointError(f"embedded reproduction checkpoint refused: {exc}") from exc
-    expected_reproduction_version = 1 if envelope["version"] == LEGACY_COMBINED_VERSION else 2
+    expected_reproduction_version = envelope["version"]
     if reproductive.wire_version != expected_reproduction_version:
         _fail("combined and embedded reproduction checkpoint versions are incompatible")
     row = _strict(envelope["being"], {"person_id", "name", "request_key", "definition", "state"}, "Being record")
@@ -343,7 +345,7 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
         _fail("Being identity and name are required")
     return DetachedCombinedBeingCheckpoint(
         envelope["reproduction_checkpoint"], row["person_id"], row["name"], row["request_key"],
-        _canonical(row["definition"]),
+        _canonical(row["definition"]), envelope["version"],
     )
 
 
@@ -363,7 +365,7 @@ def restore_combined_being_checkpoint(world, checkpoint, *, _fail_after=None):
                 "state_contract": BEING_CONTRACT,
             }
             envelope = {
-                "schema": COMBINED_SCHEMA, "version": COMBINED_VERSION,
+                "schema": COMBINED_SCHEMA, "version": checkpoint.wire_version,
                 "being_contract": BEING_CONTRACT,
                 "reproduction_checkpoint": checkpoint.reproduction_checkpoint,
                 "being": {"person_id": checkpoint.person_id, "name": checkpoint.name,
@@ -396,7 +398,7 @@ def restore_combined_being_checkpoint(world, checkpoint, *, _fail_after=None):
         objects_before = dict(object_map)
         try:
             repro_phase = _fail_after.removeprefix("reproduction_") if _fail_after in {
-                "reproduction_groups", "reproduction_indexes", "reproduction_authored_requests",
+                "reproduction_groups", "reproduction_indexes", "reproduction_aliases", "reproduction_authored_requests",
                 "reproduction_v1_records", "reproduction_v2_records", "reproduction_revision",
                 "reproduction_consistency"} else None
             restore_reproduction_checkpoint(world, candidate.reproduction_checkpoint, _fail_after=repro_phase)

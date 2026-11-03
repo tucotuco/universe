@@ -253,10 +253,8 @@ def prepare_reproduction_group_elaboration(
         raise ReproductionGroupPublicationError("parent membership collides with a native Object ID")
     if proposal.parents_complete:
         completed_group = dict(snapshot.group_id_by_parent_set).get(parents)
-        if completed_group is not None and completed_group != group.group_id:
-            raise ReproductionGroupPublicationError("completed exact parent set already belongs to another group")
         if (parents in {key for key, _ in snapshot.generation_parent_set_scopes}
-                or parents in {key for key, _ in snapshot.progressive_parent_set_scopes}):
+                or parents in {key for key, _ in snapshot.progressive_parent_set_scopes}) and completed_group is None:
             raise ReproductionGroupPublicationError("completed exact parent set conflicts with a generation scope")
     for child in group.offspring_ids:
         pending, seen = list(parents), set()
@@ -301,6 +299,7 @@ _ELABORATION_PHASES = (
     "group_membership", "completed_parent_set_index", "offspring_parent_membership",
     "person_reservations", "idempotency", "revision", "consistency",
 )
+_MERGE_PHASES = ("merge_survivor", "merge_alias", "retired_group")
 _STATISTICAL_PUBLICATION_PHASES = (
     "group", "parent_set_index", "offspring_indexes", "origin_ticks",
     "person_reservations", "group_reservation", "generation_outcome",
@@ -390,6 +389,7 @@ class ReproductionGroupRegistrySnapshot:
     progressive_histories: tuple[object, ...]
     progressive_parent_set_scopes: tuple[tuple[tuple[str, ...], str], ...]
     progressive_request_keys: tuple[str, ...]
+    group_id_aliases: tuple[tuple[str, str], ...]
 
     def known_parents(self, person_id: str) -> tuple[str, ...] | None:
         """Known parent members derived from its ReproductionGroup, or ``None``."""
@@ -504,6 +504,9 @@ class ReproductionGroupRegistry:
         # distinguishes worlds without claiming cross-process durability.
         self.world_identity = id(world)
         self._groups_by_id: dict[str, ReproductionGroupRecord] = {}
+        # Retired authored group IDs remain reserved and resolve to the one
+        # canonical live group after a same-parent-set completion merge.
+        self._group_id_aliases: dict[str, str] = {}
         # This index contains only groups whose parent membership is explicit
         # complete; partial known-member tuples are never uniqueness keys.
         self._group_id_by_parent_set: dict[tuple[str, ...], str] = {}
@@ -556,11 +559,21 @@ class ReproductionGroupRegistry:
                 ),
                 progressive_parent_set_scopes=tuple(sorted(self._progressive_parent_set_scopes.items())),
                 progressive_request_keys=tuple(sorted(self._progressive_requests)),
+                group_id_aliases=tuple(sorted(self._group_id_aliases.items())),
             )
 
     def get_group(self, group_id: str) -> ReproductionGroupRecord | None:
         with self._world._schedule_lock:
-            return self._groups_by_id.get(group_id)
+            return self._groups_by_id.get(self._canonical_group_id_unlocked(group_id))
+
+    def canonical_group_id(self, group_id: str) -> str | None:
+        """Resolve a live or retired logical group ID to its current authority."""
+        with self._world._schedule_lock:
+            canonical = self._canonical_group_id_unlocked(group_id)
+            return canonical if canonical in self._groups_by_id else None
+
+    def _canonical_group_id_unlocked(self, group_id: str) -> str:
+        return self._group_id_aliases.get(group_id, group_id)
 
     @staticmethod
     def _validate_request(candidate, request_key, expected_revision, fail_after):
@@ -699,7 +712,7 @@ class ReproductionGroupRegistry:
             raise ReproductionGroupPublicationError("request_key must be nonempty text")
         if type(expected_revision) is not int or expected_revision < 0:
             raise ReproductionGroupPublicationError("expected_revision must be nonnegative")
-        if _fail_after is not None and _fail_after not in _ELABORATION_PHASES:
+        if _fail_after is not None and _fail_after not in (_ELABORATION_PHASES + _MERGE_PHASES):
             raise ReproductionGroupPublicationError("unknown membership fault-injection phase")
         normalized = (
             "elaborate-membership", candidate.group_id, candidate.prior_parent_ids,
@@ -745,30 +758,83 @@ class ReproductionGroupRegistry:
             self._validate_parentage_addition(candidate.parent_ids, candidate.offspring_ids)
             if candidate.parents_complete:
                 owner = self._group_id_by_parent_set.get(candidate.parent_ids)
-                if owner is not None and owner != candidate.group_id:
-                    raise ReproductionGroupPublicationError("completed exact parent set already belongs to another group")
-                if (candidate.parent_ids in self._generation_parent_set_scopes
-                        or candidate.parent_ids in self._progressive_parent_set_scopes):
+                if (owner is None and (candidate.parent_ids in self._generation_parent_set_scopes
+                                       or candidate.parent_ids in self._progressive_parent_set_scopes)):
                     raise ReproductionGroupPublicationError("completed exact parent set conflicts with a generation scope")
 
+            merge_target_id = None
+            merge_target = None
+            if candidate.parents_complete:
+                owner = self._group_id_by_parent_set.get(candidate.parent_ids)
+                if owner is not None and owner != candidate.group_id:
+                    merge_target_id = owner
+                    merge_target = self._groups_by_id.get(owner)
+                    if (merge_target is None or not merge_target.parents_complete
+                            or merge_target.parent_ids != candidate.parent_ids):
+                        raise ReproductionGroupPublicationError(
+                            "completed-set owner is not a compatible canonical ReproductionGroup"
+                        )
+                    if merge_target_id == candidate.group_id:
+                        raise ReproductionGroupPublicationError("a group cannot merge into itself")
+                    indexed_elsewhere = {
+                        child for child in current.offspring_ids
+                        if self._group_id_by_offspring.get(child) != current.group_id
+                    }
+                    if indexed_elsewhere:
+                        raise ReproductionGroupPublicationError(
+                            "retiring group has offspring references outside its authoritative membership"
+                        )
+                    # Existing group completeness remains unchanged; aliases
+                    # and receipts preserve H's original authored provenance.
+                    survivor_children = set(merge_target.offspring_ids)
+                    merged_children = merge_target.offspring_ids + tuple(
+                        child for child in current.offspring_ids if child not in survivor_children
+                    )
+                    if len(set(merged_children)) != len(merged_children):
+                        raise ReproductionGroupPublicationError("merge would duplicate an offspring identity")
+                else:
+                    merged_children = candidate.offspring_ids
+            else:
+                merged_children = candidate.offspring_ids
+
             revision = self._revision + 1
-            updated = ReproductionGroupRecord(
-                self.world_identity, current.group_id, candidate.parent_ids, current.offspring_ids,
-                current.source_reference, revision, candidate.parents_complete,
-            )
+            if merge_target is not None:
+                updated = ReproductionGroupRecord(
+                    self.world_identity, merge_target.group_id, merge_target.parent_ids,
+                    merged_children, merge_target.source_reference, revision, True,
+                )
+            else:
+                updated = ReproductionGroupRecord(
+                    self.world_identity, current.group_id, candidate.parent_ids, current.offspring_ids,
+                    current.source_reference, revision, candidate.parents_complete,
+                )
+            # The request result is immutable historical provenance for H's
+            # completion, so it retains H and H's authored offspring slice.
             result = ReproductionGroupPublicationResult(
-                self.world_identity, updated.group_id, updated.parent_ids, updated.offspring_ids,
-                updated.source_reference, request_key, revision, updated.parents_complete,
+                self.world_identity, candidate.group_id, candidate.parent_ids,
+                candidate.offspring_ids, candidate.source_reference,
+                request_key, revision, candidate.parents_complete,
             )
             undo = self._capture_undo()
             try:
-                self._groups_by_id[current.group_id] = updated
+                if merge_target is not None:
+                    self._groups_by_id[merge_target.group_id] = updated
+                    self._maybe_fail(_fail_after, "merge_survivor")
+                else:
+                    self._groups_by_id[current.group_id] = updated
                 self._maybe_fail(_fail_after, "group_membership")
-                if updated.parents_complete:
+                if candidate.parents_complete and merge_target is None:
                     self._group_id_by_parent_set[updated.parent_ids] = updated.group_id
                 self._maybe_fail(_fail_after, "completed_parent_set_index")
-                for child in updated.offspring_ids:
+                if merge_target is not None:
+                    self._group_id_aliases[current.group_id] = merge_target.group_id
+                    self._maybe_fail(_fail_after, "merge_alias")
+                    del self._groups_by_id[current.group_id]
+                    self._maybe_fail(_fail_after, "retired_group")
+                for child in current.offspring_ids if merge_target is not None else updated.offspring_ids:
+                    canonical_group_id = merge_target.group_id if merge_target is not None else updated.group_id
                     self._parent_set_by_offspring[child] = updated.parent_ids
+                    self._group_id_by_offspring[child] = canonical_group_id
                 self._maybe_fail(_fail_after, "offspring_parent_membership")
                 self._person_id_reservations.update(candidate.added_parent_ids)
                 self._maybe_fail(_fail_after, "person_reservations")
@@ -1303,7 +1369,12 @@ class ReproductionGroupRegistry:
     def _assert_consistent(self) -> None:
         if self._revision < 1:
             raise RuntimeError("published state has no committed revision")
-        if set(self._groups_by_id) != self._group_id_reservations:
+        live_group_ids = set(self._groups_by_id)
+        alias_ids = set(self._group_id_aliases)
+        if (live_group_ids & alias_ids
+                or set(self._group_id_aliases.values()) - live_group_ids
+                or set(self._group_id_aliases.values()) & alias_ids
+                or live_group_ids | alias_ids != self._group_id_reservations):
             raise RuntimeError("group identity reservation index is inconsistent")
         expected_complete_index = {}
         expected_people = set()
@@ -1337,14 +1408,21 @@ class ReproductionGroupRegistry:
             raise RuntimeError("offspring parentage index is inconsistent")
         if set(self._requests) != {record.result.request_key for record in self._requests.values()}:
             raise RuntimeError("idempotency request index is inconsistent")
+        authored_by_group = {}
         for request_key, record in self._requests.items():
             result = record.result
-            group = self._groups_by_id.get(result.group_id)
+            canonical_id = self._canonical_group_id_unlocked(result.group_id)
+            group = self._groups_by_id.get(canonical_id)
+            source_receipt = next((row for row in self._requests.values()
+                                   if row.result.group_id == result.group_id
+                                   and not (len(row.normalized_request) == 8
+                                            and row.normalized_request[0] == "elaborate-membership")), None)
+            creator_source = (source_receipt.result.source_reference if source_receipt is not None else None)
             common_invalid = (
                 result.world_identity != self.world_identity or result.request_key != request_key
                 or group is None or not set(result.parent_ids).issubset(group.parent_ids)
-                or group.offspring_ids != result.offspring_ids
-                or group.source_reference != result.source_reference
+                or not set(result.offspring_ids).issubset(group.offspring_ids)
+                or creator_source != result.source_reference
                 or result.revision > group.revision
             )
             normalized = record.normalized_request
@@ -1370,6 +1448,70 @@ class ReproductionGroupRegistry:
                     or (result.parents_complete and
                         (not group.parents_complete or group.parent_ids != result.parent_ids))):
                 raise RuntimeError("idempotency record is inconsistent with published world state")
+            authored_by_group.setdefault(result.group_id, []).append((result.revision, normalized, result))
+
+        # Reconstruct each authored group's own membership history. A retired
+        # ID must end in an explicit complete request whose exact set matches
+        # its live canonical survivor. Its offspring remain in the survivor in
+        # deterministic merge-revision order; receipts themselves retain the
+        # retired ID and original source attribution.
+        creator_by_group = {}
+        merge_children_by_survivor = {}
+        expected_revision_by_survivor = {}
+        for group_id, history in authored_by_group.items():
+            history.sort(key=lambda row: row[0])
+            creators = [item for item in history
+                        if not (len(item[1]) == 8 and item[1][0] == "elaborate-membership")]
+            if len(creators) != 1:
+                raise RuntimeError("each authored ReproductionGroup must have exactly one creation receipt")
+            creation_revision, creation_normalized, creation_result = creators[0]
+            if len(creation_normalized) not in (4, 5):
+                raise RuntimeError("authored group creation receipt has unsupported data")
+            creator_by_group[group_id] = creation_result
+            current_parents = creation_result.parent_ids
+            current_complete = creation_result.parents_complete
+            latest_revision = creation_revision
+            for revision, normalized, result in history:
+                if revision < creation_revision:
+                    raise RuntimeError("membership receipt predates group creation")
+                if len(normalized) != 8 or normalized[0] != "elaborate-membership":
+                    continue
+                if revision <= latest_revision or current_complete or normalized[2] != current_parents:
+                    raise RuntimeError("membership receipt sequence is not a valid additive history")
+                current_parents = normalized[4]
+                current_complete = normalized[7]
+                latest_revision = revision
+
+            canonical_id = self._canonical_group_id_unlocked(group_id)
+            canonical = self._groups_by_id.get(canonical_id)
+            if canonical is None:
+                raise RuntimeError("authored history has no live canonical group")
+            if group_id in self._group_id_aliases:
+                if (not current_complete or current_parents != canonical.parent_ids
+                        or not canonical.parents_complete
+                        or not set(creation_result.offspring_ids).issubset(canonical.offspring_ids)
+                        or latest_revision > canonical.revision):
+                    raise RuntimeError("retired group history does not resolve to its completed survivor")
+                merge_children_by_survivor.setdefault(canonical_id, []).append(
+                    (latest_revision, group_id, creation_result.offspring_ids)
+                )
+                expected_revision_by_survivor[canonical_id] = max(
+                    expected_revision_by_survivor.get(canonical_id, 0), latest_revision,
+                )
+            else:
+                if (canonical.parent_ids != current_parents
+                        or canonical.parents_complete is not current_complete
+                        or canonical.source_reference != creation_result.source_reference):
+                    raise RuntimeError("live group membership or provenance disagrees with its receipts")
+                if canonical.revision != latest_revision:
+                    expected_revision_by_survivor[canonical_id] = max(
+                        expected_revision_by_survivor.get(canonical_id, 0), canonical.revision,
+                    )
+                else:
+                    expected_revision_by_survivor[canonical_id] = max(
+                        expected_revision_by_survivor.get(canonical_id, 0), latest_revision,
+                    )
+
         if set(self._generation_requests) != {
                 record.outcome.request_key for record in self._generation_requests.values()}:
             raise RuntimeError("statistical idempotency request index is inconsistent")
@@ -1408,9 +1550,10 @@ class ReproductionGroupRegistry:
                         or outcome.parent_ids in self._group_id_by_parent_set):
                     raise RuntimeError("zero outcome incorrectly publishes a group or offspring")
             else:
-                group = self._groups_by_id.get(outcome.group_id)
+                canonical_id = self._canonical_group_id_unlocked(outcome.group_id)
+                group = self._groups_by_id.get(canonical_id)
                 if (group is None or group.parent_ids != outcome.parent_ids
-                        or group.offspring_ids != outcome.offspring_ids
+                        or group.offspring_ids[:len(outcome.offspring_ids)] != outcome.offspring_ids
                         or tuple(self._offspring_origin_ticks.get(child) for child in outcome.offspring_ids)
                         != outcome.origin_ticks):
                     raise RuntimeError("positive statistical outcome lacks matching published facts")
@@ -1438,12 +1581,13 @@ class ReproductionGroupRegistry:
             if len(set(children)) != len(children):
                 raise RuntimeError("progressive history repeats an offspring identity")
             if children:
-                group = self._groups_by_id.get(history.group_id)
+                canonical_id = self._canonical_group_id_unlocked(history.group_id)
+                group = self._groups_by_id.get(canonical_id)
                 expected_group_id = f"RG-PROG-{history.scope_digest[:24]}"
                 expected_source = (f"{INTERVAL_PROFILE_SCHEMA}:{history.profile_id}@"
                                    f"{history.profile_version}:{history.scope_digest}")
                 if (history.group_id != expected_group_id or group is None
-                        or group.parent_ids != parent_ids or group.offspring_ids != children
+                        or group.parent_ids != parent_ids or group.offspring_ids[:len(children)] != children
                         or group.source_reference != expected_source):
                     raise RuntimeError("progressive history does not match its authoritative group")
                 expected_origin_ticks.update(
@@ -1479,6 +1623,36 @@ class ReproductionGroupRegistry:
                 raise RuntimeError("progressive idempotency request inputs are inconsistent")
         if expected_origin_ticks != self._offspring_origin_ticks:
             raise RuntimeError("offspring origin-time index is inconsistent")
+        for survivor_id, merges in merge_children_by_survivor.items():
+            survivor = self._groups_by_id[survivor_id]
+            origins = []
+            authored_origin = creator_by_group.get(survivor_id)
+            if authored_origin is not None:
+                origins.append((authored_origin.revision, authored_origin.offspring_ids))
+            origins.extend((record.outcome.revision, record.outcome.offspring_ids)
+                           for record in self._generation_requests.values()
+                           if record.outcome.count and record.outcome.group_id == survivor_id)
+            origins.extend((history.revision, tuple(child for row in history.periods for child in row.offspring_ids))
+                           for history in self._progressive_histories.values()
+                           if history.group_id == survivor_id)
+            if len(origins) != 1:
+                raise RuntimeError("merge survivor has an ambiguous authored/statistical origin")
+            expected_children = list(origins[0][1])
+            seen_children = set(expected_children)
+            expected_revision = max(origins[0][0], expected_revision_by_survivor.get(survivor_id, 0))
+            for merge_revision, retired_id, children in sorted(merges):
+                if self._group_id_aliases.get(retired_id) != survivor_id:
+                    raise RuntimeError("group alias does not match merge history")
+                expected_revision = max(expected_revision, merge_revision)
+                for child in children:
+                    if child in seen_children:
+                        raise RuntimeError("merge history duplicates an offspring identity")
+                    expected_children.append(child)
+                    seen_children.add(child)
+            if tuple(expected_children) != survivor.offspring_ids:
+                raise RuntimeError("canonical offspring union disagrees with ordered merge history")
+            if survivor.revision != expected_revision:
+                raise RuntimeError("canonical group revision disagrees with merge history")
         from being import BeingInstance
         native_bindings = self._native_beings_by_person_id
         if set(native_bindings) - set(self._group_id_by_offspring):
@@ -1521,6 +1695,7 @@ class ReproductionGroupRegistry:
             dict(self._progressive_requests),
             dict(self._native_beings_by_person_id),
             dict(self._native_being_requests),
+            dict(self._group_id_aliases),
         )
 
     def _restore_undo(self, undo) -> None:
@@ -1538,6 +1713,7 @@ class ReproductionGroupRegistry:
             (self._progressive_requests, undo[13]),
             (self._native_beings_by_person_id, undo[14]),
             (self._native_being_requests, undo[15]),
+            (self._group_id_aliases, undo[16]),
         )
         for target, original in maps:
             target.clear()

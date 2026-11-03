@@ -145,7 +145,7 @@ def phase_resume(path):
         raise AssertionError("native Being identity or authored attributes changed")
     # Corruption is rejected before any target world is supplied or modified.
     try:
-        decode_combined_being_checkpoint(checkpoint.replace('"version": 2', '"version": 99', 1))
+        decode_combined_being_checkpoint(checkpoint.replace('"version": 3', '"version": 99', 1))
     except CombinedBeingCheckpointError:
         pass
     else:

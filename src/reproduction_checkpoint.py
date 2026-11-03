@@ -31,12 +31,14 @@ from reproduction_group import (
 
 
 CHECKPOINT_SCHEMA = "universe-reproduction-domain-checkpoint"
-CHECKPOINT_VERSION = 2
+CHECKPOINT_VERSION = 3
 LEGACY_CHECKPOINT_VERSION = 1
-REGISTRY_CONTRACT = "logical-reproduction-registry/2"
+PREVIOUS_CHECKPOINT_VERSION = 2
+REGISTRY_CONTRACT = "logical-reproduction-registry/3"
 LEGACY_REGISTRY_CONTRACT = "logical-reproduction-registry/1"
+PREVIOUS_REGISTRY_CONTRACT = "logical-reproduction-registry/2"
 RESTORE_FAILURE_PHASES = (
-    "groups", "indexes", "authored_requests", "v1_records", "v2_records",
+    "groups", "indexes", "aliases", "authored_requests", "v1_records", "v2_records",
     "revision", "consistency",
 )
 
@@ -75,6 +77,7 @@ class DetachedReproductionCheckpoint:
     progressive_parent_set_scopes: tuple
     progressive_requests: tuple
     wire_version: int = CHECKPOINT_VERSION
+    group_id_aliases: tuple = ()
 
 
 def _fail(message):
@@ -348,6 +351,7 @@ def _registry_data(registry):
             "parent_set_by_offspring": [[key, list(value)] for key, value in sorted(registry._parent_set_by_offspring.items())],
             "person_id_reservations": sorted(registry._person_id_reservations),
             "group_id_reservations": sorted(registry._group_id_reservations),
+            "group_id_aliases": [list(item) for item in sorted(registry._group_id_aliases.items())],
             "offspring_origin_ticks": [list(item) for item in sorted(registry._offspring_origin_ticks.items())],
             "generation_parent_set_scopes": [[list(key), value] for key, value in sorted(registry._generation_parent_set_scopes.items())],
             "progressive_parent_set_scopes": [[list(key), value] for key, value in sorted(registry._progressive_parent_set_scopes.items())],
@@ -385,6 +389,7 @@ def encode_reproduction_checkpoint(world) -> str:
         elif any((registry._groups_by_id, registry._group_id_by_parent_set,
                   registry._group_id_by_offspring, registry._parent_set_by_offspring,
                   registry._person_id_reservations, registry._group_id_reservations,
+                  registry._group_id_aliases,
                   registry._requests, registry._offspring_origin_ticks,
                   registry._generation_requests, registry._generation_parent_set_scopes,
                   registry._progressive_histories, registry._progressive_parent_set_scopes,
@@ -423,6 +428,7 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
         _fail("unsupported checkpoint schema or version")
     version = envelope["version"]
     expected_contract = (LEGACY_REGISTRY_CONTRACT if version == LEGACY_CHECKPOINT_VERSION
+                         else PREVIOUS_REGISTRY_CONTRACT if version == PREVIOUS_CHECKPOINT_VERSION
                          else REGISTRY_CONTRACT if version == CHECKPOINT_VERSION else None)
     if type(envelope["registry_contract"]) is not str or envelope["registry_contract"] != expected_contract:
         _fail("unsupported reproduction registry contract")
@@ -439,11 +445,14 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
     revision = _int(payload["revision"], "registry revision", 0)
     groups = tuple(_group_from_data(item, version=version)
                    for item in _array(payload["groups"], "group records"))
-    indexes = _strict_object(payload["indexes"], {
+    index_keys = {
         "group_id_by_parent_set", "group_id_by_offspring", "parent_set_by_offspring",
         "person_id_reservations", "group_id_reservations", "offspring_origin_ticks",
         "generation_parent_set_scopes", "progressive_parent_set_scopes",
-    }, "registry indexes")
+    }
+    if version >= 3:
+        index_keys.add("group_id_aliases")
+    indexes = _strict_object(payload["indexes"], index_keys, "registry indexes")
     parent_group = _pairs(indexes["group_id_by_parent_set"], "parent index",
                           lambda value, label: _tuple_strings(value, label, True), _str)
     child_group = _pairs(indexes["group_id_by_offspring"], "offspring index", _str, _str)
@@ -452,6 +461,8 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
         lambda value, label: _tuple_strings(value, label, True)))
     person_reservations = _tuple_strings(indexes["person_id_reservations"], "person reservations")
     group_reservations = _tuple_strings(indexes["group_id_reservations"], "group reservations")
+    group_aliases = (_pairs(indexes["group_id_aliases"], "group aliases", _str, _str)
+                     if version >= 3 else ())
     origin_ticks = _pairs(indexes["offspring_origin_ticks"], "origin ticks", _str,
                            lambda value, label: _int(value, label, 0))
     generation_scopes = _pairs(indexes["generation_parent_set_scopes"], "V1 scopes",
@@ -487,7 +498,7 @@ def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
     candidate = DetachedReproductionCheckpoint(
         source_identity, revision, groups, parent_group, child_group, child_parents,
         person_reservations, group_reservations, origin_ticks, tuple(authored), generation_scopes,
-        tuple(generation), histories, progressive_scopes, tuple(progressive), version,
+        tuple(generation), histories, progressive_scopes, tuple(progressive), version, group_aliases,
     )
     groups_by_id = [row.group_id for row in groups]
     history_keys = [row.parent_ids for row in histories]
@@ -519,6 +530,7 @@ class _ValidationOwner:
 
 def _populate_registry(registry, candidate):
     registry._groups_by_id.update((row.group_id, row) for row in candidate.groups)
+    registry._group_id_aliases.update(candidate.group_id_aliases)
     registry._group_id_by_parent_set.update(candidate.group_id_by_parent_set)
     registry._group_id_by_offspring.update(candidate.group_id_by_offspring)
     registry._parent_set_by_offspring.update(candidate.parent_set_by_offspring)
@@ -552,6 +564,7 @@ def _validate_detached(candidate):
                 registry._generation_parent_set_scopes, registry._progressive_histories,
                 registry._progressive_parent_set_scopes, registry._progressive_requests,
                 registry._person_id_reservations, registry._group_id_reservations,
+                registry._group_id_aliases,
                 registry._offspring_origin_ticks)):
             _fail("revision-zero checkpoint contains published records")
         return
@@ -572,9 +585,12 @@ def _validate_detached(candidate):
     generated_v1 = {outcome.parent_ids for outcome in
                     (record.outcome for record in registry._generation_requests.values()) if outcome.count > 0}
     generated_v2 = {parents for parents, history in registry._progressive_histories.items() if history.group_id}
+    # A retired authored group can have a completion receipt for the same
+    # exact set as the statistical/progressive group it was merged into.
+    # That alias is the V3 merge fact, not a competing reproduction scope.
     authored_sets = {result.parent_ids for result in
                      (record.result for record in registry._requests.values())
-                     if result.parents_complete}
+                     if result.parents_complete and result.group_id not in registry._group_id_aliases}
     if (authored_sets & (set(registry._generation_parent_set_scopes) | set(registry._progressive_parent_set_scopes))
             or generated_v1 & generated_v2):
         _fail("authored, V1 and V2 parent-set scopes overlap incompatibly")
@@ -588,7 +604,7 @@ def _validate_detached(candidate):
             _fail("authored idempotency normalization is malformed")
         if len(normalized) == 8 and normalized[0] == "elaborate-membership":
             if candidate.wire_version < 2 or len(normalized) != 8:
-                _fail("membership-elaboration history requires reproduction checkpoint V2")
+                _fail("membership-elaboration history requires reproduction checkpoint V2 or later")
             (_operation, group_id, prior, added, resulting, offspring, source, complete) = normalized
             if (type(group_id) is not str or type(prior) is not tuple or not prior
                     or type(added) is not tuple or type(resulting) is not tuple
@@ -611,9 +627,9 @@ def _validate_detached(candidate):
                 _fail("authored idempotency request data is inconsistent")
             authored_by_group.setdefault(result.group_id, []).append((result.revision, normalized, result))
 
-    # Validate each group's complete authored evolution from its first
-    # publication through every membership amendment. This preserves request
-    # idempotency history, not only the latest membership snapshot.
+    # Validate authored membership evolution and reconstruct each canonical
+    # survivor's deterministic offspring union from the immutable request
+    # receipts. Retired IDs remain aliases, never live group records.
     for group_id, history in authored_by_group.items():
         history.sort(key=lambda item: item[0])
         creators = [item for item in history
@@ -621,9 +637,6 @@ def _validate_detached(candidate):
         if len(creators) != 1:
             _fail("each authored ReproductionGroup must have exactly one creation request")
         creation_revision, creation_norm, creation_result = creators[0]
-        group = registry._groups_by_id.get(group_id)
-        if group is None:
-            _fail("authored request history references an unavailable ReproductionGroup")
         if len(creation_norm) not in (4, 5):
             _fail("authored group-creation request has unsupported normalized data")
         current_parents = creation_result.parent_ids
@@ -641,12 +654,46 @@ def _validate_detached(candidate):
             current_parents = normalized[4]
             current_complete = normalized[7]
             latest_revision = revision
+        canonical_id = registry._canonical_group_id_unlocked(group_id)
+        group = registry._groups_by_id.get(canonical_id)
+        if group is None:
+            _fail("authored request history does not resolve to a live ReproductionGroup")
+        if group_id in registry._group_id_aliases:
+            if (not current_complete or not group.parents_complete
+                    or current_parents != group.parent_ids
+                    or not set(creation_result.offspring_ids).issubset(group.offspring_ids)
+                    or latest_revision > group.revision):
+                _fail("retired group history does not match its canonical survivor")
+            continue
+        incoming = []
+        for retired_id, survivor_id in registry._group_id_aliases.items():
+            if survivor_id != group_id:
+                continue
+            retired_history = authored_by_group.get(retired_id, ())
+            retired_completion = [row for row in retired_history
+                                  if len(row[1]) == 8 and row[1][0] == "elaborate-membership"
+                                  and row[2].parents_complete]
+            if not retired_completion:
+                _fail("group alias has no completed membership receipt")
+            receipt = max(retired_completion, key=lambda row: row[0])
+            retired_creator = next((row[2] for row in retired_history
+                                    if not (len(row[1]) == 8 and row[1][0] == "elaborate-membership")), None)
+            if retired_creator is None:
+                _fail("group alias has no authored source history")
+            incoming.append((receipt[0], retired_id, retired_creator.offspring_ids))
+        expected_children = list(creation_result.offspring_ids)
+        for _revision, _retired, children in sorted(incoming):
+            for child in children:
+                if child in expected_children:
+                    _fail("merge history duplicates an offspring identity")
+                expected_children.append(child)
+        expected_revision = max([latest_revision, *(row[0] for row in incoming)])
         if (group.parent_ids != current_parents or group.parents_complete is not current_complete
-                or group.offspring_ids != creation_result.offspring_ids
+                or group.offspring_ids != tuple(expected_children)
                 or group.source_reference != creation_result.source_reference
-                or group.revision != latest_revision):
-            _fail("current ReproductionGroup state does not match its membership request history")
-        group_origins[group_id] = latest_revision
+                or group.revision != expected_revision):
+            _fail("current ReproductionGroup state does not match its authored/merge history")
+        group_origins[group_id] = expected_revision
     for key, record in registry._generation_requests.items():
         outcome = record.outcome
         if outcome.world_identity != candidate.source_world_identity or outcome.request_key != key:
@@ -666,10 +713,13 @@ def _validate_detached(candidate):
         if record.normalized_inputs != _normalized_request(request):
             _fail("V1 idempotency inputs are inconsistent")
         if outcome.group_id is not None:
-            generated_group = registry._groups_by_id.get(outcome.group_id)
-            if generated_group is None or not generated_group.parents_complete:
+            canonical_id = registry._canonical_group_id_unlocked(outcome.group_id)
+            generated_group = registry._groups_by_id.get(canonical_id)
+            if (generated_group is None or not generated_group.parents_complete
+                    or generated_group.parent_ids != outcome.parent_ids
+                    or generated_group.offspring_ids[:len(outcome.offspring_ids)] != outcome.offspring_ids):
                 _fail("V1 generated groups must have complete parent membership")
-            group_origins[outcome.group_id] = outcome.revision
+            group_origins[canonical_id] = max(group_origins.get(canonical_id, 0), outcome.revision)
     history_by_parent = registry._progressive_histories
     intervals = {}
     for key, record in registry._progressive_requests.items():
@@ -709,10 +759,55 @@ def _validate_detached(candidate):
         if not ordered or ordered[-1][2] != history.revision:
             _fail("V2 history revision is not bound to its final published extension")
         if history.group_id is not None:
-            generated_group = registry._groups_by_id.get(history.group_id)
-            if generated_group is None or not generated_group.parents_complete:
+            canonical_id = registry._canonical_group_id_unlocked(history.group_id)
+            generated_group = registry._groups_by_id.get(canonical_id)
+            generated_children = tuple(child for period in history.periods for child in period.offspring_ids)
+            if (generated_group is None or not generated_group.parents_complete
+                    or generated_group.parent_ids != parents
+                    or generated_group.offspring_ids[:len(generated_children)] != generated_children):
                 _fail("V2 generated groups must have complete parent membership")
-            group_origins[history.group_id] = history.revision
+            group_origins[canonical_id] = max(group_origins.get(canonical_id, 0), history.revision)
+    for survivor_id in set(registry._group_id_aliases.values()):
+        survivor = registry._groups_by_id[survivor_id]
+        origin_rows = []
+        authored_creator = next((row[2] for row in authored_by_group.get(survivor_id, ())
+                                 if not (len(row[1]) == 8 and row[1][0] == "elaborate-membership")), None)
+        if authored_creator is not None:
+            origin_rows.append((authored_creator.revision, authored_creator.offspring_ids))
+        origin_rows.extend((record.outcome.revision, record.outcome.offspring_ids)
+                           for record in registry._generation_requests.values()
+                           if record.outcome.count and record.outcome.group_id == survivor_id)
+        origin_rows.extend((history.revision,
+                            tuple(child for period in history.periods for child in period.offspring_ids))
+                           for history in registry._progressive_histories.values()
+                           if history.group_id == survivor_id)
+        if len(origin_rows) != 1:
+            _fail("merge survivor has an ambiguous authored/statistical origin")
+        expected_children = list(origin_rows[0][1])
+        expected_revision = origin_rows[0][0]
+        expected_revision = max(
+            (expected_revision, *(row[0] for row in authored_by_group.get(survivor_id, ())))
+        )
+        for retired_id, canonical_id in registry._group_id_aliases.items():
+            if canonical_id != survivor_id:
+                continue
+            retired_history = authored_by_group.get(retired_id, ())
+            creators = [row[2] for row in retired_history
+                        if not (len(row[1]) == 8 and row[1][0] == "elaborate-membership")]
+            completions = [row for row in retired_history
+                           if len(row[1]) == 8 and row[1][0] == "elaborate-membership"
+                           and row[2].parents_complete]
+            if len(creators) != 1 or not completions:
+                _fail("retired group lacks creation or completion request history")
+            completion = max(completions, key=lambda row: row[0])
+            expected_revision = max(expected_revision, completion[0])
+            for child in creators[0].offspring_ids:
+                if child in expected_children:
+                    _fail("merge history duplicates an offspring identity")
+                expected_children.append(child)
+        if survivor.offspring_ids != tuple(expected_children):
+            _fail("canonical offspring union disagrees with persisted merge references")
+        group_origins[survivor_id] = expected_revision
     if (set(group_origins) != set(registry._groups_by_id)
             or any(registry._groups_by_id[group_id].revision != revision
                    for group_id, revision in group_origins.items())):
@@ -779,6 +874,8 @@ def restore_reproduction_checkpoint(world, checkpoint, *, _fail_after=None):
             registry._person_id_reservations.update(scratch._person_id_reservations)
             registry._offspring_origin_ticks.update(scratch._offspring_origin_ticks)
             registry._maybe_fail(_fail_after, "indexes")
+            registry._group_id_aliases.update(scratch._group_id_aliases)
+            registry._maybe_fail(_fail_after, "aliases")
             registry._requests.update(scratch._requests)
             registry._maybe_fail(_fail_after, "authored_requests")
             registry._generation_requests.update(scratch._generation_requests)

@@ -1,4 +1,4 @@
-"""V11 fresh-process save/restore and progressive parent-membership proof.
+"""V12 fresh-process merge, retired-ID alias, and checkpoint proof.
 
 The reproduction checkpoint is an integrity-checked data format, not an
 authentication mechanism or general Universe save file.
@@ -60,7 +60,10 @@ def initial_world(label):
     world = new_world(label)
     create(world, "G", ("A",), ("X", "SIB"), complete=False, key="create-G")
     create(world, "H", ("A",), ("Y",), complete=False, key="create-H")
+    create(world, "SINGLETON-H", ("A",), ("SINGLETON-Y",), complete=False,
+           key="create-singleton-H")
     create(world, "G-child", ("X", "Q"), ("C",), complete=True, key="create-child")
+    create(world, "H-child", ("Y", "R"), ("HC",), complete=True, key="create-H-child")
     return world
 
 
@@ -89,7 +92,13 @@ def _complete_path(world):
     assert replay == added and world.reproduction_group_snapshot() == at_add
     complete = elaborate(world, "G", ("B", "A"), (), complete=True, key="G:complete")
     create(world, "A-singleton", ("A",), ("SINGLETON",), complete=True, key="create-singleton")
-    return added, complete
+    # Completion to the same exact set merges H into the already-live G.
+    merged_h = elaborate(world, "H", ("A",), ("B",), complete=True, key="H:merge-into-G")
+    # The complete one-parent set is independently valid and also merges.
+    merged_singleton = elaborate(
+        world, "SINGLETON-H", ("A",), (), complete=True, key="singleton:merge",
+    )
+    return added, complete, merged_h, merged_singleton
 
 
 def _logical_authored_state(world):
@@ -106,7 +115,7 @@ def _logical_authored_state(world):
           record.result.revision, record.result.parents_complete))
         for key, record in sorted(world._reproduction_group_registry._requests.items())
     )
-    return snapshot.revision, groups, requests
+    return snapshot.revision, groups, requests, snapshot.group_id_aliases
 
 
 def phase_initial_save(path):
@@ -128,19 +137,19 @@ def phase_extend(path):
     before = restored
     _complete_path(target)
     after = target.reproduction_group_snapshot()
-    try:
-        elaborate(target, "H", ("A",), ("B",), complete=True, key="H:collides-with-G")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("overlapping H was silently merged into completed G")
-    if target.reproduction_group_snapshot() != after:
-        raise AssertionError("failed duplicate completion changed authoritative state")
+    if (target.get_reproduction_group("H").group_id != "G"
+            or target.canonical_reproduction_group_id("H") != "G"
+            or "H" in {row.group_id for row in after.groups}
+            or "SINGLETON-H" in {row.group_id for row in after.groups}
+            or target.get_reproduction_group("SINGLETON-H").group_id != "A-singleton"):
+        raise AssertionError("completed groups did not resolve to their live canonical survivors")
     path.write_text(encode_reproduction_checkpoint(target), encoding="utf-8")
     group = target.get_reproduction_group("G")
     print(f"EXTEND pid={os.getpid()} restored_revision={before.revision} current_revision={after.revision}")
     print(f"same G id={group.group_id}; offspring={group.offspring_ids}; parents={group.parent_ids}; "
-          f"complete={group.parents_complete}; collision_refused=true; checkpoint=reproduction-v{CHECKPOINT_VERSION}")
+          f"complete={group.parents_complete}; H->G={target.canonical_reproduction_group_id('H')}; "
+          f"singleton-H->A-singleton={target.canonical_reproduction_group_id('SINGLETON-H')}; "
+          f"retired_ids_absent=true; checkpoint=reproduction-v{CHECKPOINT_VERSION}")
 
 
 def phase_verify(path):
@@ -155,6 +164,22 @@ def phase_verify(path):
         raise AssertionError("restored membership request did not replay idempotently")
     if random.getstate() != before_rng:
         raise AssertionError("idempotent membership replay changed RNG")
+    # Historical H requests remain usable after H is retired. The creation
+    # and merge receipts keep H provenance while canonical lookup resolves G.
+    h_create = create(target, "H", ("A",), ("Y",), complete=False, key="create-H")
+    h_merge = elaborate(target, "H", ("A",), ("B",), complete=True, key="H:merge-into-G")
+    singleton_merge = elaborate(
+        target, "SINGLETON-H", ("A",), (), complete=True, key="singleton:merge",
+    )
+    if (h_create.group_id != "H" or h_merge.group_id != "H"
+            or target.canonical_reproduction_group_id(h_merge.group_id) != "G"
+            or singleton_merge.group_id != "SINGLETON-H"
+            or target.canonical_reproduction_group_id(singleton_merge.group_id) != "A-singleton"):
+        raise AssertionError("retired group receipts lost provenance or canonical references")
+    if target.reproduction_group_snapshot().known_grandparent_paths("HC") != (("Y", ("A", "B")),):
+        raise AssertionError("preexisting descendant reference did not resolve through the merged group")
+    if target.reproduction_group_snapshot() != after_replay:
+        raise AssertionError("replaying pre-merge and merge requests changed committed state")
     before_conflict = after_replay
     try:
         elaborate(target, "G", ("A",), ("C",), complete=False, key="G:add:B")
@@ -164,6 +189,14 @@ def phase_verify(path):
         raise AssertionError("conflicting request-key reuse was accepted")
     if target.reproduction_group_snapshot() != before_conflict:
         raise AssertionError("conflicting replay changed authoritative state")
+    try:
+        elaborate(target, "H", ("A",), ("C",), complete=True, key="H:merge-into-G")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("conflicting reuse of a merged-H request key was accepted")
+    if target.reproduction_group_snapshot() != before_conflict:
+        raise AssertionError("conflicting merged-group replay changed authoritative state")
 
     control = initial_world("V11 uninterrupted control")
     _complete_path(control)
@@ -173,7 +206,7 @@ def phase_verify(path):
     control_digest = logical_reproduction_checkpoint_digest(encode_reproduction_checkpoint(control))
     if resumed_digest != control_digest:
         raise AssertionError("fresh-process membership continuation differs from uninterrupted control")
-    if (group.group_id != "G" or group.offspring_ids != ("X", "SIB")
+    if (group.group_id != "G" or group.offspring_ids != ("X", "SIB", "Y")
             or group.parent_ids != ("A", "B") or not group.parents_complete
             or target.reproduction_group_snapshot().known_parents("C") != ("Q", "X")
             or target.reproduction_group_snapshot().known_grandparent_paths("C") != (("X", ("A", "B")),)):
@@ -182,7 +215,8 @@ def phase_verify(path):
           f"conflicting_key_refused=true; request_keys={target.reproduction_group_snapshot().request_keys}")
     print(f"same uninterrupted logical state={resumed_digest == control_digest}; digest={resumed_digest}; "
           f"facts_and_request_receipts_match=true; revisions_match=true; "
-          f"G complete={target.get_reproduction_group('G').parents_complete}")
+          f"G complete={target.get_reproduction_group('G').parents_complete}; "
+          f"historical H receipt={h_merge.group_id}; canonical H=G; merge_replay=true")
 
 
 def phase_combined_save(path):
@@ -218,8 +252,13 @@ def phase_combined_verify(path):
             or being.original.obj_type != "V11 explicitly authored native Being"
             or group.parent_ids != ("A", "B") or not group.parents_complete):
         raise AssertionError("combined restore did not preserve native Being and completed group")
+    if (target.canonical_reproduction_group_id("H") != "G"
+            or "H" in {row.group_id for row in target.reproduction_group_snapshot().groups}
+            or "Y" not in group.offspring_ids):
+        raise AssertionError("combined fresh-process restore resurrected or lost a merged group")
     print(f"COMBINED-VERIFY pid={os.getpid()} BeingInstance={being.id}; authored type={being.original.obj_type}; "
-          f"G=({group.parent_ids}, complete={group.parents_complete})")
+          f"G=({group.parent_ids}, complete={group.parents_complete}, offspring={group.offspring_ids}); "
+          f"H->G={target.canonical_reproduction_group_id('H')}; retired-H-live=false")
 
 
 def run_subprocess(script, phase, path):

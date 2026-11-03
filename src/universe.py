@@ -112,6 +112,10 @@ class Universe(Identifiable):
         """Read one published objective group without realizing other state."""
         return self._reproduction_group_registry.get_group(group_id)
 
+    def canonical_reproduction_group_id(self, group_id):
+        """Resolve a live or retired group ID to the current canonical group."""
+        return self._reproduction_group_registry.canonical_group_id(group_id)
+
     def publish_reproduction_group(self, candidate, *, request_key, expected_revision,
                                    _fail_after=None):
         """World-owned, no-Encounter atomic publication for the bounded D4B case."""

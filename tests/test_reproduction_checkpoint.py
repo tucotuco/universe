@@ -68,6 +68,7 @@ def _legacy_v1_reproduction_wire(text):
     envelope = json.loads(text)
     envelope["version"] = 1
     envelope["registry_contract"] = "logical-reproduction-registry/1"
+    envelope["payload"]["indexes"].pop("group_id_aliases", None)
     for group in envelope["payload"]["groups"]:
         group.pop("parents_complete")
     for request in envelope["payload"]["authored_requests"]:
@@ -75,10 +76,19 @@ def _legacy_v1_reproduction_wire(text):
     return _retag(envelope)
 
 
+def _legacy_v2_reproduction_wire(text):
+    """Recreate the V11 wire shape (partial groups, no retired-ID aliases)."""
+    envelope = json.loads(text)
+    envelope["version"] = 2
+    envelope["registry_contract"] = "logical-reproduction-registry/2"
+    envelope["payload"]["indexes"].pop("group_id_aliases", None)
+    return _retag(envelope)
+
+
 def _container_refs(world):
     registry = world._reproduction_group_registry
     names = (
-        "_groups_by_id", "_group_id_by_parent_set", "_group_id_by_offspring",
+        "_groups_by_id", "_group_id_aliases", "_group_id_by_parent_set", "_group_id_by_offspring",
         "_parent_set_by_offspring", "_person_id_reservations", "_group_id_reservations",
         "_requests", "_offspring_origin_ticks", "_generation_requests",
         "_generation_parent_set_scopes", "_progressive_histories",
@@ -104,6 +114,23 @@ class ReproductionCheckpointTests(unittest.TestCase):
         self.assertEqual(group.parent_ids, ("P", "Q"))
         self.assertIs(group.parents_complete, True)
         self.assertEqual(restored.group_id_by_parent_set, (( ("P", "Q"), "RG-LEGACY"),))
+
+    def test_v11_v2_partial_wire_remains_readable_without_alias_semantics(self):
+        source = make_world("V11 V2 source")
+        source.publish_reproduction_group(
+            prepare_reproduction_group(ReproductionGroupProposal(
+                "RG-PARTIAL-V2", ("P",), ("X",), "test:legacy-v2", parents_complete=False,
+            )), request_key="partial-v2-create", expected_revision=0,
+        )
+        old_wire = _legacy_v2_reproduction_wire(encode_reproduction_checkpoint(source))
+        detached = decode_reproduction_checkpoint(old_wire)
+        self.assertEqual(detached.wire_version, 2)
+        self.assertEqual(detached.group_id_aliases, ())
+        self.assertIs(detached.groups[0].parents_complete, False)
+        target = make_world("V11 V2 restored")
+        restore_reproduction_checkpoint(target, old_wire)
+        self.assertIs(target.get_reproduction_group("RG-PARTIAL-V2").parents_complete, False)
+        self.assertEqual(target.canonical_reproduction_group_id("RG-PARTIAL-V2"), "RG-PARTIAL-V2")
 
     def test_round_trip_preserves_authored_v1_v2_and_zero_registry_records(self):
         source = make_world("all reproduction contracts")

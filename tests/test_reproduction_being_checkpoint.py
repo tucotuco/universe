@@ -87,6 +87,7 @@ def legacy_v1_reproduction(text):
     envelope = json.loads(text)
     envelope["version"] = 1
     envelope["registry_contract"] = "logical-reproduction-registry/1"
+    envelope["payload"]["indexes"].pop("group_id_aliases", None)
     for group in envelope["payload"]["groups"]:
         group.pop("parents_complete")
     for request in envelope["payload"]["authored_requests"]:
@@ -98,9 +99,21 @@ def legacy_v1_reproduction(text):
     return json.dumps(envelope, sort_keys=True, ensure_ascii=True, indent=2, allow_nan=False) + "\n"
 
 
+def legacy_v2_reproduction(text):
+    envelope = json.loads(text)
+    envelope["version"] = 2
+    envelope["registry_contract"] = "logical-reproduction-registry/2"
+    envelope["payload"]["indexes"].pop("group_id_aliases", None)
+    unsigned = {key: value for key, value in envelope.items() if key != "sha256"}
+    envelope["sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
+    ).hexdigest()
+    return json.dumps(envelope, sort_keys=True, ensure_ascii=True, indent=2, allow_nan=False) + "\n"
+
+
 def container_refs(instance):
     r = instance._reproduction_group_registry
-    return (r._groups_by_id, r._group_id_by_parent_set, r._group_id_by_offspring,
+    return (r._groups_by_id, r._group_id_aliases, r._group_id_by_parent_set, r._group_id_by_offspring,
             r._parent_set_by_offspring, r._person_id_reservations, r._group_id_reservations,
             r._requests, r._offspring_origin_ticks, r._generation_requests,
             r._generation_parent_set_scopes, r._progressive_histories,
@@ -124,6 +137,27 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         self.assertIs(group.parents_complete, True)
         self.assertIs(target.get_object_by_id(child), being)
         self.assertEqual(being.id, child)
+
+    def test_v11_v2_combined_partial_checkpoint_remains_readable(self):
+        source = world("V11 combined V2 source")
+        source.publish_reproduction_group(
+            prepare_reproduction_group(ReproductionGroupProposal(
+                "V2-PARTIAL", ("P",), ("X",), "test:v2-combined", parents_complete=False,
+            )), request_key="v2-create", expected_revision=0,
+        )
+        native = materialize_reproductive_offspring(
+            source, "X", being_definition=definition(), name="X", request_key="bind-v2",
+            expected_revision=1,
+        )
+        envelope = json.loads(encode_combined_being_checkpoint(source))
+        envelope["version"] = 2
+        envelope["reproduction_checkpoint"] = legacy_v2_reproduction(envelope["reproduction_checkpoint"])
+        old = retag(json.dumps(envelope), lambda value: None)
+        target = world("V11 combined V2 target")
+        restored = restore_combined_being_checkpoint(target, old)
+        self.assertEqual(restored.id, native.id)
+        self.assertIs(target.get_reproduction_group("V2-PARTIAL").parents_complete, False)
+        self.assertEqual(target.reproduction_group_snapshot().group_id_aliases, ())
 
     def test_v6_v2_partial_group_with_native_being_restores_and_rolls_back_atomically(self):
         import reproduction_being_checkpoint as combined
@@ -234,7 +268,7 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
     def test_corrupt_version_unknown_identity_definition_and_state_refuse(self):
         _source, _child, _being, encoded = ready()
         with self.assertRaisesRegex(CombinedBeingCheckpointError, "unsupported.*version"):
-            decode_combined_being_checkpoint(encoded.replace('"version": 2', '"version": 99', 1))
+            decode_combined_being_checkpoint(encoded.replace('"version": 3', '"version": 99', 1))
         bad_digest = json.loads(encoded)
         bad_digest["sha256"] = "0" * 64
         with self.assertRaisesRegex(CombinedBeingCheckpointError, "digest mismatch"):
@@ -319,19 +353,21 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         self.assertIn("uninterrupted digest match=True", result.stdout)
         self.assertIn("V4 reproduction-only refusal=preserved", result.stdout)
 
-    def test_v11_partial_membership_demo_uses_fresh_processes(self):
+    def test_v12_merge_alias_demo_uses_fresh_processes(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "examples/partial_reproduction_checkpoint_continuation.py")],
             cwd=ROOT, check=True, text=True, capture_output=True,
         )
         output = result.stdout
-        self.assertIn("checkpoint=reproduction-v2", output)
+        self.assertIn("checkpoint=reproduction-v3", output)
         self.assertIn("replay_revision_unchanged=true", output)
         self.assertIn("conflicting_key_refused=true", output)
         self.assertIn("same uninterrupted logical state=True", output)
         self.assertIn("native identity stable=X", output)
         self.assertIn("separate processes=true reproduction=", output)
         self.assertIn("combined-native=", output)
+        self.assertIn("H->G=G", output)
+        self.assertIn("retired-H-live=false", output)
 
 
 if __name__ == "__main__":

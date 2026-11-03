@@ -87,14 +87,123 @@ class ReproductionGroupMembershipTests(unittest.TestCase):
         h = next(group for group in final.groups if group.group_id == "H")
         self.assertEqual(h.offspring_ids, ("Y",))
 
-        # H cannot be silently merged into G when completion collides.
+        # A completion collision is the merge trigger. H no longer remains an
+        # independent authoritative group, but its ID and receipt still resolve.
         h_proposal = ReproductionGroupElaborationProposal("H", ("A",), ("B",), True)
-        before_refusal = final
-        with self.assertRaisesRegex(ReproductionGroupPublicationError, "already belongs"):
+        merged_receipt = w.resolve_reproduction_group_elaboration(
+            h_proposal, request_key="h-merge", expected_revision=final.revision,
+        )
+        merged = w.reproduction_group_snapshot()
+        self.assertEqual(merged_receipt.group_id, "H")  # immutable H provenance
+        self.assertEqual(w.canonical_reproduction_group_id("H"), "G")
+        self.assertIs(w.get_reproduction_group("H"), w.get_reproduction_group("G"))
+        self.assertNotIn("H", {group.group_id for group in merged.groups})
+        self.assertEqual(w.get_reproduction_group("G").offspring_ids, ("X", "SIB", "Y"))
+        self.assertEqual(dict(merged.group_id_by_offspring)["Y"], "G")
+        self.assertEqual(w.resolve_reproduction_group_elaboration(
+            h_proposal, request_key="h-merge", expected_revision=final.revision,
+        ), merged_receipt)
+        self.assertEqual(w.reproduction_group_snapshot(), merged)
+
+    def test_complete_singleton_parent_set_merges_with_incomplete_singleton(self):
+        w = world()
+        create(w, "complete-singleton", ("A",), ("X",), complete=True, key="g")
+        create(w, "partial-singleton", ("A",), ("Y", "Z"), complete=False, key="h")
+        before = w.reproduction_group_snapshot()
+        receipt = w.resolve_reproduction_group_elaboration(
+            ReproductionGroupElaborationProposal("partial-singleton", ("A",), (), True),
+            request_key="resolve-singleton", expected_revision=before.revision,
+        )
+        after = w.reproduction_group_snapshot()
+        self.assertEqual(receipt.group_id, "partial-singleton")
+        self.assertEqual(after.group_id_by_parent_set, (( ("A",), "complete-singleton"),))
+        self.assertEqual(w.get_reproduction_group("complete-singleton").offspring_ids, ("X", "Y", "Z"))
+        self.assertEqual(w.canonical_reproduction_group_id("partial-singleton"), "complete-singleton")
+        self.assertNotIn("partial-singleton", {row.group_id for row in after.groups})
+
+    def test_authored_partial_merge_preserves_positive_progressive_period_history(self):
+        from reproduction_generation import (
+            ProgressiveReproductionRequest, TestOnlyIntervalReproductionProfile,
+        )
+        w = world()
+        profile = TestOnlyIntervalReproductionProfile("merge-periods", "1", ((1, 1),))
+        generated = w.resolve_progressive_reproduction(
+            ProgressiveReproductionRequest(("A", "B"), 8, 1, profile),
+            request_key="AB-through-T1", expected_revision=0,
+        )
+        create(w, "H", ("A",), ("Y",), complete=False, key="h")
+        history_before = w._reproduction_group_registry._progressive_histories[("A", "B")]
+        origin_ticks_before = dict(w._reproduction_group_registry._offspring_origin_ticks)
+        before = w.reproduction_group_snapshot()
+        w.resolve_reproduction_group_elaboration(
+            ReproductionGroupElaborationProposal("H", ("A",), ("B",), True),
+            request_key="merge-H", expected_revision=before.revision,
+        )
+        survivor = w.get_reproduction_group(generated.group_id)
+        self.assertEqual(survivor.offspring_ids, (*generated.all_offspring_ids, "Y"))
+        self.assertEqual(
+            w._reproduction_group_registry._progressive_histories[("A", "B")], history_before,
+        )
+        self.assertEqual(
+            {key: value for key, value in w._reproduction_group_registry._offspring_origin_ticks.items()
+             if key != "Y"},
+            origin_ticks_before,
+        )
+        restored = world()
+        restore_reproduction_checkpoint(restored, encode_reproduction_checkpoint(w))
+        self.assertEqual(restored.canonical_reproduction_group_id("H"), generated.group_id)
+        self.assertEqual(restored.get_reproduction_group(generated.group_id).offspring_ids, survivor.offspring_ids)
+
+    def test_merge_rolls_back_each_write_phase_in_place_and_retries(self):
+        from reproduction_group import _ELABORATION_PHASES, _MERGE_PHASES
+        for phase in _ELABORATION_PHASES + _MERGE_PHASES:
+            with self.subTest(phase=phase):
+                w = world()
+                create(w, "G", ("A", "B"), ("X",), complete=True, key="g")
+                create(w, "H", ("A",), ("Y",), complete=False, key="h")
+                registry = w._reproduction_group_registry
+                names = (
+                    "_groups_by_id", "_group_id_aliases", "_group_id_by_parent_set",
+                    "_group_id_by_offspring", "_parent_set_by_offspring",
+                    "_person_id_reservations", "_group_id_reservations", "_requests",
+                )
+                refs = tuple(getattr(registry, name) for name in names)
+                before = w.reproduction_group_snapshot()
+                rng_before = random.getstate()
+                proposal = ReproductionGroupElaborationProposal("H", ("A",), ("B",), True)
+                with self.assertRaises(InjectedReproductionGroupFailure):
+                    w.resolve_reproduction_group_elaboration(
+                        proposal, request_key="merge-H", expected_revision=before.revision,
+                        _fail_after=phase,
+                    )
+                self.assertEqual(w.reproduction_group_snapshot(), before)
+                self.assertTrue(all(getattr(registry, name) is ref for name, ref in zip(names, refs)))
+                self.assertEqual(random.getstate(), rng_before)
+                self.assertEqual(w.canonical_reproduction_group_id("H"), "H")
+                result = w.resolve_reproduction_group_elaboration(
+                    proposal, request_key="merge-H", expected_revision=before.revision,
+                )
+                self.assertEqual(result.group_id, "H")
+                self.assertEqual(w.canonical_reproduction_group_id("H"), "G")
+
+    def test_zero_period_scope_prevents_completion_without_disturbing_history(self):
+        from reproduction_generation import (
+            ProgressiveReproductionRequest, TestOnlyIntervalReproductionProfile,
+        )
+        w = world()
+        zero_profile = TestOnlyIntervalReproductionProfile("merge-zero", "1", ((0, 1),))
+        w.resolve_progressive_reproduction(
+            ProgressiveReproductionRequest(("A", "B"), 4, 0, zero_profile),
+            request_key="zero-AB", expected_revision=0,
+        )
+        create(w, "H", ("A",), ("Y",), complete=False, key="h")
+        before = w.reproduction_group_snapshot()
+        with self.assertRaisesRegex(ReproductionGroupPublicationError, "generation scope"):
             w.resolve_reproduction_group_elaboration(
-                h_proposal, request_key="h-colliding-completion", expected_revision=final.revision,
+                ReproductionGroupElaborationProposal("H", ("A",), ("B",), True),
+                request_key="resolve-H", expected_revision=before.revision,
             )
-        self.assertEqual(w.reproduction_group_snapshot(), before_refusal)
+        self.assertEqual(w.reproduction_group_snapshot(), before)
 
     def test_idempotent_replay_stale_candidates_and_request_key_conflicts(self):
         w = world()
@@ -139,16 +248,20 @@ class ReproductionGroupMembershipTests(unittest.TestCase):
                          (created.group_id, created.parent_ids, created.offspring_ids,
                           created.parents_complete, created.revision))
 
-    def test_completed_set_collision_is_refused_without_merging_or_losing_facts(self):
+    def test_completed_set_collision_from_parent_resolution_merges_without_losing_facts(self):
         w = world()
         create(w, "G", ("A", "B"), ("X",), complete=True, key="g")
         create(w, "H", ("A",), ("Y",), complete=False, key="h")
         before = w.reproduction_group_snapshot()
         proposal = ReproductionGroupElaborationProposal("H", ("A",), ("B",), True)
-        with self.assertRaisesRegex(ReproductionGroupPublicationError, "already belongs"):
-            prepare_reproduction_group_elaboration(w, proposal)
-        self.assertEqual(w.reproduction_group_snapshot(), before)
-        self.assertEqual(w.get_reproduction_group("H").offspring_ids, ("Y",))
+        receipt = w.resolve_reproduction_group_elaboration(
+            proposal, request_key="merge-H", expected_revision=before.revision,
+        )
+        after = w.reproduction_group_snapshot()
+        self.assertEqual(receipt.group_id, "H")
+        self.assertEqual(w.canonical_reproduction_group_id("H"), "G")
+        self.assertEqual(w.get_reproduction_group("G").offspring_ids, ("X", "Y"))
+        self.assertNotIn("H", {row.group_id for row in after.groups})
 
     def test_faults_at_every_elaboration_write_group_restore_aliases_and_allow_retry(self):
         from reproduction_group import _ELABORATION_PHASES
@@ -184,28 +297,71 @@ class ReproductionGroupMembershipTests(unittest.TestCase):
                 self.assertEqual(result.parent_ids, ("A", "B"))
                 self.assertEqual(w.reproduction_group_snapshot().revision, before.revision + 1)
 
-    def test_checkpoint_v2_round_trips_partial_state_and_membership_history(self):
+    def test_checkpoint_v3_round_trips_merge_aliases_and_historical_membership(self):
         w = world()
-        create(w, "G", ("A",), ("X",), complete=False, key="g")
-        source = encode_reproduction_checkpoint(w)
-        detached = decode_reproduction_checkpoint(source)
-        self.assertEqual(detached.wire_version, 2)
-        self.assertIs(detached.groups[0].parents_complete, False)
-        restored = world()
-        restore_reproduction_checkpoint(restored, source)
-        self.assertIs(restored.get_reproduction_group("G").parents_complete, False)
-        self.assertEqual(restored.reproduction_group_snapshot().known_parents("X"), ("A",))
-        revision = restored.reproduction_group_snapshot().revision
-        restored.resolve_reproduction_group_elaboration(
-            ReproductionGroupElaborationProposal("G", ("A",), ("B",), True),
-            request_key="complete-g", expected_revision=revision,
+        create(w, "G", ("A", "B"), ("X",), complete=True, key="g")
+        create(w, "H", ("A",), ("Y",), complete=False, key="h")
+        before = w.reproduction_group_snapshot()
+        merge = ReproductionGroupElaborationProposal("H", ("A",), ("B",), True)
+        receipt = w.resolve_reproduction_group_elaboration(
+            merge, request_key="merge-H", expected_revision=before.revision,
         )
-        after = encode_reproduction_checkpoint(restored)
+        encoded = encode_reproduction_checkpoint(w)
+        detached = decode_reproduction_checkpoint(encoded)
+        self.assertEqual(detached.wire_version, 3)
+        self.assertEqual(detached.group_id_aliases, (("H", "G"),))
+        self.assertEqual(detached.group_id_reservations, ("G", "H"))
         target = world()
-        restore_reproduction_checkpoint(target, after)
-        self.assertEqual(target.get_reproduction_group("G").parent_ids, ("A", "B"))
-        self.assertIs(target.get_reproduction_group("G").parents_complete, True)
-        self.assertEqual(set(target._reproduction_group_registry._requests), {"g", "complete-g"})
+        restore_reproduction_checkpoint(target, encoded)
+        self.assertEqual(target.canonical_reproduction_group_id("H"), "G")
+        self.assertEqual(target.get_reproduction_group("H"), target.get_reproduction_group("G"))
+        self.assertNotIn("H", {row.group_id for row in target.reproduction_group_snapshot().groups})
+        self.assertEqual(target.get_reproduction_group("G").offspring_ids, ("X", "Y"))
+        revision = target.reproduction_group_snapshot().revision
+        replay = target.resolve_reproduction_group_elaboration(
+            merge, request_key="merge-H", expected_revision=before.revision,
+        )
+        self.assertEqual(
+            (replay.group_id, replay.parent_ids, replay.offspring_ids, replay.source_reference,
+             replay.request_key, replay.revision, replay.parents_complete),
+            (receipt.group_id, receipt.parent_ids, receipt.offspring_ids, receipt.source_reference,
+             receipt.request_key, receipt.revision, receipt.parents_complete),
+        )
+        self.assertEqual(target.reproduction_group_snapshot().revision, revision)
+        create_replay = target.publish_reproduction_group(
+            prepare_reproduction_group(ReproductionGroupProposal(
+                "H", ("A",), ("Y",), "author:h", parents_complete=False,
+            )), request_key="h", expected_revision=0,
+        )
+        self.assertEqual(target.canonical_reproduction_group_id(create_replay.group_id), "G")
+        self.assertEqual(target.reproduction_group_snapshot().revision, revision)
+        final = world()
+        restore_reproduction_checkpoint(final, encode_reproduction_checkpoint(target))
+        self.assertEqual(final.canonical_reproduction_group_id("H"), "G")
+        self.assertEqual(final.get_reproduction_group("G").offspring_ids, ("X", "Y"))
+
+    def test_v3_alias_corruption_is_rejected_not_repaired(self):
+        w = world()
+        create(w, "G", ("A", "B"), ("X",), complete=True, key="g")
+        create(w, "H", ("A",), ("Y",), complete=False, key="h")
+        w.resolve_reproduction_group_elaboration(
+            ReproductionGroupElaborationProposal("H", ("A",), ("B",), True),
+            request_key="merge", expected_revision=2,
+        )
+        original = json.loads(encode_reproduction_checkpoint(w))
+        for alias_rows, records in (
+            ([], original["payload"]["groups"]),
+            ([["H", "MISSING"]], original["payload"]["groups"]),
+            ([["H", "G"]], original["payload"]["groups"] + [
+                {**original["payload"]["groups"][0], "group_id": "H"}
+            ]),
+        ):
+            with self.subTest(alias_rows=alias_rows, group_count=len(records)):
+                forged = json.loads(json.dumps(original))
+                forged["payload"]["indexes"]["group_id_aliases"] = alias_rows
+                forged["payload"]["groups"] = records
+                with self.assertRaises(ReproductionCheckpointValidationError):
+                    decode_reproduction_checkpoint(retag_checkpoint(forged))
 
     def test_v2_requires_explicit_completeness_and_validates_membership_history(self):
         w = world()
