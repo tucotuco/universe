@@ -57,6 +57,11 @@ class AdultMemberRequest:
     publication_boundary: int
     name: str | None = None
     geometry: AdultMemberGeometryDescriptor | None = None
+    # Explicit world-authored assertion that this already-counted population
+    # slot is the same logical Person as an established reproductive offspring.
+    # A key is required so the native identity binding is idempotent/auditable.
+    reproductive_person_id: str | None = None
+    reproduction_request_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,11 @@ class AdultMemberCandidate:
     read_dependencies: tuple
     prospective_write_set: tuple[str, ...]
     prospective_rollback_obligations: tuple[str, ...]
+    reproduction_registry_identity: int | None
+    reproduction_registry_revision: int | None
+    reproduction_group_id: str | None
+    reproduction_binding_ids: tuple
+    reproduction_request_records: tuple
 
 
 PROSPECTIVE_WRITE_SET = (
@@ -92,6 +102,8 @@ PROSPECTIVE_WRITE_SET = (
     "StatisticalGroup._realized_beings[member_id] = same Being object",
     "StatisticalGroup._motion_attached_native_ids.add(member_id)",
     "Encounter.being_list append member_id",
+    "when explicitly requested: ReproductionGroupRegistry._native_beings_by_person_id[member_id] = same Being",
+    "when explicitly requested: ReproductionGroupRegistry._native_being_requests[request_key] = binding record",
 )
 
 PROSPECTIVE_ROLLBACK_OBLIGATIONS = (
@@ -100,6 +112,7 @@ PROSPECTIVE_ROLLBACK_OBLIGATIONS = (
     "remove the motion attachment only if it was added by this publication",
     "restore Encounter.being_list contents in place, preserving list identity and order",
     "preserve Universe registry and Group mapping/set identities and all pre-existing aliases",
+    "when explicitly requested: restore both ReproductionGroup native-binding dictionaries in place",
 )
 
 
@@ -249,6 +262,17 @@ def _build(encounter, group, request):
     _reject(request.geometry is None
             or type(request.geometry) is AdultMemberGeometryDescriptor,
             "geometry must be an AdultMemberGeometryDescriptor or None")
+    _reject(request.reproductive_person_id is None
+            or (type(request.reproductive_person_id) is str
+                and request.reproductive_person_id.strip()),
+            "reproductive_person_id must be nonempty text or None")
+    _reject(request.reproduction_request_key is None
+            or (type(request.reproduction_request_key) is str
+                and request.reproduction_request_key.strip()),
+            "reproduction_request_key must be nonempty text or None")
+    _reject((request.reproductive_person_id is None)
+            == (request.reproduction_request_key is None),
+            "reproductive identity and request key must be supplied together")
     _reject(type(request.publication_boundary) is int and request.publication_boundary > 0,
             "publication boundary must be a positive integer")
 
@@ -293,6 +317,51 @@ def _build(encounter, group, request):
             "stable member identity conflicts with an Encounter Object")
     _reject(member_id not in encounter.awareness,
             "stable member identity already has Encounter awareness state")
+
+    reproduction_registry_identity = None
+    reproduction_registry_revision = None
+    reproduction_group_id = None
+    reproduction_binding_ids = ()
+    reproduction_request_records = ()
+    reproduction = world._reproduction_group_registry
+    if request.reproductive_person_id is None:
+        _reject(member_id not in reproduction._person_id_reservations,
+                "reserved reproductive identity requires an explicit matching offspring association")
+    if request.reproductive_person_id is not None:
+        _reject(request.reproductive_person_id == member_id,
+                "authored reproductive identity must equal the selected stable Group-member identity")
+        _reject(reproduction._world is world,
+                "ReproductionGroup registry is not owned by this Universe")
+        try:
+            reproduction._assert_consistent()
+        except (RuntimeError, ValueError, TypeError) as exc:
+            raise GroupMemberCandidateRejected(
+                f"ReproductionGroup identity state is inconsistent: {exc}") from exc
+        _reject(member_id in reproduction._group_id_by_offspring,
+                "explicit reproductive identity is not an established offspring")
+        reproduction_group_id = reproduction._canonical_group_id_unlocked(
+            reproduction._group_id_by_offspring[member_id])
+        _reject(reproduction_group_id in reproduction._groups_by_id,
+                "established offspring has no canonical ReproductionGroup")
+        _reject(member_id not in reproduction._native_beings_by_person_id,
+                "logical offspring already has a native Being binding")
+        key = request.reproduction_request_key
+        _reject(key not in reproduction._native_being_requests,
+                "native Being binding request key is already used")
+        _reject(key not in (set(reproduction._requests)
+                            | set(reproduction._generation_requests)
+                            | set(reproduction._progressive_requests)),
+                "request key is already used by a ReproductionGroup publication")
+        _reject(member_id in reproduction._person_id_reservations,
+                "established offspring identity is not reserved by reproduction state")
+        reproduction_registry_identity = id(reproduction)
+        reproduction_registry_revision = reproduction._revision
+        reproduction_binding_ids = tuple(sorted(
+            (identity, id(being))
+            for identity, being in reproduction._native_beings_by_person_id.items()))
+        reproduction_request_records = tuple(sorted(
+            (key, record.person_id, record.normalized_request, id(record.being))
+            for key, record in reproduction._native_being_requests.items()))
 
     definition = world.get_being_definition("Human")
     _reject(isinstance(definition, BeingDefinition),
@@ -345,6 +414,11 @@ def _build(encounter, group, request):
         read_dependencies=initial_read_dependencies,
         prospective_write_set=PROSPECTIVE_WRITE_SET,
         prospective_rollback_obligations=PROSPECTIVE_ROLLBACK_OBLIGATIONS,
+        reproduction_registry_identity=reproduction_registry_identity,
+        reproduction_registry_revision=reproduction_registry_revision,
+        reproduction_group_id=reproduction_group_id,
+        reproduction_binding_ids=reproduction_binding_ids,
+        reproduction_request_records=reproduction_request_records,
     )
 
 

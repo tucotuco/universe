@@ -30,7 +30,8 @@ from universe_physical_fatigue_r4 import Profile
 PHASES = ('movement','registrations','targets','practice','reality','observers',
           'lifecycle','endpoint_starts','frames_clock','adult_registry',
           'adult_group_member','adult_group_realized','adult_group_motion',
-          'adult_encounter_participant','rng','consistency','mark_committed')
+          'adult_encounter_participant','adult_reproduction_binding',
+          'adult_reproduction_request','rng','consistency','mark_committed')
 _GATE = threading.RLock()  # Stable lock order: process gate, then world schedule lock.
 _ACTIVE = None
 _PUBLISHING = False
@@ -267,6 +268,7 @@ class _WritePlan:
         self.locations={}
         self.journal=[]
         self.adult_realization=None  # Detached until its explicit publication phases.
+        self.adult_reproduction_binding=None
 
     def _add(self,phase,location,operation,chain=False):
         if location in self.locations and not chain:
@@ -398,6 +400,31 @@ def _make_plan(encounter,candidate,rng_owner):
                 or being.id in encounter.non_being_object_list):
             raise PublicationRejected('adult-member identity collision before publication')
         plan.adult_realization=(operation,group,being,member,slot)
+        if operation.request.reproductive_person_id is not None:
+            from reproduction_being_bridge import (
+                _NativeBeingBindingRecord, _definition_signature,
+            )
+            reproduction=world._reproduction_group_registry
+            if (operation.reproduction_registry_identity!=id(reproduction)
+                    or operation.reproduction_registry_revision!=reproduction._revision
+                    or operation.reproduction_group_id
+                    != reproduction._canonical_group_id_unlocked(
+                        reproduction._group_id_by_offspring.get(operation.member_id, ''))):
+                raise PublicationRejected('ReproductionGroup binding dependencies changed')
+            definition_signature=_definition_signature(being.original)
+            normalized=(being.id,being.name,definition_signature)
+            request_key=operation.request.reproduction_request_key
+            if (operation.member_id not in reproduction._person_id_reservations
+                    or reproduction._group_id_by_offspring.get(operation.member_id) is None
+                    or operation.member_id in reproduction._native_beings_by_person_id
+                    or request_key in reproduction._native_being_requests
+                    or request_key in reproduction._requests
+                    or request_key in reproduction._generation_requests
+                    or request_key in reproduction._progressive_requests):
+                raise PublicationRejected('explicit offspring binding is no longer available')
+            binding_record=_NativeBeingBindingRecord(
+                request_key,operation.member_id,normalized,being)
+            plan.adult_reproduction_binding=(reproduction,binding_record)
     events=dict(world.event_history)
     for record in book._choices.values():
         for member in record.members:
@@ -531,6 +558,16 @@ def _make_plan(encounter,candidate,rng_owner):
         plan.contents('adult_group_motion',group._motion_attached_native_ids,motion_after)
         participants_after=list(encounter.being_list);participants_after.append(operation.member_id)
         plan.contents('adult_encounter_participant',encounter.being_list,participants_after)
+    if plan.adult_reproduction_binding is not None:
+        reproduction,binding_record=plan.adult_reproduction_binding
+        bindings_after=dict(reproduction._native_beings_by_person_id)
+        bindings_after[binding_record.person_id]=binding_record.being
+        plan.contents('adult_reproduction_binding',
+                      reproduction._native_beings_by_person_id,bindings_after)
+        requests_after=dict(reproduction._native_being_requests)
+        requests_after[binding_record.request_key]=binding_record
+        plan.contents('adult_reproduction_request',
+                      reproduction._native_being_requests,requests_after)
     receipt=PublishedInterval(encounter.id,candidate.boundary,tuple(supported.boundary.actions),tuple(supported.effects),
         candidate.provisional_rng.after,supported.notification_intents,inspection=prepare_record(encounter,candidate,target_anchors,events))
     plan.append('mark_committed',encounter,'_atomic_interval_history',receipt)
@@ -578,6 +615,19 @@ def _committed_consistency(encounter,candidate,plan):
                 or operation.member_id in candidate.pre_action_snapshot.entities
                 or operation.first_eligible_boundary!=candidate.boundary+1):
             raise PublicationRejected('adult-member realization post-write consistency failed')
+        if operation.request.reproductive_person_id is not None:
+            reproduction=encounter.universe._reproduction_group_registry
+            from reproduction_being_bridge import _definition_signature
+            request_key=operation.request.reproduction_request_key
+            record=reproduction._native_being_requests.get(request_key)
+            if (reproduction._native_beings_by_person_id.get(operation.member_id) is not being
+                    or record is None or record.being is not being
+                    or record.person_id!=operation.member_id
+                    or record.request_key!=request_key
+                    or record.normalized_request!=(being.id,being.name,
+                                                   _definition_signature(being.original))):
+                raise PublicationRejected('native reproductive identity post-write consistency failed')
+            reproduction._assert_consistent()
 
 
 def _without_fault(read_set):

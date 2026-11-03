@@ -104,16 +104,16 @@ def materialize_reproductive_offspring(
             raise ReproductionBeingBridgeError("reproduction registry is not owned by this Universe")
         if _definition_signature(being_definition) != definition_signature:
             raise ReproductionBeingBridgeError("BeingDefinition changed while materialization was being prepared")
-        try:
-            registry._validate_no_encounter_context()
-        except (TypeError, ValueError) as exc:
-            raise ReproductionBeingBridgeError(f"native Being bridge requires a no-Encounter world: {exc}") from exc
         if registry._revision:
             try:
                 registry._assert_consistent()
             except (RuntimeError, ValueError, TypeError) as exc:
                 raise ReproductionBeingBridgeError(f"reproduction/native identity state is inconsistent: {exc}") from exc
 
+        # Exact retries are read-only. Permit them after an explicit native
+        # Encounter publication has established the binding; every new or
+        # conflicting materialization still requires the legacy no-Encounter
+        # world-level context below.
         prior = registry._native_being_requests.get(request_key)
         if prior is not None:
             if prior.normalized_request != normalized:
@@ -122,6 +122,10 @@ def materialize_reproductive_offspring(
                     or world.get_object_by_id(person_id) is not prior.being):
                 raise ReproductionBeingBridgeError("stored native Being binding is stale or replaced")
             return prior.being
+        try:
+            registry._validate_no_encounter_context()
+        except (TypeError, ValueError) as exc:
+            raise ReproductionBeingBridgeError(f"native Being bridge requires a no-Encounter world: {exc}") from exc
         if request_key in (set(registry._requests) | set(registry._generation_requests)
                            | set(registry._progressive_requests)):
             raise ReproductionBeingBridgeError("request key is already used by a reproduction publication")
