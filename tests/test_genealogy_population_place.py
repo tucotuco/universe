@@ -15,6 +15,7 @@ from activities import RunAction
 from atomic_publication import PublicationFailure, RNGCursor
 from activities import SpotAction
 from attention_intent import AttentionIntentResult, accept_spot_attention
+from location_observation import LocationEvidenceLedger
 from encounter import Encounter
 from group_member_realization import (
     AdultMemberGeometryDescriptor,
@@ -135,9 +136,12 @@ def prepare_native_spot(*, suffix, seed, resolve=True):
         encounter, group, linked_request(group, child_id,
             geometry=AdultMemberGeometryDescriptor(sphere_radius=0.5)))
     genealogy_before = world.reproduction_group_snapshot()
+    spotter_locations = LocationEvidenceLedger(spotter.id)
+    observer_locations = LocationEvidenceLedger(observer.id)
     encounter.step(1, adult_member_candidate=candidate)
     being = world.get_object_by_id(child_id)
-    intent = accept_spot_attention(encounter, spotter.id)
+    intent = accept_spot_attention(encounter, spotter.id,
+                                    location_ledger=spotter_locations)
     assert intent == AttentionIntentResult(True, "accepted")
     assert set(vars(intent)) == {"accepted", "status"}
     assert child_id not in repr(intent)
@@ -160,11 +164,15 @@ def prepare_native_spot(*, suffix, seed, resolve=True):
         "history": spotter.personal_history,
         "intent": intent,
         "zero_candidate_intent": zero_candidate_intent,
+        "location_ledger": spotter_locations,
+        "other_location_ledger": observer_locations,
     }
+    assert spotter_locations.last_seen_location(being.id) is None
     encounter.step(5)
     assert encounter.time == 6
     assert spot.id in encounter.pending_action_list
     assert tuple(encounter.aware_beings(spotter.id)) == before["spotter"]
+    assert spotter_locations.last_seen_location(being.id) is None
     inspection = None
     if resolve:
         encounter.step(1)
@@ -216,6 +224,20 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         self.assertEqual(world.reproduction_group_snapshot(), genealogy_before)
         self.assertEqual(inspection.timeline[-1].boundary, 7)
         self.assertIn(spot.id, inspection.timeline[-1].action_ids)
+        seen = before["location_ledger"].last_seen_location(being.id)
+        self.assertIsNotNone(seen)
+        self.assertEqual((seen.being_id, seen.position, seen.observed_at,
+                          seen.boundary, seen.source_action_id, seen.observation_id),
+                         (being.id, before["position"], 7, 7, spot.id, spot.id))
+        self.assertEqual(before["other_location_ledger"].last_seen_location(being.id), None)
+        location_effects = [row for row in record.effects
+                            if type(row.effect).__name__ == "LocationObservationEffect"]
+        self.assertEqual(len(location_effects), 1)
+        location_row = location_effects[0]
+        self.assertEqual(location_row.identity.source_action_id, spot.id)
+        self.assertEqual(location_row.effect.observation.position, seen.position)
+        self.assertEqual(location_row.effect.observation,
+                         before["location_ledger"].observations[0])
 
     def test_failed_native_spot_does_not_publish_awareness_or_skill_practice(self):
         (world, encounter, group, observer, spotter, being, spot, inspection,
@@ -225,13 +247,15 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         self.assertEqual(record.facts.outcome, "failure")
         failure_effect_names = {type(row.effect).__name__ for row in record.effects}
         self.assertFalse(failure_effect_names & {
-            "AwarenessEffect", "ObservationEffect", "BeliefAcquisitionEffect", "PracticeEffect"})
+            "AwarenessEffect", "ObservationEffect", "BeliefAcquisitionEffect",
+            "LocationObservationEffect", "PracticeEffect"})
         self.assertEqual(tuple(encounter.aware_beings(spotter.id)), before["spotter"])
         self.assertEqual(tuple(encounter.aware_beings(observer.id)), before["other_observer"])
         self.assertEqual(spotter.get_skill_experience("spot"), 0)
         self.assertEqual(group.counts(), counts)
         self.assertEqual(world.reproduction_group_snapshot(), genealogy_before)
         self.assertEqual(being.get_position(), before["position"])
+        self.assertIsNone(before["location_ledger"].last_seen_location(being.id))
 
     def test_spot_publication_fault_rolls_back_awareness_rng_then_seeded_retry_commits(self):
         (world, encounter, group, observer, spotter, being, spot, _,
@@ -265,6 +289,43 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         self.assertEqual(tuple(encounter.aware_beings(spotter.id)),
                          (observer.id, being.id))
         self.assertEqual(tuple(encounter.aware_beings(observer.id)), ())
+        self.assertEqual(group.counts(), counts)
+        self.assertEqual(world.reproduction_group_snapshot(), genealogy_before)
+        retry_location = before["location_ledger"].last_seen_location(being.id)
+        self.assertIsNotNone(retry_location)
+        self.assertEqual((retry_location.position, retry_location.boundary,
+                          retry_location.observed_at, retry_location.source_action_id),
+                         (before["position"], 7, 7, spot.id))
+        receipt = encounter._atomic_interval_history[-1]
+        committed_locations = [row.effect.observation for row in receipt.inspection.effects.values()
+                               if type(row.effect).__name__ == "LocationObservationEffect"]
+        self.assertEqual(committed_locations,
+                         [before["location_ledger"].observations[0]])
+
+    def test_location_sample_is_post_movement_boundary_state_and_stays_historical(self):
+        (world, encounter, group, observer, spotter, being, spot, _,
+         before, counts, genealogy_before, _) = prepare_native_spot(
+            suffix="spot-location-time", seed=5302, resolve=False)
+        encounter.step(1, velocities={being.id: (2, 0, 0)})
+        inspection = encounter.inspect_committed(7)
+        record = inspection.action(spot.id)
+        seen = before["location_ledger"].last_seen_location(being.id)
+        target_at_boundary = inspection.target(being.id).position
+        self.assertEqual(record.facts.outcome, "success")
+        self.assertEqual(seen.position, target_at_boundary)
+        self.assertEqual(seen.position, CartesianPosition(
+            before["position"].x + 2, before["position"].y, before["position"].z))
+        self.assertEqual((seen.observed_at, seen.boundary), (7, 7))
+        original_seen = seen
+        live_position = being.get_position()
+        encounter.step(1, velocities={being.id: (3, 0, 0)})
+        self.assertNotEqual(being.get_position(), live_position)
+        stored_record = before["location_ledger"].observations[0]
+        with patch.object(being, "get_position", side_effect=AssertionError(
+                "last-seen query must not read current Reality")):
+            self.assertEqual(before["location_ledger"].last_seen_location(being.id),
+                             original_seen)
+        self.assertEqual(before["location_ledger"].observations, (stored_record,))
         self.assertEqual(group.counts(), counts)
         self.assertEqual(world.reproduction_group_snapshot(), genealogy_before)
 

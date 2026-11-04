@@ -13,6 +13,7 @@ from action_choice import Reservation, declaration
 from checkpoint_choices import (ChoiceDescriptorRejected, DESCRIPTOR_SCHEMA,
     describe_accepted_choice, describe_native_declaration)
 from checkpoint_inventory import capture_checkpoint_candidate
+from location_observation import LocationEvidenceLedger
 
 
 class TestPortableChoiceDescriptors(InspectionFixture):
@@ -115,6 +116,20 @@ class TestPortableChoiceDescriptors(InspectionFixture):
         self.assertFalse(candidate.portable_schema_defined)
         self.assertFalse(candidate.restore_verified)
         self.assertIn(DESCRIPTOR_SCHEMA, tuple(self._walk(candidate.envelope)))
+
+    def test_location_evidence_recipient_is_explicitly_outside_portable_checkpoint(self):
+        self.enable()
+        ledger = LocationEvidenceLedger(self.a.id)
+        view = self.enc.schedule_choice((SpotAction(
+            self.world, self.a.id, self.b.id, 2, location_ledger=ledger),))
+        candidate = capture_checkpoint_candidate(self.world, self.enc,
+            quiescent=True, rng_scope='exclusive_encounter', native_adapters=True)
+        self.assertEqual(self.enc.get_choice(view.id).state, 'accepted')
+        self.assertIn('unbound_location_evidence_recipient',
+                      {diagnostic.code for diagnostic in candidate.diagnostics})
+        self.assertFalse(candidate.closure_validated)
+        self.assertFalse(candidate.portable_schema_defined)
+        self.assertFalse(candidate.restore_verified)
 
     @staticmethod
     def _walk(value):

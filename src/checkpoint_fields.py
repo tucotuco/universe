@@ -91,7 +91,7 @@ FIELD_ADAPTERS = {
         "required": 'actor_id displacement end_time event_type instrument_id location minimum_distance name parent_event_id practice_experience resolution start_position start_time strategy target_id type universe'.split(),
     },
     'activities.SpotAction': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _encounter actor_id canceled_at cancellation_reason declared_roll end_time event_type group_fully_visible id instrument_id ledger location name parent_event_id path_status resolution roll spotting_conditions start_position start_time strategy target_id threat_at_schedule type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _encounter actor_id canceled_at cancellation_reason declared_roll end_time event_type group_fully_visible id instrument_id ledger location location_ledger name parent_event_id path_status resolution roll spotting_conditions start_position start_time strategy target_id threat_at_schedule type universe'.split(),
         "required": '_encounter actor_id declared_roll end_time event_type group_fully_visible instrument_id ledger location name parent_event_id path_status resolution roll spotting_conditions start_time strategy target_id type universe'.split(),
     },
     'armor.ArmorDefinition': {
@@ -302,6 +302,18 @@ FIELD_ADAPTERS = {
         "allowed": 'account_id recipient source_action_id target_id'.split(),
         "required": 'account_id recipient source_action_id target_id'.split(),
     },
+    'location_observation.BeingLocationObservation': {
+        "allowed": 'basis being_id boundary encounter_id id observer_id position source_action_id time'.split(),
+        "required": 'basis being_id boundary encounter_id id observer_id position source_action_id time'.split(),
+    },
+    'location_observation.LastSeenLocation': {
+        "allowed": 'being_id boundary observation_id observed_at observer_id position source_action_id'.split(),
+        "required": 'being_id boundary observation_id observed_at observer_id position source_action_id'.split(),
+    },
+    'location_observation.LocationEvidenceLedger': {
+        "allowed": '_observations observer_id'.split(),
+        "required": '_observations observer_id'.split(),
+    },
     'observer_proposals.AccountsProjection': {
         "allowed": 'accounts delivery_effect_ids identity'.split(),
         "required": 'accounts delivery_effect_ids identity'.split(),
@@ -321,6 +333,18 @@ FIELD_ADAPTERS = {
     'observer_proposals.InterpretationEffect': {
         "allowed": 'observation_id source_action_id target_id'.split(),
         "required": 'observation_id source_action_id target_id'.split(),
+    },
+    'observer_proposals.LocationObservationEffect': {
+        "allowed": 'observation recipient source_action_id target_id'.split(),
+        "required": 'observation recipient source_action_id target_id'.split(),
+    },
+    'observer_proposals.LocationEvidenceProjection': {
+        "allowed": 'effect_ids identity observations observer_id'.split(),
+        "required": 'effect_ids identity observations observer_id'.split(),
+    },
+    'observer_proposals.FrozenLocationEvidence': {
+        "allowed": 'identity observer_id observations'.split(),
+        "required": 'identity observer_id observations'.split(),
     },
     'observer_proposals.LifecycleEffect': {
         "allowed": 'action_id boundary canceled_at cancellation_reason choice_id from_queue nominal_end previous_choice_action_state source_action_id status to_queue'.split(),

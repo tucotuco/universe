@@ -142,7 +142,7 @@ def _action_descriptor(action, world, encounter):
             'id','name','type','universe','event_type','start_time','end_time',
             'location','parent_event_id','actor_id','target_id','instrument_id',
             'strategy','resolution','spotting_conditions','declared_roll',
-            'roll','path_status','_encounter','ledger','group_fully_visible'},
+            'roll','path_status','_encounter','ledger','group_fully_visible','location_ledger'},
     }[adapter]
     _require(not (set(data) - expected), 'unknown native Action fields are not portable')
     action_id = data.get('id')
@@ -182,6 +182,8 @@ def _action_descriptor(action, world, encounter):
                  'SpotAction must be pending and unbound to a live Encounter')
         _require(data.get('ledger') is None and data.get('group_fully_visible') is False,
                  'Group observation Spot declarations are not yet portable')
+        _require(data.get('location_ledger') is None,
+                 'observer location evidence recipient binding is not in the portable checkpoint contract')
         _require(data.get('roll') is None
                  and data.get('path_status') is None,
                  'SpotAction contains sampled outcome state')

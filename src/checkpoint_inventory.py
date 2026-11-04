@@ -67,6 +67,7 @@ _CATALOG = {
     'skill':'SkillDictionary SkillDefinition Skills', 'abilities':'Abilities', 'states':'States',
     'speeds':'Speed', 'strategy':'Strategy', 'exertion':'Exertion',
     'spatial.state':'SpatialState CartesianPosition', 'spatial.frame':'LocalFrame',
+    'location_observation':'LocationEvidenceLedger BeingLocationObservation LastSeenLocation',
     'spatial.geometry':'Sphere AxisAlignedBox', 'spatial.occlusion':'VisualOcclusion',
     'physical_fatigue':'PhysicalFatigueState',
     'physiology_registry':'PhysiologyRegistry PhysiologyDefinition ResolvedPhysiology',
@@ -82,7 +83,7 @@ _CATALOG = {
     'atomic_publication':'PublishedInterval TargetIntervalRecord ObjectiveCommitProvenance',
     'encounter_inspection':'CommittedBoundaryRecord EntityInspection',
     'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect EffectIdentity IdentifiedEffect',
-    'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection ObjectiveUse',
+    'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectiveUse',
     'interval_staging':'AuthorityReference StartFence RegistrationIntent QueueProjection',
 }
 _TYPES = frozenset(vars(importlib.import_module(module))[name]
@@ -112,7 +113,8 @@ def _compatibility():
         'checkpoint_choices.py',
         'objective_reality.py','observer_proposals.py','scheduling.py','interval_staging.py','atomic_publication.py','transactional_progression.py',
         'conditional_attributes.py','statistical_group.py','personal_history.py','experience.py',
-        'field_interpretation.py','field_observation.py','group_observation.py','history_conversation.py')
+        'field_interpretation.py','field_observation.py','location_observation.py',
+        'group_observation.py','history_conversation.py')
     return ('compatibility-draft',SCHEMA,('implementation-source',_digest(implementation)),
         ('rule-kernel-source',_digest(tuple(row for row in implementation if row[0] in kernels))),
         ('authoritative-decisions',hashlib.sha256((root.parent/'docs/universe4-authoritative-decisions-2026-10-27.md').read_bytes()).hexdigest()),
@@ -210,6 +212,10 @@ class _Inventory:
             return ('unsupported-reference','external-recipient')
         if tag=='statistical_group.StatisticalGroup' and field=='_conditional_attributes':
             self.issue('conditional_attribute_adapter_missing',ref,field,'ConditionalAttributes owns committed formation-attribute data and a lambda-backed keyed RNG provider; no reviewed detached/rehydration adapter exists in this inventory.')
+        if field == 'location_ledger' and item is not None and tag == 'activities.SpotAction':
+            self.issue('unbound_location_evidence_recipient',ref,field,
+                       'Observer-owned location evidence recipient has no portable binding contract; fail closed.')
+            return ('unsupported-reference','observer-location-evidence')
         if field in ('ledger','received_accounts') and item is not None and tag in ('group_observation.ObserveGroupAction','history_conversation.AskAboutPastAction','activities.SpotAction'):
             self.issue('unbound_external_recipient',ref,field,'Caller-owned recipient is not registered with a durable Universe ownership/binding contract.')
         if tag=='realization.RealityLedger' and field=='_validators':

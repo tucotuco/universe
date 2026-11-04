@@ -13,6 +13,7 @@ from action_evaluation import AwarenessEffect
 from activities import SpotAction
 from atomic_publication import RNGCursor, PublicationFailure
 from attention_intent import AttentionIntentResult, accept_spot_attention
+from location_observation import LocationEvidenceLedger
 from encounter import Encounter
 from library import Library
 from spatial import CartesianPosition, Sphere
@@ -133,6 +134,18 @@ class TestAttentionIntent(unittest.TestCase):
             targets=1, known_indices=(0,), with_group=False)
         self.assertFalse(accept_spot_attention(encounter, actor.id).accepted)
         self.assertFalse(accept_spot_attention(encounter, 'not-a-participant').accepted)
+
+    def test_mismatched_location_recipient_is_refused_without_scheduling_or_state_change(self):
+        world, encounter, actor, _, _, cursor = _scenario(targets=1, with_group=False)
+        ledger = LocationEvidenceLedger('different-observer')
+        before = (encounter.time, cursor.state, set(world.event_history),
+                  tuple(encounter.pending_action_list), tuple(encounter._choice_book._choices))
+        result = accept_spot_attention(encounter, actor.id, location_ledger=ledger)
+        after = (encounter.time, cursor.state, set(world.event_history),
+                 tuple(encounter.pending_action_list), tuple(encounter._choice_book._choices))
+        self.assertEqual(result, AttentionIntentResult(False, 'not_accepted'))
+        self.assertEqual(before, after)
+        self.assertEqual(ledger.observations, ())
 
     def test_unschedulable_intent_does_not_leave_target_bearing_draft(self):
         world, encounter, actor, _, _, cursor = _scenario(

@@ -15,7 +15,7 @@ class AttentionIntentResult:
     status: str
 
 
-def accept_spot_attention(encounter, actor_id):
+def accept_spot_attention(encounter, actor_id, *, location_ledger=None):
     """Bind one unfamiliar participating Being to an ordinary six-second Spot.
 
     Zero or multiple candidates produce the same identity-free refusal and do
@@ -34,6 +34,11 @@ def accept_spot_attention(encounter, actor_id):
             raise ValueError('attention intent requires a selected native transactional Encounter')
         if encounter.get_being(actor_id) is None:
             return AttentionIntentResult(False, 'not_accepted')
+        if location_ledger is not None:
+            from location_observation import LocationEvidenceLedger
+            if (type(location_ledger) is not LocationEvidenceLedger
+                    or location_ledger.observer_id != actor_id):
+                return AttentionIntentResult(False, 'not_accepted')
 
         known = set(encounter.aware_beings(actor_id))
         candidates = tuple(dict.fromkeys(
@@ -47,7 +52,7 @@ def accept_spot_attention(encounter, actor_id):
 
         target_id = candidates[0]
         action = SpotAction(encounter.universe, actor_id, target_id,
-                            encounter.time)
+                            encounter.time, location_ledger=location_ledger)
         book = encounter._choice_book
         prior_drafts = set(book._drafts)
         try:

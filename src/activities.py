@@ -112,7 +112,8 @@ class SpotAction(Action):
 
     def __init__(self, universe, actor_id, target_id, start_time,
                  duration=6, die_roll=None, id=None, spotting_conditions=(), *,
-                 ledger=None, group_fully_visible=False):
+                 ledger=None, group_fully_visible=False,
+                 location_ledger=None):
         for name, value in (("start_time", start_time), ("duration", duration)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{name} must be a finite number")
@@ -132,6 +133,11 @@ class SpotAction(Action):
             raise ValueError("fully visible Group observation requires the observer's BeliefLedger")
         if ledger is not None and not group_fully_visible:
             raise ValueError("Spot ledger is supported only with an explicit fully visible Group premise")
+        if location_ledger is not None:
+            from location_observation import LocationEvidenceLedger
+            if (type(location_ledger) is not LocationEvidenceLedger
+                    or location_ledger.observer_id != actor_id):
+                raise ValueError("location evidence ledger must belong to the Spotter")
         from discovery import SpottingConditions
         conditions = SpottingConditions(tuple(spotting_conditions))
         super().__init__(universe, start_time, None, 'spot', actor_id,
@@ -146,6 +152,8 @@ class SpotAction(Action):
         self._encounter = None
         self.ledger = ledger
         self.group_fully_visible = group_fully_visible
+        if location_ledger is not None:
+            self.location_ledger = location_ledger
 
     def prepare_schedule(self, encounter):
         """Bind to a validated Encounter but do not manufacture awareness."""
@@ -157,6 +165,13 @@ class SpotAction(Action):
             from statistical_group import StatisticalGroup
             if type(encounter.get_entity(self.target_id)) is not StatisticalGroup:
                 raise ValueError("fully visible Group premise requires a StatisticalGroup target")
+        location_ledger = self.__dict__.get('location_ledger')
+        if location_ledger is not None:
+            target = encounter.get_being(self.target_id)
+            if target is None:
+                raise ValueError("location evidence requires a participating Being target")
+            if location_ledger.observer_id != self.actor_id:
+                raise ValueError("location evidence ledger owner changed")
         return PreparedSchedule.from_action(self, initialization=(('_encounter', encounter),))
 
     def resolve(self, difficulty_class):

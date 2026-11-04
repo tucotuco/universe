@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from activities import RunAction, SpotAction
 from atomic_publication import RNGCursor
 from attention_intent import accept_spot_attention
+from location_observation import LocationEvidenceLedger
 from encounter import Encounter
 from group_member_realization import AdultMemberRequest, prepare_adult_member_candidate
 from group_member_realization import AdultMemberGeometryDescriptor
@@ -166,7 +167,10 @@ def main():
     }
     if any(child_id in known for known in awareness_before_spot.values()):
         raise AssertionError("realization or genealogy exposed C before Spot")
-    intent = accept_spot_attention(encounter, spotter.id)
+    spotter_locations = LocationEvidenceLedger(spotter.id)
+    observer_locations = LocationEvidenceLedger(observer.id)
+    intent = accept_spot_attention(encounter, spotter.id,
+                                   location_ledger=spotter_locations)
     if not intent.accepted or set(vars(intent)) != {"accepted", "status"}:
         raise AssertionError("the identity-free Spot intent was not accepted")
     if child_id in repr(intent):
@@ -188,8 +192,13 @@ def main():
     if (encounter.time != 6 or spot.id not in encounter.pending_action_list
             or tuple(encounter.aware_beings(spotter.id)) != awareness_before_spot[spotter.id]):
         raise AssertionError("Spot changed observer state before its resolution boundary")
+    if spotter_locations.last_seen_location(child_id) is not None:
+        raise AssertionError("location evidence appeared before Spot succeeded")
+    if spotter_locations.last_seen_location(child_id) is not None:
+        raise AssertionError("location evidence appeared before successful Spot resolution")
     encounter.step(1)
-    spot_record = encounter.inspect_committed(7).action(spot.id)
+    boundary7 = encounter.inspect_committed(7)
+    spot_record = boundary7.action(spot.id)
     effects = tuple(row.effect for row in spot_record.effects)
     if spot_record.facts.outcome != "success":
         raise AssertionError(f"seeded native Spot failed: {spot_record.facts.outcome}")
@@ -209,9 +218,29 @@ def main():
         raise AssertionError("Spot unexpectedly changed personal history")
     if spotter.get_skill_experience("spot") != 0:
         raise AssertionError("revision-60 Spot must not award Spot experience")
+    location = spotter_locations.last_seen_location(child_id)
+    if location is None:
+        raise AssertionError("successful Spot did not publish owner location evidence")
+    location_effects = [effect for effect in effects
+                        if type(effect).__name__ == "LocationObservationEffect"]
+    expected_position = boundary7.target(child_id).position
+    if (len(location_effects) != 1
+            or location_effects[0].observation != spotter_locations.observations[0]
+            or location.position != expected_position
+            or location.source_action_id != spot.id
+            or location.boundary != 7 or location.observed_at != 7):
+        raise AssertionError("location evidence lacks frozen position or Action provenance")
+    if observer_locations.last_seen_location(child_id) is not None:
+        raise AssertionError("location evidence leaked to the independent observer")
     if (group.counts() != counts_before or being.get_position() != candidate.initial_position
             or world.reproduction_group_snapshot() != genealogy_before_encounter):
         raise AssertionError("perception changed population, place, or genealogy")
+
+    encounter.step(1, velocities={child_id: (1, 0, 0)})
+    current_position = being.get_position()
+    historical_location = spotter_locations.last_seen_location(child_id)
+    if current_position == location.position or historical_location.position != location.position:
+        raise AssertionError("time-7 last-seen evidence tracked later movement")
 
     population_after = group.aggregate_state()
     receipt = encounter._atomic_interval_history[-1]
@@ -259,6 +288,18 @@ def main():
             "effective_dc": metadata["effective_dc"],
             "effects": [type(effect).__name__ for effect in effects],
             "spot_experience": spotter.get_skill_experience("spot"),
+            "location_evidence": {
+                "observer_id": location.observer_id,
+                "being_id": location.being_id,
+                "source_action_id": location.source_action_id,
+                "observed_at": location.observed_at,
+                "boundary": location.boundary,
+                "position": location.position.as_tuple(),
+                "current_position_after_boundary_8": current_position.as_tuple(),
+                "remains_historical": historical_location.position == location.position,
+                "other_observer_has_evidence": (
+                    observer_locations.last_seen_location(child_id) is not None),
+            },
         },
         "observer_knowledge": {
             "before": {key: list(value) for key, value in awareness_before_spot.items()},

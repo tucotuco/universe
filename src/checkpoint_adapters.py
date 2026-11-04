@@ -180,6 +180,10 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if tag=='activities.SpotAction' and field=='location_ledger' and item is not None:
+            self.issue('unbound_location_evidence_recipient',ref,field,
+                'Observer-owned location evidence has no portable recipient binding contract; restoration remains refused.')
+            return ('unsupported-reference','observer-location-evidence')
         if tag=='action_choice._Accepted' and field=='signatures':
             from checkpoint_choices import describe_accepted_choice, ChoiceDescriptorRejected
             record=self._objects_by_identity.get(self._owner_identity(ref))

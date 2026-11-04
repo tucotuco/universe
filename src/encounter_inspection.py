@@ -152,7 +152,8 @@ def detached(value):
             'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PracticeEffect ProtectionEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
-            'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection RecipientIdentity ObjectiveUse',
+            'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection FrozenLocationEvidence RecipientIdentity ObjectiveUse',
+            'location_observation': 'BeingLocationObservation LastSeenLocation',
             'objective_reality': 'ObjectiveFact SubjectRealityCandidate',
             'experience': 'SkillUse BatchSkillUse',
             'realization': 'FactKey',
@@ -234,7 +235,8 @@ def _idle(encounter):
 def _validate_live_latest(encounter, targets, meta, objectives, recipients, action_ids):
     """Reject unfenced drift; never substitute current state for historical data."""
     objects = encounter.universe.object_registry.object_instances
-    from observer_proposals import BeliefProjection, AccountsProjection, _capture_belief
+    from observer_proposals import (BeliefProjection, AccountsProjection,
+        LocationEvidenceProjection, _capture_belief, _capture_location_evidence)
     from field_observation import BeliefLedger
     from realization import RealityLedger, CommittedFact, FactKey
     from statistical_group import StatisticalGroup
@@ -300,7 +302,7 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
     for aid in action_ids:
         action=encounter.universe.event_history[aid]
         data = object.__getattribute__(action, '__dict__')
-        for field in ('ledger', 'received_accounts'):
+        for field in ('ledger', 'received_accounts', 'location_ledger'):
             if data.get(field) is not None:
                 handles[id(data[field])] = data[field]
     for identity, projection in recipients.items():
@@ -316,6 +318,14 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                 and detached(actual.auxiliary) == projection.auxiliary, 'unreceipted Belief change')
         elif type(projection) is AccountsProjection:
             _require(type(handle) is list and detached(handle) == projection.accounts, 'unreceipted account change')
+        elif type(projection) is LocationEvidenceProjection:
+            from location_observation import LocationEvidenceLedger
+            _require(type(handle) is LocationEvidenceLedger
+                and handle.observer_id == projection.observer_id,
+                'location evidence recipient identity/owner changed')
+            actual = _capture_location_evidence(handle, projection.observer_id)
+            _require(detached(actual.observations) == projection.observations,
+                     'unreceipted observer location evidence change')
         else:
             raise UnsupportedEvaluation('unreviewed inspection recipient')
 
@@ -359,7 +369,8 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
     import atomic_publication as publication
     from interval_staging import _guard_methods, _OBJECTS, _ACTIONS
     from action_evaluation import ActionProposal
-    from observer_proposals import LifecycleEffect
+    from observer_proposals import (LifecycleEffect, LocationObservationEffect,
+                                    LocationEvidenceProjection)
     if type(encounter) is not Encounter:
         raise UnsupportedEvaluation('native Encounter inspection required')
     world=object.__getattribute__(encounter,'__dict__')['universe']
@@ -450,6 +461,26 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                 _require(eid == row.identity and eid.encounter_id == encounter.id
                     and eid.boundary == record.boundary and eid.source_action_id in meta.actions,
                     'foreign effect provenance')
+                if type(row.effect) is LocationObservationEffect:
+                    declaration, facts = meta.actions[eid.source_action_id]
+                    evidence = row.effect.observation
+                    projection = meta.recipients.get(row.effect.recipient)
+                    _require(row.effect.target_id == declaration.actor_id
+                        and row.effect.source_action_id == declaration.id
+                        and declaration.family == 'spot'
+                        and evidence.id == declaration.id
+                        and evidence.observer_id == declaration.actor_id
+                        and evidence.being_id == declaration.target_id
+                        and evidence.source_action_id == declaration.id
+                        and evidence.encounter_id == encounter.id
+                        and evidence.boundary == record.boundary
+                        and evidence.time == declaration.nominal_end
+                        and evidence.position == meta.entities[declaration.target_id].position
+                        and facts.outcome == 'success'
+                        and type(projection) is LocationEvidenceProjection
+                        and projection.observer_id == declaration.actor_id
+                        and projection.observations.get(evidence.id) == evidence,
+                        'location observation does not match its successful Spot receipt')
             batch_targets = {}
             for key, anchor in meta.target_anchors.items():
                 obj = objects.get(key)
