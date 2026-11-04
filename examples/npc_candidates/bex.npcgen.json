@@ -1,0 +1,318 @@
+{
+  "format": "npcgen-npc",
+  "schema_version": 1,
+  "engine": {
+    "name": "npcgen",
+    "version": "2.1.0",
+    "rules_hash": "sha256:78e8a2bc8e7dc7ba635f8ab6d8bdf8174c35608c9af04b6533cc3d84c46865ff"
+  },
+  "generation": {
+    "seed": 71402,
+    "mode": "random"
+  },
+  "edits": [
+    {
+      "op": "set_name",
+      "args": [
+        "Bex"
+      ]
+    }
+  ],
+  "state": {
+    "name": "Bex",
+    "classes": [
+      4,
+      7
+    ],
+    "xps": [
+      15957.1630859375,
+      5698.98681640625
+    ],
+    "levels": [
+      4,
+      3
+    ],
+    "race": 2,
+    "subrace": "",
+    "sex": 1,
+    "scores": [
+      18,
+      8,
+      9,
+      14,
+      13,
+      7
+    ],
+    "exc_str": 54,
+    "age": 84.6910629272461,
+    "month": 11,
+    "day": 27,
+    "height": 40.939998626708984,
+    "weight": 57.19142532348633,
+    "hps": 16,
+    "psionics": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "possessions": {
+      "items": [
+        "Oleum Magicale \nMagic-User Potion: Improved Invisibilty (as spell) "
+      ],
+      "exchanged": [
+        [
+          "Gas Poison antidote: A \nAlchemist Potion: Great Water, Sapphire",
+          "600"
+        ],
+        [
+          "Bowl Commanding Water Elementals (DMG)",
+          "25000"
+        ]
+      ],
+      "gold": 25600.0,
+      "lines": [
+        "Gas Poison antidote: A \nAlchemist Potion: Great Water, Sapphire was exchanged for 600 gp.",
+        "Oleum Magicale \nMagic-User Potion: Improved Invisibilty (as spell) ",
+        "Bowl Commanding Water Elementals (DMG) was exchanged for 25000 gp."
+      ]
+    },
+    "family": {
+      "known": true,
+      "rank": 9,
+      "children": 9,
+      "survived": 7,
+      "spacing": 14,
+      "mother_birthdate": -92,
+      "siblings": [
+        {
+          "number": 1,
+          "birthdate": -42,
+          "sex": 0,
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 2,
+          "birthdate": -38,
+          "sex": 1,
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 3,
+          "birthdate": -35,
+          "sex": 1,
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 4,
+          "birthdate": -22,
+          "sex": 0,
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 5,
+          "birthdate": -14,
+          "sex": 0,
+          "alive": false,
+          "is_self": false
+        },
+        {
+          "number": 6,
+          "birthdate": -7,
+          "sex": 0,
+          "alive": false,
+          "is_self": false
+        },
+        {
+          "number": 7,
+          "birthdate": -6,
+          "sex": 0,
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 8,
+          "birthdate": -5,
+          "sex": 1,
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 9,
+          "birthdate": 0,
+          "sex": 1,
+          "alive": true,
+          "is_self": true
+        }
+      ],
+      "ancestry": null
+    },
+    "seed": 71402
+  },
+  "sheet": {
+    "identity": {
+      "name": "Bex",
+      "sex": "Female",
+      "race": "Hill Dwarf",
+      "subrace": null
+    },
+    "abilities": {
+      "scores": {
+        "Str": 18,
+        "Int": 8,
+        "Wis": 9,
+        "Dex": 14,
+        "Con": 13,
+        "Cha": 7
+      },
+      "exceptional_strength": 54,
+      "strength": {
+        "weight_allowance": 154,
+        "to_hit": 2,
+        "damage": 3
+      },
+      "dexterity_reaction": 0,
+      "learning_percent": {
+        "Int": null,
+        "Wis": 40
+      }
+    },
+    "age": {
+      "age": 84.69,
+      "category": "Mature",
+      "birthday": {
+        "day": 27,
+        "month": "Orram"
+      },
+      "height_inches": 40.94,
+      "weight_pounds": 57.19
+    },
+    "classes": [
+      {
+        "class": "Fighter",
+        "level": 4,
+        "xp": 15957.16,
+        "title": "Veteran",
+        "over_limit": false
+      },
+      {
+        "class": "Thief",
+        "level": 3,
+        "xp": 5698.99,
+        "title": "Footpad",
+        "over_limit": false
+      }
+    ],
+    "hit_points": 16,
+    "psionics": null,
+    "possessions": {
+      "items": [
+        "Oleum Magicale \nMagic-User Potion: Improved Invisibilty (as spell) "
+      ],
+      "exchanged_for_gold": [
+        [
+          "Gas Poison antidote: A \nAlchemist Potion: Great Water, Sapphire",
+          "600"
+        ],
+        [
+          "Bowl Commanding Water Elementals (DMG)",
+          "25000"
+        ]
+      ],
+      "gold": 25600.0
+    },
+    "family": {
+      "known": true,
+      "birth_rank": 9,
+      "children": 9,
+      "survived": 7,
+      "mother_birthdate": -92,
+      "ancestry": null,
+      "siblings": [
+        {
+          "number": 1,
+          "birthdate": -42,
+          "sex": "M",
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 2,
+          "birthdate": -38,
+          "sex": "F",
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 3,
+          "birthdate": -35,
+          "sex": "F",
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 4,
+          "birthdate": -22,
+          "sex": "M",
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 5,
+          "birthdate": -14,
+          "sex": "M",
+          "alive": false,
+          "is_self": false
+        },
+        {
+          "number": 6,
+          "birthdate": -7,
+          "sex": "M",
+          "alive": false,
+          "is_self": false
+        },
+        {
+          "number": 7,
+          "birthdate": -6,
+          "sex": "M",
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 8,
+          "birthdate": -5,
+          "sex": "F",
+          "alive": true,
+          "is_self": false
+        },
+        {
+          "number": 9,
+          "birthdate": 0,
+          "sex": "F",
+          "alive": true,
+          "is_self": true
+        }
+      ]
+    }
+  },
+  "notes": {
+    "identity": "",
+    "abilities": "",
+    "age": "",
+    "classes": "",
+    "hit_points": "",
+    "psionics": "",
+    "possessions": "",
+    "family": "",
+    "general": ""
+  }
+}

@@ -6,10 +6,11 @@
 
 ## ACTIVE
 
-No implementation task is active; choose the next bounded objective after review of U-WORLD-001B.
+No implementation task is active; U-ARENA-001 completed the first bounded native Encounter Arena. Select the next increment after reviewing its results.
 
 ## NEXT
 
+- [ ] **U-ARENA-002 · PLANNED — Minimal interactive native Encounter Arena.** Add operator controls over supported native Choices and read-only committed/observer views; retain Universe as the only resolver and do not revive the legacy tactical facade. See [Encounter engine](docs/tasks/encounter-engine.md) and the [revised Arena roadmap](docs/design/Universe-Playground-Revised-Roadmap.md).
 - [ ] **U-REL-002 · PLANNED — Extend kinship-consistency coverage under partial realization.** The V3 demonstration covers one bounded multigenerational graph; broader cases remain optional follow-up after the current cross-domain integration objective. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## DONE — bounded, demonstrated milestones
@@ -35,6 +36,7 @@ No implementation task is active; choose the next bounded objective after review
 - [x] **U-OPS-007 — Install the verified Universe 6 → 7 handoff (2026-11-04).** The supplied handoff is installed byte-for-byte at [`docs/handoffs/universe-6-to-7.md`](docs/handoffs/universe-6-to-7.md); repository-relative links and documentation checks passed. This is distinct from the historical U-OPS-002 cleanup task.
 - [x] **U-LOC-001 — Initial waypoint belief and landmark counterfactual experiment (5E1F–5E1G).** Demonstrated in interrupted work, not part of the committed CORE implementation; snapshots remain under `work-stash/`. See [generation and Attention](docs/tasks/generation-and-attention.md).
 - [x] **U-INT-001 — Narrow spatial Encounter and motion demonstrations.** Continuous position, derived TriFold context and simple Run movement are demonstrated in bounded examples; this is not global geography or terrain integration. See [broader Universe roadmap](docs/tasks/broader-universe.md).
+- [x] **U-ARENA-001 — First native Encounter Arena.** Two exact NPC Generator `npcgen-npc` v1 exports retain their complete source bytes/provenance and bind to distinct, explicit native Being IDs. Only source display names map into the Arena; native Human definitions, geometry, positions, Spot roll, and Encounter are Arena-authored. A native six-second Spot commits through transactional progression, with committed developer inspection and observer-only Awareness. No NPC ability, race, HP, skill, XP, equipment, size, or family rule was activated; no BattleCode interchange or browser UI was built. See [Encounter engine](docs/tasks/encounter-engine.md), [generation and Attention](docs/tasks/generation-and-attention.md), and the [revised Arena roadmap](docs/design/Universe-Playground-Revised-Roadmap.md).
 
 ## OPEN — capabilities requiring follow-up
 

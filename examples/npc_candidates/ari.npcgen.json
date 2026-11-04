@@ -1,0 +1,267 @@
+{
+  "format": "npcgen-npc",
+  "schema_version": 1,
+  "engine": {
+    "name": "npcgen",
+    "version": "2.1.0",
+    "rules_hash": "sha256:78e8a2bc8e7dc7ba635f8ab6d8bdf8174c35608c9af04b6533cc3d84c46865ff"
+  },
+  "generation": {
+    "seed": 71401,
+    "mode": "random"
+  },
+  "edits": [
+    {
+      "op": "set_name",
+      "args": [
+        "Ari"
+      ]
+    }
+  ],
+  "state": {
+    "name": "Ari",
+    "classes": [
+      10
+    ],
+    "xps": [
+      827496.5625
+    ],
+    "levels": [
+      14
+    ],
+    "race": 6,
+    "subrace": "",
+    "sex": 0,
+    "scores": [
+      15,
+      13,
+      11,
+      17,
+      15,
+      10
+    ],
+    "exc_str": 0,
+    "age": 773.7434692382812,
+    "month": 11,
+    "day": 24,
+    "height": 67.19999694824219,
+    "weight": 152.5152587890625,
+    "hps": 81,
+    "psionics": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "possessions": {
+      "items": [
+        "Bucknard's Everfull Purse (DMG) ",
+        "Armor: Chain +1 ",
+        "Armor: Chain +2 Elfin ",
+        "Gas Poison, Str:2 A ",
+        "Rod(36 charges): Many Things (TT) ",
+        "Armor: Field Plate +2 ",
+        "Rod(19 charges): Paralyzation (as Wand in DMG) ",
+        "Axe of Hurling +4 (UA) ",
+        "Venom antidote: Huge Centipede \nIllusionist Potion: True Sight (as spell) ",
+        "Magic Carnelian (red) Cabachon 1.53ct (0.31g) Base Value: 0.461gp",
+        "Dust: Blinding ",
+        "Medicinal: Garlic (W&W) ",
+        "Mace +1 ",
+        "Long Sword +2 "
+      ],
+      "exchanged": [
+        [
+          "Quarterstaff +1",
+          "1500"
+        ],
+        [
+          "Dart +2 (5-20)",
+          "16"
+        ],
+        [
+          "Bard Instrument (DMG)",
+          ""
+        ],
+        [
+          "Staff-Spear +2 (UA)",
+          "2000"
+        ]
+      ],
+      "gold": 3516.0,
+      "lines": [
+        "Bucknard's Everfull Purse (DMG) ",
+        "Armor: Chain +1 ",
+        "Armor: Chain +2 Elfin ",
+        "Quarterstaff +1 was exchanged for 1500 gp.",
+        "Gas Poison, Str:2 A ",
+        "Rod(36 charges): Many Things (TT) ",
+        "Armor: Field Plate +2 ",
+        "Rod(19 charges): Paralyzation (as Wand in DMG) ",
+        "Dart +2 (5-20) was exchanged for 16 gp.",
+        "Axe of Hurling +4 (UA) ",
+        "Venom antidote: Huge Centipede \nIllusionist Potion: True Sight (as spell) ",
+        "Magic Carnelian (red) Cabachon 1.53ct (0.31g) Base Value: 0.461gp",
+        "Bard Instrument (DMG) was exchanged for  gp.",
+        "Staff-Spear +2 (UA) was exchanged for 2000 gp.",
+        "Dust: Blinding ",
+        "Medicinal: Garlic (W&W) ",
+        "Mace +1 ",
+        "Long Sword +2 "
+      ]
+    },
+    "family": {
+      "known": true,
+      "rank": 1,
+      "children": 2,
+      "survived": 1,
+      "spacing": 227,
+      "mother_birthdate": -432,
+      "siblings": [
+        {
+          "number": 1,
+          "birthdate": 0,
+          "sex": 0,
+          "alive": true,
+          "is_self": true
+        },
+        {
+          "number": 2,
+          "birthdate": 201,
+          "sex": 1,
+          "alive": false,
+          "is_self": false
+        }
+      ],
+      "ancestry": null
+    },
+    "seed": 71401
+  },
+  "sheet": {
+    "identity": {
+      "name": "Ari",
+      "sex": "Male",
+      "race": "High Elf",
+      "subrace": null
+    },
+    "abilities": {
+      "scores": {
+        "Str": 15,
+        "Int": 13,
+        "Wis": 11,
+        "Dex": 17,
+        "Con": 15,
+        "Cha": 10
+      },
+      "exceptional_strength": null,
+      "strength": {
+        "weight_allowance": 80,
+        "to_hit": 0,
+        "damage": 0
+      },
+      "dexterity_reaction": 2,
+      "learning_percent": {
+        "Int": 50,
+        "Wis": 50
+      }
+    },
+    "age": {
+      "age": 773.74,
+      "category": "Middle-aged",
+      "birthday": {
+        "day": 24,
+        "month": "Orram"
+      },
+      "height_inches": 67.2,
+      "weight_pounds": 152.52
+    },
+    "classes": [
+      {
+        "class": "Cavalier",
+        "level": 14,
+        "xp": 827496.56,
+        "title": "Cavalier",
+        "over_limit": false
+      }
+    ],
+    "hit_points": 81,
+    "psionics": null,
+    "possessions": {
+      "items": [
+        "Bucknard's Everfull Purse (DMG) ",
+        "Armor: Chain +1 ",
+        "Armor: Chain +2 Elfin ",
+        "Gas Poison, Str:2 A ",
+        "Rod(36 charges): Many Things (TT) ",
+        "Armor: Field Plate +2 ",
+        "Rod(19 charges): Paralyzation (as Wand in DMG) ",
+        "Axe of Hurling +4 (UA) ",
+        "Venom antidote: Huge Centipede \nIllusionist Potion: True Sight (as spell) ",
+        "Magic Carnelian (red) Cabachon 1.53ct (0.31g) Base Value: 0.461gp",
+        "Dust: Blinding ",
+        "Medicinal: Garlic (W&W) ",
+        "Mace +1 ",
+        "Long Sword +2 "
+      ],
+      "exchanged_for_gold": [
+        [
+          "Quarterstaff +1",
+          "1500"
+        ],
+        [
+          "Dart +2 (5-20)",
+          "16"
+        ],
+        [
+          "Bard Instrument (DMG)",
+          ""
+        ],
+        [
+          "Staff-Spear +2 (UA)",
+          "2000"
+        ]
+      ],
+      "gold": 3516.0
+    },
+    "family": {
+      "known": true,
+      "birth_rank": 1,
+      "children": 2,
+      "survived": 1,
+      "mother_birthdate": -432,
+      "ancestry": null,
+      "siblings": [
+        {
+          "number": 1,
+          "birthdate": 0,
+          "sex": "M",
+          "alive": true,
+          "is_self": true
+        },
+        {
+          "number": 2,
+          "birthdate": 201,
+          "sex": "F",
+          "alive": false,
+          "is_self": false
+        }
+      ]
+    }
+  },
+  "notes": {
+    "identity": "",
+    "abilities": "",
+    "age": "",
+    "classes": "",
+    "hit_points": "",
+    "psionics": "",
+    "possessions": "",
+    "family": "",
+    "general": ""
+  }
+}

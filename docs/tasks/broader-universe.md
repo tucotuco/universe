@@ -21,6 +21,7 @@ The long-term direction is a coherent world that refines detail on demand while 
 - **U-AGENT-001:** richer goals, planning, learning, communication and social history must use observer-owned evidence rather than objective omniscience.
 - **U-ATT-001:** persistent Attention may eventually concern Beings, Objects, Groups and Events. Events remain a distinct ontology.
 - **U-UI-001:** observer-facing presentation must show only knowledge available to that observer; developer inspection is omniscient and is not player perception.
+- **U-ARENA-001 / U-ARENA-002:** the first source-preserving two-candidate native Arena is demonstrated; its next planned step is an interactive surface over native Choice submission and read-only committed/observer-specific views. See the [Encounter task](encounter-engine.md) and [revised Arena roadmap](../design/Universe-Playground-Revised-Roadmap.md). The earlier BattleCode-centered P0 proposal remains historical; BattleCode is outside the near-term Arena plan.
 
 The [deferred Object/Event perception design note](../design/deferred-object-event-perception.md) records open questions about subjects, motion and perceptible Actions. It is a non-authoritative design note, not an adopted simulation rule or implementation authorization.
 

@@ -4,6 +4,8 @@ Back to [TASKS.md](../../TASKS.md).
 
 ## Completed bounded demonstrations
 
+- **U-ARENA-001 candidate boundary:** two exact NPC Generator v1 exports are preserved as source bytes with engine, rule-hash, seed, edit, and content-digest provenance. An explicit per-Arena binding assigns each candidate a distinct native Being identity; only the source name becomes a display name. Native Human definitions and scene choices supply active attributes and placements. NPC race/sex/age/scores/class/level/XP/HP/dimensions/possessions/family remain source-only; the generator does not expose a discrete Universe skill list. This is not population membership, genealogy, observer knowledge, or cross-process binding persistence. See the [Arena example](../../examples/npc_encounter_arena.py) and [import boundary](../../src/arena_npc_import.py).
+
 - `StatisticalGroup(ObjectInstance)` is a population-specific prototype, not a general Group ontology. Trusted world code can select one already-counted adult and atomically publish its realization while conserving Group totals.
 - A supported successful Spot can record exact aggregate Group count evidence for one observer; it does not expose unresolved slot identifiers, individual identity or position.
 - The 5E2S adapter accepts only one eligible unfamiliar participating Being; zero or several candidates are refused. It is an experiment, not general Agent Attention or category-directed Spot.

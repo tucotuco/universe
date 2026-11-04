@@ -12,6 +12,7 @@ Back to [TASKS.md](../../TASKS.md).
 - **Group evidence:** 5E2C interim success can establish exact aggregate evidence about a supported fully visible Group. The separate `ObserveGroupAction` sampler retains provisional Spot-rank/XP behavior and needs a decision; it is not ordinary Spot.
 - **Combat integration:** the bounded 5E2U example commits an Awareness-derived Thrust for 4 damage (HP 10→6) and 10 Dagger XP. Under 5E2M, Group envelopes describe aggregate extent and do not block melee; real modeled Beings/Objects still participate in physical obstruction.
 - **Fresh-process continuation:** 5E1J6 restores one historical Run boundary and publishes one new Run boundary, with no imported-practice replay and native issuance for the new receipt. This Run-only scenario consumes no RNG. It does not demonstrate stochastic replay or general save/load.
+- **U-ARENA-001 native Encounter Arena:** [`examples/npc_encounter_arena.py`](../../examples/npc_encounter_arena.py) imports two exact NPC Generator v1 source records through [`arena_npc_import.py`](../../src/arena_npc_import.py), binds them to distinct explicit native Being IDs, and resolves a six-second native Spot through the transactional Encounter publisher. The source names are display labels; the Human definitions, geometry, positions, and fixed Spot roll are Arena-authored. Only Ari receives Awareness on success; a failed roll publishes none. The demonstration is developer inspection, not an observer UI or portable save. [`tests/test_npc_encounter_arena.py`](../../tests/test_npc_encounter_arena.py) covers source validation/provenance, identity and collisions, property non-mapping, deterministic results, failure, and publisher rollback/retry.
 
 ## Open work and acceptance gates
 
@@ -21,6 +22,7 @@ Back to [TASKS.md](../../TASKS.md).
 - **U-LOC-002:** U-LOC-002A is complete within its bounded Being/Spot scope; U-LOC-002B (an evidence-driven follow-up Action) is **deferred / not authorized**. Other location sources, Object/Event classes, motion and Action perception, waypoints/maps and broader observer access remain open. See the [deferred perception design note](../design/deferred-object-event-perception.md), which records questions only and is not an adopted rule.
 - **U-PHY-001:** live R4 Q/B fatigue remains unintegrated; the preserved workbench is experimental.
 - **U-PHY-002:** continue the authoritative combat/force issue work in the [r60 issue bridge](encounters-r60-open-issues.md).
+- **U-ARENA-002:** build a minimal interactive presentation that proposes only supported native Choices and reads committed or observer-filtered results. Keep Universe as the sole resolver; do not route transactional Encounters through the legacy `TacticalDuel` facade. No Browser UI, action submission, or player view is delivered by U-ARENA-001.
 
 ## Normative sources and evidence
 
