@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from activities import RunAction, SpotAction
 from atomic_publication import RNGCursor
+from attention_intent import accept_spot_attention
 from encounter import Encounter
 from group_member_realization import AdultMemberRequest, prepare_adult_member_candidate
 from group_member_realization import AdultMemberGeometryDescriptor
@@ -73,7 +74,11 @@ def main():
     # slot placement. It is not knowledge acquired from genealogy or counts.
     spotter.set_position(CartesianPosition(12, 44, 0))
     spotter.set_geometry(Sphere(0.5))
+    # Initial scenario awareness makes the already-present observer ineligible
+    # for the Spotter's one-target intent. It does not reveal the not-yet-
+    # realized counted member, and the other observer remains unaware of both.
     encounter = Encounter(world, 15, 0, initiated=True,
+                          awareness={spotter.id: {observer.id}},
                           id="genealogy-population-place-encounter")
     world.add_event(encounter)
     encounter.add_being(observer.id)
@@ -86,6 +91,29 @@ def main():
     encounter.schedule_choice((RunAction(world, observer.id, 0, 1, 1,
                                          experience=2,
                                          id="world-observer-run"),))
+
+    # Before the adult exists as an Encounter participant, the identity-free
+    # intent has zero candidates. This refusal preserves the accepted Run and
+    # every authoritative value.
+    zero_candidate_before = (
+        encounter.time, rng.state, dict((key, set(value))
+                                       for key, value in encounter.awareness.items()),
+        tuple(encounter.pending_action_list), tuple(encounter._choice_book._choices),
+        tuple(encounter.__dict__.get("_atomic_interval_history", ())),
+        set(world.event_history),
+    )
+    zero_candidate_intent = accept_spot_attention(encounter, spotter.id)
+    zero_candidate_after = (
+        encounter.time, rng.state, dict((key, set(value))
+                                       for key, value in encounter.awareness.items()),
+        tuple(encounter.pending_action_list), tuple(encounter._choice_book._choices),
+        tuple(encounter.__dict__.get("_atomic_interval_history", ())),
+        set(world.event_history),
+    )
+    if (zero_candidate_intent.accepted
+            or zero_candidate_intent.status != "not_accepted"
+            or zero_candidate_before != zero_candidate_after):
+        raise AssertionError("zero-candidate Spot refusal changed Encounter state")
 
     request = AdultMemberRequest(
         group.id, 0, "adults", 0, 1, name="C",
@@ -129,20 +157,31 @@ def main():
     if not conflict_refused:
         raise AssertionError("conflicting reuse of the binding request key was accepted")
 
-    # The second Being submits a genuine, target-directed native Spot through
-    # the same transactional scheduler and publisher. Its target is supplied
-    # by this developer-authored scenario; this does not implement category-
-    # directed discovery of an unknown individual.
+    # Initiation supplies only the observer's intent. The existing adapter
+    # privately binds the unique unfamiliar participating Being to a native
+    # six-second SpotAction. The result returned to the caller carries no ID.
     awareness_before_spot = {
         observer.id: tuple(encounter.aware_beings(observer.id)),
         spotter.id: tuple(encounter.aware_beings(spotter.id)),
     }
     if any(child_id in known for known in awareness_before_spot.values()):
         raise AssertionError("realization or genealogy exposed C before Spot")
+    intent = accept_spot_attention(encounter, spotter.id)
+    if not intent.accepted or set(vars(intent)) != {"accepted", "status"}:
+        raise AssertionError("the identity-free Spot intent was not accepted")
+    if child_id in repr(intent):
+        raise AssertionError("the intent result exposed the privately bound identity")
+    spot = next(
+        member.action
+        for choice in encounter._choice_book._choices.values()
+        for member in choice.members
+        if type(member.action) is SpotAction
+    )
+    # This comparison is trusted developer verification after the native
+    # scheduler accepted the identity-free intent; it is not supplied to it.
+    if spot.target_id != child_id:
+        raise AssertionError("the unique private binding selected the wrong Being")
     personal_history_before_spot = spotter.personal_history
-    spot = SpotAction(world, spotter.id, child_id, encounter.time,
-                      id="spot-counted-genealogy-person")
-    encounter.schedule_choice((spot,))
     if (spot.start_time, spot.end_time) != (1, 7):
         raise AssertionError("deliberate Spot must span the six seconds 1 through 7")
     encounter.step(5)
@@ -157,7 +196,8 @@ def main():
     metadata = dict(spot_record.facts.metadata)
     if (metadata.get("roll"), metadata.get("discovery_dc"), metadata.get("effective_dc")) != (18, 15, 15):
         raise AssertionError("Spot did not use the expected seeded check and target DC")
-    if (tuple(encounter.aware_beings(spotter.id)) != (child_id,)
+    if (tuple(encounter.aware_beings(spotter.id))
+            != (observer.id, child_id)
             or tuple(encounter.aware_beings(observer.id)) != awareness_before_spot[observer.id]):
         raise AssertionError("Spot Awareness was not isolated to its observing Being")
     effect_names = {type(effect).__name__ for effect in effects}
@@ -205,6 +245,10 @@ def main():
         "conflicting_retry_refused": conflict_refused,
         "automatic_awareness": encounter.aware_beings(observer.id),
         "spot": {
+            "zero_candidate_refused_before_realization": (
+                not zero_candidate_intent.accepted),
+            "initiation": {"accepted": intent.accepted, "status": intent.status},
+            "target_id_supplied_by_caller": False,
             "action_id": spot.id,
             "start": spot.start_time,
             "end": spot.end_time,

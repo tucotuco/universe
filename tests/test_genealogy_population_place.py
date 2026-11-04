@@ -14,6 +14,7 @@ import atomic_publication
 from activities import RunAction
 from atomic_publication import PublicationFailure, RNGCursor
 from activities import SpotAction
+from attention_intent import AttentionIntentResult, accept_spot_attention
 from encounter import Encounter
 from group_member_realization import (
     AdultMemberGeometryDescriptor,
@@ -78,7 +79,9 @@ def make_world(*, suffix="main", publish_genealogy=True, authored_offspring_id=N
         # obtained from parentage or aggregate population evidence.
         observer_two.set_position(CartesianPosition(12, 44, 0))
         observer_two.set_geometry(Sphere(0.5))
-    encounter = Encounter(world, 15, 0, initiated=True,
+    awareness = ({observer_two.id: {observer.id}}
+                 if observer_two is not None else None)
+    encounter = Encounter(world, 15, 0, initiated=True, awareness=awareness,
                           id=f"genealogy-population-{suffix}")
     world.add_event(encounter)
     encounter.add_being(observer_id)
@@ -103,18 +106,50 @@ def linked_request(group, member_id, *, key="bind-C", boundary=1, geometry=None)
 
 
 def prepare_native_spot(*, suffix, seed, resolve=True):
-    """Publish realization, then schedule an ordinary six-second native Spot."""
+    """Publish realization, then accept an identity-free native Spot intent."""
     world, encounter, group, observer, rng, counts, child_id, spotter = make_world(
         suffix=suffix, independent_observer=True, rng_seed=seed)
+    # The only current participants are mutually constrained by the authored
+    # starting awareness: the Spotter already knows the observer, so there is
+    # no unfamiliar Being to bind. Refusal must be a pure no-op.
+    zero_candidate_before = (
+        encounter.time, rng.state, dict((key, set(value))
+                                       for key, value in encounter.awareness.items()),
+        tuple(encounter.pending_action_list), tuple(encounter.finished_action_list),
+        tuple(encounter.cancelled_action_list),
+        tuple(encounter.__dict__.get("_atomic_interval_history", ())),
+        tuple(encounter._choice_book._choices), set(world.event_history),
+    )
+    zero_candidate_intent = accept_spot_attention(encounter, spotter.id)
+    zero_candidate_after = (
+        encounter.time, rng.state, dict((key, set(value))
+                                       for key, value in encounter.awareness.items()),
+        tuple(encounter.pending_action_list), tuple(encounter.finished_action_list),
+        tuple(encounter.cancelled_action_list),
+        tuple(encounter.__dict__.get("_atomic_interval_history", ())),
+        tuple(encounter._choice_book._choices), set(world.event_history),
+    )
+    assert zero_candidate_intent == AttentionIntentResult(False, "not_accepted")
+    assert zero_candidate_before == zero_candidate_after
     candidate = prepare_adult_member_candidate(
         encounter, group, linked_request(group, child_id,
             geometry=AdultMemberGeometryDescriptor(sphere_radius=0.5)))
     genealogy_before = world.reproduction_group_snapshot()
     encounter.step(1, adult_member_candidate=candidate)
     being = world.get_object_by_id(child_id)
-    spot = SpotAction(world, spotter.id, child_id, encounter.time,
-                      id=f"population-linked-spot-{suffix}")
-    encounter.schedule_choice((spot,))
+    intent = accept_spot_attention(encounter, spotter.id)
+    assert intent == AttentionIntentResult(True, "accepted")
+    assert set(vars(intent)) == {"accepted", "status"}
+    assert child_id not in repr(intent)
+    spot = next(
+        member.action
+        for choice in encounter._choice_book._choices.values()
+        for member in choice.members
+        if type(member.action) is SpotAction
+    )
+    # Trusted test inspection checks the native private binding; the caller
+    # supplied only the actor identity to accept_spot_attention.
+    assert spot.target_id == child_id
     before = {
         "spotter": tuple(encounter.aware_beings(spotter.id)),
         "other_observer": tuple(encounter.aware_beings(observer.id)),
@@ -123,6 +158,8 @@ def prepare_native_spot(*, suffix, seed, resolve=True):
         "genealogy": world.reproduction_group_snapshot(),
         "rng": rng.state,
         "history": spotter.personal_history,
+        "intent": intent,
+        "zero_candidate_intent": zero_candidate_intent,
     }
     encounter.step(5)
     assert encounter.time == 6
@@ -141,8 +178,14 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         (world, encounter, group, observer, spotter, being, spot, inspection,
          before, counts, genealogy_before, _) = prepare_native_spot(
             suffix="spot-success", seed=5302)
-        self.assertEqual(before["spotter"], ())
+        self.assertEqual(before["spotter"], (observer.id,))
+        self.assertNotIn(being.id, before["spotter"])
         self.assertEqual(before["other_observer"], ())
+        self.assertEqual(before["zero_candidate_intent"],
+                         AttentionIntentResult(False, "not_accepted"))
+        self.assertEqual(before["intent"], AttentionIntentResult(True, "accepted"))
+        self.assertEqual(set(vars(before["intent"])), {"accepted", "status"})
+        self.assertNotIn(being.id, repr(before["intent"]))
         self.assertEqual(encounter.time, 7)
         self.assertEqual((spot.start_time, spot.end_time), (1, 7))
         self.assertIn(spot.id, inspection.actions)
@@ -152,7 +195,8 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         metadata = dict(record.facts.metadata)
         self.assertEqual((metadata["roll"], metadata["discovery_dc"],
                           metadata["effective_dc"]), (18, 15, 15))
-        self.assertEqual(tuple(encounter.aware_beings(spotter.id)), (being.id,))
+        self.assertEqual(tuple(encounter.aware_beings(spotter.id)),
+                         (observer.id, being.id))
         self.assertEqual(tuple(encounter.aware_beings(observer.id)), ())
         # Current Being Spot publishes Awareness only. It has no Group-count,
         # parentage, kinship, evidence, Belief, or Spot-practice consequence.
@@ -218,7 +262,8 @@ class GenealogyPopulationPlaceTests(unittest.TestCase):
         record = encounter.inspect_committed(7).action(spot.id)
         self.assertEqual(record.facts.outcome, "success")
         self.assertEqual(dict(record.facts.metadata)["roll"], 18)
-        self.assertEqual(tuple(encounter.aware_beings(spotter.id)), (being.id,))
+        self.assertEqual(tuple(encounter.aware_beings(spotter.id)),
+                         (observer.id, being.id))
         self.assertEqual(tuple(encounter.aware_beings(observer.id)), ())
         self.assertEqual(group.counts(), counts)
         self.assertEqual(world.reproduction_group_snapshot(), genealogy_before)
