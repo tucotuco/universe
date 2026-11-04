@@ -24,8 +24,12 @@ from spatial import CartesianPosition, Sphere
 from universe import Universe
 
 
-def build_arena(*, die_roll=20, resolve=True):
-    """Build and resolve one fresh deterministic two-Being Arena."""
+def build_arena(*, die_roll=20, resolve=True, submit_spot=True):
+    """Build a fresh Arena, optionally submitting and resolving its native Spot.
+
+    ``submit_spot=False`` is used by the local interactive adapter so the
+    operator, rather than scenario construction, initiates the Choice.
+    """
     world = Universe(
         "NPC candidate Arena",
         library=Library(config_dir=str(ROOT / "src" / "config")),
@@ -57,16 +61,19 @@ def build_arena(*, die_roll=20, resolve=True):
     rng = RNGCursor(random.Random(74001).getstate())
     encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
 
-    spot = SpotAction(
-        world, ari.native_being_id, bex.native_being_id, start_time=0,
-        duration=6, die_roll=die_roll, id="npc-arena/action/spot-ari-bex",
-    )
-    encounter.schedule_choice((spot,))
     rng_before = rng.state
+    spot = None
+    accepted_choice = None
     view = None
     action = None
     committed_boundaries = ()
-    if resolve:
+    if submit_spot:
+        spot = SpotAction(
+            world, ari.native_being_id, bex.native_being_id, start_time=0,
+            duration=6, die_roll=die_roll, id="npc-arena/action/spot-ari-bex",
+        )
+        accepted_choice = encounter.schedule_choice((spot,))
+    if resolve and submit_spot:
         encounter.step(6)
         view = encounter.inspect_committed(6)
         action = view.action(spot.id)
@@ -81,6 +88,7 @@ def build_arena(*, die_roll=20, resolve=True):
         "encounter": encounter,
         "action": action,
         "spot_action": spot,
+        "accepted_choice": accepted_choice,
         "rng": rng,
         "rng_unchanged": rng.state == rng_before,
         "spot_awareness": {
@@ -91,6 +99,11 @@ def build_arena(*, die_roll=20, resolve=True):
         "committed_boundaries": committed_boundaries,
     }
     return summary
+
+
+def build_unstarted_arena(*, die_roll=20):
+    """Construct the same native scenario without scheduling any Action."""
+    return build_arena(die_roll=die_roll, resolve=False, submit_spot=False)
 
 
 def format_arena(summary):

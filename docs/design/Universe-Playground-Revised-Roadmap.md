@@ -47,13 +47,15 @@ Therefore the first goal is **candidate -> explicit native Being binding -> nati
 
 **Bounded result:** [`examples/npc_encounter_arena.py`](../../examples/npc_encounter_arena.py) uses two exported v1 source records, preserves exact source bytes/provenance, and binds display names to two explicitly identified native Human Beings. It commits one revision-60 Spot through the transactional publisher and reports the result as developer inspection. Only names map from NPC source; positions, definitions, geometry, and roll are Arena-authored. See U-ARENA-001 in [`TASKS.md`](../../TASKS.md) and [`docs/tasks/encounter-engine.md`](../tasks/encounter-engine.md). This does not activate generator-derived mechanics or add browser controls.
 
-### A2 — Minimal interactive Arena (next planned increment: U-ARENA-002)
+### A2 — Minimal interactive Arena (completed within U-ARENA-002)
 
 Revisit the actual `examples/live_combat.py` / prior Encounter UI. Reuse safe UI components, controls, visual language or timeline concepts after verification; replace/avoid any facade that owns rules or serialization. Present positions, known/apparent Actions, time, selected participant and committed effects through read-only projections. An operator may propose and submit valid native Actions; each request must be validated by Universe's Action choice and transaction machinery. Keep a distinguishable GM view versus an individual Being's viewpoint. Start local; no cloud or cross-project merge.
 
 **Demo:** two imported participants; choose a supported Action, step time, see correct committed result and history. Do not silently hand out observer omniscience. If existing UI is unusable, implement the smallest new presentation layer rather than repairing a parallel tactical resolver.
 
-### A3 — Bounded portable Arena checkpoint
+**Bounded result:** [`examples/npc_encounter_arena_web.py`](../../examples/npc_encounter_arena_web.py) launches the local adapter in [`examples/arena_web.py`](../../examples/arena_web.py), which serves only on `127.0.0.1`. It presents the two native Cartesian positions, allows one explicit Ari→Bex deliberate Spot Choice through the native ChoiceBook, advances via one-second `Encounter.step(1)` calls, and displays the committed boundary timeline and boundary-6 outcome from `EncounterInspection`. Separate observer endpoints use `Encounter.aware_beings()` only: Ari sees Bex only after successful Spot, Bex does not inherit that Awareness, and neither observer projection contains coordinates. The fixed Spot roll is Arena-authored; Spot does not create location evidence or XP. The view is a local in-memory operator tool, not authentication, player access, or a portable save.
+
+### A3 — Bounded portable Arena checkpoint (next planned increment: U-ARENA-003)
 
 Save a **supported** committed Arena state, start a fresh process, restore and continue a native Action, compare against uninterrupted simulation. Explicitly include provenance/bindings, stable native identities, live supported attributes, positions, RNG, relevant Actions/choices, observer records, receipts and references. Investigate checkpoint refusals, including `BeingLocationObservation` recipients from U-LOC-002A, **only within** the chosen supported closure. Unsupported authoritative state must be refused, never dropped. Protect reproducibility across versions; a checksum is integrity detection, not authenticity.
 
@@ -78,4 +80,4 @@ Expand verified combat and opposition, tactical controls and replay, observer ev
 
 ## 6. Current recommendation
 
-The next Codex assignment is **A1 — NPC candidates in a native Universe Arena**, with `docs/assignments/U-ARENA-001.md` as the proposed implementation task. It is a bounded runnable demonstration, not another reconnaissance report. Before implementation Codex must confirm actual checkout/head, the latest r60 and native APIs. Architectural conflicts must be surfaced rather than resolved by silently adopting NPC-generator mechanics.
+The next Arena increment is **U-ARENA-003 — bounded portable checkpoint**, after defining the exact supported state and checking existing checkpoint refusals. Do not infer that the browser's in-memory view is a save or that general Universe persistence is ready.
