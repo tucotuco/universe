@@ -8,7 +8,7 @@ Back to [TASKS.md](../../TASKS.md).
 - **5E3F:** commit `03c5e9a874c88ac21686b0c0da58d24a736a4cd4` preserves interrupted work under Git-tracked `work-stash/`, with 78 verified snapshots.
 - **5E3H:** commit `379219223686d841fdff70702cd43a45423b8758`, parent `03c5e9a874c88ac21686b0c0da58d24a736a4cd4`, tree `1d12256a79aca7f9ca06b279e238ca462d836d54`; 25 documentation paths. The latest full clean-export regression reported 1,573 passing tests at 5E3G. The 5E2U dirty-tree integration reported 1,630; that later count is separate evidence and is not a replacement for the committed 5E3A candidate provenance.
 - **5E3I:** installs the task register and topic files in one selective documentation commit. Its self-hash is not written into that same commit; identify it in Git by report path and commit subject.
-- **5E3J–5E3K:** sanitized unpublished local history was pushed normally to `https://github.com/tucotuco/universe.git`; the reported remote `main` was independently confirmed at `a22c284909d7f64c14cad919518f9da319bcf1ed`. The current checkout is on `main` at that commit and tracks `origin/main` at the same commit. Private `ARCHIVE_ROOT/` files are still not GitHub-backed up.
+- **5E3J–5E3K:** sanitized unpublished local history was pushed normally to `https://github.com/tucotuco/universe.git`; the 5E3K remote `main` was independently confirmed at `a22c284909d7f64c14cad919518f9da319bcf1ed`. On 2026-11-04, U-OPS-001A published 23 descendant commits; the live remote and local `main` are now both verified at `10ba6c85f329ccced15332b24f19faddf9303d85`. Private `ARCHIVE_ROOT/` files are still not GitHub-backed up.
 
 No regression suite was run for this documentation-only adoption. Run `python docs/encounters_adopted_r60/tools/generate_outstanding_todo.py --check` and `python docs/encounters_adopted_r60/tools/update_encounters_toc.py --check` to verify the maintained issue output and ToC.
 
@@ -31,7 +31,9 @@ The historical archive is addressed through [`historical-evidence-archive-index.
 
 ## Completed operational task: GitHub publication
 
-**U-OPS-006 is complete** for the sanitized history through the current `main` commit, based on the independent remote verification recorded by 5E3K and the matching local tracking ref. Future pushes still require normal repository/content review and explicit authorization. Private `ARCHIVE_ROOT/` contents remain outside GitHub.
+**U-OPS-006 is complete** for the sanitized history through `a22c284909d7f64c14cad919518f9da319bcf1ed`, as independently verified by 5E3K. U-OPS-001A later published its 23-commit descendant range, and live `origin/main` was confirmed at `10ba6c85f329ccced15332b24f19faddf9303d85` on 2026-11-04. Future pushes still require normal repository/content review and explicit authorization. Private `ARCHIVE_ROOT/` contents remain outside GitHub.
+
+**U-OPS-007 is complete:** the verified Universe 6 → 7 handoff was installed at [`handoffs/universe-6-to-7.md`](../handoffs/universe-6-to-7.md) on 2026-11-04. The original cleanup task U-OPS-002 remains historical and unchanged.
 
 ## Safe commits
 
