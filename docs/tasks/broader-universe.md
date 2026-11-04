@@ -22,6 +22,8 @@ The long-term direction is a coherent world that refines detail on demand while 
 - **U-ATT-001:** persistent Attention may eventually concern Beings, Objects, Groups and Events. Events remain a distinct ontology.
 - **U-UI-001:** observer-facing presentation must show only knowledge available to that observer; developer inspection is omniscient and is not player perception.
 
+The [deferred Object/Event perception design note](../design/deferred-object-event-perception.md) records open questions about subjects, motion and perceptible Actions. It is a non-authoritative design note, not an adopted simulation rule or implementation authorization.
+
 ## Planning source
 
 [`deferred-ideas.md`](../deferred-ideas.md) is the earlier consolidated Universe backlog, reviewed 2026-10-19. Keep its broad aspirations, but use current [`TASKS.md`](../../TASKS.md), adopted Encounter rules, current source/tests and later user decisions for present status and acceptance. Historical engineering material is indexed in the [archive index](../historical-evidence-archive-index.md).

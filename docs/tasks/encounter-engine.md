@@ -17,8 +17,8 @@ Back to [TASKS.md](../../TASKS.md).
 
 - **U-PER-002:** general checkpoint/save/load, mixed Action and observer cases, and stochastic continuation.
 - **U-RULE-001:** resolve or retire provisional `ObserveGroupAction` rank/XP behavior without inventing sensing mechanics.
-- **U-SPOT-002:** category-directed Spot/Search, multi-candidate outcomes and sustained Attention remain unapproved.
-- **U-LOC-002:** the one Being/Spot evidence path is complete as U-LOC-002A. General location evidence sources, other Object kinds, waypoints/maps and broader observer access remain open.
+- **U-SPOT-002:** category-directed Spot/Search, multi-candidate outcomes and sustained Attention remain unapproved. General Object/Event, motion and performed-Action perception also remain open.
+- **U-LOC-002:** U-LOC-002A is complete within its bounded Being/Spot scope; U-LOC-002B (an evidence-driven follow-up Action) is **deferred / not authorized**. Other location sources, Object/Event classes, motion and Action perception, waypoints/maps and broader observer access remain open. See the [deferred perception design note](../design/deferred-object-event-perception.md), which records questions only and is not an adopted rule.
 - **U-PHY-001:** live R4 Q/B fatigue remains unintegrated; the preserved workbench is experimental.
 - **U-PHY-002:** continue the authoritative combat/force issue work in the [r60 issue bridge](encounters-r60-open-issues.md).
 

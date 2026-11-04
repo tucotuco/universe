@@ -62,8 +62,8 @@ Historical sources remain untrusted and are not runtime dependencies. Before ado
 - **U-GRP-005:** generalize Group membership/data beyond the population example; any `ObjectGroup` name or heterogeneous membership needs a separate decision. Events stay outside Object ontology.
 - **U-GRP-006:** Agent interest or aggregate Group evidence cannot yet select an unresolved hidden member. Specify trusted-world authority, deterministic selection and information boundaries.
 - **U-ATT-001:** ongoing mutable Attention may eventually concern categories, known Beings/Objects/Groups, or Events such as moonrise; it does not guarantee discovery and differs from a focused Spot Action.
-- **U-SPOT-002:** category-directed Spot, multiple matches and Search semantics remain unapproved.
-- **U-LOC-002:** U-LOC-002A supports one owner-bound Being location sample from successful deliberate Spot. Location evidence for other Object types or Actions, waypoint/map use and broader observer-facing policy remain open.
+- **U-SPOT-002:** category-directed Spot, multiple matches and Search semantics remain unapproved. General Object/Event, motion and performed-Action perception is still open; see the [deferred perception design note](../design/deferred-object-event-perception.md) (design only, not adopted rules).
+- **U-LOC-002:** U-LOC-002A is complete within its one Being/Spot evidence scope. U-LOC-002B (an evidence-driven follow-up Action) is **deferred / not authorized**. Other Object/Event location sources, motion and Action perception, waypoint/map use and broader observer-facing policy remain open.
 - Broader uncertainty, multiple-Group membership, population lifecycle, non-adult realization and autonomous Agent policies remain future work.
 
 ## Planning and source context
