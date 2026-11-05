@@ -55,9 +55,13 @@ Revisit the actual `examples/live_combat.py` / prior Encounter UI. Reuse safe UI
 
 **Bounded result:** [`examples/npc_encounter_arena_web.py`](../../examples/npc_encounter_arena_web.py) launches the local adapter in [`examples/arena_web.py`](../../examples/arena_web.py), which serves only on `127.0.0.1`. It presents the two native Cartesian positions, allows one explicit Ari→Bex deliberate Spot Choice through the native ChoiceBook, advances via one-second `Encounter.step(1)` calls, and displays the committed boundary timeline and boundary-6 outcome from `EncounterInspection`. Separate observer endpoints use `Encounter.aware_beings()` only: Ari sees Bex only after successful Spot, Bex does not inherit that Awareness, and neither observer projection contains coordinates. The fixed Spot roll is Arena-authored; Spot does not create location evidence or XP. The view is a local in-memory operator tool, not authentication, player access, or a portable save.
 
-### A3 — Bounded portable Arena checkpoint (next planned increment: U-ARENA-003)
+### A3 — Bounded portable Arena checkpoint (U-ARENA-003 remains open/blocked)
+
+Completed prerequisite **U-ARENA-003A**: the fixed successful six-boundary native Spot can be exported as a detached, canonical, versioned historical claim containing its chronology, effects, Target-owned Awareness, and original NPC source bindings. Fresh-process validation does not authenticate or install receipts. This is not a checkpoint, restored Encounter, or continuation.
 
 Save a **supported** committed Arena state, start a fresh process, restore and continue a native Action, compare against uninterrupted simulation. Explicitly include provenance/bindings, stable native identities, live supported attributes, positions, RNG, relevant Actions/choices, observer records, receipts and references. Investigate checkpoint refusals, including `BeingLocationObservation` recipients from U-LOC-002A, **only within** the chosen supported closure. Unsupported authoritative state must be refused, never dropped. Protect reproducibility across versions; a checksum is integrity detection, not authenticity.
+
+The 003A projection does not close these requirements. Do not treat imported historical claims as native receipts; a reviewed trusted-local history/inspection-composition contract is required before native restore and continuation can be attempted.
 
 A saved Arena draft and event replay are not substitutes for this checkpoint.
 
