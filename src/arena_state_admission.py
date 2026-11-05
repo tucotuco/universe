@@ -459,7 +459,13 @@ def _prepare_arena_state(candidate, prefix, history_view, capability, *,
         "NO LIVE ENCOUNTER OR CONTINUATION; no Action scheduling, receipt issuance, or RNG authority")
     result = QuarantinedArenaState(view)
     with _LOCK:
-        _PRIVATE_NATIVE[result] = (anchor, beings)
+        # Retain the exact inputs which produced this quarantined graph. Later
+        # bounded Arena policies may consume the graph only after revalidating
+        # this same B1/B2 pair and host selection.
+        _PRIVATE_NATIVE[result] = (
+            anchor, beings, candidate, prefix, history_view,
+            record.scenario, record.expected_bindings, record.expected_sources,
+        )
     return result
 
 
@@ -472,3 +478,26 @@ def _private_native_beings(result):
     if graph is None:
         raise ArenaStateAdmissionRejected("quarantined native graph is no longer available")
     return graph[1]
+
+
+def _private_admitted_inputs(result):
+    """Return the exact B1/B2 objects and host expectations for private adapters."""
+    if type(result) is not QuarantinedArenaState:
+        raise ArenaStateAdmissionRejected("quarantined Arena result required")
+    with _LOCK:
+        graph = _PRIVATE_NATIVE.get(result)
+    if graph is None or len(graph) != 8:
+        raise ArenaStateAdmissionRejected("quarantined Arena graph is absent or already consumed")
+    return graph[2:]
+
+
+def _consume_private_native_graph(result, expected_beings):
+    """Transfer the exact private graph once to an approved Arena activation."""
+    if type(result) is not QuarantinedArenaState:
+        raise ArenaStateAdmissionRejected("quarantined Arena result required")
+    with _LOCK:
+        graph = _PRIVATE_NATIVE.get(result)
+        if graph is None or len(graph) != 8 or graph[1] is not expected_beings:
+            raise ArenaStateAdmissionRejected("quarantined Arena graph changed or was already consumed")
+        del _PRIVATE_NATIVE[result]
+    return graph[:2]
