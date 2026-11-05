@@ -3,12 +3,21 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 from threading import RLock
 from urllib.parse import urlsplit
 
-from activities import SpotAction
+from activities import RunAction, SpotAction
 from action_choice import ChoiceRejected
+from arena_history_prefix import capture_arena_history_prefix
+from arena_state_candidate import capture_arena_post_spot_state
+from arena_local_checkpoint import (
+    ArenaLocalCheckpointRejected,
+    encode_local_bundle,
+    write_local_bundle,
+)
 from examples.npc_encounter_arena import build_unstarted_arena
+from arena_state_activation import _compose_committed_inspection
 
 
 class ArenaRequestError(ValueError):
@@ -18,19 +27,34 @@ class ArenaRequestError(ValueError):
 class ArenaSession:
     """One in-memory native transactional Arena; Universe remains authoritative."""
 
-    def __init__(self, *, die_roll=20):
-        self.scenario = build_unstarted_arena(die_roll=die_roll)
-        self.encounter = self.scenario["encounter"]
-        self.world = self.encounter.universe
-        self.ari, self.bex = self.scenario["candidate_bindings"]
+    def __init__(self, *, die_roll=20, save_path=None, active=None):
+        self.active = active
+        self.save_path = save_path
+        self._saved = False
+        if active is None:
+            self.scenario = build_unstarted_arena(die_roll=die_roll)
+            self.encounter = self.scenario["encounter"]
+            self.world = self.encounter.universe
+            self.ari, self.bex = self.scenario["candidate_bindings"]
+            self.rng = self.scenario["rng"]
+        else:
+            self.scenario = None
+            self.encounter = active.encounter
+            self.world = active.world
+            self.rng = active.rng
+            bindings = {row.native_being_id: row for row in active.imported_history.npc_bindings}
+            self.ari = bindings["arena/being/ari"]
+            self.bex = bindings["arena/being/bex"]
         self.die_roll = die_roll
-        self._rng_initial = self.scenario["rng"].state
+        self._rng_initial = self.rng.state
         self._spot = None
         self._choice = None
+        self._run = None
+        self._run_choice = None
         self._lock = RLock()
 
     def _inspection(self):
-        if self.encounter.time < 1:
+        if self.encounter.time < 1 or (self.active is not None and self.encounter.time == 6):
             return None
         return self.encounter.inspect_committed(int(self.encounter.time))
 
@@ -52,25 +76,62 @@ class ArenaSession:
                     "name": binding.display_name,
                     "id": binding.native_being_id,
                     "position": self._position(binding.native_being_id, inspection),
+                    "hit_points": self.world.get_object_by_id(binding.native_being_id).get_hit_points(),
+                    "aware_of": list(self.encounter.aware_beings(binding.native_being_id)),
                     "native_definition": binding.native_definition_name,
                     "source_sha256": binding.source_sha256,
                 })
-            choice = None
+            choice = self.encounter.get_choice(self._run_choice.id) if self._run_choice is not None else (
+                self.encounter.get_choice(self._choice.id) if self._choice is not None else None)
             committed_action = None
-            if self._choice is not None:
-                choice = self.encounter.get_choice(self._choice.id)
-                if inspection is not None and self._spot.id in inspection.actions:
-                    result = inspection.action(self._spot.id)
+            if inspection is not None:
+                action_id = (self._run.id if self._run is not None
+                            else self._spot.id if self._spot is not None else None)
+                if action_id is not None and action_id in inspection.actions:
+                    result = inspection.action(action_id)
                     facts = dict(result.facts.metadata)
                     committed_action = {
-                        "id": self._spot.id, "boundary": result.resolved_boundary,
+                        "id": action_id, "boundary": result.resolved_boundary,
+                        "actor_id": result.declaration.actor_id,
+                        "target_id": result.declaration.target_id,
+                        "choice_id": result.lifecycle.choice_id,
                         "outcome": result.facts.outcome, "roll": facts.get("roll"),
                         "effective_dc": facts.get("effective_dc"),
+                        "metadata": facts,
                         "effect_ids": [str(effect.identity) for effect in result.effects],
+                        "practice": [{
+                            "being_id": row.being_id, "skill": row.skill_name,
+                            "experience": row.experience, "time": row.time,
+                            "causal_action_ids": [item.action_id for item in row.exercises],
+                        } for row in inspection.target(self.ari.native_being_id).practice_history],
                     }
-            timeline = [] if inspection is None else [
-                {"boundary": row.boundary, "start": row.start,
-                 "action_ids": list(row.action_ids)} for row in inspection.timeline]
+            if self.active is not None:
+                payload = self.active.imported_prefix.payload()
+                timeline = [{
+                    "boundary": row["boundary"], "start": float.fromhex(row["start_time"]),
+                    "action_ids": list(row["action_ids"]),
+                    "provenance": "imported/host-accepted claim; original receipt authenticity not established",
+                } for row in payload["boundaries"]]
+                if inspection is not None:
+                    composed = _compose_committed_inspection(self.active)
+                    timeline = [{
+                        "boundary": row.boundary, "start": row.start,
+                        "action_ids": list(row.action_ids), "provenance": row.provenance,
+                    } for row in composed.timeline]
+            else:
+                timeline = [] if inspection is None else [
+                    {"boundary": row.boundary, "start": row.start,
+                     "action_ids": list(row.action_ids),
+                     "provenance": "native/publisher-issued in this process"}
+                    for row in inspection.timeline]
+            imported_action = None
+            if self.active is not None:
+                spot = self.active.imported_history.spot
+                imported_action = {
+                    "id": spot.action_id, "boundary": spot.resolved_boundary,
+                    "outcome": spot.outcome,
+                    "provenance": "imported/host-accepted claim; original receipt authenticity not established",
+                }
             return {
                 "audience": "GM/developer omniscient Reality view; local operator tool, not an auth boundary",
                 "time": self.encounter.time, "encounter_id": self.encounter.id,
@@ -79,7 +140,20 @@ class ArenaSession:
                     "id": choice.id, "state": choice.state,
                     "action_ids": list(choice.action_ids), "first_start": choice.first_start},
                 "spot": committed_action, "committed_timeline": timeline,
-                "rng_unchanged": self.scenario["rng"].state == self._rng_initial,
+                "historical_spot_claim": imported_action,
+                "history_mode": "trusted-local continuation" if self.active is not None else "native live Arena",
+                "imported_history_trust": None if self.active is None else self.active.imported_history.trust,
+                "run_choice": None if self._run_choice is None else {
+                    "id": self._run_choice.id, "state": self._run_choice.state,
+                    "action_ids": list(self._run_choice.action_ids),
+                },
+                "save_available": (self.save_path is not None and self.active is None
+                                   and self.encounter.time == 6 and committed_action is not None
+                                   and committed_action["outcome"] == "success" and not self._saved),
+                "saved": self._saved,
+                "native_receipt_boundaries": [row.boundary for row in self.encounter.__dict__.get("_atomic_interval_history", ())],
+                "native_inspection_boundaries": [] if inspection is None else [row.boundary for row in inspection.timeline],
+                "rng_unchanged": self.rng.state == self._rng_initial,
             }
 
     def observer_view(self, observer_id):
@@ -108,39 +182,103 @@ class ArenaSession:
                 self.world, self.ari.native_being_id, self.bex.native_being_id,
                 start_time=0, duration=6, die_roll=self.die_roll,
                 id="npc-arena/action/spot-ari-bex")
-            draft = self.encounter.propose_choice({"spot-ari-bex": action})
-            validation = self.encounter.validate_choice(draft)
-            if not validation.valid:
-                raise ChoiceRejected(validation.diagnostics)
-            choice = self.encounter.accept_valid_choice(validation)
+            # The native convenience adapter performs the same complete-set
+            # validation and produces the closed ChoiceBook state required by
+            # the existing B2 capture contract.
+            choice = self.encounter.schedule_choice((action,))
             self._spot, self._choice = action, choice
             return {"choice_id": choice.id, "state": choice.state,
                     "action_ids": list(choice.action_ids)}
 
     def advance_one_second(self):
         with self._lock:
-            if self.encounter.time >= 6:
-                raise ArenaRequestError("this bounded Arena ends at boundary 6")
+            limit = 7 if self.active is not None else 6
+            if self.encounter.time >= limit:
+                raise ArenaRequestError(f"this bounded Arena ends at boundary {limit}")
+            if self.active is not None and self.encounter.time == 6 and self._run_choice is None:
+                raise ArenaRequestError("submit the one allowlisted Run Choice before advancing boundary 7")
             before = self.encounter.time
-            self.encounter.step(1)
+            if self.active is not None:
+                self.encounter.step(1, velocities={
+                    self.ari.native_being_id: (1, 0, 0),
+                    self.bex.native_being_id: (0, 0, 0),
+                })
+            else:
+                self.encounter.step(1)
             if self.encounter.time != before + 1:
                 raise RuntimeError("native Encounter did not advance exactly one second")
             return self.gm_view()
+
+    def save_supported_state(self):
+        """Save only a successfully committed, quiescent native boundary 6."""
+        with self._lock:
+            if self.save_path is None or self.active is not None:
+                raise ArenaRequestError("this Arena process has no configured initial-state save destination")
+            if self._saved:
+                raise ArenaRequestError("this Arena boundary-6 state was already saved")
+            if self.encounter.time != 6 or self.encounter.last_processed_boundary != 6:
+                raise ArenaRequestError("save requires the committed boundary-6 state")
+            if (self.encounter.pending_action_list or self.encounter.__dict__.get("_dispatching")
+                    or self.encounter.__dict__.get("_advancing") or self.encounter.__dict__.get("_running")):
+                raise ArenaRequestError("save requires quiescent Action scheduling")
+            inspection = self.encounter.inspect_committed(6)
+            spot = inspection.action("npc-arena/action/spot-ari-bex")
+            if spot.facts.outcome != "success" or spot.resolved_boundary != 6:
+                raise ArenaRequestError("only the successful boundary-6 Spot case is saveable")
+            if self._choice is None or self.encounter.get_choice(self._choice.id).state != "finished":
+                raise ArenaRequestError("native Spot Choice is not finished at boundary 6")
+            summary = dict(self.scenario)
+            prefix = capture_arena_history_prefix(summary)
+            candidate = capture_arena_post_spot_state(summary, prefix)
+            wire = encode_local_bundle(prefix, candidate)
+            try:
+                destination = write_local_bundle(
+                    self.save_path, wire,
+                    repository_root=Path(__file__).resolve().parents[1])
+            except ArenaLocalCheckpointRejected as exc:
+                raise ArenaRequestError(str(exc)) from exc
+            self._saved = True
+            return {
+                "saved": True,
+                "path": str(destination),
+                "bundle_schema": "universe.arena.operator-bundle/1",
+                "history_prefix_sha256": prefix.content_sha256,
+                "state_candidate_sha256": candidate.content_sha256,
+                "historical_trust": "untrusted data until separately host-admitted",
+            }
+
+    def submit_run(self):
+        """Accept the one fixed native Ari +X Run at the imported time-6 fence."""
+        with self._lock:
+            if self.active is None or self.encounter.time != 6:
+                raise ArenaRequestError("the supported Run Choice is available only in a resumed time-6 Arena")
+            if self._run_choice is not None:
+                raise ArenaRequestError("the boundary-7 Run Choice was already submitted")
+            action = RunAction(
+                self.world, self.ari.native_being_id, 6, 1, 0.5,
+                experience=4, id="npc-arena/action/run-ari-boundary-7")
+            self._run_choice = self.encounter.schedule_choice((action,))
+            self._run = action
+            return {"choice_id": self._run_choice.id, "state": self._run_choice.state,
+                    "action_ids": list(self._run_choice.action_ids),
+                    "provenance": "new operator-submitted native Choice; boundary 7 not yet committed"}
 
 
 _PAGE = r'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Universe Encounter Arena</title><style>
 body{font:16px system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#202533}.tag{background:#f1e8d3;padding:.65rem;border-left:4px solid #a87520}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}section{border:1px solid #ccd2da;border-radius:8px;padding:1rem}button{padding:.6rem 1rem;margin:.4rem .4rem .4rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f6f7f8;padding:.8rem}svg{width:100%;height:230px;background:#f5f8fb;border:1px solid #d3dae2}
 </style><h1>Universe Encounter Arena</h1><p class="tag"><b>Local GM/developer tool.</b> The GM panel is omniscient Reality inspection. Ari and Bex panels are separate observer Awareness projections. This localhost page is not an authentication boundary.</p>
-<section><h2>GM / developer Reality view</h2><p id="clock"></p><svg viewBox="0 0 520 220" role="img" aria-label="Cartesian Arena map"><line x1="30" y1="180" x2="500" y2="180" stroke="#667"/><line x1="30" y1="20" x2="30" y2="180" stroke="#667"/><g id="markers"></g></svg><pre id="participants"></pre><p>Supported operation: Ari Spots Bex (GM-directed target; fixed scenario roll). Submit before stepping, then advance one second per click. The six-second Action commits at boundary 6.</p><button id="spot">Submit Ari → Bex Spot Choice</button><button id="advance">Advance one second</button><p id="message" role="status"></p><h3>Choice and committed result</h3><pre id="choice"></pre><h3>Committed boundary timeline</h3><pre id="timeline"></pre></section>
+<section><h2>GM / developer Reality view</h2><p id="clock"></p><p id="trust"></p><svg viewBox="0 0 520 220" role="img" aria-label="Cartesian Arena map"><line x1="30" y1="180" x2="500" y2="180" stroke="#667"/><line x1="30" y1="20" x2="30" y2="180" stroke="#667"/><g id="markers"></g></svg><pre id="participants"></pre><p id="instructions">Supported operation: Ari Spots Bex (GM-directed target; fixed scenario roll). Submit before stepping, then advance one second per click. The six-second Action commits at boundary 6.</p><button id="spot">Submit Ari → Bex Spot Choice</button><button id="save" hidden>Save supported Arena state</button><button id="run" hidden>Submit Ari Run +X Choice</button><button id="advance">Advance one second</button><p id="message" role="status"></p><h3>Choice and committed result</h3><pre id="choice"></pre><h3>Boundary history and provenance</h3><pre id="timeline"></pre></section>
 <div class="grid"><section><h2>Ari observer projection</h2><pre id="ari"></pre></section><section><h2>Bex observer projection</h2><pre id="bex"></pre></section></div>
 <script>
 async function req(path,method='GET',body){const o={method,headers:{}};if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}const r=await fetch(path,o),d=await r.json();if(!r.ok)throw Error(d.error||('HTTP '+r.status));return d}
 function show(id,v){document.getElementById(id).textContent=JSON.stringify(v,null,2)}
 function draw(rows){const g=document.getElementById('markers');while(g.firstChild)g.removeChild(g.firstChild);for(const p of rows){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('cx',String(50+Number(p.position.x)*100));c.setAttribute('cy',String(170-Number(p.position.y)*100));c.setAttribute('r','8');c.setAttribute('fill',p.name==='Ari'?'#316ab0':'#bd573d');g.appendChild(c);const t=document.createElementNS('http://www.w3.org/2000/svg','text');t.setAttribute('x',String(62+Number(p.position.x)*100));t.setAttribute('y',String(174-Number(p.position.y)*100));t.textContent=p.name;g.appendChild(t)}}
-async function refresh(){const g=await req('/api/gm');document.getElementById('clock').textContent='Encounter time: '+g.time+' s';draw(g.participants);show('participants',g.participants);show('choice',{choice:g.choice,committed_action:g.spot});show('timeline',g.committed_timeline);show('ari',await req('/api/observer/ari'));show('bex',await req('/api/observer/bex'));document.getElementById('spot').disabled=!!g.choice||g.time!==0;document.getElementById('advance').disabled=g.time>=6}
+async function refresh(){const g=await req('/api/gm');document.getElementById('clock').textContent='Encounter time: '+g.time+' s';document.getElementById('trust').textContent=g.imported_history_trust||'';draw(g.participants);show('participants',g.participants);show('choice',{native_choice:g.choice,run_choice:g.run_choice,imported_spot_claim:g.historical_spot_claim,committed_action:g.spot});show('timeline',g.committed_timeline);show('ari',await req('/api/observer/ari'));show('bex',await req('/api/observer/bex'));document.getElementById('spot').hidden=g.history_mode!=='native live Arena';document.getElementById('spot').disabled=!!g.choice||g.time!==0;document.getElementById('save').hidden=!g.save_available&&!g.saved;document.getElementById('save').disabled=!g.save_available;document.getElementById('run').hidden=g.history_mode!=='trusted-local continuation';document.getElementById('run').disabled=g.time!==6||!!g.run_choice;document.getElementById('advance').disabled=(g.history_mode==='native live Arena'?g.time>=6:g.time>=7)||(g.time===6&&g.history_mode==='trusted-local continuation'&&!g.run_choice)}
 document.getElementById('spot').onclick=async()=>{try{await req('/api/spot','POST',{operation:'ari_spots_bex'});document.getElementById('message').textContent='Choice accepted by native Encounter ChoiceBook.';await refresh()}catch(e){document.getElementById('message').textContent=e.message}};
 document.getElementById('advance').onclick=async()=>{try{await req('/api/advance','POST',{seconds:1});document.getElementById('message').textContent='Advanced one native Encounter second.';await refresh()}catch(e){document.getElementById('message').textContent=e.message}};refresh().catch(e=>document.getElementById('message').textContent=e.message);
+document.getElementById('save').onclick=async()=>{try{const r=await req('/api/save','POST',{});document.getElementById('message').textContent='Saved exact supported B1/B2 data; it remains untrusted until host admission.';await refresh()}catch(e){document.getElementById('message').textContent=e.message}};
+document.getElementById('run').onclick=async()=>{try{await req('/api/run','POST',{operation:'ari_run_plus_x'});document.getElementById('message').textContent='Native Run Choice accepted. Advance one second to publish boundary 7.';await refresh()}catch(e){document.getElementById('message').textContent=e.message}};
 </script></html>'''
 
 
@@ -190,6 +328,14 @@ def make_handler(session):
                     if payload != {"seconds": 1}:
                         raise ArenaRequestError("advance accepts exactly one second")
                     return self._send(200, session.advance_one_second())
+                if path == "/api/save":
+                    if payload != {}:
+                        raise ArenaRequestError("save accepts an empty request; destination is host-configured")
+                    return self._send(200, session.save_supported_state())
+                if path == "/api/run":
+                    if payload != {"operation": "ari_run_plus_x"}:
+                        raise ArenaRequestError("only the allowlisted Ari Run +X operation is supported")
+                    return self._send(200, session.submit_run())
                 return self._send(404, {"error": "unknown Arena endpoint"})
             except ArenaRequestError as exc:
                 return self._send(409, {"error": str(exc)})
@@ -205,11 +351,11 @@ def make_handler(session):
     return Handler
 
 
-def serve_local(port=8000):
+def serve_local(port=8000, *, session=None):
     """Serve only on IPv4 loopback; the host is intentionally not configurable."""
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(ArenaSession()))
-    print(f"Universe Encounter Arena: http://127.0.0.1:{server.server_port}/")
-    print("Local GM/developer tool; in-memory only, not a save or login boundary. Ctrl-C to stop.")
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session or ArenaSession()))
+    print(f"Universe Encounter Arena: http://127.0.0.1:{server.server_port}/", flush=True)
+    print("Local GM/developer tool; no client-selected path or Action IDs. Ctrl-C to stop.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -10,16 +10,47 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-from arena_web import serve_local
+from arena_web import ArenaSession, serve_local
+from arena_local_checkpoint import ArenaLocalCheckpointRejected, activate_approved_local_bundle, validate_local_path
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--save-path", help="host-configured absolute bundle destination outside the repository")
+    parser.add_argument("--resume-from", help="host-selected saved bundle; requires --approve-local-checkpoint")
+    parser.add_argument("--approve-local-checkpoint", action="store_true",
+                        help="explicitly trust the exact fixed local Arena bundle for this process")
+    parser.add_argument("--rng-seed", type=int,
+                        help="new host-selected process-local RNG seed; required with --resume-from")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
-    serve_local(args.port)
+    if args.resume_from:
+        if not args.approve_local_checkpoint:
+            parser.error("--resume-from requires the separate --approve-local-checkpoint option")
+        if args.save_path:
+            parser.error("--save-path is only supported when starting the original Arena")
+        if args.rng_seed is None:
+            parser.error("--resume-from requires a separately host-selected --rng-seed")
+        try:
+            active = activate_approved_local_bundle(
+                args.resume_from, repository_root=ROOT,
+                fixture_root=ROOT / "examples" / "npc_candidates",
+                host_approved=args.approve_local_checkpoint, rng_seed=args.rng_seed)
+            session = ArenaSession(active=active)
+        except (ArenaLocalCheckpointRejected, OSError, ValueError) as exc:
+            parser.error(f"saved Arena was refused: {exc}")
+    else:
+        if args.approve_local_checkpoint or args.rng_seed is not None:
+            parser.error("approval and RNG options are valid only with --resume-from")
+        if args.save_path:
+            try:
+                args.save_path = str(validate_local_path(args.save_path, repository_root=ROOT))
+            except ArenaLocalCheckpointRejected as exc:
+                parser.error(f"save destination is invalid: {exc}")
+        session = ArenaSession(save_path=args.save_path)
+    serve_local(args.port, session=session)
 
 
 if __name__ == "__main__":
