@@ -45,6 +45,8 @@ class NpcBeingArena:
     strike: MeleeStrike
     rng: RNGCursor
     submitted: bool = False
+    choice: object = None
+    committed_result: object = None
 
     def developer_view(self):
         source_state = self.source_record["state"]
@@ -92,16 +94,33 @@ class NpcBeingArena:
             "progression_mode": self.encounter.progression_mode,
         }
 
-    def resolve_one_thrust(self):
-        """Accept and publish the one fixed Action; a second submission refuses."""
+    def submit_thrust(self):
+        """Accept the one fixed Choice without advancing or consuming RNG."""
         if self.submitted:
             raise RuntimeError("the one Arena thrust has already been submitted")
+        choice = self.encounter.schedule_choice((self.strike,))
+        self.choice = choice
         self.submitted = True
-        self.encounter.schedule_choice((self.strike,))
+        return {
+            "accepted": True,
+            "action_id": self.strike.id,
+            "choice_id": choice.id,
+            "choice_state": choice.state,
+            "start_time": self.strike.start_time,
+            "scheduled_end_time": self.strike.end_time,
+            "encounter_time": self.encounter.time,
+        }
+
+    def advance_to_commit(self):
+        """Advance this fixed scenario to impact and read the publisher result."""
+        if not self.submitted:
+            raise RuntimeError("submit the fixed thrust before advancing")
+        if self.committed_result is not None:
+            raise RuntimeError("the one Arena thrust has already committed")
         self.encounter.step(self.strike.end_time - self.encounter.time)
         inspection = self.encounter.inspect_committed(self.strike.end_time)
         action = inspection.action(self.strike.id)
-        return {
+        self.committed_result = {
             "action_id": self.strike.id,
             "choice_id": action.lifecycle.choice_id,
             "boundary": action.resolved_boundary,
@@ -109,11 +128,19 @@ class NpcBeingArena:
             "metadata": dict(action.facts.metadata),
             "causal_damage": dict(action.damage_by_target.get(self.opponent.id, {})),
             "target_id": self.opponent.id,
-            "target_hp_after": self.opponent.get_hit_points(),
+            # Result displays come from the immutable committed Target projection,
+            # never from a later live read of the Being.
+            "target_hp_after": inspection.target(self.opponent.id).state.projected_hp,
             "native_receipt_boundaries": tuple(
                 row.boundary for row in self.encounter.__dict__.get("_atomic_interval_history", ())),
             "progression_mode": self.encounter.progression_mode,
         }
+        return dict(self.committed_result)
+
+    def resolve_one_thrust(self):
+        """Terminal convenience: accept then publish the one fixed Action."""
+        self.submit_thrust()
+        return self.advance_to_commit()
 
 
 def build_arena(*, seed=DEMO_SEED):
