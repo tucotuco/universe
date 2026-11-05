@@ -21,7 +21,7 @@ Approve a separate, explicit host policy contract for trusted-local admission of
 
 ## Verification
 
-- Direct refusal probe built the actual native six-boundary Arena, captured its detached prefix, and passed that prefix to `_host_authorize_trusted_local_restore`. It rejected with `host approval requires the exact private Run binding`; `_COMMITTED_RECEIPTS` remained byte-for-byte equivalent by mapping comparison.
+- Direct refusal probe built the actual native six-boundary Arena, captured its detached prefix, and passed that prefix to `_host_authorize_trusted_local_restore`. It rejected with `host approval requires the exact private Run binding`; `_COMMITTED_RECEIPTS` remained unchanged under exact mapping equality.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests python -m unittest test_arena_history_prefix` on the active worktree: **5 passed**.
 - The active-worktree combined command `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests python -m unittest test_arena_history_prefix test_checkpoint_restore_preparation` passed the five Arena-prefix tests, but the five Run-preparation tests errored before reaching their assertions because the tracked `docs/universe4-authoritative-decisions-2026-10-27.md` is absent from the current user-managed worktree. No restoration or repair was attempted.
 - Repeated those same focused suites in a disposable `git archive HEAD` export, adding the existing read-only legacy offspring CSV test fixtures: **10 passed**. This confirms the committed host-approval and refusal tests without changing the active tree.
