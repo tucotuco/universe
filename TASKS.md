@@ -10,7 +10,7 @@ No implementation task is active. The bounded U-ARENA-001 native scenario and U-
 
 ## NEXT
 
-- [ ] **U-ARENA-003 · OPEN/BLOCKED — Bounded portable Arena checkpoint and continuation.** The completed U-ARENA-003A projection is detached historical data only; native restoration, historical inspection composition, and post-load Action publication remain unsupported. Resume only after a reviewed trusted-local imported-history/inspection contract exists. General Universe persistence remains out of scope. See [Encounter engine](docs/tasks/encounter-engine.md) and the [Arena roadmap](docs/design/Universe-Playground-Revised-Roadmap.md).
+- [ ] **U-ARENA-003 · OPEN/BLOCKED — Bounded portable Arena checkpoint and continuation.** U-ARENA-003A supplies detached historical data only. The U-ARENA-003B preparation attempt is blocked: existing host approval is bound to a process-local quarantined Run graph and cannot authorize the six-boundary Arena prefix. Native restoration, historical inspection composition, and post-load Action publication remain unsupported. Resume only after a reviewed out-of-band Arena-history trust contract. General Universe persistence remains out of scope. See [Encounter engine](docs/tasks/encounter-engine.md) and the [Arena roadmap](docs/design/Universe-Playground-Revised-Roadmap.md).
 - [ ] **U-REL-002 · PLANNED — Extend kinship-consistency coverage under partial realization.** The V3 demonstration covers one bounded multigenerational graph; broader cases remain optional follow-up after the current cross-domain integration objective. See [generation and Attention](docs/tasks/generation-and-attention.md).
 
 ## DONE — bounded, demonstrated milestones
