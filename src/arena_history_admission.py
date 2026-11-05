@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import base64
 import re
 from threading import Lock
+import weakref
 from weakref import WeakKeyDictionary
 
 from arena_history_prefix import (
@@ -194,6 +195,7 @@ class _AdmissionRecord:
 
 _CAPABILITIES = WeakKeyDictionary()
 _CAPABILITY_LOCK = Lock()
+_ADMITTED_VIEWS = {}
 
 
 def _validate_expected_bindings(rows):
@@ -361,4 +363,32 @@ def _prepare_arena_history_view(prefix, capability):
         raise ArenaAdmissionRejected("host-approved Arena prefix bytes changed")
     if record.policy_context != "host deliberately selected exact prefix digest and source/native bindings":
         raise ArenaAdmissionRejected("host admission policy context is unsupported")
-    return _build_view(checked)
+    view = _build_view(checked)
+    # Later, narrowly scoped host policies may require evidence that a view
+    # came through this one-shot B1 preparation path. The map is process-local
+    # and records object identity, not a portable or cryptographic credential.
+    key = id(view)
+    reference = weakref.ref(view, lambda ref, key=key: _forget_admitted_view(key, ref))
+    with _CAPABILITY_LOCK:
+        _ADMITTED_VIEWS[key] = (reference, checked.content_sha256)
+    return view
+
+
+def _forget_admitted_view(key, reference):
+    with _CAPABILITY_LOCK:
+        current = _ADMITTED_VIEWS.get(key)
+        if current is not None and current[0] is reference:
+            _ADMITTED_VIEWS.pop(key, None)
+
+
+def _require_prepared_history_view(prefix, view):
+    """Require the exact live view returned by B1 preparation for this prefix."""
+    if type(view) is not HostAcceptedArenaHistoryView:
+        raise ArenaAdmissionRejected("exact B1-prepared Arena history view required")
+    with _CAPABILITY_LOCK:
+        record = _ADMITTED_VIEWS.get(id(view))
+    if record is None or record[0]() is not view or record[1] != prefix.content_sha256:
+        raise ArenaAdmissionRejected("Arena history view was not prepared for this exact prefix")
+    if view != _build_view(_revalidate_prefix(prefix)[1]):
+        raise ArenaAdmissionRejected("B1-prepared Arena history view no longer matches its prefix")
+    return True
