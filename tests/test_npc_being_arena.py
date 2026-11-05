@@ -25,16 +25,22 @@ class TestNpcBeingArena(unittest.TestCase):
                           "Dex": 12, "Con": 9, "Cha": 14})
         self.assertEqual(view["source_derived"]["skills"], {
             "skills": {"armed combat": 1}, "weapon_skills": {"Dagger": 2}})
+        self.assertEqual(view["source_derived"]["initial_hit_points"], {
+            "value": 23, "source_path": "state.hps",
+            "meaning": "generated initial HP value; not a maximum-HP or Hit Dice mapping"})
         self.assertEqual(view["npc_native"]["skills"],
                          {"armed combat": 1, "Dagger": 2})
-        self.assertEqual(view["npc_native"]["HP"], 10)  # explicit Arena baseline
+        self.assertEqual(view["npc_native"]["initial_HP"], 23)
+        self.assertEqual(view["npc_native"]["current_HP"], 23)
         self.assertEqual(view["npc_native"]["position"], (0.0, 0.0, 0.0))
-        self.assertEqual(view["opponent_arena_authored"]["HP"], 10)
+        self.assertEqual(view["opponent_arena_authored"]["initial_HP"], 10)
+        self.assertEqual(view["opponent_arena_authored"]["current_HP"], 10)
         self.assertEqual(view["opponent_arena_authored"]["AC"], 11)
         self.assertNotIn("source_record", view)
         self.assertNotIn("race", view["source_derived"])
         rendered = _format_developer_view(view)
         self.assertIn("Source-derived acquired ranks", rendered)
+        self.assertIn("Source-derived initial HP=23 (state.hps)", rendered)
         self.assertIn("Arena-authored", rendered)
         self.assertNotIn("High Elf", rendered)
         self.assertNotIn("family", rendered.lower())

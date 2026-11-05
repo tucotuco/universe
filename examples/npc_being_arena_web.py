@@ -31,11 +31,11 @@ button{font:inherit;padding:.6rem 1rem;margin:.3rem .4rem .3rem 0}#state{backgro
  <section><h2>Arena-authored mechanics</h2><pre id="arena">Loading…</pre></section>
 </div>
 <section><h2>Encounter progression</h2>
- <p>One fixed native Dagger thrust. Submit the Choice, inspect the pre-commit state, then advance to the scheduled boundary 4. Source race, class, age, XP, possessions and HP are not imported. The source `armed combat` rank is imported, but this implementation does not calculate the full revision-60 strategy pool.</p>
+ <p>One fixed native Dagger thrust. Submit the Choice, inspect the pre-commit state, then advance to the scheduled boundary 4. Tobe's source-generated initial HP is mapped from <code>state.hps</code> to native initial/current HP; it is not a maximum-HP or Hit Dice mapping. Race, age, class/level/XP and possessions are not imported. The source <code>armed combat</code> rank is imported, but this implementation does not calculate the full revision-60 strategy pool.</p>
  <button id="submit">Submit fixed Dagger thrust</button>
  <button id="advance" disabled>Advance to native commit boundary</button>
  <pre id="state">Loading…</pre>
- <p>Native committed inspection does not expose the numerical d20 result. This page shows the native outcome, recorded metadata, Target HP and causal damage without reconstructing a roll.</p>
+ <p>Native committed inspection does not expose the numerical d20 result. This page shows the native outcome, recorded metadata, Target HP and causal damage without reconstructing a roll. The opponent's HP is Arena-authored.</p>
 </section>
 <script>
 async function request(path, method='GET', body){const opts={method,headers:{}};if(body!==undefined){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}const r=await fetch(path,opts);let d;try{d=await r.json()}catch{d={error:'Invalid server response'}}if(!r.ok)throw Error(d.error||('HTTP '+r.status));return d}

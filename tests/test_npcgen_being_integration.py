@@ -94,6 +94,8 @@ class TestNpcgenNativeBeingIntegration(unittest.TestCase):
         self.assertEqual(being.FIT(), 9)  # native Abilities convention: FIT follows CON
         self.assertEqual(being.get_skill_level("armed combat"), 1)
         self.assertEqual(being.get_weapon_skill_level("Dagger"), 2)
+        self.assertEqual(being.original.hit_points, 23)
+        self.assertEqual(being.get_hit_points(), 23)
         self.assertEqual(being.skill_experience, {})
         self.assertEqual(being.skill_use_history, [])
         self.assertEqual(being.weapons, [])
@@ -132,6 +134,30 @@ class TestNpcgenNativeBeingIntegration(unittest.TestCase):
         conflicting_sheet = deepcopy(self.record)
         conflicting_sheet["sheet"]["skills"]["weapon_skills"]["Dagger"] = 3
         cases.append(("conflicting sheet", conflicting_sheet))
+        missing_hp = deepcopy(self.record)
+        del missing_hp["state"]["hps"]
+        cases.append(("missing HP", missing_hp))
+        unresolved_hp = deepcopy(self.record)
+        unresolved_hp["state"]["hps"] = None
+        cases.append(("unresolved HP", unresolved_hp))
+        boolean_hp = deepcopy(self.record)
+        boolean_hp["state"]["hps"] = True
+        cases.append(("boolean HP", boolean_hp))
+        negative_hp = deepcopy(self.record)
+        negative_hp["state"]["hps"] = -1
+        cases.append(("negative HP", negative_hp))
+        fractional_hp = deepcopy(self.record)
+        fractional_hp["state"]["hps"] = 23.0
+        cases.append(("fractional HP", fractional_hp))
+        conflicting_hp = deepcopy(self.record)
+        conflicting_hp["sheet"]["hit_points"] += 1
+        cases.append(("conflicting sheet HP", conflicting_hp))
+        missing_sheet_hp = deepcopy(self.record)
+        del missing_sheet_hp["sheet"]["hit_points"]
+        cases.append(("missing sheet HP", missing_sheet_hp))
+        boolean_sheet_hp = deepcopy(self.record)
+        boolean_sheet_hp["sheet"]["hit_points"] = True
+        cases.append(("boolean sheet HP", boolean_sheet_hp))
 
         for label, record in cases:
             with self.subTest(label=label):

@@ -27,6 +27,7 @@ class _NpcgenV2Fields:
     abilities: tuple
     ordinary_ranks: tuple
     weapon_ranks: tuple
+    initial_hit_points: int
 
 
 def _positive_rank_dict(value, expected_keys, field_name):
@@ -55,6 +56,16 @@ def _validate_npcgen_v2_record(record, library):
     sheet = record.get("sheet")
     if type(state) is not dict or type(sheet) is not dict:
         raise ValueError("npcgen v2 state and sheet objects are required")
+
+    # npcgen's canonical state.hps is its generated hit-point total. The v2
+    # sheet is derived from that same state and must agree; this fixture has no
+    # separate current/damage history.
+    initial_hit_points = state.get("hps")
+    sheet_hit_points = sheet.get("hit_points")
+    if type(initial_hit_points) is not int or initial_hit_points < 0:
+        raise ValueError("state.hps must be a nonnegative integer initial HP value")
+    if type(sheet_hit_points) is not int or sheet_hit_points != initial_hit_points:
+        raise ValueError("sheet.hit_points must be the same integer value as state.hps")
 
     name = state.get("name")
     sheet_identity = sheet.get("identity")
@@ -97,15 +108,17 @@ def _validate_npcgen_v2_record(record, library):
         if library.weapon_dictionary.get_object_definition(weapon_name) is None:
             raise ValueError(f"weapon skill is not configured natively: {weapon_name}")
 
-    return _NpcgenV2Fields(name, tuple(abilities), ordinary, weapons)
+    return _NpcgenV2Fields(name, tuple(abilities), ordinary, weapons, initial_hit_points)
 
 
 def create_npcgen_v2_native_being(universe, source_bytes):
     """Create one genuine native Being from the supported, validated v2 record.
 
     The original bytes remain with the caller for provenance and complete-record
-    inspection. This function imports no source race, age, class/level/XP, HP,
-    possessions, family, notes, Action history, or practice history.
+    inspection. Source ``state.hps`` initializes current HP only; it is not a
+    maximum-HP or Hit Dice mapping. This function imports no source race, age,
+    class/level/XP, possessions, family, notes, Action history, or practice
+    history.
     """
     import json
 
@@ -133,7 +146,8 @@ def create_npcgen_v2_native_being(universe, source_bytes):
     # Explicit native-only test baseline. These required mechanics have no
     # verified mapping from this source record and are not imported NPC facts.
     definition = BeingDefinition(
-        "npcgen fixture baseline", length=1.7, weight=70, hit_points=10,
+        "npcgen fixture baseline", length=1.7, weight=70,
+        hit_points=fields.initial_hit_points,
         hit_dice="1d8", alignment="Neutral", armor_class=11,
         challenge_rating=1, abilities=abilities, skills=skills,
     )

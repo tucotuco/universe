@@ -82,6 +82,8 @@ class NpcBeingArenaWebTests(unittest.TestCase):
         self.assertIn(b"Arena-authored mechanics", page)
         self.assertIn(b"not imported", page)
         self.assertIn(b"does not calculate the full revision-60 strategy pool", page)
+        self.assertIn(b"state.hps", page)
+        self.assertIn(b"maximum-HP or Hit Dice mapping", page)
         self.assertNotIn(b"High Elf", page)
         self.assertNotIn(b"7881", page)
 
@@ -94,6 +96,11 @@ class NpcBeingArenaWebTests(unittest.TestCase):
         source = initial["developer_view"]["source_derived"]
         self.assertEqual(source["display_name"], "Tobe")
         self.assertEqual(source["skills"]["weapon_skills"], {"Dagger": 2})
+        self.assertEqual(source["initial_hit_points"]["value"], 23)
+        self.assertEqual(initial["developer_view"]["npc_native"]["initial_HP"], 23)
+        self.assertEqual(initial["developer_view"]["npc_native"]["current_HP"], 23)
+        self.assertEqual(initial["developer_view"]["opponent_arena_authored"]["initial_HP"], 10)
+        self.assertEqual(initial["developer_view"]["opponent_arena_authored"]["current_HP"], 10)
         serialized = json.dumps(initial, sort_keys=True)
         for hidden in ("High Elf", "7881.735", "family", "possessions", "psionics"):
             self.assertNotIn(hidden, serialized)

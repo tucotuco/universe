@@ -68,25 +68,33 @@ class NpcBeingArena:
             "audience": "local omniscient developer view; not an Agent observation",
             "source_sha256": self.source_sha256,
             "source_derived": {"display_name": source_state["name"],
-                               "abilities": source_scores, "skills": source_state["skills"]},
+                               "abilities": source_scores, "skills": source_state["skills"],
+                               "initial_hit_points": {
+                                   "value": source_state["hps"], "source_path": "state.hps",
+                                   "meaning": "generated initial HP value; not a maximum-HP or Hit Dice mapping",
+                               }},
             "npc_native": {
                 "name": self.npc.name, "id": self.npc.id,
                 "abilities": native_scores, "skills": native_skills,
-                "HP": self.npc.get_hit_points(), "position": self.npc.get_position().as_tuple(),
+                "initial_HP": self.npc.original.hit_points,
+                "current_HP": self.npc.get_hit_points(),
+                "position": self.npc.get_position().as_tuple(),
                 "geometry": self.npc.geometry.to_dict(),
                 "equipment": [self.world.get_object_by_id(self.dagger_id).name],
             },
             "opponent_arena_authored": {
                 "name": self.opponent.name, "id": self.opponent.id,
                 "definition": self.opponent.current.obj_type,
-                "HP": self.opponent.get_hit_points(), "AC": self.opponent.get_armor_class(),
+                "initial_HP": self.opponent.original.hit_points,
+                "current_HP": self.opponent.get_hit_points(),
+                "AC": self.opponent.get_armor_class(),
                 "position": self.opponent.get_position().as_tuple(),
                 "geometry": self.opponent.geometry.to_dict(),
             },
             "arena_authored": {
-                "NPC nonimported HP/definition/geometry/position":
-                    "generic test baseline: HP 10; Sphere(0.5); (0, 0, 0)",
-                "opponent": "HP 10, AC 11, generic test definition; Sphere(0.5); (1.5, 0, 0)",
+                "NPC native definition/geometry/position":
+                    "generic test baseline apart from source-derived initial HP; Sphere(0.5); (0, 0, 0)",
+                "opponent": "Arena-authored initial/current HP 10, AC 11, generic test definition; Sphere(0.5); (1.5, 0, 0)",
                 "equipment": "native Dagger explicitly supplied and equipped for this demo; not in source possession list",
                 "encounter DC": 10,
                 "action strategy": {"attack": 0, "defense": 0, "timing": 0, "extra_damage": 0},
@@ -200,9 +208,11 @@ def _format_developer_view(view):
         f"Source-derived abilities: {source['abilities']}",
         f"Source-derived acquired ranks: {source['skills']}",
         f"Native Being: {npc['name']} ({npc['id']}) abilities={npc['abilities']} skills={npc['skills']}",
-        f"Arena-authored NPC HP={npc['HP']}, position={npc['position']}, geometry={npc['geometry']}, "
+        f"Source-derived initial HP={source['initial_hit_points']['value']} ({source['initial_hit_points']['source_path']}); "
+        f"native NPC current HP={npc['current_HP']}, position={npc['position']}, geometry={npc['geometry']}, "
         f"equipment={npc['equipment']}",
-        f"Arena-authored opponent: {opponent['name']} ({opponent['id']}), HP={opponent['HP']}, "
+        f"Arena-authored opponent: {opponent['name']} ({opponent['id']}), "
+        f"initial/current HP={opponent['initial_HP']}/{opponent['current_HP']}, "
         f"AC={opponent['AC']}, position={opponent['position']}, geometry={opponent['geometry']}",
         "Action: one native Dagger thrust; default supplied Strategy is all zero.",
         "Progression: native opt-in transactional Encounter; publication is per crossed second.",
