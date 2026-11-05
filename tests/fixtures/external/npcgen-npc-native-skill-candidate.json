@@ -1,0 +1,201 @@
+{
+  "format": "npcgen-npc",
+  "schema_version": 2,
+  "engine": {
+    "name": "npcgen",
+    "version": "2.1.0",
+    "rules_hash": "sha256:78e8a2bc8e7dc7ba635f8ab6d8bdf8174c35608c9af04b6533cc3d84c46865ff"
+  },
+  "generation": {
+    "seed": 9,
+    "mode": "random"
+  },
+  "edits": [
+    {
+      "op": "resolve_skills_by_age",
+      "args": []
+    }
+  ],
+  "state": {
+    "name": "Tobe",
+    "classes": [
+      5
+    ],
+    "xps": [
+      7881.7353515625
+    ],
+    "levels": [
+      3
+    ],
+    "race": 6,
+    "subrace": "",
+    "sex": 1,
+    "scores": [
+      12,
+      11,
+      16,
+      12,
+      9,
+      14
+    ],
+    "exc_str": 0,
+    "age": 197.12811279296875,
+    "month": 2,
+    "day": 2,
+    "height": 49.59000015258789,
+    "weight": 46.8067626953125,
+    "hps": 23,
+    "psionics": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "possessions": {
+      "items": [
+        "Armor: Leather  +2 "
+      ],
+      "exchanged": [
+        [
+          "Sticky Arrow (1-4)",
+          "20"
+        ]
+      ],
+      "gold": 20.0,
+      "lines": [
+        "Armor: Leather  +2 ",
+        "Sticky Arrow (1-4) was exchanged for 20 gp."
+      ]
+    },
+    "family": {
+      "known": true,
+      "rank": 1,
+      "children": 1,
+      "survived": 1,
+      "spacing": 452,
+      "mother_birthdate": -325,
+      "siblings": [
+        {
+          "number": 1,
+          "birthdate": 0,
+          "sex": 1,
+          "alive": true,
+          "is_self": true
+        }
+      ],
+      "ancestry": null
+    },
+    "skills": {
+      "skills": {
+        "armed combat": 1
+      },
+      "weapon_skills": {
+        "Dagger": 2
+      }
+    },
+    "seed": 9
+  },
+  "sheet": {
+    "identity": {
+      "name": "Tobe",
+      "sex": "Female",
+      "race": "High Elf",
+      "subrace": null
+    },
+    "abilities": {
+      "scores": {
+        "Str": 12,
+        "Int": 11,
+        "Wis": 16,
+        "Dex": 12,
+        "Con": 9,
+        "Cha": 14
+      },
+      "exceptional_strength": null,
+      "strength": {
+        "weight_allowance": 65,
+        "to_hit": 0,
+        "damage": 0
+      },
+      "dexterity_reaction": 0,
+      "learning_percent": {
+        "Int": 40,
+        "Wis": 75
+      }
+    },
+    "age": {
+      "age": 197.13,
+      "category": "Mature",
+      "birthday": {
+        "day": 2,
+        "month": "Durüm"
+      },
+      "height_inches": 49.59,
+      "weight_pounds": 46.81
+    },
+    "classes": [
+      {
+        "class": "Cleric",
+        "level": 3,
+        "xp": 7881.74,
+        "title": "Priest",
+        "over_limit": false
+      }
+    ],
+    "hit_points": 23,
+    "skills": {
+      "skills": {
+        "armed combat": 1
+      },
+      "weapon_skills": {
+        "Dagger": 2
+      }
+    },
+    "psionics": null,
+    "possessions": {
+      "items": [
+        "Armor: Leather  +2 "
+      ],
+      "exchanged_for_gold": [
+        [
+          "Sticky Arrow (1-4)",
+          "20"
+        ]
+      ],
+      "gold": 20.0
+    },
+    "family": {
+      "known": true,
+      "birth_rank": 1,
+      "children": 1,
+      "survived": 1,
+      "mother_birthdate": -325,
+      "ancestry": null,
+      "siblings": [
+        {
+          "number": 1,
+          "birthdate": 0,
+          "sex": "F",
+          "alive": true,
+          "is_self": true
+        }
+      ]
+    }
+  },
+  "notes": {
+    "identity": "",
+    "abilities": "",
+    "age": "",
+    "classes": "",
+    "hit_points": "",
+    "psionics": "",
+    "possessions": "",
+    "family": "",
+    "general": ""
+  }
+}
