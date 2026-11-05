@@ -1,0 +1,66 @@
+"""Opt-in developer Arena: source-derived Being, one native transactional thrust."""
+
+from pathlib import Path
+import sys
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "examples"))
+sys.path.insert(0, str(ROOT / "src"))
+
+from npc_being_arena import _format_developer_view, build_arena
+
+
+class TestNpcBeingArena(unittest.TestCase):
+    def test_one_operator_action_is_native_transactional_and_one_shot(self):
+        arena = build_arena(seed=72002)
+        view = arena.developer_view()
+
+        self.assertEqual(arena.encounter.progression_mode, "transactional")
+        self.assertEqual(view["audience"],
+                         "local omniscient developer view; not an Agent observation")
+        self.assertEqual(view["source_derived"]["display_name"], "Tobe")
+        self.assertEqual(view["source_derived"]["abilities"],
+                         {"Str": 12, "Int": 11, "Wis": 16,
+                          "Dex": 12, "Con": 9, "Cha": 14})
+        self.assertEqual(view["source_derived"]["skills"], {
+            "skills": {"armed combat": 1}, "weapon_skills": {"Dagger": 2}})
+        self.assertEqual(view["npc_native"]["skills"],
+                         {"armed combat": 1, "Dagger": 2})
+        self.assertEqual(view["npc_native"]["HP"], 10)  # explicit Arena baseline
+        self.assertEqual(view["npc_native"]["position"], (0.0, 0.0, 0.0))
+        self.assertEqual(view["opponent_arena_authored"]["HP"], 10)
+        self.assertEqual(view["opponent_arena_authored"]["AC"], 11)
+        self.assertNotIn("source_record", view)
+        self.assertNotIn("race", view["source_derived"])
+        rendered = _format_developer_view(view)
+        self.assertIn("Source-derived acquired ranks", rendered)
+        self.assertIn("Arena-authored", rendered)
+        self.assertNotIn("High Elf", rendered)
+        self.assertNotIn("family", rendered.lower())
+        self.assertEqual(tuple(arena.encounter.__dict__.get("_atomic_interval_history", ())), ())
+
+        result = arena.resolve_one_thrust()
+        self.assertEqual(result["progression_mode"], "transactional")
+        self.assertEqual(result["action_id"], arena.strike.id)
+        self.assertEqual(result["boundary"], arena.strike.end_time)
+        self.assertEqual(result["outcome"], "normal")
+        self.assertEqual(result["metadata"], {"distance": 1.5})
+        self.assertEqual(result["causal_damage"], {"body": 4})
+        self.assertEqual(result["target_hp_after"], 6)
+        self.assertEqual(result["native_receipt_boundaries"], (1, 2, 3, 4))
+        self.assertEqual(arena.encounter.inspect_committed().action(arena.strike.id).facts.outcome,
+                         result["outcome"])
+        time_after = arena.encounter.time
+        receipts_after = tuple(arena.encounter.__dict__.get("_atomic_interval_history", ()))
+        hp_after = arena.opponent.get_hit_points()
+        with self.assertRaisesRegex(RuntimeError, "already been submitted"):
+            arena.resolve_one_thrust()
+        self.assertEqual(arena.encounter.time, time_after)
+        self.assertEqual(tuple(arena.encounter.__dict__.get("_atomic_interval_history", ())),
+                         receipts_after)
+        self.assertEqual(arena.opponent.get_hit_points(), hp_after)
+
+
+if __name__ == "__main__":
+    unittest.main()
