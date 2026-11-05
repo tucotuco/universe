@@ -156,7 +156,7 @@ def write_local_bundle(path, wire, *, repository_root):
     target = _outside_repository(path, repository_root)
     if type(wire) is not bytes or not wire or len(wire) > MAX_BUNDLE_BYTES:
         raise ArenaLocalCheckpointRejected("bundle bytes are empty or exceed their size limit")
-    decode_local_bundle(wire)
+    _decode_supported_bundle(wire)
     if not target.parent.is_dir():
         raise ArenaLocalCheckpointRejected("configured bundle destination directory must already exist")
     temp_name = None
@@ -198,8 +198,20 @@ def read_local_bundle(path, *, repository_root):
         wire = target.read_bytes()
     except OSError as exc:
         raise ArenaLocalCheckpointRejected(f"cannot read configured local Arena bundle: {exc}") from exc
-    decode_local_bundle(wire)
+    _decode_supported_bundle(wire)
     return wire
+
+
+def _decode_supported_bundle(wire):
+    """Validate either the unchanged S6 envelope or the closed S7 extension."""
+    try:
+        data = json.loads(wire.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError) as exc:
+        raise ArenaLocalCheckpointRejected(f"saved Arena bundle is invalid: {exc}") from exc
+    if type(data) is dict and data.get("schema") == "universe.arena.local-s7-claim/1":
+        from arena_s7_checkpoint import decode_s7_candidate
+        return decode_s7_candidate(wire)
+    return decode_local_bundle(wire)
 
 
 def activate_approved_local_bundle(path, *, repository_root, fixture_root,
@@ -210,47 +222,80 @@ def activate_approved_local_bundle(path, *, repository_root, fixture_root,
     if isinstance(rng_seed, bool) or type(rng_seed) is not int:
         raise ArenaLocalCheckpointRejected("a separately host-selected integer RNG seed is required")
     try:
-        from examples.npc_encounter_arena import ROOT as example_root
-
         wire = read_local_bundle(path, repository_root=repository_root)
         prefix, candidate = decode_local_bundle(wire)
-        expected_fixture_root = (Path(example_root) / "examples" / "npc_candidates").resolve()
-        if Path(fixture_root).resolve() != expected_fixture_root:
-            raise ArenaLocalCheckpointRejected("host fixture root is outside the fixed NPC candidate directory")
-        source_bytes = {
-            "arena-ari": (Path(fixture_root) / "ari.npcgen.json").read_bytes(),
-            "arena-bex": (Path(fixture_root) / "bex.npcgen.json").read_bytes(),
-        }
-        bindings = (
-            ExpectedArenaBinding("arena-ari", hashlib.sha256(source_bytes["arena-ari"]).hexdigest(),
-                                 "Ari", "arena/being/ari", "Human",
-                                 ("0x0.0p+0", "0x0.0p+0", "0x0.0p+0")),
-            ExpectedArenaBinding("arena-bex", hashlib.sha256(source_bytes["arena-bex"]).hexdigest(),
-                                 "Bex", "arena/being/bex", "Human",
-                                 ("0x1.8000000000000p+1", "0x0.0p+0", "0x0.0p+0")),
-        )
-        # Keep the fixture root supplied by the application host, not from the bundle.
-        history_capability = _host_authorize_arena_history(
-            prefix, expected_content_sha256=prefix.content_sha256,
-            expected_scenario=_SCENARIO, expected_bindings=bindings)
-        history = _prepare_arena_history_view(prefix, history_capability)
-        expected_sources = tuple(ExpectedArenaSource(key, source_bytes[key])
-                                 for key in ("arena-ari", "arena-bex"))
-        state_capability = _host_authorize_arena_state(
-            candidate, prefix, history, expected_content_sha256=candidate.content_sha256,
-            expected_scenario=_SCENARIO, expected_bindings=bindings,
-            expected_sources=expected_sources)
-        admitted = _prepare_arena_state(
-            candidate, prefix, history, state_capability,
-            expected_content_sha256=candidate.content_sha256,
-            expected_scenario=_SCENARIO, expected_bindings=bindings,
-            expected_sources=expected_sources)
-        activation_capability = _host_authorize_local_activation(admitted, rng_seed=rng_seed)
-        from arena_state_activation import _activate_local_arena
-        return _activate_local_arena(admitted, activation_capability)
+        return _activate_validated_inputs(
+            prefix, candidate, repository_root=repository_root,
+            fixture_root=fixture_root, rng_seed=rng_seed, s7_view=None,
+            source_bundle_wire=wire)
     except ArenaLocalCheckpointRejected:
         raise
     except Exception as exc:
         # Rejection never returns the private graph/Universe and never loosens
         # the native C1 receipt or constructor safeguards.
         raise ArenaLocalCheckpointRejected(f"trusted-local fixed Arena admission refused: {exc}") from exc
+
+
+def activate_approved_s7_bundle(path, *, repository_root, fixture_root,
+                                host_approved, rng_seed):
+    """Separately host-approve the exact fixed boundary-7 claim for boundary 8."""
+    if host_approved is not True:
+        raise ArenaLocalCheckpointRejected("separate explicit S7 local-host approval is required")
+    if isinstance(rng_seed, bool) or type(rng_seed) is not int:
+        raise ArenaLocalCheckpointRejected("a fresh host-selected RNG seed is required for S7 admission")
+    try:
+        from arena_s7_checkpoint import decode_s7_candidate, s7_view, _decode_base
+        wire = read_local_bundle(path, repository_root=repository_root)
+        candidate7 = decode_s7_candidate(wire)
+        view7 = s7_view(candidate7)
+        prefix, candidate = _decode_base(view7.base_bundle)
+        active = _activate_validated_inputs(
+            prefix, candidate, repository_root=repository_root,
+            fixture_root=fixture_root, rng_seed=rng_seed, s7_view=view7,
+            source_bundle_wire=wire)
+        active = __import__("dataclasses").replace(active, bundle_wire=wire)
+        return active
+    except ArenaLocalCheckpointRejected:
+        raise
+    except Exception as exc:
+        raise ArenaLocalCheckpointRejected(f"trusted-local S7 admission refused: {exc}") from exc
+
+
+def _activate_validated_inputs(prefix, candidate, *, repository_root, fixture_root,
+                               rng_seed, s7_view, source_bundle_wire):
+    from examples.npc_encounter_arena import ROOT as example_root
+    expected_fixture_root = (Path(example_root) / "examples" / "npc_candidates").resolve()
+    if Path(fixture_root).resolve() != expected_fixture_root:
+        raise ArenaLocalCheckpointRejected("host fixture root is outside the fixed NPC candidate directory")
+    source_bytes = {
+        "arena-ari": (Path(fixture_root) / "ari.npcgen.json").read_bytes(),
+        "arena-bex": (Path(fixture_root) / "bex.npcgen.json").read_bytes(),
+    }
+    bindings = (
+        ExpectedArenaBinding("arena-ari", hashlib.sha256(source_bytes["arena-ari"]).hexdigest(),
+                             "Ari", "arena/being/ari", "Human",
+                             ("0x0.0p+0", "0x0.0p+0", "0x0.0p+0")),
+        ExpectedArenaBinding("arena-bex", hashlib.sha256(source_bytes["arena-bex"]).hexdigest(),
+                             "Bex", "arena/being/bex", "Human",
+                             ("0x1.8000000000000p+1", "0x0.0p+0", "0x0.0p+0")),
+    )
+    history_capability = _host_authorize_arena_history(
+        prefix, expected_content_sha256=prefix.content_sha256,
+        expected_scenario=_SCENARIO, expected_bindings=bindings)
+    history = _prepare_arena_history_view(prefix, history_capability)
+    expected_sources = tuple(ExpectedArenaSource(key, source_bytes[key])
+                             for key in ("arena-ari", "arena-bex"))
+    state_capability = _host_authorize_arena_state(
+        candidate, prefix, history, expected_content_sha256=candidate.content_sha256,
+        expected_scenario=_SCENARIO, expected_bindings=bindings,
+        expected_sources=expected_sources)
+    admitted = _prepare_arena_state(
+        candidate, prefix, history, state_capability,
+        expected_content_sha256=candidate.content_sha256,
+        expected_scenario=_SCENARIO, expected_bindings=bindings,
+        expected_sources=expected_sources)
+    activation_capability = _host_authorize_local_activation(
+        admitted, rng_seed=rng_seed, s7_view=s7_view)
+    from arena_state_activation import _activate_local_arena
+    active = _activate_local_arena(admitted, activation_capability)
+    return __import__("dataclasses").replace(active, bundle_wire=source_bundle_wire)

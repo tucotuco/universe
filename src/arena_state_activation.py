@@ -76,6 +76,8 @@ class _ActivationRecord:
     candidate_bytes: bytes
     prefix_bytes: bytes
     rng_seed: int
+    start_boundary: int = 6
+    s7_view: object = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,9 @@ class _ActiveArenaContinuation:
     imported_history: object
     imported_prefix: object
     source_provenance: tuple
+    start_boundary: int = 6
+    bundle_wire: bytes | None = None
+    imported_run_claim: object = None
 
 
 @dataclass(frozen=True)
@@ -203,12 +208,26 @@ def _reviewed_inputs(state):
     return candidate, prefix, history_view, beings, scenario, bindings, sources, data
 
 
-def _host_authorize_local_activation(state, *, rng_seed):
+def _host_authorize_local_activation(state, *, rng_seed, s7_view=None):
     """Host deliberately accepts the exact B1/B2 pair as local initial state."""
     if isinstance(rng_seed, bool) or type(rng_seed) is not int:
         raise ArenaActivationRejected("new process-local RNG seed must be an integer chosen by the host")
     context = _reviewed_inputs(state)
     candidate, prefix, history_view, beings, scenario, bindings, sources, _ = context
+    start_boundary = 6
+    if s7_view is not None:
+        from arena_s7_checkpoint import ArenaS7Rejected, ArenaS7View, _expected_boundary7, _decode_base, _thaw
+        if type(s7_view) is not ArenaS7View:
+            raise ArenaActivationRejected("exact validated S7 view required")
+        try:
+            prefix7, candidate7 = _decode_base(s7_view.base_bundle)
+            if (candidate7.to_bytes() != candidate.to_bytes()
+                    or prefix7.to_bytes() != prefix.to_bytes()
+                    or _thaw(s7_view.boundary7) != _expected_boundary7()):
+                raise ArenaS7Rejected("S7 claim is not bound to this exact admitted S6 state")
+        except (ArenaS7Rejected, TypeError, ValueError) as exc:
+            raise ArenaActivationRejected(f"S7 claim validation failed: {exc}") from exc
+        start_boundary = 7
     with _LOCK:
         if (state in _ACTIVATED
                 or any(record.state is state for record in _CAPABILITIES.values())):
@@ -216,7 +235,7 @@ def _host_authorize_local_activation(state, *, rng_seed):
         capability = _ArenaActivationCapability()
         _CAPABILITIES[capability] = _ActivationRecord(
             state, beings, candidate, prefix, history_view, scenario, bindings, sources,
-            candidate.to_bytes(), prefix.to_bytes(), rng_seed,
+            candidate.to_bytes(), prefix.to_bytes(), rng_seed, start_boundary, s7_view,
         )
     return capability
 
@@ -241,6 +260,8 @@ def _activate_local_arena(state, capability):
     _require(candidate.to_bytes() == record.candidate_bytes
              and prefix.to_bytes() == record.prefix_bytes,
              "B1/B2 bytes changed after host authorization")
+    if record.start_boundary == 7:
+        _apply_s7_state(beings, record.s7_view)
 
     # The fixed historical Choice draft occupies counter 1. Seed the empty
     # fresh ChoiceBook at that verified high-water mark so the native Run gets
@@ -273,14 +294,15 @@ def _activate_local_arena(state, capability):
         row.being_id: tuple(row.aware_of)
         for row in history_view.targets
     }
+    start_boundary = record.start_boundary
     encounter = Encounter(
-        world, difficulty_class=15, start_time=6, initiated=True,
+        world, difficulty_class=15, start_time=start_boundary, initiated=True,
         id=_SCENARIO.encounter_id,
         awareness=awareness,
     )
-    _require(encounter.time == 6 and encounter.last_processed_boundary == 6
-             and encounter.start_time == 6,
-             "ordinary Encounter constructor did not create the quiescent time-6 context")
+    _require(encounter.time == start_boundary and encounter.last_processed_boundary == start_boundary
+             and encounter.start_time == start_boundary,
+             "ordinary Encounter constructor did not create the approved boundary context")
     world.add_event(encounter)
     for identity in ("arena/being/ari", "arena/being/bex"):
         encounter.add_being(identity)
@@ -293,7 +315,7 @@ def _activate_local_arena(state, capability):
         "arena/being/ari": {"arena/being/bex"},
         "arena/being/bex": set(),
     }, "new Encounter Awareness differs from imported Target-owned state")
-    encounter._choice_book._counter = 1
+    encounter._choice_book._counter = 1 if start_boundary == 6 else 2
     rng = RNGCursor(random.Random(record.rng_seed).getstate())
     rng_before = rng.state
     # The exact B3 objects stay quarantined until every native constructor and
@@ -309,7 +331,7 @@ def _activate_local_arena(state, capability):
             data.pop("_checkpoint_quarantined", None)
         encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
         _require(encounter.progression_mode == "transactional"
-                 and encounter.time == 6 and encounter.last_processed_boundary == 6
+                 and encounter.time == start_boundary and encounter.last_processed_boundary == start_boundary
                  and not encounter.__dict__.get("_atomic_interval_history"),
                  "fresh transactional Encounter did not start at the imported checkpoint fence")
         _require(rng.state == rng_before,
@@ -326,7 +348,48 @@ def _activate_local_arena(state, capability):
     provenance = tuple((row.binding_key, row.source_sha256, row.native_being_id,
                         row.native_definition_name, row.position_hex)
                        for row in history_view.npc_bindings)
-    return _ActiveArenaContinuation(world, encounter, rng, history_view, prefix, provenance)
+    return _ActiveArenaContinuation(
+        world, encounter, rng, history_view, prefix, provenance,
+        start_boundary=start_boundary,
+        imported_run_claim=(record.s7_view.boundary7 if record.s7_view is not None else None),
+    )
+
+
+def _apply_s7_state(beings, view):
+    """Construct the exact imported boundary-7 state while native Beings are quarantined."""
+    from arena_s7_checkpoint import ArenaS7View, _expected_boundary7, _thaw
+    from spatial.geometry import CartesianPosition
+    from spatial.state import SpatialState
+    from action_evaluation import EffectIdentity
+    from experience import BatchSkillUse
+    from frozen_practice import CandidatePracticeUse
+
+    _require(type(view) is ArenaS7View and _thaw(view.boundary7) == _expected_boundary7(),
+             "S7 post-Run state is not the exact reviewed data claim")
+    by_id = {being.id: being for being in beings}
+    _require(set(by_id) == {"arena/being/ari", "arena/being/bex"},
+             "S7 reconstruction has an unexpected native participant set")
+    ari, bex = by_id["arena/being/ari"], by_id["arena/being/bex"]
+    _require(ari.get_position().as_tuple() == (0.0, 0.0, 0.0)
+             and bex.get_position().as_tuple() == (3.0, 0.0, 0.0)
+             and not ari.skill_experience and not ari.skill_use_history
+             and not ari._skill_practice_baselines,
+             "S6 native Being state is not the expected pre-Run baseline")
+    ari.set_spatial_state(SpatialState(CartesianPosition(1.0, 0.0, 0.0)))
+    effect = EffectIdentity("npc-arena/encounter/1", 7,
+                            "npc-arena/action/run-ari-boundary-7", "effect", 0)
+    exercise = CandidatePracticeUse(
+        effect, "run", 4, "npc-arena/action/run-ari-boundary-7", 7.0, 7, "success")
+    ari.skill_experience = {"run": 4}
+    ari._skill_practice_baselines = {"run": 0}
+    ari.skill_use_history = [BatchSkillUse(
+        ari.id, "run", 4, 0, 0, 7, (exercise,))]
+    _require(ari.get_position().as_tuple() == (1.0, 0.0, 0.0)
+             and bex.get_position().as_tuple() == (3.0, 0.0, 0.0)
+             and ari.skill_experience == {"run": 4}
+             and len(ari.skill_use_history) == 1
+             and ari.skill_use_history[0].exercises[0].action_id == "npc-arena/action/run-ari-boundary-7",
+             "native S7 state reconstruction differs from its validated claim")
 
 
 def _compose_committed_inspection(active):
