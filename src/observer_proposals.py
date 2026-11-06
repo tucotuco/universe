@@ -34,10 +34,10 @@ _NATIVE_LOCATION_LAST_SEEN = LocationEvidenceLedger.last_seen_location
 _NATIVE_SAMPLE = SampledGroupObservation.sample
 _NATIVE_INTERPRET = FieldInterpreter.interpret
 from action import Action
-from activities import RunAction, SpotAction
+from activities import RunAction, SpotAction, ThrowAction
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
-_NATIVE_RESOLVERS = {cls:cls.resolve for cls in (Action,RunAction,SpotAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction)}
+_NATIVE_RESOLVERS = {cls:cls.resolve for cls in (Action,RunAction,SpotAction,ThrowAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction)}
 _RECORDS = (FieldObservation, CountReport, FieldInterpretation, BeliefRevision,
     EvidenceReassessment, InquiryProposal, InquiryRecord, HeardAccount, CartesianPosition,
     BeingLocationObservation, LastSeenLocation)
@@ -460,8 +460,8 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
         AccountDeliveryEffect, ActionOutcomeEffect, LifecycleEffect, ReservationReleaseEffect,
         PostCommitNotificationIntent, AwarenessEffect, PracticeEffect)
     # Core combat effects have already been validated by native reconciliation.
-    from action_evaluation import DamageEffect, FatalEffect, ProtectionEffect, DefenseEffect
-    accepted += (DamageEffect, FatalEffect, ProtectionEffect, DefenseEffect)
+    from action_evaluation import DamageEffect, FatalEffect, ProtectionEffect, DefenseEffect, ProjectileReleaseEffect
+    accepted += (DamageEffect, FatalEffect, ProtectionEffect, DefenseEffect, ProjectileReleaseEffect)
     for row in rows:
         _check(type(row) is IdentifiedEffect and type(row.identity) is EffectIdentity, 'invalid staged effect')
         key = row.identity

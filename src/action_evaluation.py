@@ -201,8 +201,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     shield_names = freeze(weapon_dictionary['object_categories']).get('Shields', ())
     participants = tuple(dict.fromkeys(freeze(ed['being_list']) + freeze(ed['non_being_object_list'])))
     actions = {}
+    from activities import ThrowAction
     families = {Action: 'combat', MeleeStrike: 'melee', MeleeDefense: 'defense',
-                RunAction: 'run', SpotAction: 'spot'}
+                RunAction: 'run', SpotAction: 'spot', ThrowAction: 'throw'}
     objective_actions = {}
     if _objective:
         from group_observation import ObserveGroupAction
@@ -230,7 +231,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot', 'throw') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -267,6 +268,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(action) is RunAction:
             selected['start_position'] = position(ad['start_position'])
             selected['started'] = ad.get('_activity_started', False)
+        if type(action) is ThrowAction:
+            for key in ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m'):
+                selected[key] = freeze(ad[key])
         if not cancelled:
             # Reuse Increment 3 ownership and declaration validation, after the
             # exact-type/callback preflight above. No scheduling hook executes.
@@ -330,7 +334,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         optics = od['visual_occlusion']
         if optics is not None:
             optics = VisualOcclusion(**freeze(native_data(optics, (VisualOcclusion,))))
-        data = {'hardness': freeze(cd['hardness']),
+        data = {'hardness': freeze(cd['hardness']), 'weight': freeze(cd.get('weight')),
                 'discovery_dc': freeze(cd.get('discovery_dc'))}
         category = 'object'
         if type(obj) is BeingInstance:
@@ -341,10 +345,12 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 race=freeze(cd.get('race')),
                 abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
+                height=freeze(cd.get('height')),
                 body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),
                 fatigue_level=freeze(od['fatigue_level']),
                 exertion=freeze(native_data(od['exertion'], (Exertion,))),
                 fatigue_adjustments=freeze(od['exertion'].fatigue_levels))
+            data['possessions'] = freeze(od.get('possessions', ()))
             # Preserve category membership and insertion order, including RNG choice.
             shields = shield_names
             data['held'] = tuple(v for v in data['body_parts'].values() if v is not None and
@@ -470,6 +476,18 @@ class DefenseEffect:
     kind: str
     eligible: bool
     success: bool
+
+
+@dataclass(frozen=True)
+class ProjectileReleaseEffect:
+    source_action_id: str
+    target_id: str
+    release_time: float
+    release_position: tuple
+    velocity_m_s: tuple
+    impact_time: float
+    landing_position: tuple
+    landing_elevation_m: float
 
 
 @dataclass(frozen=True)
@@ -701,6 +719,33 @@ def _activity(snapshot, action, rng):
             metadata.append(('displacement', displacement))
             if displacement:
                 effects.append(PracticeEffect(action.id, actor.id, 'run', action.data['practice_experience']))
+    elif action.family == 'throw':
+        from throwing import release_velocity_yd_s, project_drag_free_trajectory
+        projectile = snapshot.entity(action.instrument_id)
+        if actor.position is None or projectile.position is None:
+            outcome = 'unplaced'
+        elif action.instrument_id not in actor.data.get('possessions', ()):
+            outcome = 'unavailable'
+        else:
+            height = actor.data['height']
+            speed = release_velocity_yd_s(strength=actor.data['abilities']['STR'],
+                throw_skill_level=actor.data['skills'].get('throw', 0),
+                projectile_weight_lb=projectile.data['weight'],
+                heavy_load_reference_lb=action.data['heavy_load_reference_lb'],
+                height_inches=height)
+            release = CartesianPosition(actor.position.x, actor.position.y,
+                actor.position.z + height * 0.0254)
+            trajectory = project_drag_free_trajectory(release_velocity_yd_s=speed,
+                release_position=release, landing_elevation_m=action.data['landing_elevation_m'],
+                elevation_degrees=action.data['elevation_degrees'],
+                azimuth_degrees=action.data['azimuth_degrees'])
+            effects.append(ProjectileReleaseEffect(action.id, projectile.id,
+                snapshot.boundary, release.as_tuple(), trajectory.velocity_m_s,
+                snapshot.boundary + trajectory.flight_time_s,
+                trajectory.landing_position.as_tuple(), action.data['landing_elevation_m']))
+            outcome = 'released'
+            metadata.extend((('release_speed_yd_s', speed),
+                             ('impact_time', snapshot.boundary + trajectory.flight_time_s)))
     else:
         target = snapshot.entity(action.target_id)
         distance = snapshot.distance(actor.id, target.id)
@@ -729,7 +774,10 @@ def _activity(snapshot, action, rng):
                 outcome = 'success' if roll + racial >= dc else 'failure'
                 if outcome == 'success':
                     effects.append(AwarenessEffect(action.id, actor.id, target.id, distance, None))
-    return ActionProposal(action.id, actor.id, () if action.target_id is None else (action.target_id,),
+    affected = (() if action.target_id is None else (action.target_id,))
+    if action.family == 'throw':
+        affected = tuple(dict.fromkeys(affected + tuple(effect.target_id for effect in effects)))
+    return ActionProposal(action.id, actor.id, affected,
                           outcome, tuple(effects), metadata=tuple(metadata))
 
 
@@ -756,7 +804,7 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot') for a in selected):
+    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot', 'throw') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     rng = _ProvisionalRandom(snapshot.rng_state)
     proposals = []

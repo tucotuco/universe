@@ -23,7 +23,7 @@ from universe import Universe
 from action_choice import ChoiceBook, ChoiceView, ChoiceMember, Reservation, _Accepted, declaration
 from scheduling import PreparedSchedule
 from action import Action
-from activities import RunAction, SpotAction
+from activities import RunAction, SpotAction, ThrowAction
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
 from group_observation import ObserveGroupAction, SampledGroupObservation
@@ -43,6 +43,7 @@ from skill import Skills, SkillDictionary
 from abilities import Abilities
 from states import States
 from exertion import Exertion
+from throwing import ProjectileFlight, ProjectileBoundaryState
 
 
 _ISSUED_CANDIDATES = {}  # Process-local native issuance, never serialized.
@@ -61,7 +62,7 @@ def _require(test, reason):
         raise IntervalIntegrityError(reason)
 
 
-_ACTIONS = (Action, RunAction, SpotAction, MeleeStrike, MeleeDefense,
+_ACTIONS = (Action, RunAction, SpotAction, ThrowAction, MeleeStrike, MeleeDefense,
             ObserveGroupAction, AskAboutPastAction)
 _OBJECTS = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance, StatisticalGroup)
 # Pin methods at import, before any user-provided extension is inspected. This
@@ -71,7 +72,8 @@ _CLASSES = (Encounter, Universe, ChoiceBook, ObjectRegistry, *_ACTIONS, *_OBJECT
             FrozenFatigueFrame, SampledGroupObservation, FieldInterpreter, BeliefLedger,
             LocationEvidenceLedger,
             BeingDefinition, ObjectDefinition, WeaponDefinition, ArmorDefinition, Library,
-            Skills, SkillDictionary, Abilities, States, Exertion, random.Random)
+            Skills, SkillDictionary, Abilities, States, Exertion,
+            ProjectileFlight, ProjectileBoundaryState, random.Random)
 _METHODS = {(cls, name): inspect.getattr_static(cls, name)
             for cls in _CLASSES for name in dir(cls)
             if callable(inspect.getattr_static(cls, name))}
@@ -111,6 +113,14 @@ class MovementSegment:
     velocities: object
     before: object
     after: object
+
+
+@dataclass(frozen=True)
+class ProjectileMotionUpdate:
+    object_id: str
+    prior_flight: ProjectileFlight
+    next_flight: ProjectileFlight
+    state: ProjectileBoundaryState
 
 
 @dataclass(frozen=True)
@@ -174,6 +184,7 @@ class IntervalCandidate:
     integrity_token: str = ''
     # A typed non-Action world-state operation; never part of Action coverage.
     adult_member_candidate: object = None
+    projectile_updates: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -520,6 +531,28 @@ def _validate_closure(candidate):
         'inconsistent proposed queues')
     _require(all(r.boundary>candidate.boundary for r in queues.reservations), 'early or missing resource release')
     _require(candidate.provisional_rng.after==supported.boundary.provisional_rng_state, 'RNG projection mismatch')
+    _require(type(candidate.projectile_updates) is tuple
+        and len({u.object_id for u in candidate.projectile_updates})==len(candidate.projectile_updates),
+        'invalid projectile boundary update set')
+    for update in candidate.projectile_updates:
+        _require(type(update) is ProjectileMotionUpdate and type(update.prior_flight) is ProjectileFlight
+            and type(update.next_flight) is ProjectileFlight and type(update.state) is ProjectileBoundaryState
+            and update.state.boundary==candidate.boundary
+            and update.state.source_action_id==update.prior_flight.source_action_id
+            and update.state.source_effect_identity==update.prior_flight.source_effect_identity
+            and update.state.position==candidate.proposed_authoritative_changes['positions'].get(update.object_id)
+            and update.state.status==update.next_flight.status
+            and update.next_flight.source_action_id==update.prior_flight.source_action_id
+            and update.next_flight.source_effect_identity==update.prior_flight.source_effect_identity
+            and update.next_flight.release_time==update.prior_flight.release_time
+            and update.next_flight.impact_time==update.prior_flight.impact_time
+            and update.next_flight.release_position==update.prior_flight.release_position
+            and update.next_flight.landing_position==update.prior_flight.landing_position
+            and update.next_flight.velocity_m_s==update.prior_flight.velocity_m_s
+            and (update.state.status=='landed')==(update.prior_flight.impact_time<=candidate.boundary)
+            and (update.next_flight.landing_recorded_at==float(candidate.boundary)
+                 if update.state.status=='landed' else update.next_flight.landing_recorded_at is None),
+            'inconsistent projectile boundary projection')
     operation=candidate.adult_member_candidate
     if operation is not None:
         from group_member_realization import AdultMemberCandidate
@@ -583,7 +616,30 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                 _require(sum(x is obj for x in objects.values())==1, 'aliased authoritative Object')
         positions={key:None if objects[key].spatial_state is None else position(
             native_data(objects[key].spatial_state,(SpatialState,))['position']) for key in ed['being_list']+ed['non_being_object_list']}
+        active_flight_ids={key for key in positions
+            if type(object.__getattribute__(objects[key],'__dict__').get('_projectile_flight')) is ProjectileFlight
+            and object.__getattribute__(objects[key],'__dict__')['_projectile_flight'].status=='in_flight'}
+        if velocities is not None and active_flight_ids.intersection(velocities):
+            raise UnsupportedEvaluation('in-flight projectile motion is derived from its committed launch state')
         motion=_motion(positions,velocities,ed['local_frame'],velocity_frame,next_boundary-ed['time'])
+        projectile_updates=[]
+        for key in tuple(positions):
+            flight=object.__getattribute__(objects[key],'__dict__').get('_projectile_flight')
+            if flight is None:continue
+            _require(type(flight) is ProjectileFlight and flight.status in ('in_flight','landed'),
+                'unsupported projectile flight descriptor')
+            if flight.status=='landed':continue
+            _require(positions[key]==flight.position_at(ed['time']),
+                'projectile starting position disagrees with committed flight state')
+            landed=flight.impact_time<=next_boundary
+            target_position=flight.landing_position if landed else flight.position_at(next_boundary)
+            next_flight=replace(flight,status='landed' if landed else 'in_flight',
+                landing_recorded_at=float(next_boundary) if landed else None)
+            state=ProjectileBoundaryState(flight.source_action_id,next_boundary,target_position,
+                next_flight.status,flight.impact_time,
+                flight.source_effect_identity)
+            positions[key]=target_position
+            projectile_updates.append(ProjectileMotionUpdate(key,flight,next_flight,state))
         pending=list(ed['pending_action_list']);events=dict(wd['event_history']);initialization={}
         registered=dict(book._registered);states=dict(book._states)
         choice_states={cid:r.view.state for cid,r in book._choices.items()}; records=book._choices
@@ -670,7 +726,8 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             'action_metadata':metadata,'queues':queues,'rng':provisional})
         candidate=IntervalCandidate(encounter.id,next_boundary,checkpoint,tuple(movement),tuple(fences),
             context.snapshot,supported,provisional,changes,
-            adult_member_candidate=adult_member_candidate)
+            adult_member_candidate=adult_member_candidate,
+            projectile_updates=tuple(projectile_updates))
         _validate_closure(candidate)
         from transactional_progression import _validate_restored_candidate_context
         _validate_restored_candidate_context(encounter,candidate)

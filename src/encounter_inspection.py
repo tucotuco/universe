@@ -8,8 +8,9 @@ from dataclasses import dataclass, fields, is_dataclass
 from types import MappingProxyType
 import importlib
 
-from action_evaluation import (DamageEffect, FatalEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation)
+from spatial.state import CartesianPosition
 
 
 class InspectionRejected(EvaluationIntegrityError):
@@ -36,6 +37,7 @@ class CommittedBoundaryRecord:
     starts: tuple
     participants: tuple
     schedule: object
+    projectile_states: object
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ class TargetInspection:
     damage_by_action: object
     fatal_floor_reduction: float
     practice_history: tuple
+    projectile_state: object = None
 
 
 @dataclass(frozen=True)
@@ -149,7 +152,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PracticeEffect ProtectionEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection FrozenLocationEvidence RecipientIdentity ObjectiveUse',
@@ -163,6 +166,7 @@ def detached(value):
             'interval_staging': 'AuthorityReference StartFence RegistrationIntent QueueProjection',
             'atomic_publication': 'TargetIntervalRecord PublishedInterval',
             'action_choice': 'Reservation',
+            'throwing': 'ProjectileFlight ProjectileBoundaryState',
             'spatial.state': 'CartesianPosition',
             'encounter_inspection': 'CommittedBoundaryRecord EntityInspection ActionInspection TargetInspection BoundaryInspection ObjectiveFactInspection ObjectiveInspection EncounterInspection',
         }
@@ -212,11 +216,24 @@ def prepare_record(encounter, candidate, anchors, events):
         entities[key] = EntityInspection(entity.category, entity.obj_type, label if type(label) is str else None,
                          entity.position, entity.data)
     actions = {aid: (snap.actions[aid], proposal) for aid, proposal in supported.boundary.actions.items()}
+    projectile_states={}
+    from action_evaluation import ProjectileReleaseEffect
+    from throwing import ProjectileBoundaryState
+    for identity, row in supported.boundary.effects.items():
+        effect=row.effect
+        if type(effect) is ProjectileReleaseEffect:
+            source_identity=(identity.encounter_id,identity.boundary,identity.source_action_id,
+                             identity.channel,identity.slot)
+            projectile_states[effect.target_id]=ProjectileBoundaryState(effect.source_action_id,
+                candidate.boundary,CartesianPosition(*effect.release_position),'in_flight',
+                effect.impact_time,source_identity)
+    for update in candidate.projectile_updates:
+        projectile_states[update.object_id]=update.state
     return detached(CommittedBoundaryRecord(candidate.start_checkpoint.start, candidate.boundary,
         entities, anchors, actions, {aid: id(events[aid]) for aid in actions},
         supported.effects, supported.objective.subjects, supported.objective_use,
         supported.recipients, candidate.start_fences, snap.participant_ids,
-        candidate.proposed_authoritative_changes['queues']))
+        candidate.proposed_authoritative_changes['queues'], projectile_states))
 
 
 def _idle(encounter):
@@ -253,7 +270,12 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
         current=native_data(obj.current,(BeingDefinition,ObjectDefinition,ArmorDefinition,WeaponDefinition))
         if obj.spatial_state is not None:native_data(obj.spatial_state,(SpatialState,))
         _require(detached(current['hit_points']) == target.projected_hp, 'unreceipted Target HP change')
-        _require(detached(None if obj.spatial_state is None else obj.spatial_state.position) == meta.entities[key].position, 'unreceipted position change')
+        expected_position=(meta.projectile_states[key].position if key in meta.projectile_states
+                           else meta.entities[key].position)
+        _require(detached(None if obj.spatial_state is None else obj.spatial_state.position) == expected_position, 'unreceipted position change')
+        if key in meta.projectile_states:
+            _require(obj.__dict__.get('_atomic_projectile_history',())[-1] == meta.projectile_states[key],
+                     'unreceipted projectile boundary state')
         properties=meta.entities[key].pre_action
         _require(detached(current['hardness']) == properties['hardness'], 'unreceipted protection change')
         if target.category == 'being':
@@ -449,6 +471,7 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
             and copies[0].inspection.start == encounter.start_time, 'missing initial committed receipt')
         all_action_ids=[]
         target_storage={}
+        projectile_effects=set()
         for live_receipt, record in zip(history,copies):
             meta = record.inspection
             _require(record.committed and record.encounter_id == encounter.id
@@ -481,6 +504,22 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                         and projection.observer_id == declaration.actor_id
                         and projection.observations.get(evidence.id) == evidence,
                         'location observation does not match its successful Spot receipt')
+                if type(row.effect) is ProjectileReleaseEffect:
+                    projectile_effects.add((eid.encounter_id,eid.boundary,eid.source_action_id,
+                                            eid.channel,eid.slot))
+            _require(type(meta.projectile_states) in (dict,MappingProxyType),
+                     'unreviewed committed projectile state map')
+            from throwing import ProjectileBoundaryState
+            for object_id, state in meta.projectile_states.items():
+                source=state.source_effect_identity if type(state) is ProjectileBoundaryState else None
+                _require(type(object_id) is str and object_id in meta.target_anchors
+                    and type(state) is ProjectileBoundaryState and state.boundary==record.boundary
+                    and state.source_action_id==source[2] and source in projectile_effects
+                    and state.status in ('in_flight','landed'),
+                    'invalid or uncaused committed projectile state')
+                _require(type(state.impact_time) in (int,float)
+                    and (state.status=='landed') == (state.impact_time<=record.boundary),
+                    'projectile landing chronology is inconsistent')
             batch_targets = {}
             for key, anchor in meta.target_anchors.items():
                 obj = objects.get(key)
@@ -509,9 +548,11 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                             component = row.effect.component
                             components[component] = components.get(component, 0) + row.effect.amount
                     entity = meta.entities[key]
-                    view = TargetInspection(record.boundary, state, entity.position, entity,
+                    projectile_state=meta.projectile_states.get(key)
+                    position=projectile_state.position if projectile_state is not None else entity.position
+                    view = TargetInspection(record.boundary, state, position, entity,
                         freeze(by_action), state.starting_hp - min(state.starting_hp, -10) if state.fatal_effect_ids else 0,
-                        _practice_history(state.practice_state))
+                        _practice_history(state.practice_state), projectile_state)
                     histories.setdefault(key, []).append(view)
             latest_targets = batch_targets
             objectives.update(meta.objective); recipients.update(meta.recipients)

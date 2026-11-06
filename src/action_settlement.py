@@ -8,11 +8,12 @@ from dataclasses import dataclass, field, fields, replace
 import math
 import random
 from types import MappingProxyType
+from spatial.state import CartesianPosition
 
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
     EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, EffectIdentity, IdentifiedEffect,
-    RandomDraw, UnsupportedEvaluation, EvaluationIntegrityError, freeze, position)
+    RandomDraw, ProjectileReleaseEffect, UnsupportedEvaluation, EvaluationIntegrityError, freeze, position)
 
 
 class SettlementIntegrityError(EvaluationIntegrityError):
@@ -78,8 +79,8 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect)
-_FAMILIES = frozenset(('combat', 'melee', 'defense', 'run', 'spot', 'observe_group', 'history_request'))
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect)
+_FAMILIES = frozenset(('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
@@ -90,6 +91,7 @@ _OUTCOMES = {
     'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
+    'throw': frozenset(('unplaced', 'unavailable', 'released')),
 }
 _METADATA = {'combat': (), 'melee': ('distance',), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
@@ -97,6 +99,7 @@ _METADATA = {'combat': (), 'melee': ('distance',), 'defense': (), 'run': ('displ
                       'objective_key', 'evidence_kind', 'visible_count'),
              'observe_group': ('skill_level_used', 'roll', 'observation_id', 'objective_key'),
              'history_request': ('account_id', 'objective_key', 'newly_constructed')}
+_METADATA['throw'] = ('release_speed_yd_s', 'impact_time')
 
 
 def _require(condition, reason):
@@ -201,7 +204,7 @@ def _copy_proposal(proposal, actions, entities):
     if action.lifecycle == 'cancelled':
         _require(not effects and not defenses, 'interrupted Action may not propose active effects')
     expected_targets = set(() if action.target_id is None else (action.target_id,))
-    if action.family in ('combat', 'melee'):
+    if action.family in ('combat', 'melee', 'throw'):
         expected_targets.update(e.target_id for e in effects)
     _require(set(targets) == expected_targets, 'affected Target references do not match causal records')
     return ActionProposal(proposal.action_id, proposal.actor_id, tuple(sorted(targets)),
@@ -229,6 +232,45 @@ def _validate_effect(effect, proposal, action, actions, entities, participants):
     _identity(effect.target_id)
     _require(effect.target_id in entities, 'unknown effect recipient')
     recipient = entities[effect.target_id]
+    if type(effect) is ProjectileReleaseEffect:
+        _require(action.family == 'throw' and proposal.outcome == 'released'
+                 and action.instrument_id == effect.target_id and recipient.category == 'object',
+                 'projectile release must target its declared Object instrument')
+        _require(effect.release_time == action.boundary and effect.impact_time > effect.release_time
+                 and action.nominal_end-action.start==4,
+                 'invalid projectile release chronology')
+        _require(type(effect.release_position) is tuple and len(effect.release_position)==3
+                 and type(effect.landing_position) is tuple and len(effect.landing_position)==3
+                 and type(effect.velocity_m_s) is tuple and len(effect.velocity_m_s) == 3,
+                 'invalid projectile trajectory proposal')
+        for value in effect.release_position+effect.landing_position: _number(value)
+        _number(effect.landing_elevation_m)
+        for value in effect.velocity_m_s: _number(value)
+        if actor.position is None or effect.target_id not in actor.data.get('possessions', ()):
+            raise SettlementIntegrityError('Throw Object is not a positioned available possession')
+        _require(actor.data.get('abilities',{}).get('STR')==10
+            and type(recipient.data.get('weight')) in (int,float)
+            and 0 < recipient.data['weight'] <= 3.3,
+            'unsupported Throw strength/weight bracket')
+        from throwing import release_velocity_yd_s, project_drag_free_trajectory
+        height=actor.data.get('height')
+        speed=release_velocity_yd_s(strength=actor.data['abilities']['STR'],
+            throw_skill_level=actor.data['skills'].get('throw',0),
+            projectile_weight_lb=recipient.data['weight'],
+            heavy_load_reference_lb=action.data['heavy_load_reference_lb'],height_inches=height)
+        projected=project_drag_free_trajectory(release_velocity_yd_s=speed,
+            release_position=CartesianPosition(actor.position.x,actor.position.y,
+                actor.position.z+height*0.0254),
+            landing_elevation_m=action.data['landing_elevation_m'],
+            elevation_degrees=action.data['elevation_degrees'],
+            azimuth_degrees=action.data['azimuth_degrees'])
+        expected_time=action.boundary+projected.flight_time_s
+        _require(effect.release_position==projected.release_position.as_tuple()
+            and effect.velocity_m_s==projected.velocity_m_s
+            and effect.landing_position==projected.landing_position.as_tuple()
+            and math.isclose(effect.impact_time,expected_time,rel_tol=1e-13,abs_tol=1e-13),
+            'projectile release contradicts the adopted frozen launch calculation')
+        return effect.target_id, ('projectile_release', action.id, effect.target_id)
     if type(effect) in (DamageEffect, FatalEffect, ProtectionEffect):
         _require(action.family in ('combat', 'melee') and proposal.outcome in ('normal', 'critical', 'hit self', 'fatal'), 'damage/protection on an inapplicable Action')
         body_id = action.actor_id if proposal.outcome == 'hit self' else action.target_id
@@ -295,6 +337,9 @@ def _validate_effect(effect, proposal, action, actions, entities, participants):
 def _validate_complete_outcome(proposal, action, entities):
     """Validate required typed contributions, without redoing any calculation."""
     effects = proposal.effects
+    releases = [e for e in effects if type(e) is ProjectileReleaseEffect]
+    _require(len(releases) == int(action.family == 'throw' and proposal.outcome == 'released'),
+             'missing/extra projectile release contribution')
     practice = [e for e in effects if type(e) is PracticeEffect]
     expected_practice = None
     if action.lifecycle == 'pending':

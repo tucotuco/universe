@@ -105,6 +105,7 @@ def declaration(action, *, _initialization=None):
              'max_distance', 'spotting_conditions', 'declared_roll', 'episode_time', 'topic', 'generate',
              'substituted_claim', 'received_accounts', 'seed', 'random_key',
              'observer', 'interpreter', 'ledger', 'experience_policy', 'focus_category')
+    names += ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m')
     names += ('group_fully_visible', 'location_ledger')
     names += ('get_instrument', 'damage_potential', '_status', 'on_schedule', 'prepare_schedule')
     strategy = data.get('strategy')

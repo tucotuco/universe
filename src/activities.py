@@ -15,6 +15,62 @@ from scheduling import PreparedSchedule
 from experience import ActionResolution, SkillExercise
 from perception import Perception
 from spatial.state import CartesianPosition
+from object import ObjectInstance
+
+
+class ThrowAction(Action):
+    """Narrow native drag-free Throw release (no target or impact mechanics)."""
+
+    def __init__(self, universe, actor_id, instrument_id, start_time, *,
+                 heavy_load_reference_lb, elevation_degrees, azimuth_degrees=0.0,
+                 landing_elevation_m=0.0, id=None):
+        values = (start_time, heavy_load_reference_lb, elevation_degrees,
+                  azimuth_degrees, landing_elevation_m)
+        if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
+            raise ValueError('Throw inputs must be finite native numbers')
+        if heavy_load_reference_lb <= 0 or not 0 <= elevation_degrees <= 90:
+            raise ValueError('invalid Throw load reference or elevation')
+        if type(actor_id) is not str or type(instrument_id) is not str:
+            raise ValueError('Throw requires native actor and Object identities')
+        super().__init__(universe, start_time, start_time + 4, 'throw', actor_id,
+                         target_id=None, instrument_id=instrument_id, id=id)
+        self.end_time = start_time + 4
+        self.heavy_load_reference_lb = float(heavy_load_reference_lb)
+        self.elevation_degrees = float(elevation_degrees)
+        self.azimuth_degrees = float(azimuth_degrees)
+        self.landing_elevation_m = float(landing_elevation_m)
+
+    def prepare_schedule(self, encounter):
+        if encounter.progression_mode != 'transactional':
+            raise ValueError('ThrowAction requires explicitly selected native transactional progression')
+        if self.end_time - self.start_time != 4:
+            raise ValueError('native Throw currently supports the authored four-second bracket')
+        actor = encounter.get_being(self.actor_id)
+        obj = encounter.universe.get_object_by_id(self.instrument_id)
+        if actor is None or obj is None or type(obj) is not ObjectInstance:
+            raise ValueError('Throw requires a participating Being and registered ObjectInstance')
+        if self.instrument_id not in actor.possessions:
+            raise ValueError('Throw Object must be available in actor possessions')
+        from being import BeingInstance
+        holders = [being.id for being in encounter.universe.object_registry.object_instances.values()
+                   if type(being) is BeingInstance and self.instrument_id in being.possessions]
+        if holders != [actor.id]:
+            raise ValueError('Throw Object must have exactly one native Being possessor')
+        weight = obj.current.weight
+        if type(weight) not in (int, float) or not math.isfinite(weight) or weight <= 0:
+            raise ValueError('Throw Object must have positive finite pound weight')
+        # The implemented preparation contract is deliberately the reviewed
+        # Strength-10, <=3.3 lb, four-second table bracket only.
+        strength = actor.current.abilities.STR()
+        if strength != 10 or weight > 3.3:
+            raise ValueError('native Throw supports only the authored Strength 10 four-second weight bracket')
+        if actor.get_position() is None or obj.get_position() is None:
+            raise ValueError('Thrower and Object require authored spatial positions')
+        return PreparedSchedule.from_action(self)
+
+    def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
+        raise RuntimeError('ThrowAction resolves only through native transactional publication')
 
 
 class RunAction(Action):

@@ -17,12 +17,16 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
+from action_evaluation import ProjectileReleaseEffect
+from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
 from realization import RealityLedger, CommittedFact
 from observer_proposals import (BeliefProjection, AccountsProjection,
                                 LocationEvidenceProjection)
 from statistical_group import StatisticalGroup
+from object import ObjectInstance
+from spatial.state import CartesianPosition
 from encounter_fatigue_bridge import FrozenFatigueFrame, FrozenFatigueView
 from physiology_registry import ResolvedPhysiology
 from universe_physical_fatigue_r4 import Profile
@@ -434,6 +438,39 @@ def _make_plan(encounter,candidate,rng_owner):
     for key,pos in changes['positions'].items():
         if pos is not None and objects[key].spatial_state.position!=pos:
             plan.attr('movement',objects[key].spatial_state,'position',pos)
+    for update in candidate.projectile_updates:
+        obj=objects.get(update.object_id)
+        if (obj is None or type(update.prior_flight) is not ProjectileFlight
+                or object.__getattribute__(obj,'__dict__').get('_projectile_flight') is not update.prior_flight
+                or type(update.next_flight) is not ProjectileFlight
+                or type(update.state) is not ProjectileBoundaryState):
+            raise PublicationRejected('projectile flight dependency changed')
+        plan.attr('movement',obj,'_projectile_flight',update.next_flight)
+        plan.append('movement',obj,'_atomic_projectile_history',update.state)
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is not ProjectileReleaseEffect:continue
+        obj=objects.get(effect.target_id);source=events.get(effect.source_action_id)
+        if (obj is None or type(obj) is not ObjectInstance or source is None
+                or object.__getattribute__(obj,'__dict__').get('_projectile_flight') is not None
+                or obj.spatial_state is None):
+            raise PublicationRejected('projectile release target is unavailable or already in flight')
+        actor=objects.get(source.actor_id)
+        if actor is None or effect.target_id not in actor.possessions:
+            raise PublicationRejected('projectile release no longer owns its Object')
+        plan.contents('targets',actor.possessions,[key for key in actor.possessions if key!=effect.target_id])
+        identity=(row.identity.encounter_id,row.identity.boundary,row.identity.source_action_id,
+                  row.identity.channel,row.identity.slot)
+        release_position=CartesianPosition(*effect.release_position)
+        landing_position=CartesianPosition(*effect.landing_position)
+        flight=ProjectileFlight(effect.source_action_id,effect.release_time,effect.impact_time,
+            release_position,landing_position,effect.velocity_m_s,
+            effect.landing_elevation_m,identity)
+        state=ProjectileBoundaryState(effect.source_action_id,candidate.boundary,
+            release_position,'in_flight',effect.impact_time,identity)
+        plan.attr('targets',obj.spatial_state,'position',release_position,chain=True)
+        plan.attr('targets',obj,'_projectile_flight',flight)
+        plan.append('targets',obj,'_atomic_projectile_history',state)
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}
@@ -614,6 +651,24 @@ def _committed_consistency(encounter,candidate,plan):
         elif identity.role=='observer_location_evidence':
             from observer_proposals import _capture_location_evidence
             _capture_location_evidence(handle,handle.observer_id)
+    for update in candidate.projectile_updates:
+        obj=objects[update.object_id]
+        if (obj.spatial_state.position!=update.state.position
+                or obj.__dict__.get('_projectile_flight') is not update.next_flight
+                or obj.__dict__.get('_atomic_projectile_history',())[-1] is not update.state):
+            raise PublicationRejected('projectile boundary post-write consistency failed')
+    for row in candidate.supported_candidate.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is ProjectileReleaseEffect:
+            obj=objects[effect.target_id]
+            actor=objects[candidate.supported_candidate.boundary.actions[effect.source_action_id].actor_id]
+            if (obj.spatial_state.position!=CartesianPosition(*effect.release_position)
+                    or obj.__dict__.get('_projectile_flight') is None
+                    or obj.__dict__.get('_projectile_flight').source_action_id!=effect.source_action_id
+                    or effect.target_id in actor.possessions):
+                raise PublicationRejected('projectile release post-write consistency failed: '
+                    f'position={obj.spatial_state.position!r}, flight={obj.__dict__.get("_projectile_flight")!r}, '
+                    f'possessed={effect.target_id in actor.possessions}')
     if candidate.adult_member_candidate is not None:
         operation,group,being,member,slot=plan.adult_realization
         objects=encounter.universe.object_registry.object_instances

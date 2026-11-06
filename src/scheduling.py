@@ -29,7 +29,7 @@ class PreparedSchedule:
         data = object.__getattribute__(action, '__dict__')
         instrument = data.get('instrument_id')
         active = ((instrument,) if instrument is not None and
-                  data['event_type'] in ('swing', 'thrust', 'parry') else ())
+                  data['event_type'] in ('swing', 'thrust', 'parry', 'throw') else ())
         return cls(data['id'], data['start_time'],
                    data['end_time'] if end_time is None else end_time,
                    data['actor_id'], data.get('target_id'), instrument,
@@ -45,13 +45,14 @@ def native_preparer(action):
     """
     from action import Action
     from activities import RunAction, SpotAction
+    from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
     from group_observation import ObserveGroupAction
     from history_conversation import AskAboutPastAction
 
     cls = type(action)
-    native = (Action, RunAction, SpotAction, MeleeStrike, MeleeDefense,
+    native = (Action, RunAction, SpotAction, ThrowAction, MeleeStrike, MeleeDefense,
               ObserveGroupAction, AskAboutPastAction)
     if not issubclass(cls, Action):
         raise UnsupportedScheduleExtension(

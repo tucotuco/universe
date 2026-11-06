@@ -154,6 +154,59 @@ class DragFreeTrajectoryProjection:
         )
 
 
+@dataclass(frozen=True)
+class ProjectileFlight:
+    """Immutable authoritative launch facts for the bounded drag-free model."""
+    source_action_id: str
+    release_time: float
+    impact_time: float
+    release_position: CartesianPosition
+    landing_position: CartesianPosition
+    velocity_m_s: tuple
+    landing_elevation_m: float
+    source_effect_identity: tuple = ()
+    status: str = 'in_flight'
+    landing_recorded_at: float | None = None
+
+    def __post_init__(self):
+        if not self.source_action_id or self.status not in ('in_flight', 'landed'):
+            raise ValueError('invalid native projectile flight identity/status')
+        if (type(self.source_effect_identity) is not tuple or len(self.source_effect_identity) != 5
+                or self.source_effect_identity[2] != self.source_action_id):
+            raise ValueError('projectile must retain its native release effect identity')
+        for value in (self.release_time, self.impact_time, self.landing_elevation_m):
+            _finite_number(value, 'projectile flight value')
+        if self.impact_time <= self.release_time:
+            raise ValueError('projectile impact must follow release')
+        if type(self.velocity_m_s) is not tuple or len(self.velocity_m_s) != 3:
+            raise ValueError('projectile velocity must be a three-component tuple')
+        for value in self.velocity_m_s:
+            _finite_number(value, 'projectile velocity')
+        if self.status == 'landed' and self.landing_recorded_at is None:
+            raise ValueError('landed projectile requires its publication boundary')
+
+    def position_at(self, time):
+        time = _finite_number(time, 'projectile time')
+        elapsed = min(max(time - self.release_time, 0.0), self.impact_time - self.release_time)
+        vx, vy, vz = self.velocity_m_s
+        return CartesianPosition(
+            self.release_position.x + vx * elapsed,
+            self.release_position.y + vy * elapsed,
+            self.release_position.z + vz * elapsed - 5.0 * elapsed * elapsed,
+        )
+
+
+@dataclass(frozen=True)
+class ProjectileBoundaryState:
+    """Target-owned committed position/status and source-Action causality."""
+    source_action_id: str
+    boundary: int
+    position: CartesianPosition
+    status: str
+    impact_time: float | None = None
+    source_effect_identity: tuple = ()
+
+
 def project_drag_free_trajectory(*, release_velocity_yd_s, release_position,
                                  landing_elevation_m, elevation_degrees,
                                  azimuth_degrees=0.0):

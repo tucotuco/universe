@@ -280,6 +280,7 @@ def validate_action_contract(encounter,action,*,_force=False):
     import inspect
     from action import Action
     from activities import RunAction,SpotAction
+    from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
     from group_observation import ObserveGroupAction
@@ -287,7 +288,7 @@ def validate_action_contract(encounter,action,*,_force=False):
     from observer_proposals import _NATIVE_RESOLVERS,_NATIVE_HOOKS,_capture_belief,frozen_value
     from objective_reality import objective_action_data
     from action_evaluation import UnsupportedEvaluation
-    if type(action) not in (Action,RunAction,SpotAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
+    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
         raise UnsupportedEvaluation('transactional progression requires a reviewed exact native Action family')
     data=object.__getattribute__(action,'__dict__')
     if (inspect.getattr_static(type(action),'resolve') is not _NATIVE_RESOLVERS[type(action)]
@@ -296,6 +297,13 @@ def validate_action_contract(encounter,action,*,_force=False):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
     if type(action) is Action and data['event_type'] not in ('swing','thrust'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
+    if type(action) is ThrowAction:
+        if (data.get('event_type') != 'throw' or data.get('target_id') is not None
+                or type(data.get('instrument_id')) is not str
+                or data.get('end_time') - data.get('start_time') != 4
+                or any(type(data.get(key)) not in (int,float) or not math.isfinite(data[key])
+                       for key in ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m'))):
+            raise TransactionalProgressionError('invalid reviewed Throw declaration')
     if type(action) in (ObserveGroupAction,AskAboutPastAction) or (
             type(action) is SpotAction and data.get('group_fully_visible') is True):
         objective_action_data(action)
