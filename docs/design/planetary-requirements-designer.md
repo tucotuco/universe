@@ -122,4 +122,4 @@ model should support imperfectly known constraints from inhabitants.
 - Quantify uncertainty and feasibility of partially specified conditions,
   including search bounds and posterior distributions.
 - Connect observationally inferred calendars and astronomy to Agent-relative
-  knowledge. See [the two-moon inverse-design experiment](planetary-two-moon-observations.md).
+  knowledge. See [the two-moon inverse-design experiment](../experiments/world-generation/planetary-two-moon-observations.md).

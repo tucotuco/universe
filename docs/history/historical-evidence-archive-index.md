@@ -1,10 +1,10 @@
 # Historical Engineering Evidence Archive Index
 
-This index locates historical Universe 4/5 engineering evidence removed from the working repository during the 5E3G–5E3H cleanup. It is a locator and recovery guide, not an authoritative simulation specification. Adopted revision-60 rules remain in [`encounters_adopted_r60/`](encounters_adopted_r60/).
+This index locates historical Universe 4/5 engineering evidence removed from the working repository during the 5E3G–5E3H cleanup. It is a locator and recovery guide, not an authoritative simulation specification. The current controlling Encounter package is [`../encounters/README.md`](../encounters/README.md) (revision 61 baseline with revision 62 and 63 supplements); revision-60 files remain historical evidence.
 
 ## Archive location and integrity
 
-The 5E3H archive is a private local preservation archive, not a GitHub backup:
+The 5E3H archive is a private local preservation archive, not a GitHub backup. Current simulation rules are maintained separately in `docs/encounters/` (r61 plus r62/r63):
 
 - Archive root placeholder: `ARCHIVE_ROOT/5e3h-final-cleanup/`
 - Self-contained archive: `ARCHIVE_ROOT/5e3h-final-cleanup/universe5-5e3h-cleanup-archive.tar.gz`
@@ -59,10 +59,10 @@ The 17 complete evidence directories are enumerated below. Archive-level groups 
 
 ## Maintained references
 
-Several maintained documents formerly linked directly into historical evidence. Those links now target this index:
+Historical source files and private archive payloads are not runtime dependencies. Original checkout-relative paths are preserved below as provenance; files not explicitly present beside this index remain in the private recovery archive.
 
-- [`universe4-checkpoint-compatibility-contract-draft.md`](universe4-checkpoint-compatibility-contract-draft.md) — see [the 5D1 observed-field catalog](#increment-5d1-observed-field-catalog) and [the 5D2B closure report and blocker matrix](#increment-5d2b-closure-report-and-blocker-matrix).
-- [`universe5-transition-handoff.md`](universe5-transition-handoff.md) — see [advanced-time checkpoint reports and assignment](#advanced-time-checkpoint-reports-and-assignment).
+- [`universe4-checkpoint-compatibility-contract-draft.md`](universe4-checkpoint-compatibility-contract-draft.md) — historical checkpoint contract draft; see the 5D1 and 5D2B archive locators below.
+- [`universe5-transition-handoff.md`](universe5-transition-handoff.md) — historical transition context; its checkpoint references remain archive locators, not current persistence guarantees.
 - The retained Encounter characterization links resolve through [Assignment 03 evidence](#universe-4-assignment-03-evidence).
 
 ### Increment 5D1 observed-field catalog
