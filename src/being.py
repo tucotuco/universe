@@ -29,6 +29,8 @@ from weapon import WeaponInstance, WeaponDictionary
 class BeingDefinition(ObjectDefinition):
     '''
     A template for characteristics of a Being, which is a subtype of Object.
+    Native physical length/stature is stored in inches and body weight in
+    pounds. These are not spatial coordinates or collision geometry.
     '''
     def __init__(self, obj_type, length, weight, hit_points, hit_dice, alignment, 
                  armor_class, challenge_rating, width=0, height=0, cost=0, hardness=0, 
@@ -1389,7 +1391,8 @@ class BeingDictionary(ObjectDictionary):
 
     def load(self, filename):
         '''
-        Get predefined BeingDefinitions from a CSV file.
+        Get predefined BeingDefinitions from a TSV file. The native beings.tsv
+        schema names stature as length_inches; native Being weight is pounds.
         '''
         p = True
         with open(filename, 'r') as f:
@@ -1402,5 +1405,7 @@ class BeingDictionary(ObjectDictionary):
                 being_dict = {}
                 for i in range(len(headers)):
                     being_dict[headers[i]] = fields[i]
+                if 'length_inches' in being_dict:
+                    being_dict['length'] = being_dict.pop('length_inches')
                 being = BeingDefinition(**being_dict)
                 self.objects[being.obj_type] = being

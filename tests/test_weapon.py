@@ -241,13 +241,15 @@ class TestWeaponDictionary(unittest.TestCase):
         self.assertEqual(weapon.obj_type, 'Aklys')
         self.assertEqual(weapon.cost, 400)
         self.assertEqual(weapon.weight, 3.5)
-        self.assertEqual(weapon.length, 2)
+        self.assertEqual(weapon.length, 24)
         self.assertDictEqual(weapon.attacks, {'R': {'t': 6, 'd': 5, 'p': 'P'},
                                               'S': {'t': 6, 'd': 5, 'p': 'B'},
                                               'T': {'t': 4, 'd': 3, 'p': 'P'}})
         self.assertEqual(weapon.hardness, 5)
         self.assertEqual(weapon.hit_points, 2)
         self.assertEqual(weapon.weapon_size, 'S')
+        dagger = self.weapon_dict.objects['Dagger']
+        self.assertEqual(dagger.length, 15)  # source 1.25 ft -> native 15 in
 
     def test_all_weapons_in_categories(self):
         self.weapon_dict.load_object_categories(self.categories_file)

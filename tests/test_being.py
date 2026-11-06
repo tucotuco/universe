@@ -467,7 +467,9 @@ class TestBeingDictionary(unittest.TestCase):
         self.assertEqual(object.obj_type, 'Androsphinx')
         self.assertEqual(object.cost, 0)
         self.assertEqual(object.weight, 20000)
-        self.assertEqual(object.length, 10)
+        self.assertEqual(object.length, 120)
+        human = self.object_dict.objects['Human']
+        self.assertEqual((human.length, human.weight), (69, 170))
         self.assertEqual(object.hardness, 0)
         self.assertEqual(object.hit_points, 199)
 

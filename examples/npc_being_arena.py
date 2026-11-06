@@ -26,6 +26,9 @@ from spatial import CartesianPosition, Sphere
 from universe import Universe
 
 
+METERS_TO_YARDS = 1 / 0.9144
+
+
 FIXTURE = ROOT / "tests/fixtures/external/npcgen-npc-native-skill-candidate.json"
 EXPECTED_FIXTURE_SHA256 = "e59b55a6c22f822d65716215b64bccf0c1f2c7a42d49036092580d7c470241ae"
 DEMO_ACTION_ID = "npc-being-arena/action/one-dagger-thrust"
@@ -69,6 +72,12 @@ class NpcBeingArena:
             "source_sha256": self.source_sha256,
             "source_derived": {"display_name": source_state["name"],
                                "abilities": source_scores, "skills": source_state["skills"],
+                               "physical": {
+                                   "stature_inches": source_state["height"],
+                                   "stature_source_path": "state.height",
+                                   "body_weight_pounds": source_state["weight"],
+                                   "body_weight_source_path": "state.weight",
+                               },
                                "initial_hit_points": {
                                    "value": source_state["hps"], "source_path": "state.hps",
                                    "meaning": "generated initial HP value; not a maximum-HP or Hit Dice mapping",
@@ -78,8 +87,13 @@ class NpcBeingArena:
                 "abilities": native_scores, "skills": native_skills,
                 "initial_HP": self.npc.original.hit_points,
                 "current_HP": self.npc.get_hit_points(),
-                "position": self.npc.get_position().as_tuple(),
+                "length_inches": self.npc.original.length,
+                "weight_pounds": self.npc.original.weight,
+                "position": tuple(value * METERS_TO_YARDS
+                                   for value in self.npc.get_position().as_tuple()),
+                "position_unit": "yard",
                 "geometry": self.npc.geometry.to_dict(),
+                "geometry_unit": "meter",
                 "equipment": [self.world.get_object_by_id(self.dagger_id).name],
             },
             "opponent_arena_authored": {
@@ -88,8 +102,11 @@ class NpcBeingArena:
                 "initial_HP": self.opponent.original.hit_points,
                 "current_HP": self.opponent.get_hit_points(),
                 "AC": self.opponent.get_armor_class(),
-                "position": self.opponent.get_position().as_tuple(),
+                "position": tuple(value * METERS_TO_YARDS
+                                   for value in self.opponent.get_position().as_tuple()),
+                "position_unit": "yard",
                 "geometry": self.opponent.geometry.to_dict(),
+                "geometry_unit": "meter",
             },
             "arena_authored": {
                 "NPC native definition/geometry/position":
@@ -207,13 +224,18 @@ def _format_developer_view(view):
         f"Source-derived name: {source['display_name']}",
         f"Source-derived abilities: {source['abilities']}",
         f"Source-derived acquired ranks: {source['skills']}",
+        f"Source-derived stature={source['physical']['stature_inches']} in; "
+        f"body weight={source['physical']['body_weight_pounds']} lb",
         f"Native Being: {npc['name']} ({npc['id']}) abilities={npc['abilities']} skills={npc['skills']}",
         f"Source-derived initial HP={source['initial_hit_points']['value']} ({source['initial_hit_points']['source_path']}); "
-        f"native NPC current HP={npc['current_HP']}, position={npc['position']}, geometry={npc['geometry']}, "
+        f"native stature={npc['length_inches']} in, body weight={npc['weight_pounds']} lb; "
+        f"current HP={npc['current_HP']}, position={npc['position']} yd, "
+        f"geometry={npc['geometry']} {npc['geometry_unit']}, "
         f"equipment={npc['equipment']}",
         f"Arena-authored opponent: {opponent['name']} ({opponent['id']}), "
         f"initial/current HP={opponent['initial_HP']}/{opponent['current_HP']}, "
-        f"AC={opponent['AC']}, position={opponent['position']}, geometry={opponent['geometry']}",
+        f"AC={opponent['AC']}, position={opponent['position']} yd, "
+        f"geometry={opponent['geometry']} {opponent['geometry_unit']}",
         "Action: one native Dagger thrust; default supplied Strategy is all zero.",
         "Progression: native opt-in transactional Encounter; publication is per crossed second.",
     ))

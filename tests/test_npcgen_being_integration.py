@@ -96,10 +96,15 @@ class TestNpcgenNativeBeingIntegration(unittest.TestCase):
         self.assertEqual(being.get_weapon_skill_level("Dagger"), 2)
         self.assertEqual(being.original.hit_points, 23)
         self.assertEqual(being.get_hit_points(), 23)
+        self.assertAlmostEqual(being.original.length, 49.59000015258789)
+        self.assertAlmostEqual(being.current.length, 49.59000015258789)
+        self.assertAlmostEqual(being.original.weight, 46.8067626953125)
+        self.assertAlmostEqual(being.current.weight, 46.8067626953125)
         self.assertEqual(being.skill_experience, {})
         self.assertEqual(being.skill_use_history, [])
         self.assertEqual(being.weapons, [])
         self.assertEqual(being.possessions, [])
+        self.assertIsNone(being.geometry)  # Physical dimensions do not author collision geometry.
         self.assertEqual(self.record, original)
         self.assertEqual(self.raw, FIXTURE.read_bytes())
 
@@ -116,6 +121,7 @@ class TestNpcgenNativeBeingIntegration(unittest.TestCase):
         self.assertIs(imported_world.get_object_by_id(imported.id), imported)
         self.assertIs(control_world.get_object_by_id(control.id), control)
         self.assertEqual(imported_strike.get_instrument().current.obj_type, "Dagger")
+        self.assertEqual(imported_strike.get_instrument().original.length, 15)
 
     def test_unknown_or_unsupported_skill_data_refuses_without_registration(self):
         cases = []
@@ -158,6 +164,28 @@ class TestNpcgenNativeBeingIntegration(unittest.TestCase):
         boolean_sheet_hp = deepcopy(self.record)
         boolean_sheet_hp["sheet"]["hit_points"] = True
         cases.append(("boolean sheet HP", boolean_sheet_hp))
+        for key, value in (("height", None), ("height", True), ("height", 0),
+                           ("height", -1), ("height", float("inf")),
+                           ("weight", None), ("weight", False), ("weight", 0),
+                           ("weight", -1), ("weight", float("nan"))):
+            invalid_measurement = deepcopy(self.record)
+            invalid_measurement["state"][key] = value
+            cases.append((f"invalid state {key} {value!r}", invalid_measurement))
+        missing_height = deepcopy(self.record)
+        del missing_height["state"]["height"]
+        cases.append(("missing state height", missing_height))
+        conflicting_height = deepcopy(self.record)
+        conflicting_height["sheet"]["age"]["height_inches"] += 1
+        cases.append(("conflicting sheet height", conflicting_height))
+        missing_weight = deepcopy(self.record)
+        del missing_weight["state"]["weight"]
+        cases.append(("missing state weight", missing_weight))
+        missing_sheet_measurement = deepcopy(self.record)
+        del missing_sheet_measurement["sheet"]["age"]["weight_pounds"]
+        cases.append(("missing sheet weight", missing_sheet_measurement))
+        unsupported_units = deepcopy(self.record)
+        unsupported_units["state"]["height_units"] = "cm"
+        cases.append(("unsupported height units", unsupported_units))
 
         for label, record in cases:
             with self.subTest(label=label):

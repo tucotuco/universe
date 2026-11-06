@@ -1,28 +1,28 @@
-obj_type	length	weight	hit_points	hit_dice	alignment	armor_class	challenge_rating	race	discovery_dc
-Cloud giant	18	5300	200	16d12	Neutral good	14	9		None
-Fire giant	18	5300	162	15d12	Lawful evil	18	9		None
-Frost giant	20	5900	138	13d12	Chaotic evil	15	8		None
-Hill giant	16	4400	105	13d12	Chaotic evil	13	5		None
-Stone giant	18	5300	126	14d12	Neutral	17	7		None
-Storm giant	26	9600	230	26d12	Neutral good	16	13		None
-Androsphinx	10	20000	199	17d10	Lawful neutral	17	17		None
-Gymnosphinx	8	6500	136	11d10	Lawful neutral	17	11		None
-Drow	4.5	90	13	2d8	Chaotic evil	15	1		None
-Grey elf	5.5	120	37	2d6+2	Neutral good	11	1	Elf	None
-High elf	5.5	120	13	1d8	Chaotic good	11	1	Elf	None
-Wood elf	5.5	120	11	1d8	Chaotic good	11	1	Elf	None
-Half-elf	5.5	140	11	1d8	Neutral	11	1	Half-elf	None
-Human	5.75	170	10	1d8	Neutral	11	1		None
-Kobold	2.5	70	3	1d6	Lawful evil	13	1		None
-Skeleton	5	50	13	2d8	Lawful Evil	13	1		None
-Zombie	6	175	22	3d8	Neutral Evil	8	1		None
-Ghoul	6	150	22	5d8	Chaotic Evil	12	1		None
-Wight	6	175	45	6d8	Neutral Evil	14	3		None
-Mummy	6	200	58	9d8	Lawful Evil	11	3		None
-Specter	5	10	22	5d8	Chaotic Evil	12	1		None
-Vampire Spawn	6	200	82	11d8	Lawful Evil	16	5		None
-Ghost	5	1	45	10d8	Any	11	4		None
-Wraith	5	1	67	10d8	Neutral Evil	13	5		None
-Mummy Lord	6	225	97	13d8	Lawful Evil	17	15		None
-Vampire	6	200	144	18d8	Lawful Evil	16	13		None
-Lich	6	175	135	18d8	Any	17	21		None
+obj_type	length_inches	weight	hit_points	hit_dice	alignment	armor_class	challenge_rating	race	discovery_dc
+Cloud giant	216	5300	200	16d12	Neutral good	14	9		None
+Fire giant	216	5300	162	15d12	Lawful evil	18	9		None
+Frost giant	240	5900	138	13d12	Chaotic evil	15	8		None
+Hill giant	192	4400	105	13d12	Chaotic evil	13	5		None
+Stone giant	216	5300	126	14d12	Neutral	17	7		None
+Storm giant	312	9600	230	26d12	Neutral good	16	13		None
+Androsphinx	120	20000	199	17d10	Lawful neutral	17	17		None
+Gymnosphinx	96	6500	136	11d10	Lawful neutral	17	11		None
+Drow	54	90	13	2d8	Chaotic evil	15	1		None
+Grey elf	66	120	37	2d6+2	Neutral good	11	1	Elf	None
+High elf	66	120	13	1d8	Chaotic good	11	1	Elf	None
+Wood elf	66	120	11	1d8	Chaotic good	11	1	Elf	None
+Half-elf	66	140	11	1d8	Neutral	11	1	Half-elf	None
+Human	69	170	10	1d8	Neutral	11	1		None
+Kobold	30	70	3	1d6	Lawful evil	13	1		None
+Skeleton	60	50	13	2d8	Lawful Evil	13	1		None
+Zombie	72	175	22	3d8	Neutral Evil	8	1		None
+Ghoul	72	150	22	5d8	Chaotic Evil	12	1		None
+Wight	72	175	45	6d8	Neutral Evil	14	3		None
+Mummy	72	200	58	9d8	Lawful Evil	11	3		None
+Specter	60	10	22	5d8	Chaotic Evil	12	1		None
+Vampire Spawn	72	200	82	11d8	Lawful Evil	16	5		None
+Ghost	60	1	45	10d8	Any	11	4		None
+Wraith	60	1	67	10d8	Neutral Evil	13	5		None
+Mummy Lord	72	225	97	13d8	Lawful Evil	17	15		None
+Vampire	72	200	144	18d8	Lawful Evil	16	13		None
+Lich	72	175	135	18d8	Any	17	21		None

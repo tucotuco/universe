@@ -11,7 +11,8 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'src'), str(ROOT / 'examples')]
-from ai_duel import AgentDuel, OpenAIPolicy, TacticalPolicy
+from ai_duel import (AgentDuel, OpenAIPolicy, TacticalPolicy,
+                     reference_arm_length_inches)
 from ai_encounter import main as app_main
 from live_combat import make_handler
 from melee_combat import MeleeStrike
@@ -53,18 +54,32 @@ class AIEncounterTest(unittest.TestCase):
     def test_reach_is_weapon_and_body_specific_and_applies_at_impact(self):
         game = AgentDuel(policy=Constant('wait'))
         state = game.state()
-        self.assertAlmostEqual(state['ranges']['scout'],
-            (.375 * game.player.original.length + 1.25) / 3, places=4)
-        self.assertAlmostEqual(state['ranges']['raider'],
-            (.375 * game.foe.original.length + 3.5) / 3, places=4)
+        scout_reach_inches = (15 / 37) * 69 + 15
+        raider_reach_inches = (15 / 37) * 69 + 42
+        self.assertAlmostEqual(state['ranges']['scout'], scout_reach_inches / 36, places=4)
+        self.assertAlmostEqual(state['ranges']['raider'], raider_reach_inches / 36, places=4)
+        self.assertEqual(state['ranges']['unit'], 'yard')
+        self.assertEqual(state['player']['position_unit'], 'yard')
+        self.assertAlmostEqual(state['foe']['position'][0], 1.5 / 0.9144, places=4)
         self.assertFalse(state['range']['in_range'])
         self.assertTrue(state['range']['opponent_in_range'])
         game.choose('thrust')
-        self.assertAlmostEqual(game._pending(game.player).reach, state['ranges']['scout'], places=3)
+        self.assertAlmostEqual(game._pending(game.player).reach,
+                               scout_reach_inches * 0.0254, places=3)
         opponent = AgentDuel(policy=Constant('thrust'))
         opponent.choose('wait')
         self.assertAlmostEqual(opponent._pending(opponent.foe).reach,
-                               state['ranges']['raider'], places=3)
+                               raider_reach_inches * 0.0254, places=3)
+
+    def test_reference_arm_length_prefers_larger_measured_dimension_and_medium_fallback(self):
+        self.assertEqual({category: reference_arm_length_inches(size_category=category)
+                          for category in 'DTSMLHGC'},
+                         {'D': 3.5, 'T': 7, 'S': 14, 'M': 28,
+                          'L': 56, 'H': 112, 'G': 224, 'C': 448})
+        self.assertAlmostEqual(reference_arm_length_inches(height_inches=60, length_inches=74),
+                               74 * 15 / 37)
+        self.assertAlmostEqual(reference_arm_length_inches(height_inches=74), 74 * 15 / 37)
+        self.assertAlmostEqual(reference_arm_length_inches(length_inches=74), 74 * 15 / 37)
 
     def test_visible_equipment_without_leaking_private_vitals(self):
         game = AgentDuel(policy=Constant('wait'))

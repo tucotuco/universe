@@ -16,6 +16,8 @@ from utils import convert_to_numeric
 class WeaponDefinition(ObjectDefinition):
     '''
     A template for characteristics of a Weapon, which is a subtype of Object.
+    Native weapon length is stored in inches and weight in pounds. The
+    configuration loader converts the source table's feet-valued lengths.
     R - Throw  t - timing
     S - Swing  d - damage
     T - Thrust p - penetration types
@@ -191,6 +193,9 @@ class WeaponDictionary(ObjectDictionary):
             self.load(dictionary_file)
 
     def load(self, filename):
+        # The weapon reference table defines physical L values in feet. Native
+        # WeaponDefinition.length is inches; convert at this input boundary.
+        FEET_TO_INCHES = 12.0
         p = True
         with open(filename, 'r') as f:
             lines = f.readlines()
@@ -202,5 +207,7 @@ class WeaponDictionary(ObjectDictionary):
                 weapon_dict = {}
                 for i in range(len(headers)):
                     weapon_dict[headers[i]] = fields[i]
+                if "length" in weapon_dict and weapon_dict["length"] not in (None, ""):
+                    weapon_dict["length"] = float(weapon_dict["length"]) * FEET_TO_INCHES
                 weapon = WeaponDefinition(**weapon_dict)
                 self.objects[weapon.obj_type] = weapon

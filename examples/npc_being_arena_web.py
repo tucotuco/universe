@@ -31,7 +31,7 @@ button{font:inherit;padding:.6rem 1rem;margin:.3rem .4rem .3rem 0}#state{backgro
  <section><h2>Arena-authored mechanics</h2><pre id="arena">Loading…</pre></section>
 </div>
 <section><h2>Encounter progression</h2>
- <p>One fixed native Dagger thrust. Submit the Choice, inspect the pre-commit state, then advance to the scheduled boundary 4. Tobe's source-generated initial HP is mapped from <code>state.hps</code> to native initial/current HP; it is not a maximum-HP or Hit Dice mapping. Race, age, class/level/XP and possessions are not imported. The source <code>armed combat</code> rank is imported, but this implementation does not calculate the full revision-60 strategy pool.</p>
+ <p>One fixed native Dagger thrust. Submit the Choice, inspect the pre-commit state, then advance to the scheduled boundary 4. Source stature (<code>state.height</code>, inches) and body weight (<code>state.weight</code>, pounds) initialize native Being length and weight. These values do not create collision geometry: the displayed Sphere is Arena-authored. The source also supplies initial HP (<code>state.hps</code>), not a maximum-HP or Hit Dice mapping. Race, age, class/level/XP and possessions are not imported. The source <code>armed combat</code> rank is imported, but this implementation does not calculate the full revision-60 strategy pool.</p>
  <button id="submit">Submit fixed Dagger thrust</button>
  <button id="advance" disabled>Advance to native commit boundary</button>
  <pre id="state">Loading…</pre>

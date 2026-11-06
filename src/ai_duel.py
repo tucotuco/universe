@@ -19,6 +19,39 @@ from strategy import Strategy
 from tactical_duel import TacticalDuel
 
 
+SIZE_CATEGORY_REFERENCE_ARM_INCHES = {
+    'D': 3.5, 'T': 7, 'S': 14, 'M': 28, 'L': 56,
+    'H': 112, 'G': 224, 'C': 448,
+}
+INCHES_TO_METERS = 0.0254
+METERS_TO_YARDS = 1 / 0.9144
+
+
+def reference_arm_length_inches(*, height_inches=None, length_inches=None,
+                                size_category=None):
+    """Resolve the adopted physical arm-length estimate without geometry inference."""
+    dimensions = []
+    for value in (height_inches, length_inches):
+        if value is None:
+            continue
+        if type(value) not in (int, float):
+            raise ValueError('physical height and length must be finite nonnegative inches')
+        try:
+            value = float(value)
+        except (OverflowError, ValueError) as exc:
+            raise ValueError('physical height and length must be finite nonnegative inches') from exc
+        if not math.isfinite(value) or value < 0:
+            raise ValueError('physical height and length must be finite nonnegative inches')
+        if value == 0:  # Native definitions use zero as their unset dimension sentinel.
+            continue
+        dimensions.append(value)
+    if dimensions:
+        return max(dimensions) * (15 / 37)
+    if size_category not in SIZE_CATEGORY_REFERENCE_ARM_INCHES:
+        raise ValueError('a known physical dimension or size category is required for Reach')
+    return SIZE_CATEGORY_REFERENCE_ARM_INCHES[size_category]
+
+
 class TacticalPolicy:
     """Deterministic, inspectable baseline; not a learned model."""
 
@@ -138,17 +171,17 @@ class AgentDuel(TacticalDuel):
         super().__init__(seed)
 
     def _reach_for(self, actor, weapon_id):
-        """Draft reach: 3/8 of body length + weapon length, in yards.
-
-        This bounded scene defines one coordinate unit as one yard. Full
-        facing/engagement and body-part contact remain outside the prototype.
-        """
+        """Return impact Reach in meters for comparison with Encounter positions."""
         self.encounter.assert_legacy_consumer()
         if self.legacy_reach:
             return self.REACH  # Verify pre-reach-fix saved battles without changing history.
         weapon = self.world.get_object_by_id(weapon_id)
-        return (0.375 * float(actor.original.length) +
-                float(weapon.original.length)) / 3.0
+        arm_inches = reference_arm_length_inches(
+            height_inches=actor.original.height,
+            length_inches=actor.original.length)
+        # Being and weapon physical lengths are inches; Encounter coordinates
+        # and center-to-center impact distances are meters.
+        return (arm_inches + float(weapon.original.length)) * INCHES_TO_METERS
 
     def _visible_equipment(self, actor, weapon_id):
         self.encounter.assert_legacy_consumer()
@@ -320,6 +353,32 @@ class AgentDuel(TacticalDuel):
     def state(self, audit=False):
         self.encounter.assert_legacy_consumer()
         state = super().state(audit=audit)
+        # Convert world-space meter values only at this developer/player view
+        # boundary. Encounter state, geometry and comparisons remain metric.
+        for participant_key in ('player', 'foe'):
+            participant = state.get(participant_key)
+            if participant is not None and isinstance(participant.get('position'), list):
+                participant['position'] = [v * METERS_TO_YARDS
+                                           for v in participant['position']]
+                participant['position_unit'] = 'yard'
+        if audit:
+            display_history = []
+            for original in state['history']:
+                item = dict(original)
+                if item.get('player_movement') is not None:
+                    item['player_movement'] = [v * METERS_TO_YARDS
+                                               for v in item['player_movement']]
+                    item['movement_unit'] = 'yard/second'
+                if item.get('foe_activity') is not None:
+                    activity = dict(item['foe_activity'])
+                    if activity.get('movement') is not None:
+                        activity['movement'] = [v * METERS_TO_YARDS
+                                                for v in activity['movement']]
+                        activity['movement_unit'] = 'yard/second'
+                    item['foe_activity'] = activity
+                display_history.append(item)
+            state['history'] = display_history
+        state['spatial_presentation_unit'] = 'yard'
         decision = getattr(self, '_ai_last', None)
         # Offer the human exactly the same reaction readiness information
         # the autonomous opponent receives through its legal-action filter.
@@ -344,12 +403,27 @@ class AgentDuel(TacticalDuel):
         player_reach = self._reach_for(self.player, self.player_weapon)
         foe_reach = self._reach_for(self.foe, self.foe_weapon)
         state['reach_profile'] = 'legacy shared reach' if self.legacy_reach else 'weapon-specific reach'
-        state['ranges'] = {'scout': round(player_reach, 4),
-                           'raider': round(foe_reach, 4), 'unit': 'yard'}
+        # The Encounter uses meters internally; developer/player presentation
+        # reports spatial distances and Reach in yards.
+        if self.legacy_reach:
+            state['ranges'] = {'scout': round(player_reach, 4),
+                               'raider': round(foe_reach, 4), 'unit': 'yard'}
+        else:
+            state['ranges'] = {'scout': round(player_reach * METERS_TO_YARDS, 4),
+                               'raider': round(foe_reach * METERS_TO_YARDS, 4),
+                               'unit': 'yard'}
+            if state['range'] is not None:
+                state['range']['distance'] = round(
+                    state['range']['distance'] * METERS_TO_YARDS, 4)
+                state['range']['reach'] = round(
+                    state['range']['reach'] * METERS_TO_YARDS, 4)
+                state['range']['unit'] = 'yard'
         if state['range'] is not None:
             distance = state['range']['distance']
-            state['range']['opponent_reach'] = foe_reach
-            state['range']['opponent_in_range'] = distance <= foe_reach
+            opponent_reach = (foe_reach if self.legacy_reach else
+                              foe_reach * METERS_TO_YARDS)
+            state['range']['opponent_reach'] = opponent_reach
+            state['range']['opponent_in_range'] = distance <= opponent_reach
         if state['foe'] is not None:
             # Observable equipment, not a disclosure of hidden skill or HP.
             state['foe'].update(self._visible_equipment(self.foe, self.foe_weapon))

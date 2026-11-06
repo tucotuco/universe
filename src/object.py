@@ -153,9 +153,9 @@ class ObjectInstance(Identifiable):
     def set_geometry(self, geometry):
         """Assign physical extent; None means geometry has not been modeled.
 
-        Definition dimensions are deliberately *not* interpreted as world-space
-        dimensions: historical configuration units and body orientation are
-        not yet specified. Beings inherit this capability from ObjectInstance.
+        Definition dimensions are physical quantities in their subtype's
+        native units. They are deliberately not interpreted as world-space
+        dimensions or collision geometry; geometry must be authored separately.
         """
         if geometry is not None and not isinstance(geometry, Geometry3D):
             raise TypeError("geometry must be a Geometry3D or None")

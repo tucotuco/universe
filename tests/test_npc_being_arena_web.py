@@ -84,6 +84,8 @@ class NpcBeingArenaWebTests(unittest.TestCase):
         self.assertIn(b"does not calculate the full revision-60 strategy pool", page)
         self.assertIn(b"state.hps", page)
         self.assertIn(b"maximum-HP or Hit Dice mapping", page)
+        self.assertIn(b"Source stature", page)
+        self.assertIn(b"do not create collision geometry", page)
         self.assertNotIn(b"High Elf", page)
         self.assertNotIn(b"7881", page)
 
@@ -99,6 +101,12 @@ class NpcBeingArenaWebTests(unittest.TestCase):
         self.assertEqual(source["initial_hit_points"]["value"], 23)
         self.assertEqual(initial["developer_view"]["npc_native"]["initial_HP"], 23)
         self.assertEqual(initial["developer_view"]["npc_native"]["current_HP"], 23)
+        self.assertAlmostEqual(initial["developer_view"]["npc_native"]["length_inches"],
+                               49.59000015258789)
+        self.assertAlmostEqual(initial["developer_view"]["npc_native"]["weight_pounds"],
+                               46.8067626953125)
+        self.assertAlmostEqual(source["physical"]["stature_inches"], 49.59000015258789)
+        self.assertAlmostEqual(source["physical"]["body_weight_pounds"], 46.8067626953125)
         self.assertEqual(initial["developer_view"]["opponent_arena_authored"]["initial_HP"], 10)
         self.assertEqual(initial["developer_view"]["opponent_arena_authored"]["current_HP"], 10)
         serialized = json.dumps(initial, sort_keys=True)
