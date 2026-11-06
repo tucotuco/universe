@@ -1,0 +1,63 @@
+--- a/docs/encounters/encounters-working-draft-adopted-r61.md
++++ b/docs/encounters/encounters-working-draft-adopted-r61.md
+@@ -3,0 +4 @@
++> **Current supplementary decision (proposed revision 62):** Reference arm length and the throwing velocity denominator are proposed to follow the [revision-62 decision](encounters-consistency-decisions-r62.md) and [issue supplement](encounters-rule-issues-r62.md); revision-59 0.800 m figures remain historical, not current values.
+@@ -20 +21 @@
+-> **Adopted revision 59 (throwing calibration; supersedes the earlier 0.7865 m and uncalibrated-size statements below):** Medium reference arm length **0.800 m**; lengths double per size category, acceleration path equals reference arm length, and the smooth empirical release-velocity equation with work-energy square-root-of-length scaling is normative. Equal Strength entails equal maximum lifting/carrying capacity regardless of size. The superseded revision 57–58 statements below are retained as chronological history, **not current rules**. See [Throwing](#throwing) and [Strength-based force capacity](#strength-based-force-capacity-calibration-evidence).
++> **Historical revision 59 (proposed revision 62 supersedes its reference arm length and throwing denominator):** The former 0.800 m Medium anchor and metric size series are retained as decision history. Its independent equal-Strength/capacity decisions remain in force. See the revision-62 supplementary decision addendum.
+@@ -328 +329 @@
+-**Reference arm geometry and throwing distance (revision 59).** For reference Beings, determine arm length by Size Category, independently of abstract effective-size Grapple factors. Medium = **0.800 m**, and each category step doubles (or halves) length: Diminutive 0.100 m, Tiny 0.200 m, Small 0.400 m, Medium 0.800 m, Large 1.600 m, Huge 3.200 m, Gargantuan 6.400 m, Colossal 12.800 m. For throwing, **acceleration distance equals this reference arm length**; no separate hand, grip or moving-arm-mass model is required. The 0.800 m anchor is a rounded design standard informed by human measurements, not a claim about every individual's anatomy. Combat Reach remains governed separately by its established rules.
++**Reference arm geometry and throwing distance (proposed current supplementary decision, revision 62).** When positive measured Being height or length is available, calculate `L_inches = (15/37) × max(height_inches, length_inches)`. Otherwise use an explicitly known Size Category estimate: Diminutive 3.5 in, Tiny 7 in, Small 14 in, Medium 28 in, Large 56 in, Huge 112 in, Gargantuan 224 in, Colossal 448 in. Do not infer category from geometry or an unimplemented category stub, and do not add individual random variation. For throwing, **acceleration distance equals this reference arm length**. The revision-59 0.800 m anchor and metric series remain historical/superseded for current calculation. Combat Reach remains a scalar for spatial comparisons, never a world coordinate, and follows its separate center-distance rule.
+@@ -1132,3 +1133,3 @@
+-**Adopted revision 59 throwing velocity model.** Use the following smooth empirical approximation in place of looking up a Velocity versus Weight percentage. This fits the historical table as a *surrogate* calibration; the original per-throw observations are unavailable. For projectile weight `m` and the heavy-load reference `H(S)` in matching units, let `x=m/H(S)`. The current maximum-velocity formula remains `Vmax = 5 × (Strength + throw skill modifier − 2)/2` yards per second, with modifier 1 for any acquired Throw skill and 0 otherwise. For Size Category with reference acceleration distance `L`, release speed in yards per second is:
+-
+-`Vrelease = Vmax × exp(−(x / 0.08081)^0.6010) × sqrt(L / 0.800 m)`.
++**Adopted revision 59 throwing velocity model.** Use the following smooth empirical approximation in place of looking up a Velocity versus Weight percentage. This fits the historical table as a *surrogate* calibration; the original per-throw observations are unavailable. For projectile weight `m` and the heavy-load reference `H(S)` in matching units, let `x=m/H(S)`. The current maximum-velocity formula remains `Vmax = 5 × (Strength + throw skill modifier − 2)/2` yards per second, with modifier 1 for any acquired Throw skill and 0 otherwise. For the resolved reference arm length `L`, release speed remains in yards per second:
++
++`Vrelease_yd_s = Vmax_yd_s × exp(−(x / 0.08081)^0.6010) × sqrt(L_inches / 28 inches)`.
+--- a/docs/encounters/README.md
++++ b/docs/encounters/README.md
+@@ -5 +5 @@
+-Revision 60 ratifies Medium arm length 0.8 m, doubling reference geometry per size category, throwing acceleration distance equal to arm length, smooth empirical velocity response, and work-energy square-root-of-length scaling. Absolute Strength and carrying/lifting limits are independent of size. Historical curve retained for provenance, not used for velocity calculations. General physical force/Grapple work remains open. No Universe engine code changed.
++Revision 61 is the adopted working rules baseline. The proposed revision-62 addenda would update reference arm length and the throwing equation denominator; until formally applied, revision 61 remains the active text. See [the proposed decision](encounters-consistency-decisions-r62.md) and [issue supplement](encounters-rule-issues-r62.md). Absolute Strength and carrying/lifting limits are independent of size. Historical curve retained for provenance, not used for velocity calculations. General physical force/Grapple work remains open. No Universe engine code changed.
+--- a/docs/encounters/encounters-outstanding-todo.md
++++ b/docs/encounters/encounters-outstanding-todo.md
+@@ -41,0 +42,2 @@
++- [ ] **Native Throw Action integration remains open.** The pure `src/throwing.py` equation helper is not an Action, absolute-weight gate, or trajectory calculator. The proposed revision-62 decision must be reviewed/applied before this helper is treated as synchronized current rules.
++
+--- /dev/null
++++ b/docs/encounters/encounters-consistency-decisions-r62.md
+@@ -0,0 +1,21 @@
++# Encounter consistency decision addendum — proposed revision 62
++
++**Status: proposed; not applied or adopted in this checkout.** This proposed addendum supersedes revision 59 only for reference arm length, measured-dimension priority, and the throwing equation denominator. Prior decision text remains unchanged as historical provenance.
++
++## Reference arm length and Reach terminology
++
++- Native Being stature/length and weapon length are inches. For positive measured height or length, use `L_inches = (15/37) × max(height_inches, length_inches)`; measurements take precedence over category.
++- If neither dimension is positive, use an explicitly known category estimate: Diminutive 3.5, Tiny 7, Small 14, Medium 28, Large 56, Huge 112, Gargantuan 224, Colossal 448 inches. Do not infer category from geometry or an unimplemented category stub; do not add individual random variation.
++- Reach is a scalar used in spatial comparisons, never a world coordinate. This does not change the separate adopted melee center-distance rule.
++
++## Throwing equation and preserved constraints
++
++For `x = projectile_weight_lb / heavy_load_reference_lb`, retain `Vmax_yd_s = 5 × (Strength + Throw_skill_modifier − 2)/2`, where the modifier is +1 for any acquired Throw level and 0 otherwise. Calculate:
++
++`Vrelease_yd_s = Vmax_yd_s × exp(−(x / 0.08081)^0.6010) × sqrt(L_inches / 28 inches)`.
++
++The 28-inch denominator makes the Medium reference factor exactly one. The heavy-load value remains a numerical normalizer, not a physical causal law. Preserve the separate maximum-throwable-weight constraint and the minimum 5 yd/s effective-adjacent-hex threshold. Throw velocity remains yd/s; a future trajectory boundary must explicitly convert to m/s (×0.9144) while spatial coordinates remain meters.
++
++The revision-59 0.800 m Medium anchor and metric series are historical/superseded for current calculation. Any interim 30-inch reference is likewise historical/superseded; keep old revision records unchanged.
++
++This does not create a native Throw Action or integrate the helper with Encounter scheduling. Maximum-weight tables, projectile trajectory integration, and any additional eligibility rule remain separate.
+--- /dev/null
++++ b/docs/encounters/encounters-rule-issues-r62.md
+@@ -0,0 +1,9 @@
++# Encounter issue-register supplement — proposed revision 62
++
++**Status: proposed; not applied or adopted.** Supplements the historical issue register without rewriting prior issue decisions.
++
++- Throwing reference-arm and release-velocity formula decisions: covered by the proposed revision-62 consistency addendum. This only governs the mathematical reference and denominator.
++- **Still unimplemented:** native Throw Action scheduling/resolution, enforcement of the independent maximum-throwable-weight table, and connection from release velocity to the existing metric projectile trajectory calculations. No such native Throw velocity/action path was found in the inspected source.
++- **Still open independently:** ES-041 non-throwing force capacity, Grapple, grip, traction, leverage, and force-to-motion behavior.
++
++The revision-59 0.800 m formula/series and any interim 30-inch reference are historical values once the revision-62 decision is formally adopted; old dated decision records remain unchanged.

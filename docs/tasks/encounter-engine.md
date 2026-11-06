@@ -20,6 +20,8 @@ Back to [TASKS.md](../../TASKS.md).
 
 ## Open work and acceptance gates
 
+- **U-THROW-001 (code calculation delivered; authoritative documentation blocked):** [`src/throwing.py`](../../src/throwing.py) supplies a pure yd/s maximum/release-velocity calculation using the assignment's 28-inch denominator, the shared measured arm helper, explicit size-category fallback, and the one-time Throw modifier. No native Throw Action, maximum throwable-weight table implementation, or trajectory calculator exists in the inspected source, so none is claimed. The active revision-61 files are in the user-moved, untracked [`docs/encounters/`](../encounters/) directory and were left untouched. The proposed revision-62 synchronization patch is unapplied; see the [U-THROW-001 report](../reports/U-THROW-001-report.md).
+
 - **U-PER-002:** general checkpoint/save/load, mixed Action and observer cases, and stochastic continuation.
 - **U-RULE-001:** resolve or retire provisional `ObserveGroupAction` rank/XP behavior without inventing sensing mechanics.
 - **U-SPOT-002:** category-directed Spot/Search, multi-candidate outcomes and sustained Attention remain unapproved. General Object/Event, motion and performed-Action perception also remain open.
