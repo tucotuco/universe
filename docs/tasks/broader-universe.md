@@ -27,4 +27,4 @@ The [deferred Object/Event perception design note](../design/deferred-object-eve
 
 ## Planning source
 
-[`deferred-ideas.md`](../deferred-ideas.md) is the earlier consolidated Universe backlog, reviewed 2026-10-19. Keep its broad aspirations, but use current [`TASKS.md`](../../TASKS.md), adopted Encounter rules, current source/tests and later user decisions for present status and acceptance. Historical engineering material is indexed in the [archive index](../historical-evidence-archive-index.md).
+[`deferred-ideas.md`](../design/deferred-ideas.md) is the earlier consolidated Universe backlog, reviewed 2026-10-19. Keep its broad aspirations, but use current [`TASKS.md`](../../TASKS.md), adopted Encounter rules, current source/tests and later user decisions for present status and acceptance. Historical engineering material is indexed in the [archive index](../history/historical-evidence-archive-index.md).

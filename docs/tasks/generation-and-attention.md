@@ -70,4 +70,4 @@ Historical sources remain untrusted and are not runtime dependencies. Before ado
 
 ## Planning and source context
 
-[`deferred-ideas.md`](../deferred-ideas.md) is an earlier consolidated Universe backlog (reviewed 2026-10-19). It remains useful for broad direction, but later adopted rules, user decisions and current source/tests supersede stale status claims. Historical evidence and original reports are located through the [archive index](../historical-evidence-archive-index.md). Interrupted experiments remain under the [tracked work-stash](../../work-stash/README.md), with topic status files describing their limits.
+[`deferred-ideas.md`](../design/deferred-ideas.md) is an earlier consolidated Universe backlog (reviewed 2026-10-19). It remains useful for broad direction, but later adopted rules, user decisions and current source/tests supersede stale status claims. Historical evidence and original reports are located through the [archive index](../history/historical-evidence-archive-index.md). Interrupted experiments remain under the [tracked work-stash](../../work-stash/README.md), with topic status files describing their limits.

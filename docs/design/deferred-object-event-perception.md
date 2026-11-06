@@ -97,4 +97,4 @@ Any eventual executable increment should be narrow, independently green, and exp
 
 ## 10. Authority and sources
 
-This note records the user's Universe 7 direction, read with `docs/handoffs/universe-6-to-7.md` and the reported U-SPOT-002A and U-LOC-002A engineering results. The handoff's revision-60 package and later confirmed decisions outrank exploratory notes. The local, unpushed Universe checkout has not been inspected for this note; check the actual checkout and authoritative documents before design implementation. The independent `npc-generator-web`, protected legacy archive, saved JSON/configurations, and existing unpushed commit history remain outside scope.
+This note records the user's earlier Universe 7 direction. For current planning, read it with the [Universe 7 → 8 review handoff](../handoffs/universe-7-to-8.md), U-REPO-005/006 reports, current task register, and adopted Encounter package. This remains design only: it does not amend the r61 baseline or r62/r63 supplements, nor authorize implementation. Preserve the independent `npc-generator-web`, protected legacy archive, saved JSON/configurations, and unrelated user work.

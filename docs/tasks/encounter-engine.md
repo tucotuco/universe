@@ -47,4 +47,4 @@ Back to [TASKS.md](../../TASKS.md).
 
 ## Normative sources and evidence
 
-The [adopted r60 draft](../encounters_adopted_r60/encounters-working-draft-adopted-r60.md), [issue register](../encounters_adopted_r60/encounters-rule-issues-r60.md) and [generated queue](../encounters_adopted_r60/encounters-outstanding-todo.md) govern rules. Current source/tests establish implementation. Prior 5E1J6, 5E2M and 5E2U reports are available via the [historical archive index](../historical-evidence-archive-index.md); their original relative paths are recorded there.
+The [current adopted Encounter package](../encounters/README.md) governs rules: revision 61 with revision 62 and 63 supplements. The [r60 issue register](../encounters/encounters-rule-issues-r60.md) and [generated queue](../encounters/encounters-outstanding-todo.md) remain historical issue-tracking inputs where referenced by the current task bridge. Current source/tests establish implementation. Prior 5E1J6, 5E2M and 5E2U reports are indexed in the [historical archive index](../history/historical-evidence-archive-index.md); their original relative paths are recorded there.
