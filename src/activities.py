@@ -169,7 +169,7 @@ class SpotAction(Action):
     def __init__(self, universe, actor_id, target_id, start_time,
                  duration=6, die_roll=None, id=None, spotting_conditions=(), *,
                  ledger=None, group_fully_visible=False,
-                 location_ledger=None):
+                 location_ledger=None, object_ledger=None):
         for name, value in (("start_time", start_time), ("duration", duration)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{name} must be a finite number")
@@ -194,6 +194,13 @@ class SpotAction(Action):
             if (type(location_ledger) is not LocationEvidenceLedger
                     or location_ledger.observer_id != actor_id):
                 raise ValueError("location evidence ledger must belong to the Spotter")
+        if object_ledger is not None:
+            from object_observation import ObjectObservationLedger
+            if (type(object_ledger) is not ObjectObservationLedger
+                    or object_ledger.observer_id != actor_id):
+                raise ValueError("Object evidence ledger must belong to the Spotter")
+            if ledger is not None or location_ledger is not None or group_fully_visible:
+                raise ValueError("Object Spot evidence cannot be combined with Group/Being evidence")
         from discovery import SpottingConditions
         conditions = SpottingConditions(tuple(spotting_conditions))
         super().__init__(universe, start_time, None, 'spot', actor_id,
@@ -210,6 +217,8 @@ class SpotAction(Action):
         self.group_fully_visible = group_fully_visible
         if location_ledger is not None:
             self.location_ledger = location_ledger
+        if object_ledger is not None:
+            self.object_ledger = object_ledger
 
     def prepare_schedule(self, encounter):
         """Bind to a validated Encounter but do not manufacture awareness."""
@@ -228,6 +237,14 @@ class SpotAction(Action):
                 raise ValueError("location evidence requires a participating Being target")
             if location_ledger.observer_id != self.actor_id:
                 raise ValueError("location evidence ledger owner changed")
+        object_ledger = self.__dict__.get('object_ledger')
+        if object_ledger is not None:
+            from object import ObjectInstance
+            target = encounter.get_entity(self.target_id)
+            if type(target) is not ObjectInstance:
+                raise ValueError("Object evidence requires a participating native ObjectInstance target")
+            if object_ledger.observer_id != self.actor_id:
+                raise ValueError("Object evidence ledger owner changed")
         return PreparedSchedule.from_action(self, initialization=(('_encounter', encounter),))
 
     def resolve(self, difficulty_class):

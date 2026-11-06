@@ -22,6 +22,7 @@ from history_conversation import AskAboutPastAction, HeardAccount
 from spatial.state import CartesianPosition
 from location_observation import (BeingLocationObservation, LastSeenLocation,
     LocationEvidenceLedger)
+from object_observation import ObjectObservation, ObjectObservationLedger
 from objective_reality import (ObjectiveContext, capture_objective_context,
     evaluate_native_companion, build_objective_candidate, revalidate_complete_objective)
 
@@ -31,6 +32,7 @@ _NATIVE_BELIEF_LEARN = BeliefLedger.learn
 _NATIVE_BELIEF_COUNT = BeliefLedger.count_estimate
 _NATIVE_BELIEF_DISCREPANCIES = BeliefLedger.discrepancies
 _NATIVE_LOCATION_LAST_SEEN = LocationEvidenceLedger.last_seen_location
+_NATIVE_OBJECT_LAST = ObjectObservationLedger.last_observation
 _NATIVE_SAMPLE = SampledGroupObservation.sample
 _NATIVE_INTERPRET = FieldInterpreter.interpret
 from action import Action
@@ -40,7 +42,7 @@ from melee_defense import MeleeDefense
 _NATIVE_RESOLVERS = {cls:cls.resolve for cls in (Action,RunAction,SpotAction,ThrowAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction)}
 _RECORDS = (FieldObservation, CountReport, FieldInterpretation, BeliefRevision,
     EvidenceReassessment, InquiryProposal, InquiryRecord, HeardAccount, CartesianPosition,
-    BeingLocationObservation, LastSeenLocation)
+    BeingLocationObservation, LastSeenLocation, ObjectObservation)
 
 
 def _check(test, reason):
@@ -92,6 +94,13 @@ class FrozenLocationEvidence:
 
 
 @dataclass(frozen=True)
+class FrozenObjectEvidence:
+    identity: RecipientIdentity
+    observer_id: str
+    observations: object
+
+
+@dataclass(frozen=True)
 class ObserverActionInputs:
     action_id: str
     observer_config: object = None
@@ -103,6 +112,7 @@ class ObserverActionInputs:
     belief_recipient: RecipientIdentity | None = None
     account_recipient: RecipientIdentity | None = None
     location_recipient: RecipientIdentity | None = None
+    object_recipient: RecipientIdentity | None = None
     substituted_claim: str | None = None
 
 
@@ -157,6 +167,14 @@ class LocationObservationEffect:
     target_id: str
     recipient: RecipientIdentity
     observation: BeingLocationObservation
+
+
+@dataclass(frozen=True)
+class ObjectObservationEffect:
+    source_action_id: str
+    target_id: str
+    recipient: RecipientIdentity
+    observation: ObjectObservation
 
 
 @dataclass(frozen=True)
@@ -250,6 +268,14 @@ class LocationEvidenceProjection:
 
 
 @dataclass(frozen=True)
+class ObjectEvidenceProjection:
+    identity: RecipientIdentity
+    observer_id: str
+    observations: object
+    effect_ids: tuple
+
+
+@dataclass(frozen=True)
 class ObjectiveUse:
     subject_id: str
     key: object
@@ -328,6 +354,23 @@ def _capture_location_evidence(ledger, observer_id):
     return FrozenLocationEvidence(identity, observer_id, observations)
 
 
+def _capture_object_evidence(ledger, observer_id):
+    if type(ledger) is not ObjectObservationLedger or ledger.observer_id != observer_id:
+        raise UnsupportedEvaluation('Object evidence recipient must belong to the observing Being')
+    if inspect.getattr_static(type(ledger), 'last_observation', None) is not _NATIVE_OBJECT_LAST:
+        raise UnsupportedEvaluation('unreviewed Object evidence query override')
+    data = native_data(ledger, (ObjectObservationLedger,))
+    if type(data.get('_observations')) is not dict:
+        raise UnsupportedEvaluation('unreviewed Object evidence storage')
+    observations = frozen_value(data['_observations'])
+    for key, value in observations.items():
+        _check(type(key) is str and type(value) is ObjectObservation
+               and key == value.id and value.observer_id == observer_id,
+               'invalid or foreign existing Object evidence')
+    identity = RecipientIdentity('observer_object_evidence', id(ledger))
+    return FrozenObjectEvidence(identity, observer_id, observations)
+
+
 def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None,
                              _restore_context=None):
     """Read-only extension of 5B2 capture; callback and recipient adapters are closed."""
@@ -379,11 +422,24 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
         elif view.family == 'spot':
             from activities import SpotAction
             from statistical_group import StatisticalGroup
+            from object import ObjectInstance
             registry = object.__getattribute__(ed['universe'], '__dict__')['object_registry'].object_instances
             target = registry.get(view.target_id)
             if type(action) is not SpotAction:
                 raise UnsupportedEvaluation('unreviewed native Spot Action contract')
-            if data.get('location_ledger') is not None:
+            if data.get('object_ledger') is not None:
+                if (type(data.get('object_ledger')) is not ObjectObservationLedger
+                        or type(target) is not ObjectInstance
+                        or view.target_id not in context.snapshot.participant_ids
+                        or context.snapshot.entity(view.target_id).category != 'object'
+                        or data.get('location_ledger') is not None
+                        or data.get('ledger') is not None
+                        or data.get('group_fully_visible') is True):
+                    raise UnsupportedEvaluation('Object evidence requires one participating native ObjectInstance and its owner ledger')
+                frozen = _capture_object_evidence(data['object_ledger'], view.actor_id)
+                recipients[frozen.identity] = frozen
+                actions[aid] = ObserverActionInputs(aid, object_recipient=frozen.identity)
+            elif data.get('location_ledger') is not None:
                 if (type(target) is StatisticalGroup
                         or view.target_id not in context.snapshot.participant_ids
                         or context.snapshot.entity(view.target_id).category != 'being'):
@@ -424,6 +480,7 @@ def validate_complete_context(context):
     _check(set(inputs.lifecycle) == set(context.snapshot.actions)
         and objective_ids.issubset(inputs.actions)
         and all(inputs.actions[key].location_recipient is not None
+                or inputs.actions[key].object_recipient is not None
                 for key in extra), 'incomplete frozen observer/lifecycle coverage')
     return inputs
 
@@ -456,7 +513,7 @@ def _belief_acquire(frozen, observation, interpretation):
 def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals, notify):
     seen = set()
     accepted = (ObservationEffect, InterpretationEffect, BeliefAcquisitionEffect,
-        LocationObservationEffect, TestimonyEffect,
+        LocationObservationEffect, ObjectObservationEffect, TestimonyEffect,
         AccountDeliveryEffect, ActionOutcomeEffect, LifecycleEffect, ReservationReleaseEffect,
         PostCommitNotificationIntent, AwarenessEffect, PracticeEffect)
     # Core combat effects have already been validated by native reconciliation.
@@ -470,9 +527,11 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
         seen.add(key)
         _check(type(row.effect) in accepted and row.effect.source_action_id == key.source_action_id, 'unsupported/contradictory staged effect')
         if type(row.effect) in (ObservationEffect, InterpretationEffect, BeliefAcquisitionEffect,
-                                LocationObservationEffect, TestimonyEffect, AccountDeliveryEffect):
+                                LocationObservationEffect, ObjectObservationEffect,
+                                TestimonyEffect, AccountDeliveryEffect):
             _check(row.effect.target_id == snapshot.actions[key.source_action_id].actor_id, 'observer effect has wrong authoritative recipient')
-        if type(row.effect) in (BeliefAcquisitionEffect, LocationObservationEffect, AccountDeliveryEffect):
+        if type(row.effect) in (BeliefAcquisitionEffect, LocationObservationEffect,
+                                ObjectObservationEffect, AccountDeliveryEffect):
             _check(row.effect.recipient in recipients, 'unknown external authoritative recipient')
         if type(row.effect) is LocationObservationEffect:
             action = snapshot.actions[key.source_action_id]
@@ -493,6 +552,27 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
                    and evidence.position == snapshot.entity(action.target_id).position
                    and evidence.basis == 'successful_deliberate_spot',
                    'location evidence does not match the common Spot snapshot')
+        if type(row.effect) is ObjectObservationEffect:
+            action = snapshot.actions[key.source_action_id]
+            evidence = row.effect.observation
+            projected = recipients[row.effect.recipient]
+            entity = snapshot.entity(action.target_id)
+            _check(row.effect.recipient.role == 'observer_object_evidence'
+                   and type(projected) is ObjectEvidenceProjection
+                   and projected.identity == row.effect.recipient
+                   and projected.observer_id == row.effect.target_id
+                   and projected.observations.get(evidence.id) == evidence
+                   and evidence.observer_id == row.effect.target_id
+                   and evidence.id == action.id
+                   and evidence.object_id == action.target_id
+                   and evidence.source_action_id == action.id
+                   and evidence.encounter_id == snapshot.encounter_id
+                   and evidence.boundary == snapshot.boundary
+                   and evidence.time == action.nominal_end
+                   and evidence.position == entity.position
+                   and evidence.projectile_status == entity.data.get('projectile_status')
+                   and evidence.basis == 'successful_deliberate_spot',
+                   'Object evidence does not match the common Spot snapshot')
         if type(row.effect) is PostCommitNotificationIntent:
             _check(row.effect.after_commit is True, 'notification must wait for successful commitment')
         if type(row.effect) is ReservationReleaseEffect:
@@ -522,6 +602,11 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
                             and proposals[aid].outcome == 'success')
         _check(count(LocationObservationEffect) == int(location_success),
                'missing/extra Spot location observation')
+        object_success = (action.family == 'spot' and item is not None
+                          and item.object_recipient is not None
+                          and proposals[aid].outcome == 'success')
+        _check(count(ObjectObservationEffect) == int(object_success),
+               'missing/extra Spot Object evidence')
 
 
 def build_supported_candidate(context, *, notify=False):
@@ -583,6 +668,7 @@ def build_supported_candidate(context, *, notify=False):
     recipient_states = dict(inputs.recipients); account_delivery_ids = {}
     location_effect_ids = {}
     rows, lifecycle, notifications = [], {}, []
+    object_effect_ids = {}
     for action in ordered:
         aid = action.id; item = inputs.actions.get(aid)
         if item is None:
@@ -614,6 +700,28 @@ def build_supported_candidate(context, *, notify=False):
                         LocationObservationEffect(aid, actor, item.location_recipient,
                                                   frozen_observation))
                     location_effect_ids.setdefault(item.location_recipient, []).append(rows[-1].identity)
+                if outcome == 'success' and item.object_recipient is not None:
+                    location_snapshot = snapshot.entity(target)
+                    if location_snapshot.category != 'object' or location_snapshot.position is None:
+                        raise UnsupportedEvaluation('successful Object Spot evidence requires a modeled Object position')
+                    observation = ObjectObservation(
+                        aid, actor, target, aid, snapshot.encounter_id,
+                        snapshot.boundary, action.nominal_end,
+                        location_snapshot.position,
+                        location_snapshot.data.get('projectile_status'))
+                    frozen_observation = frozen_value(observation)
+                    frozen_recipient = recipient_states[item.object_recipient]
+                    observations = dict(frozen_recipient.observations)
+                    existing = observations.get(aid)
+                    if existing is not None and existing != frozen_observation:
+                        raise EvaluationIntegrityError('Object observation ID conflicts with existing evidence')
+                    observations[aid] = frozen_observation
+                    recipient_states[item.object_recipient] = replace(
+                        frozen_recipient, observations=MappingProxyType(observations))
+                    _append_effect(rows, snapshot, aid, 'object_observation', 0,
+                        ObjectObservationEffect(aid, actor, item.object_recipient,
+                                                frozen_observation))
+                    object_effect_ids.setdefault(item.object_recipient, []).append(rows[-1].identity)
                 if outcome == 'success' and aid in objective.requests:
                     from field_observation import CountReport
                     counts = objective.subject(target).counts
@@ -711,6 +819,10 @@ def build_supported_candidate(context, *, notify=False):
             recipients[key] = LocationEvidenceProjection(
                 key, state.observer_id, state.observations,
                 tuple(location_effect_ids.get(key, ())))
+        elif type(state) is FrozenObjectEvidence:
+            recipients[key] = ObjectEvidenceProjection(
+                key, state.observer_id, state.observations,
+                tuple(object_effect_ids.get(key, ())))
         else:
             recipients[key] = AccountsProjection(key,state.accounts,tuple(account_delivery_ids.get(key,())))
     all_rows = tuple(boundary.effects.values())+tuple(rows)

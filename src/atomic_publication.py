@@ -23,7 +23,8 @@ from encounter import Encounter
 from experience import BatchSkillUse
 from realization import RealityLedger, CommittedFact
 from observer_proposals import (BeliefProjection, AccountsProjection,
-                                LocationEvidenceProjection)
+                                LocationEvidenceProjection, ObjectEvidenceProjection,
+                                _capture_object_evidence)
 from statistical_group import StatisticalGroup
 from object import ObjectInstance
 from spatial.state import CartesianPosition
@@ -361,6 +362,7 @@ def _recipient_handles(encounter,candidate):
         if data.get('ledger') is not None:handles[('in_world_belief_ledger',id(data['ledger']))]=data['ledger']
         if data.get('received_accounts') is not None:handles[('in_world_received_accounts',id(data['received_accounts']))]=data['received_accounts']
         if data.get('location_ledger') is not None:handles[('observer_location_evidence',id(data['location_ledger']))]=data['location_ledger']
+        if data.get('object_ledger') is not None:handles[('observer_object_evidence',id(data['object_ledger']))]=data['object_ledger']
     return {identity:handles[(identity.role,identity.object_identity)] for identity in candidate.supported_candidate.recipients}
 
 
@@ -555,6 +557,14 @@ def _make_plan(encounter,candidate,rng_owner):
                 raise UnsupportedEvaluation('location recipient identity/owner mismatch')
             plan.contents('observers',handle._observations,
                           _preserve_known(handle._observations,projection.observations))
+        elif type(projection) is ObjectEvidenceProjection:
+            from object_observation import ObjectObservationLedger
+            if (type(handle) is not ObjectObservationLedger
+                    or handle.observer_id != projection.observer_id
+                    or identity.role != 'observer_object_evidence'):
+                raise UnsupportedEvaluation('Object evidence recipient identity/owner mismatch')
+            plan.contents('observers',handle._observations,
+                          _preserve_known(handle._observations,projection.observations))
         else:raise UnsupportedEvaluation('unsupported authoritative recipient publication')
     for key,target in supported.boundary.targets.items():
         if target.category!='being':continue
@@ -651,6 +661,8 @@ def _committed_consistency(encounter,candidate,plan):
         elif identity.role=='observer_location_evidence':
             from observer_proposals import _capture_location_evidence
             _capture_location_evidence(handle,handle.observer_id)
+        elif identity.role=='observer_object_evidence':
+            _capture_object_evidence(handle,handle.observer_id)
     for update in candidate.projectile_updates:
         obj=objects[update.object_id]
         if (obj.spatial_state.position!=update.state.position

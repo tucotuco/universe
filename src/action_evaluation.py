@@ -366,6 +366,19 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         elif type(obj) is ArmorInstance:
             category = 'armor'
             data['defenses'] = freeze(cd['defenses'])
+        elif type(obj) is ObjectInstance:
+            # The native Object Spot adapter may report only whether this
+            # Object's already modeled point-mass flight is active at the
+            # boundary. Position is captured through the common staged frame
+            # above; no release cause or future trajectory is exposed here.
+            data['projectile_status'] = None
+            flight = object.__getattribute__(obj, '__dict__').get('_projectile_flight')
+            if flight is not None:
+                from throwing import ProjectileFlight
+                if type(flight) is not ProjectileFlight:
+                    raise UnsupportedEvaluation('unreviewed Object flight descriptor in Spot snapshot')
+                data['projectile_status'] = (
+                    'landed' if flight.impact_time <= boundary else 'in_flight')
         spatial_role = ('aggregate_extent' if type(obj) is StatisticalGroup
                         else 'physical_entity')
         entities[key] = EntityView(key, category, freeze(cd['hit_points']), freeze(cd['obj_type']),

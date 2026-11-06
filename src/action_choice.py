@@ -106,7 +106,7 @@ def declaration(action, *, _initialization=None):
              'substituted_claim', 'received_accounts', 'seed', 'random_key',
              'observer', 'interpreter', 'ledger', 'experience_policy', 'focus_category')
     names += ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m')
-    names += ('group_fully_visible', 'location_ledger')
+    names += ('group_fully_visible', 'location_ledger', 'object_ledger')
     names += ('get_instrument', 'damage_potential', '_status', 'on_schedule', 'prepare_schedule')
     strategy = data.get('strategy')
     from strategy import Strategy
