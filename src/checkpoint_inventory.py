@@ -16,6 +16,10 @@ from types import MappingProxyType
 import weakref
 
 SCHEMA = 'universe.checkpoint-inventory-draft/1'
+_AUTHORITATIVE_DECISIONS_PATH = (
+    Path(__file__).resolve().parent.parent
+    / 'docs/history/universe4-authoritative-decisions-2026-10-27.md'
+)
 
 
 class CheckpointRejected(ValueError):
@@ -117,7 +121,7 @@ def _compatibility():
         'group_observation.py','history_conversation.py')
     return ('compatibility-draft',SCHEMA,('implementation-source',_digest(implementation)),
         ('rule-kernel-source',_digest(tuple(row for row in implementation if row[0] in kernels))),
-        ('authoritative-decisions',hashlib.sha256((root.parent/'docs/universe4-authoritative-decisions-2026-10-27.md').read_bytes()).hexdigest()),
+        ('authoritative-decisions',hashlib.sha256(_AUTHORITATIVE_DECISIONS_PATH.read_bytes()).hexdigest()),
         ('python-runtime',sys.implementation.name,tuple(sys.version_info)),('numeric','IEEE754-binary64-hex'),
         ('python-native-rng','MT19937-state-v3'),('restore-adapters','not-implemented'))
 

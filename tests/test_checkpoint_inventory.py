@@ -1,5 +1,6 @@
 """5D1 inactive partial inventory: data capture is not checkpoint completeness."""
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 import random
 import sys
@@ -9,6 +10,7 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'src')]
 import test_encounter_inspection as fixtures
+import checkpoint_inventory
 from checkpoint_inventory import (capture_checkpoint_candidate as capture,
     validate_checkpoint_candidate as validate,CheckpointRejected)
 from atomic_publication import publication_boundary,PublicationOwnershipError
@@ -39,6 +41,39 @@ class TestCheckpointInventory(fixtures.InspectionFixture):
         self.assertFalse(candidate.restore_verified)
         self.assertIn('semantic_closure_adapter_incomplete',{d.code for d in candidate.diagnostics})
         with self.assertRaises(CheckpointRejected):validate(self.world,self.enc,candidate,quiescent=True).require_complete()
+
+    def test_compatibility_reads_exact_canonical_historical_input(self):
+        path=checkpoint_inventory._AUTHORITATIVE_DECISIONS_PATH
+        original=Path.read_bytes
+        payload=original(path)
+        expected='65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'
+        self.assertEqual(len(payload),14791)
+        self.assertEqual(hashlib.sha256(payload).hexdigest(),expected)
+
+        def historical_digest(compatibility):
+            return next(row[1] for row in compatibility
+                        if type(row)is tuple and row and row[0]=='authoritative-decisions')
+
+        self.assertEqual(historical_digest(checkpoint_inventory._compatibility()),expected)
+
+        missing_reads=[]
+        def missing(path_arg):
+            missing_reads.append(path_arg)
+            if path_arg==path:raise FileNotFoundError(str(path_arg))
+            return original(path_arg)
+        with patch.object(Path,'read_bytes',missing):
+            with self.assertRaises(FileNotFoundError):checkpoint_inventory._compatibility()
+        self.assertIn(path,missing_reads)
+
+        tampered_reads=[]
+        def tampered(path_arg):
+            tampered_reads.append(path_arg)
+            if path_arg==path:return original(path_arg)+b'altered'
+            return original(path_arg)
+        with patch.object(Path,'read_bytes',tampered):
+            altered_digest=historical_digest(checkpoint_inventory._compatibility())
+        self.assertIn(path,tampered_reads)
+        self.assertNotEqual(altered_digest,expected)
 
     def test_initial_native_world_inventory_is_coherent_but_explicitly_incomplete(self):
         self.enable();before=self.raw();candidate=self.capture();self.assert_inventory(candidate)
