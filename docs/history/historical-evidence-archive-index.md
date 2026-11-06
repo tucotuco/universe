@@ -13,7 +13,7 @@ The 5E3H archive is a private local preservation archive, not a GitHub backup. C
 - Directory/topic summaries: `GROUPS.tsv` and `groups/*.md`
 - Archived-text link inventory: `REFERENCES.tsv`
 
-The archive contains 398 exact source files (8,349,219 bytes): all 352 files from the 17 evidence directories, plus related reports, assignments, handoffs, and ZIP files. Three unique Encounter analyses are also copied there, but are retained in this repository in portable form. The archive tar also contains the manifest, reference map, group indexes, and README. Verify a restored payload against `MANIFEST.tsv` before use.
+The archive contains 398 exact source files (8,349,219 bytes): all 352 files from the 17 evidence directories, plus related reports, assignments, handoffs, and ZIP files. Three unique Encounter analyses are preserved in that private archive; their former checkout paths are not present as portable files in the current repository. The archive tar also contains the manifest, reference map, group indexes, and README. Verify a restored payload against `MANIFEST.tsv` before use.
 
 Earlier recovery archives are catalogued in `ARCHIVE_ROOT/5e3h-final-cleanup/ARCHIVE_INVENTORY.tsv`. That inventory records the 5E3B full snapshot and artifact manifest, the 5E3G pre-cleanup snapshot and historical-document manifest, and the 5E3H archive and manifests. Consult each archive's own checksum record before restoration.
 
@@ -26,7 +26,7 @@ Each group index under `groups/` lists original paths and locators. The source-p
 | `universe4-assignment03-evidence` | Initial Encounter resolution characterization |
 | `universe4-increment1-evidence`–`universe4-increment4-evidence` | Scheduling, boundary coordination, choice reservation, and immutable evaluation |
 | `universe4-increment5a-evidence`–`universe4-increment5d2b-evidence` | Candidate settlement, checkpoint closure, and compatibility work |
-| `encounter-resolution-analysis` | Three unique source-grounded Encounter analyses, retained here as portable Markdown |
+| `encounter-resolution-analysis` | Three unique source-grounded Encounter analyses, preserved in the private archive |
 | `legacy-increment-reports` | Superseded engineering reports; later consolidated reports and decisions remain the maintained entry points |
 | `checkpoint-linked-reports` | Historical checkpoint reports whose maintained links now resolve to this index |
 | `checkpoint-advanced-time` | Advanced-time checkpoint reports and assignments |
