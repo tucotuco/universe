@@ -24,6 +24,8 @@ Back to [TASKS.md](../../TASKS.md).
 
 ## Open work and acceptance gates
 
+- **U-THROW-003 (blocked at native integration boundary):** `examples/native_throw_arena.py` submits a real base `Action(event_type="throw")` through Choice validation and demonstrates the explicit `unsupported transactional base Action activity` refusal without registration, reservation, time advance, projectile movement, or receipt. `src/throwing.py` can project the revision-62 drag-free trajectory, but `transactional_progression.validate_action_contract` admits only reviewed exact Action families, `action_evaluation`/`action_settlement` have no Throw proposal family, and `SpatialState` stores position only. There is no persistent independent projectile velocity or chronological landing contract; do not emulate release or landing by editing Object positions from an example. See the [U-THROW-003 report](../reports/U-THROW-003-report.md).
+
 - **U-PER-002:** general checkpoint/save/load, mixed Action and observer cases, and stochastic continuation.
 - **U-RULE-001:** resolve or retire provisional `ObserveGroupAction` rank/XP behavior without inventing sensing mechanics.
 - **U-SPOT-002:** category-directed Spot/Search, multi-candidate outcomes and sustained Attention remain unapproved. General Object/Event, motion and performed-Action perception also remain open.
