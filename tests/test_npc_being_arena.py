@@ -151,6 +151,29 @@ class TestNpcBeingArena(unittest.TestCase):
         self.assertEqual(exited["metadata"], {"distance": 1.5})
         self.assertEqual(exited["target_hp_after"], 10)
 
+    def test_full_precision_position_is_preserved_at_each_committed_boundary(self):
+        arena = build_arena(target_distance_meters=1.5)
+        arena.submit_thrust()
+        expected_positions = (1.25, 1.0, 0.75)
+
+        for boundary, expected_x in enumerate(expected_positions, start=1):
+            arena.encounter.step(
+                1, velocities={arena.opponent.id: (-0.25, 0.0, 0.0)})
+            self.assertEqual(arena.encounter.time, boundary)
+            self.assertEqual(arena.opponent.get_position().x, expected_x)
+            self.assertEqual(
+                arena.encounter.inspect_committed(boundary)
+                .target(arena.opponent.id).position.x,
+                expected_x,
+            )
+            receipt = arena.encounter._atomic_interval_history[-1]
+            self.assertEqual(receipt.boundary, boundary)
+
+        result = arena.advance_to_commit()
+        self.assertEqual(result["outcome"], "normal")
+        self.assertEqual(result["metadata"], {"distance": 0.75})
+        self.assertEqual(result["target_hp_after"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()
