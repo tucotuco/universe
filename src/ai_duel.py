@@ -13,43 +13,14 @@ import os
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from melee_combat import MeleeStrike
+from melee_combat import (MeleeStrike, effective_melee_reach_meters,
+                          reference_arm_length_inches)
 from melee_defense import MeleeDefense
 from strategy import Strategy
 from tactical_duel import TacticalDuel
 
 
-SIZE_CATEGORY_REFERENCE_ARM_INCHES = {
-    'D': 3.5, 'T': 7, 'S': 14, 'M': 28, 'L': 56,
-    'H': 112, 'G': 224, 'C': 448,
-}
-INCHES_TO_METERS = 0.0254
 METERS_TO_YARDS = 1 / 0.9144
-
-
-def reference_arm_length_inches(*, height_inches=None, length_inches=None,
-                                size_category=None):
-    """Resolve the adopted physical arm-length estimate without geometry inference."""
-    dimensions = []
-    for value in (height_inches, length_inches):
-        if value is None:
-            continue
-        if type(value) not in (int, float):
-            raise ValueError('physical height and length must be finite nonnegative inches')
-        try:
-            value = float(value)
-        except (OverflowError, ValueError) as exc:
-            raise ValueError('physical height and length must be finite nonnegative inches') from exc
-        if not math.isfinite(value) or value < 0:
-            raise ValueError('physical height and length must be finite nonnegative inches')
-        if value == 0:  # Native definitions use zero as their unset dimension sentinel.
-            continue
-        dimensions.append(value)
-    if dimensions:
-        return max(dimensions) * (15 / 37)
-    if size_category not in SIZE_CATEGORY_REFERENCE_ARM_INCHES:
-        raise ValueError('a known physical dimension or size category is required for Reach')
-    return SIZE_CATEGORY_REFERENCE_ARM_INCHES[size_category]
 
 
 class TacticalPolicy:
@@ -176,12 +147,7 @@ class AgentDuel(TacticalDuel):
         if self.legacy_reach:
             return self.REACH  # Verify pre-reach-fix saved battles without changing history.
         weapon = self.world.get_object_by_id(weapon_id)
-        arm_inches = reference_arm_length_inches(
-            height_inches=actor.original.height,
-            length_inches=actor.original.length)
-        # Being and weapon physical lengths are inches; Encounter coordinates
-        # and center-to-center impact distances are meters.
-        return (arm_inches + float(weapon.original.length)) * INCHES_TO_METERS
+        return effective_melee_reach_meters(actor.original, weapon.original)
 
     def _visible_equipment(self, actor, weapon_id):
         self.encounter.assert_legacy_consumer()

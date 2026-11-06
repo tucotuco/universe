@@ -7,6 +7,7 @@ This is a local developer terminal demonstration, not a game UI or importer API.
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 import random
 import sys
@@ -19,7 +20,7 @@ from atomic_publication import RNGCursor
 from being import BeingDefinition, BeingInstance
 from encounter import Encounter
 from library import Library
-from melee_combat import MeleeStrike
+from melee_combat import MeleeStrike, effective_melee_reach_meters, reference_arm_length_inches
 from npcgen_being_adapter import create_npcgen_v2_native_being
 from skill import Skills
 from spatial import CartesianPosition, Sphere
@@ -34,6 +35,8 @@ EXPECTED_FIXTURE_SHA256 = "e59b55a6c22f822d65716215b64bccf0c1f2c7a42d49036092580
 DEMO_ACTION_ID = "npc-being-arena/action/one-dagger-thrust"
 DEMO_ENCOUNTER_ID = "npc-being-arena/encounter/one-thrust"
 DEMO_SEED = 72002
+DEMO_TARGET_DISTANCE_METERS = 0.75
+DEMO_SPHERE_RADIUS_METERS = 0.25
 
 
 @dataclass
@@ -67,6 +70,14 @@ class NpcBeingArena:
         if (native_skills["armed combat"] != source_state["skills"]["skills"]["armed combat"]
                 or native_skills["Dagger"] != source_state["skills"]["weapon_skills"]["Dagger"]):
             raise RuntimeError("native skills differ from validated source ranks")
+        dagger_definition = self.world.get_object_by_id(self.dagger_id).original
+        personal_arm_inches = reference_arm_length_inches(
+            height_inches=self.npc.original.height,
+            length_inches=self.npc.original.length)
+        effective_reach_meters = effective_melee_reach_meters(
+            self.npc.original, dagger_definition)
+        target_distance_meters = self.encounter.distance_between_beings(
+            self.npc.id, self.opponent.id)
         return {
             "audience": "local omniscient developer view; not an Agent observation",
             "source_sha256": self.source_sha256,
@@ -89,6 +100,11 @@ class NpcBeingArena:
                 "current_HP": self.npc.get_hit_points(),
                 "length_inches": self.npc.original.length,
                 "weight_pounds": self.npc.original.weight,
+                "personal_arm_length_inches": personal_arm_inches,
+                "dagger_length_inches": dagger_definition.length,
+                "effective_reach_inches": effective_reach_meters / 0.0254,
+                "effective_reach_meters": effective_reach_meters,
+                "reach_uses_geometry": False,
                 "position": tuple(value * METERS_TO_YARDS
                                    for value in self.npc.get_position().as_tuple()),
                 "position_unit": "yard",
@@ -108,10 +124,17 @@ class NpcBeingArena:
                 "geometry": self.opponent.geometry.to_dict(),
                 "geometry_unit": "meter",
             },
+            "melee_eligibility": {
+                "target_center_distance_meters": target_distance_meters,
+                "reach_meters": effective_reach_meters,
+                "expected_status": ("in_reach" if target_distance_meters <= effective_reach_meters
+                                    else "out_of_reach"),
+            },
             "arena_authored": {
                 "NPC native definition/geometry/position":
-                    "generic test baseline apart from source-derived initial HP; Sphere(0.5); (0, 0, 0)",
-                "opponent": "Arena-authored initial/current HP 10, AC 11, generic test definition; Sphere(0.5); (1.5, 0, 0)",
+                    f"generic test baseline apart from source-derived values; Sphere({DEMO_SPHERE_RADIUS_METERS}) m; origin",
+                "opponent": f"Arena-authored HP 10, AC 11, Sphere({DEMO_SPHERE_RADIUS_METERS}) m; "
+                            f"center distance {target_distance_meters} m",
                 "equipment": "native Dagger explicitly supplied and equipped for this demo; not in source possession list",
                 "encounter DC": 10,
                 "action strategy": {"attack": 0, "defense": 0, "timing": 0, "extra_damage": 0},
@@ -168,17 +191,21 @@ class NpcBeingArena:
         return self.advance_to_commit()
 
 
-def build_arena(*, seed=DEMO_SEED):
+def build_arena(*, seed=DEMO_SEED, target_distance_meters=DEMO_TARGET_DISTANCE_METERS):
     """Build an unstarted, transactional Encounter from the exact v2 fixture."""
     raw = FIXTURE.read_bytes()
     source_sha256 = hashlib.sha256(raw).hexdigest()
     if source_sha256 != EXPECTED_FIXTURE_SHA256:
         raise ValueError("NPC fixture bytes differ from the reviewed U-NPC-BEING-001 fixture")
+    if (type(target_distance_meters) not in (int, float)
+            or not math.isfinite(target_distance_meters) or not 0 < target_distance_meters < 10):
+        raise ValueError("target distance must be a finite positive meter value below 10")
     source_record = json.loads(raw.decode("utf-8"))
 
     world = Universe("NPC Being native Arena", library=Library(config_dir=str(ROOT / "src/config")))
     npc = create_npcgen_v2_native_being(world, raw)
-    npc.set_geometry(Sphere(0.5))
+    # Explicitly authored scene geometry, independent of imported stature and Reach.
+    npc.set_geometry(Sphere(DEMO_SPHERE_RADIUS_METERS))
     npc.set_position(CartesianPosition(0, 0, 0))
 
     # All opponent properties are scenario authorship, not NPC source data.
@@ -189,8 +216,8 @@ def build_arena(*, seed=DEMO_SEED):
     )
     opponent = BeingInstance(opponent_definition, name="Arena opponent",
                              id="npc-being-arena/being/opponent")
-    opponent.set_geometry(Sphere(0.5))
-    opponent.set_position(CartesianPosition(1.5, 0, 0))
+    opponent.set_geometry(Sphere(DEMO_SPHERE_RADIUS_METERS))
+    opponent.set_position(CartesianPosition(target_distance_meters, 0, 0))
     world.add_object(opponent)
 
     dagger_id = world.make_weapon_for_being(npc.id, "Dagger", "Arena-supplied Dagger")
@@ -206,8 +233,10 @@ def build_arena(*, seed=DEMO_SEED):
     encounter.decide_to_act(npc.id, opponent.id, "fight")
     rng = RNGCursor(random.Random(seed).getstate())
     encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
+    reach = effective_melee_reach_meters(
+        npc.original, world.get_object_by_id(dagger_id).original)
     strike = MeleeStrike(encounter, npc.id, opponent.id, dagger_id,
-                         motion="thrust", reach=2)
+                         motion="thrust", reach=reach)
     strike.id = DEMO_ACTION_ID
     return NpcBeingArena(world, encounter, source_record, source_sha256,
                          npc, opponent, dagger_id, strike, rng)
@@ -226,6 +255,11 @@ def _format_developer_view(view):
         f"Source-derived acquired ranks: {source['skills']}",
         f"Source-derived stature={source['physical']['stature_inches']} in; "
         f"body weight={source['physical']['body_weight_pounds']} lb",
+        f"Reach: personal arm={npc['personal_arm_length_inches']:.3f} in + "
+        f"Dagger={npc['dagger_length_inches']:.3f} in = "
+        f"{npc['effective_reach_inches']:.3f} in / {npc['effective_reach_meters']:.3f} m; "
+        f"center distance={view['melee_eligibility']['target_center_distance_meters']:.3f} m "
+        f"({view['melee_eligibility']['expected_status']})",
         f"Native Being: {npc['name']} ({npc['id']}) abilities={npc['abilities']} skills={npc['skills']}",
         f"Source-derived initial HP={source['initial_hit_points']['value']} ({source['initial_hit_points']['source_path']}); "
         f"native stature={npc['length_inches']} in, body weight={npc['weight_pounds']} lb; "
@@ -236,7 +270,7 @@ def _format_developer_view(view):
         f"initial/current HP={opponent['initial_HP']}/{opponent['current_HP']}, "
         f"AC={opponent['AC']}, position={opponent['position']} yd, "
         f"geometry={opponent['geometry']} {opponent['geometry_unit']}",
-        "Action: one native Dagger thrust; default supplied Strategy is all zero.",
+        "Action: one native Dagger thrust using measured Reach; default supplied Strategy is all zero.",
         "Progression: native opt-in transactional Encounter; publication is per crossed second.",
     ))
 

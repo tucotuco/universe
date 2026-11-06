@@ -17,6 +17,54 @@ from experience import ActionResolution, SkillExercise
 from weapon import WeaponInstance
 
 
+SIZE_CATEGORY_REFERENCE_ARM_INCHES = {
+    'D': 3.5, 'T': 7, 'S': 14, 'M': 28, 'L': 56,
+    'H': 112, 'G': 224, 'C': 448,
+}
+INCHES_TO_METERS = 0.0254
+
+
+def reference_arm_length_inches(*, height_inches=None, length_inches=None,
+                                size_category=None):
+    """Return measured or explicit size-category personal arm-length estimate."""
+    dimensions = []
+    for value in (height_inches, length_inches):
+        if value is None:
+            continue
+        if type(value) not in (int, float):
+            raise ValueError('physical height and length must be finite nonnegative inches')
+        try:
+            value = float(value)
+        except (OverflowError, ValueError) as exc:
+            raise ValueError('physical height and length must be finite nonnegative inches') from exc
+        if not math.isfinite(value) or value < 0:
+            raise ValueError('physical height and length must be finite nonnegative inches')
+        if value > 0:
+            dimensions.append(value)
+    if dimensions:
+        return max(dimensions) * (15 / 37)
+    if size_category not in SIZE_CATEGORY_REFERENCE_ARM_INCHES:
+        raise ValueError('a known physical dimension or size category is required for Reach')
+    return SIZE_CATEGORY_REFERENCE_ARM_INCHES[size_category]
+
+
+def effective_melee_reach_meters(being_definition, weapon_definition, *, size_category=None):
+    """Calculate physical Reach in meters for Encounter center-distance checks.
+
+    Being/weapon physical dimensions are inches; Encounter spatial coordinates
+    and impact distances are meters. Collision geometry is independent.
+    """
+    weapon_length = weapon_definition.length
+    if (type(weapon_length) not in (int, float) or not math.isfinite(weapon_length)
+            or weapon_length < 0):
+        raise ValueError('weapon length must be a finite nonnegative number of inches')
+    arm_inches = reference_arm_length_inches(
+        height_inches=being_definition.height,
+        length_inches=being_definition.length,
+        size_category=size_category)
+    return (arm_inches + float(weapon_length)) * INCHES_TO_METERS
+
+
 @dataclass(frozen=True)
 class MeleeResult:
     """Legacy live-only sequential result; never used by pure proposals.
@@ -47,8 +95,9 @@ class MeleeStrike(Action):
     """A scheduled swing or thrust between two present Beings.
 
     ``reach`` is an explicit limit in the Encounter's continuous-coordinate
-    units. Weapon lengths in the draft table are in feet; no unverified unit
-    conversion or personal reach formula is assumed here.
+    units (meters). Callers with native physical definitions should use
+    ``effective_melee_reach_meters`` to combine inch-valued personal/weapon
+    dimensions. This Action checks that limit against center distance at impact.
 
     An obstructed or indeterminate reference-point path is conservatively
     unavailable, even if an intervening modeled physical Entity is transparent.

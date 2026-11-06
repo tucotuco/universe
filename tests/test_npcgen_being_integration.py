@@ -15,7 +15,7 @@ from abilities import Abilities
 from being import BeingDefinition, BeingInstance
 from encounter import Encounter
 from library import Library
-from melee_combat import MeleeStrike
+from melee_combat import MeleeStrike, effective_melee_reach_meters
 from npcgen_being_adapter import create_npcgen_v2_native_being
 from skill import Skills
 from spatial.state import CartesianPosition
@@ -38,7 +38,7 @@ def _zero_skill_control(world, source_record):
         dexterity=scores["Dex"], constitution=scores["Con"], charisma=scores["Cha"],
     )
     definition = BeingDefinition(
-        "native zero-skill control", length=1.7, weight=70, hit_points=10,
+        "native zero-skill control", length=69, weight=170, hit_points=10,
         hit_dice="1d8", alignment="Neutral", armor_class=11, challenge_rating=1,
         abilities=abilities, skills=Skills(),
     )
@@ -56,7 +56,7 @@ def _one_melee_attempt(imported):
     target_id = world.make_being("Human", "Target")
     target = world.get_object_by_id(target_id)
     actor.set_position(CartesianPosition(0, 0, 0))
-    target.set_position(CartesianPosition(1.5, 0, 0))
+    target.set_position(CartesianPosition(0.75, 0, 0))
     # The source record does not grant equipment. This Dagger is supplied
     # explicitly by the test scenario so the native MeleeStrike can execute.
     dagger_id = world.make_weapon_for_being(actor.id, "Dagger", "Test Dagger")
@@ -67,7 +67,8 @@ def _one_melee_attempt(imported):
     encounter.mark_aware(actor.id, target_id)
     encounter.decide_to_act(actor.id, target_id, "fight")
     strike = MeleeStrike(encounter, actor.id, target_id, dagger_id,
-                         motion="thrust", reach=2)
+                         motion="thrust", reach=effective_melee_reach_meters(
+                             actor.original, world.get_object_by_id(dagger_id).original))
     encounter.schedule_action(strike)
     with patch("action.roll_dice", side_effect=[8, 4]):
         encounter.step(duration=4)

@@ -147,7 +147,7 @@ class NpcBeingArenaWebTests(unittest.TestCase):
         self.assertTrue(final["committed"])
         self.assertEqual(final["time"], 4)
         self.assertEqual(result["outcome"], "normal")
-        self.assertEqual(result["metadata"], {"distance": 1.5})
+        self.assertEqual(result["metadata"], {"distance": 0.75})
         self.assertEqual(result["causal_damage"], {"body": 4})
         self.assertEqual(result["target_hp_after"], 6)
         self.assertEqual(result["boundary"], 4)
