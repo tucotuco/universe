@@ -122,8 +122,16 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
             or source_status != candidate.skills_status):
         _refuse("skill_status_mismatch", "candidate skill-resolution status does not match its generation request")
     if source_status.get("status") != "resolved":
+        reason = source_status.get("reason")
+        reason_text = reason if isinstance(reason, str) else ""
+        age_unavailable = (
+            "has no starting-skill age class" in reason_text
+            and reason_text.startswith("NPC age category ")
+        )
         _refuse("skill_profile_unresolved", "Generator did not resolve an age-derived skill profile",
-                reason=source_status.get("reason"), cost_modifiers=cost_modifiers)
+                reason=reason, cost_modifiers=cost_modifiers,
+                age=sheet.get("age") if type(sheet.get("age")) is dict else None,
+                age_unavailable=age_unavailable)
     source_skills = state.get("skills")
     if type(source_skills) is not dict or set(source_skills) != {"skills", "weapon_skills"}:
         _refuse("skill_profile_unresolved", "resolved candidate must contain ordinary and weapon skill maps")
@@ -203,13 +211,12 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
     }
 
 
-def generate_npcgen_arena_being(universe: Universe, *, seed: int, starting_experience: int,
-                                cost_modifiers: str, class_index: int | None = None) -> ArenaNativeBeing:
-    """Generate through installed ``npcgen.api`` and register one supported native Being.
+def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experience: int,
+                               cost_modifiers: str, class_index: int | None = None) -> ArenaNativeBeing:
+    """Generate and validate one supported native Being without registry mutation.
 
-    The cost policy is mandatory and passed through unchanged. Unsupported native
-    races, unresolved skill profiles, and malformed/inconsistent records raise
-    :class:`ArenaNPCRefusal` before Universe registry mutation.
+    The cost policy is mandatory and passed through unchanged. The supplied
+    Universe provides native dictionaries only; the returned Being stays detached.
     """
     if not isinstance(universe, Universe):
         raise TypeError("universe must be a native Universe")
@@ -249,13 +256,6 @@ def generate_npcgen_arena_being(universe: Universe, *, seed: int, starting_exper
     definition.skills = skills
 
     being = BeingInstance(definition, name=fields["name"])
-    if universe.get_object_by_id(being.id) is not None:
-        _refuse("native_identity_collision", "generated native Being identity already exists")
-    # Registration is the final mutation; all source/native checks precede it.
-    universe.add_object(being)
-    if universe.get_object_by_id(being.id) is not being:
-        _refuse("native_registration_failed", "Universe did not register the constructed Being")
-
     return ArenaNativeBeing(
         being=being,
         source_record_bytes=record_bytes,
@@ -263,3 +263,17 @@ def generate_npcgen_arena_being(universe: Universe, *, seed: int, starting_exper
         engine_identity=dict(fields["identity"]),
         skills_status=fields["status"],
     )
+
+
+def generate_npcgen_arena_being(universe: Universe, *, seed: int, starting_experience: int,
+                                cost_modifiers: str, class_index: int | None = None) -> ArenaNativeBeing:
+    """Generate through installed ``npcgen.api`` and register one supported native Being."""
+    result = prepare_npcgen_arena_being(
+        universe, seed=seed, starting_experience=starting_experience,
+        cost_modifiers=cost_modifiers, class_index=class_index)
+    if universe.get_object_by_id(result.being.id) is not None:
+        _refuse("native_identity_collision", "generated native Being identity already exists")
+    universe.add_object(result.being)
+    if universe.get_object_by_id(result.being.id) is not result.being:
+        _refuse("native_registration_failed", "Universe did not register the constructed Being")
+    return result

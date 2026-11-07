@@ -93,6 +93,8 @@ class TestNpcgenArenaAdapter(unittest.TestCase):
                 self.assertEqual(raised.exception.code, code)
                 self.assertEqual(set(world.object_registry.object_instances), before)
         self.assertIn("Dead", raised.exception.to_dict()["details"]["reason"])
+        self.assertTrue(raised.exception.to_dict()["details"]["age_unavailable"])
+        self.assertEqual(raised.exception.to_dict()["details"]["age"]["category"], "Dead")
 
     def test_unsupported_native_skill_refuses_before_registration(self):
         genuine = api.generate_arena_candidate(1, 12000, cost_modifiers="character")
