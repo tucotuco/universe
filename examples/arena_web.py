@@ -19,6 +19,7 @@ from arena_local_checkpoint import (
 from arena_s7_checkpoint import capture_s7_candidate
 from examples.npc_encounter_arena import build_unstarted_arena
 from arena_state_activation import _compose_committed_inspection
+from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
 
 
 class ArenaRequestError(ValueError):
@@ -337,6 +338,28 @@ document.getElementById('run').onclick=async()=>{try{await req('/api/run','POST'
 </script></html>'''
 
 
+_GENERATED_PAGE = r'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Universe Arena</title><style>
+body{font:16px system-ui,sans-serif;max-width:1050px;margin:2rem auto;padding:0 1rem;color:#202533}section{border:1px solid #ccd2da;border-radius:8px;padding:1rem;margin:1rem 0}.row{display:flex;flex-wrap:wrap;gap:1rem;align-items:end}label{display:grid;gap:.3rem}input{font:inherit;padding:.45rem;width:12rem}button{font:inherit;padding:.55rem .9rem}button:disabled{opacity:.5}canvas{width:100%;height:min(65vh,520px);background:#f5f8fb;border:1px solid #d3dae2}.status{padding:.7rem;background:#f1e8d3;border-left:4px solid #a87520}#error{color:#9a241e;min-height:1.3em}
+</style><h1>Universe Arena</h1><p class="status">Local generated Arena shell. The player view shows only the controlled Being and its own initial cell. No Encounter starts until Generate Encounter succeeds.</p>
+<section><h2>Generate Encounter</h2><div class="row"><label>Starting XP<input id="xp" type="text" inputmode="numeric" autocomplete="off" value="0"></label><label>Width (cells)<input id="width" type="text" inputmode="numeric" autocomplete="off" value="5"></label><label>Height (cells)<input id="height" type="text" inputmode="numeric" autocomplete="off" value="5"></label><button id="generate" disabled>Generate Encounter</button><button id="load" disabled title="General save/load is not implemented">Load unavailable</button></div><p id="error" role="alert"></p></section>
+<section><h2 id="encounterTitle">No active Encounter</h2><div class="row"><p id="clock">Time: —</p><label>Encounter display name<input id="encounterName" maxlength="40" disabled></label><button id="saveEncounterName" disabled>Apply name</button><label>Your Being name<input id="playerName" maxlength="40" disabled></label><button id="savePlayerName" disabled>Apply name</button></div><canvas id="map" aria-label="Initial one-yard-cell map"></canvas><p id="mapCaption">Map origin is southwest; columns increase east and rows increase north. Each cell is one yard (0.9144 m). Grid lines are thinned on large maps; the native cell scale is unchanged.</p><p id="player"></p><button id="spot" disabled title="Native Spot requires Being geometry">Spot unavailable</button><p id="spotReason"></p><p>One-second Advance is unavailable because the generated target cannot complete the native Spot check.</p></section>
+<script>
+const $=id=>document.getElementById(id), fields=[$('xp'),$('width'),$('height')];
+function exactInteger(s,min){if(!/^[0-9]+$/.test(s))return false;const n=s.replace(/^0+(?=.)/,'');const m=String(min);return n.length>m.length||(n.length===m.length&&n>=m)}
+function validate(){ $('generate').disabled=!(exactInteger($('xp').value,0)&&exactInteger($('width').value,5)&&exactInteger($('height').value,5)); }
+fields.forEach(x=>x.addEventListener('input',validate)); validate();
+async function req(path,body){const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error||('HTTP '+r.status));return d}
+function draw(s){const c=$('map'),ctx=c.getContext('2d'),dpr=Math.min(window.devicePixelRatio||1,2),w=c.clientWidth,h=c.clientHeight;c.width=Math.max(1,Math.round(w*dpr));c.height=Math.max(1,Math.round(h*dpr));ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);if(s.state!=='active')return;const mw=s.map.width_cells,mh=s.map.height_cells,scale=Math.min(w/mw,h/mh),ox=(w-mw*scale)/2,oy=(h-mh*scale)/2;ctx.strokeStyle='#d5dce5';ctx.lineWidth=1;ctx.beginPath();const stride=Math.max(1,Math.ceil(Math.max(mw,mh)/300));for(let x=0;x<=mw;x+=stride){const px=ox+x*scale;ctx.moveTo(px,oy);ctx.lineTo(px,oy+mh*scale)}for(let y=0;y<=mh;y+=stride){const py=oy+y*scale;ctx.moveTo(ox,py);ctx.lineTo(ox+mw*scale,py)}ctx.stroke();const p=s.player.cell,cx=ox+(p.column+.5)*scale,cy=oy+(mh-p.row-.5)*scale;ctx.beginPath();ctx.arc(cx,cy,Math.max(7,Math.min(13,scale*.3)),0,Math.PI*2);ctx.fillStyle='#316ab0';ctx.fill();ctx.fillStyle='white';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText((s.player.name.trim()[0]||'P').toUpperCase(),cx,cy);}
+function show(s){const active=s.state==='active';$('encounterTitle').textContent=active?s.encounter_name:'No active Encounter';$('clock').textContent=active?'Native Encounter time: '+s.time_seconds+' seconds':'Time: —';$('encounterName').disabled=!active;$('playerName').disabled=!active;$('saveEncounterName').disabled=!active;$('savePlayerName').disabled=!active;if(active){$('encounterName').value=s.encounter_name;$('playerName').value=s.player.name;$('player').textContent='You: '+s.player.name+' · initial cell ('+s.player.cell.column+', '+s.player.cell.row+')';$('spotReason').textContent=s.spot_reason;}else{$('player').textContent='';$('spotReason').textContent=s.spot_reason;$('encounterName').value='';$('playerName').value='';}draw(s);}
+async function refresh(){show(await req('/api/generated/state'))}
+$('generate').onclick=async()=>{ $('error').textContent='Generating…'; try{show(await req('/api/generated/generate',{starting_experience:$('xp').value,width_cells:$('width').value,height_cells:$('height').value}));$('error').textContent='Encounter generated at native time zero.'}catch(e){$('error').textContent=e.message;await refresh()}};
+$('saveEncounterName').onclick=async()=>{try{show(await req('/api/generated/encounter-name',{name:$('encounterName').value}));$('error').textContent='Encounter display name updated.'}catch(e){$('error').textContent=e.message}};
+$('savePlayerName').onclick=async()=>{try{show(await req('/api/generated/player-name',{name:$('playerName').value}));$('error').textContent='Your Being display name updated.'}catch(e){$('error').textContent=e.message}};
+window.addEventListener('resize',()=>refresh().catch(()=>{}));refresh().catch(e=>$('error').textContent=e.message);
+</script></html>'''
+
+
 def make_handler(session):
     """Create a strict HTTP handler; no caller-selected Action or Entity IDs."""
     class Handler(BaseHTTPRequestHandler):
@@ -355,13 +378,19 @@ def make_handler(session):
         def do_GET(self):
             path = urlsplit(self.path).path
             try:
+                if isinstance(session, GeneratedArenaSession):
+                    if path == "/": return self._send(200, _GENERATED_PAGE, "text/html; charset=utf-8")
+                    if path == "/api/generated/state": return self._send(200, session.public_view())
+                    return self._send(404, {"error": "unknown generated Arena endpoint"})
                 if path == "/": return self._send(200, _PAGE, "text/html; charset=utf-8")
                 if path == "/api/gm": return self._send(200, session.gm_view())
                 if path == "/api/observer/ari": return self._send(200, session.observer_view(session.ari.native_being_id))
                 if path == "/api/observer/bex": return self._send(200, session.observer_view(session.bex.native_being_id))
                 return self._send(404, {"error": "unknown Arena endpoint"})
             except Exception as exc:
-                return self._send(500, {"error": str(exc)})
+                message = ("Arena request failed; no session data was returned."
+                           if isinstance(session, GeneratedArenaSession) else str(exc))
+                return self._send(500, {"error": message})
 
         def do_POST(self):
             path = urlsplit(self.path).path
@@ -375,6 +404,16 @@ def make_handler(session):
                     raise ArenaRequestError("request body must be valid UTF-8 JSON") from exc
                 if type(payload) is not dict:
                     raise ArenaRequestError("request body must be a JSON object")
+                if isinstance(session, GeneratedArenaSession):
+                    routes = {
+                        "/api/generated/generate": session.generate,
+                        "/api/generated/encounter-name": session.rename_encounter,
+                        "/api/generated/player-name": session.rename_player,
+                    }
+                    operation = routes.get(path)
+                    if operation is None:
+                        return self._send(404, {"error": "unknown generated Arena endpoint"})
+                    return self._send(200, operation(payload))
                 if path == "/api/spot":
                     if payload != {"operation": "ari_spots_bex"}:
                         raise ArenaRequestError("only the allowlisted Ari→Bex Spot operation is supported")
@@ -396,12 +435,16 @@ def make_handler(session):
                 return self._send(404, {"error": "unknown Arena endpoint"})
             except ArenaRequestError as exc:
                 return self._send(409, {"error": str(exc)})
+            except ArenaBrowserRequestError as exc:
+                return self._send(409, {"error": str(exc)})
             except ChoiceRejected as exc:
                 return self._send(409, {"error": str(exc)})
             except (TypeError, ValueError) as exc:
                 return self._send(409, {"error": str(exc)})
             except Exception as exc:
-                return self._send(500, {"error": str(exc)})
+                message = ("Arena request failed; no session data was returned."
+                           if isinstance(session, GeneratedArenaSession) else str(exc))
+                return self._send(500, {"error": message})
 
         def log_message(self, fmt, *args):
             return
@@ -410,9 +453,13 @@ def make_handler(session):
 
 def serve_local(port=8000, *, session=None):
     """Serve only on IPv4 loopback; the host is intentionally not configurable."""
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session or ArenaSession()))
+    session = session or ArenaSession()
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(session))
     print(f"Universe Encounter Arena: http://127.0.0.1:{server.server_port}/", flush=True)
-    print("Local GM/developer tool; no client-selected path or Action IDs. Ctrl-C to stop.", flush=True)
+    if isinstance(session, GeneratedArenaSession):
+        print("Generated Arena shell; player projection only, no client-selected IDs. Ctrl-C to stop.", flush=True)
+    else:
+        print("Local GM/developer tool; no client-selected path or Action IDs. Ctrl-C to stop.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
