@@ -30,7 +30,7 @@ from weapon import WeaponDictionary
 
 
 def build_source(*, future=False, arena_activation_enabled=False, initiated=True,
-                 facings=None):
+                 facings=None, postures=None):
     library = Library(load_definitions=False)
     library.action_dictionary = ActionDictionary()
     library.armor_dictionary = ArmorDictionary()
@@ -54,6 +54,9 @@ def build_source(*, future=False, arena_activation_enabled=False, initiated=True
     facings = {} if facings is None else facings
     observer.set_hex_facing(facings.get('Observer'))
     target.set_hex_facing(facings.get('Target'))
+    postures = {} if postures is None else postures
+    observer.set_posture(postures.get('Observer'))
+    target.set_posture(postures.get('Target'))
     observer.set_position(CartesianPosition(0.125, 0, 0))
     target.set_position(CartesianPosition(1.25, 0, 0))
     target.set_geometry(Sphere(0.75))
@@ -96,6 +99,16 @@ class TestInitialNativeReconstruction(unittest.TestCase):
         self.assertIsNone(native_encounter.arena_activation)
         self.assertEqual(native_world.get_object_by_id(source_encounter.being_list[0]).hex_facing, 11)
         self.assertIsNone(native_world.get_object_by_id(source_encounter.being_list[1]).hex_facing)
+
+    def test_known_and_unknown_posture_survive_closed_native_reconstruction(self):
+        _, source_encounter, _, envelope, _ = build_source(
+            postures={'Observer': 'crouching', 'Target': None})
+        result = reconstruct_initial_run_spot(
+            decode_run_spot_wire(encode_run_spot_envelope(envelope)))
+        native_world, _, _ = _NATIVE_GRAPHS[result]
+        self.assertEqual(native_world.get_object_by_id(source_encounter.being_list[0]).posture,
+                         'crouching')
+        self.assertIsNone(native_world.get_object_by_id(source_encounter.being_list[1]).posture)
 
     def test_identity_topology_numeric_state_rng_and_quarantine(self):
         source_world, source_encounter, source_rng, envelope, _ = build_source()

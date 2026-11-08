@@ -123,6 +123,12 @@ def container_refs(instance):
 
 
 class ReproductionBeingCheckpointTests(unittest.TestCase):
+    def test_known_posture_is_outside_pristine_combined_checkpoint_scope(self):
+        source, _child, being, _encoded = ready()
+        being.set_posture("standing")
+        with self.assertRaisesRegex(CombinedBeingCheckpointError, "pristine, unplaced"):
+            encode_combined_being_checkpoint(source)
+
     def test_legacy_v6_v1_combined_checkpoint_remains_readable(self):
         _source, child, _being, encoded = ready()
         decoded = decode_combined_being_checkpoint(encoded)

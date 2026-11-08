@@ -357,6 +357,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             data.update(skills=freeze(skills['skills']), weapon_skills=freeze(skills['weapon_skills']),
                 race=freeze(cd.get('race')),
                 abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
+                posture=freeze(obj.get_posture()),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
                 height=freeze(cd.get('height')),
                 body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),

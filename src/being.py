@@ -360,6 +360,9 @@ class BeingInstance(ObjectInstance):
         # twelve-way hex orientation. Legacy front_facing/top_facing retain
         # their historical meanings and are not aliases for this field.
         self.hex_facing = None
+        # Posture is unknown until an authoritative world condition or native
+        # Action establishes it. A missing legacy prone flag is not standing.
+        self._posture = None
         self.possessions = []
         self.weapons = []
         self.strategy = Strategy()
@@ -385,6 +388,7 @@ class BeingInstance(ObjectInstance):
         data['skill_practice_baselines'] = self._skill_practice_baselines.copy()
         data['skill_use_history'] = [entry.to_dict() for entry in self.skill_use_history]
         data['hex_facing'] = self.hex_facing
+        data['posture'] = self._posture
         if self.personal_history is not None:
             data['personal_history'] = self.personal_history.to_jsonable()
         return json.dumps(data)
@@ -395,6 +399,40 @@ class BeingInstance(ObjectInstance):
             from hex_facing import validate_facing
             facing = validate_facing(facing)
         self.hex_facing = facing
+
+    @property
+    def posture(self):
+        """Return the validated native posture, including legacy prone mapping."""
+        return self.get_posture()
+
+    @staticmethod
+    def validate_posture(value):
+        if value is not None and value not in ("standing", "crouching", "lying"):
+            raise ValueError("posture must be unknown, standing, crouching, or lying")
+        if value is not None and type(value) is not str:
+            raise ValueError("posture must be a native posture string or unknown")
+        return value
+
+    def set_posture(self, value):
+        """Author a posture fact; no absent-prone default is inferred."""
+        self.validate_posture(value)
+        legacy_prone = self.current.states.get_state("prone")
+        if legacy_prone is not None and type(legacy_prone) is not bool:
+            raise ValueError("legacy prone state must be an explicit Boolean or unknown")
+        if legacy_prone is True and value not in (None, "lying"):
+            raise ValueError("legacy prone state conflicts with standing/crouching posture")
+        self._posture = value
+
+    def get_posture(self):
+        raw = self.validate_posture(self._posture)
+        legacy_prone = self.current.states.get_state("prone")
+        if legacy_prone is not None and type(legacy_prone) is not bool:
+            raise ValueError("legacy prone state must be an explicit Boolean or unknown")
+        if legacy_prone is True:
+            if raw not in (None, "lying"):
+                raise ValueError("legacy prone state conflicts with standing/crouching posture")
+            return "lying"
+        return raw
 
     def begin_personal_history(self, *, earliest, known_through,
                                nondeclining_skills=()):

@@ -170,7 +170,7 @@ def _instance_signature(being):
         "parent_container_id", "spatial_state", "geometry", "visual_occlusion",
         "possessions", "weapons", "strategy", "physical_fatigue", "physiology_id",
         "fatigue_level", "effective_fitness", "exertion", "skill_experience",
-        "skill_use_history", "_skill_practice_baselines", "personal_history",
+        "skill_use_history", "_skill_practice_baselines", "personal_history", "_posture",
     }
     if set(being.__dict__) != expected_fields:
         _fail("Being has unknown or missing instance state")
@@ -186,6 +186,7 @@ def _instance_signature(being):
             or type(being.top_facing) is not int or being.top_facing != 0
             or type(being.front_facing) is not int or being.front_facing != 1
             or being.hex_facing is not None
+            or being.get_posture() is not None
             or being.parent_container_id is not None or being.spatial_state is not None
             or being.geometry is not None or being.visual_occlusion is not None
             or type(being.possessions) is not list or being.possessions != []

@@ -80,6 +80,7 @@ def _being_state_snapshot(being, target):
         'top_facing': being.top_facing,
         'front_facing': being.front_facing,
         'hex_facing': being.hex_facing,
+        '_posture': being._posture,
         'parent_container_id': being.parent_container_id,
         'position': None if position is None else tuple(position.as_tuple()),
         'spatial_state': _native_state_value(being.spatial_state),
@@ -330,6 +331,8 @@ def bind_quarantined_run_boundary(decoded, projection=None):
           'Arena activation-enabled state is not a native Boolean')
     _need(encounter_fields['arena_activation'] == ('null',),
           'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+    _need(encounter_fields['arena_movement_activation'] == ('null',),
+          'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
     _need(encounter_fields['initiation'] == ('null',),
           'target-directed Encounter initiation is outside the bounded checkpoint subset')
     _need(not arena_enabled,
@@ -520,12 +523,28 @@ def bind_quarantined_run_boundary(decoded, projection=None):
             'geometry', 'id', 'name', 'original', 'parent_container_id',
             'personal_history', 'physical_fatigue', 'physiology_id', 'possessions',
             'skill_experience', 'skill_use_history', 'spatial_state', 'strategy',
-            'top_facing', 'type', 'visual_occlusion', 'weapons'}
+            'top_facing', 'type', 'visual_occlusion', 'weapons', '_posture'}
         _need(set(fields) == expected_instance_fields,
               'Being has missing or unsupported current-state fields')
         facing = graph.data(fields['hex_facing'])
         _need(facing is None or type(facing) is int and 0 <= facing < 12,
               'Being hex facing must be null or an integer from 0 through 11')
+        posture = graph.data(fields['_posture'])
+        _need(posture is None or type(posture) is str
+              and posture in ('standing', 'crouching', 'lying'),
+              'Being posture must be unknown or a supported posture string')
+        current_fields = graph.fields(graph.raw_ref(fields['current']),
+                                      'being.BeingDefinition')[1]
+        states_fields = graph.fields(graph.raw_ref(current_fields['states']),
+                                     'states.States')[1]
+        legacy_states = graph.data(states_fields['states'])
+        _need(type(legacy_states) is dict,
+              'Being legacy state dictionary is malformed')
+        legacy_prone = legacy_states.get('prone')
+        _need(legacy_prone is None or type(legacy_prone) is bool,
+              'legacy prone state must be an explicit Boolean or unknown')
+        _need(legacy_prone is not True or posture in (None, 'lying'),
+              'legacy prone state conflicts with standing/crouching posture')
         name = graph.data(fields['name'])
         _need(type(name) is str and name,
               'Being identity has no supported display name')
@@ -549,6 +568,7 @@ def bind_quarantined_run_boundary(decoded, projection=None):
                       'possessions', 'weapons'):
             setattr(native, field, graph.value(fields[field]))
         native.set_hex_facing(facing)
+        native.set_posture(posture)
         for field, setter in (('spatial_state', 'set_spatial_state'),
                               ('geometry', 'set_geometry'),
                               ('visual_occlusion', 'set_visual_occlusion')):

@@ -44,7 +44,8 @@ _SUPPORTED_TAGS = frozenset({
     'universe.Universe', 'library.Library', 'being.BeingDictionary',
     'skill.SkillDictionary', 'being.BeingDefinition', 'being.BeingInstance',
     'encounter.Encounter', 'encounter.EncounterInitiation',
-    'encounter.ArenaActionActivation', 'event.Event', 'action_choice.ChoiceBook',
+    'encounter.ArenaActionActivation', 'encounter.ArenaMovementActivation',
+    'event.Event', 'action_choice.ChoiceBook',
     'object.ObjectRegistry', 'actiondictionary.ActionDictionary',
     'armor.ArmorDictionary', 'object.ObjectDictionary', 'weapon.WeaponDictionary',
     'abilities.Abilities', 'speeds.Speed',
@@ -429,6 +430,7 @@ def reconstruct_initial_run_spot(decoded):
             if field in fields:
                 setattr(instance, field, graph.value(fields[field]))
         instance.set_hex_facing(graph.data(fields['hex_facing']))
+        instance.set_posture(graph.data(fields['_posture']))
         for field, setter in (('spatial_state', 'set_spatial_state'),
                                ('geometry', 'set_geometry'),
                                ('visual_occlusion', 'set_visual_occlusion')):
@@ -743,6 +745,19 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
         facing = graph.data(values['hex_facing'])
         _need(facing is None or type(facing) is int and 0 <= facing < 12,
               'Being hex facing must be null or an integer from 0 through 11')
+        posture = graph.data(values['_posture'])
+        _need(posture is None or type(posture) is str
+              and posture in ('standing', 'crouching', 'lying'),
+              'Being posture must be unknown or a supported posture string')
+        current_fields = graph.fields(graph.raw_ref(values['current']), 'being.BeingDefinition')[1]
+        states_fields = graph.fields(graph.raw_ref(current_fields['states']), 'states.States')[1]
+        legacy_states = graph.data(states_fields['states'])
+        _need(type(legacy_states) is dict, 'Being legacy state dictionary is malformed')
+        legacy_prone = legacy_states.get('prone')
+        _need(legacy_prone is None or type(legacy_prone) is bool,
+              'legacy prone state must be an explicit Boolean or unknown')
+        _need(legacy_prone is not True or posture in (None, 'lying'),
+              'legacy prone state conflicts with standing/crouching posture')
         _need(graph.data(values['personal_history']) is None,
               'personal-history reconstruction is unsupported')
         for name in ('skill_use_history', 'possessions', 'weapons'):
@@ -773,6 +788,8 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
           'Arena activation-enabled state is not a native Boolean')
     _need(encounter_fields['arena_activation'] == ('null',),
           'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+    _need(encounter_fields['arena_movement_activation'] == ('null',),
+          'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
     _need(encounter_fields['initiation'] == ('null',),
           'target-directed Encounter initiation is outside the bounded checkpoint subset')
     _need(not arena_enabled,

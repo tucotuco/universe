@@ -46,46 +46,108 @@ class TestNativeMovementIntent(unittest.TestCase):
         return MovementRateConditions(
             terrain_multiplier=1.0,
             hampered_multiplier=1.0,
-            posture="standing",
             direction="forward",
             concurrent_demanding_action=demanding)
+
+    def snapshot(self):
+        # Rate-only unit cases freeze the native Being at a test boundary while
+        # returning the Encounter cursor to its unchanged setup state.
+        old_time = self.encounter.time
+        self.encounter.time = 1
+        try:
+            return capture_snapshot(self.encounter, 1)
+        finally:
+            self.encounter.time = old_time
+
+    def evaluate(self, being, rate, conditions, **kwargs):
+        kwargs.setdefault("pre_action_snapshot", self.snapshot())
+        return evaluate_movement_rate(being, rate, conditions,
+                                      universe=self.candidate.universe, **kwargs)
 
     def test_another_demanding_action_cap_is_one_yard_per_second(self):
         # The action classification is a premise for this arithmetic test;
         # no native action-wide demanding flag exists to infer it.
-        capped = evaluate_movement_rate(
-            self.player, "walk", self.conditions(demanding=True),
-            universe=self.candidate.universe)
+        capped = self.evaluate(self.player, "walk", self.conditions(demanding=True))
         self.assertEqual(capped.yards_per_second, 1.0)
         self.assertAlmostEqual(capped.meters_per_second, 0.9144)
         self.assertNotEqual(capped.meters_per_second, 1.0)
 
-        backward = evaluate_movement_rate(
+        backward = self.evaluate(
             self.player, "sprint", MovementRateConditions(
                 terrain_multiplier=1.0, hampered_multiplier=1.0,
-                posture="standing", direction="backward",
+                direction="backward",
                 concurrent_demanding_action=False),
-            universe=self.candidate.universe)
+        )
         self.assertEqual(backward.yards_per_second, 1.0)
         self.assertAlmostEqual(backward.meters_per_second, 0.9144)
 
-        stricter = evaluate_movement_rate(
+        self.player.set_posture("lying")
+        stricter = self.evaluate(
             self.player, "sprint", MovementRateConditions(
                 terrain_multiplier=1.0, hampered_multiplier=1.0,
-                posture="lying", direction="forward",
+                direction="forward",
                 concurrent_demanding_action=True),
-            universe=self.candidate.universe)
+        )
+        self.player.set_posture("standing")
         self.assertEqual(stricter.yards_per_second, 0.5)
         self.assertAlmostEqual(stricter.meters_per_second, 0.4572)
 
         lateral = MovementRateConditions(
             terrain_multiplier=1.0, hampered_multiplier=1.0,
-            posture="standing", direction="sideways",
+            direction="sideways",
             concurrent_demanding_action=False)
-        sideways = evaluate_movement_rate(
-            self.player, "sprint", lateral, universe=self.candidate.universe)
+        sideways = self.evaluate(self.player, "sprint", lateral)
         self.assertEqual(sideways.yards_per_second, 1.0)
         self.assertAlmostEqual(sideways.meters_per_second, 0.9144)
+
+    def test_posture_is_native_snapshot_state_and_legacy_prone_is_compatible(self):
+        conditions = self.conditions()
+        self.assertEqual(self.player.posture, "standing")
+        for invalid in (True, "prone", [], 1):
+            with self.assertRaises(ValueError):
+                self.player.set_posture(invalid)
+        self.player.set_posture("crouching")
+        crouching = self.evaluate(self.player, "sprint", conditions)
+        self.assertEqual(crouching.yards_per_second, 1.0)
+        self.player.set_posture("lying")
+        lying = self.evaluate(self.player, "sprint", conditions)
+        self.assertEqual(lying.yards_per_second, 0.5)
+
+        self.player.current.states.states["prone"] = True
+        self.assertEqual(self.player.posture, "lying")
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            self.player.set_posture("standing")
+        self.player.set_posture(None)
+        self.assertEqual(self.player.posture, "lying")
+        self.player.current.states.states["prone"] = False
+        self.assertIsNone(self.player.posture)
+        self.player.set_posture("standing")
+
+    def test_rate_uses_posture_from_the_common_snapshot(self):
+        self.player.set_posture("lying")
+        snapshot = self.snapshot()
+        self.player.set_posture("standing")
+        result = self.evaluate(self.player, "sprint", self.conditions(),
+                               pre_action_snapshot=snapshot)
+        self.assertEqual(snapshot.entity(self.player.id).data["posture"], "lying")
+        self.assertEqual(result.yards_per_second, 0.5)
+
+    def test_unknown_posture_and_caller_posture_override_fail_closed(self):
+        conditions = self.conditions()
+        self.player.set_posture(None)
+        before = (self.encounter.time, self.player.get_position(), self.rng.state,
+                  random.getstate())
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.evaluate(self.player, "walk", conditions)
+        self.assertEqual(refused.exception.code, "unknown_posture")
+        self.player.set_posture("standing")
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.evaluate(self.player, "walk", MovementRateConditions(
+                terrain_multiplier=1.0, hampered_multiplier=1.0, posture="standing",
+                direction="forward", concurrent_demanding_action=False))
+        self.assertEqual(refused.exception.code, "caller_posture_forbidden")
+        self.assertEqual((self.encounter.time, self.player.get_position(), self.rng.state,
+                          random.getstate()), before)
 
     def test_native_facing_fields_do_not_supply_a_twelve_orientation_snapshot(self):
         self.assertEqual((self.player.front_facing, self.player.top_facing), (1, 0))
@@ -148,8 +210,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         expected = {"sprint": 7.0, "run": 14.0 / 3.0, "jog": 3.5,
                     "hustle": 7.0 / 3.0, "walk": 1.75}
         for category, yards_per_second in expected.items():
-            result = evaluate_movement_rate(self.player, category, conditions,
-                                            universe=self.candidate.universe)
+            result = self.evaluate(self.player, category, conditions)
             self.assertEqual(result.run_level, 0)
             self.assertEqual(result.encumbrance_lb, 0.0)
             self.assertAlmostEqual(result.sprint_yards_per_second, 7.0)
@@ -160,8 +221,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         for category, ratio in {"sprint": 1.0, "run": 2.0 / 3.0,
                                 "jog": 0.5, "hustle": 1.0 / 3.0,
                                 "walk": 0.25}.items():
-            skilled = evaluate_movement_rate(self.player, category, conditions,
-                                             universe=self.candidate.universe)
+            skilled = self.evaluate(self.player, category, conditions)
             self.assertEqual(skilled.run_level, 3)
             self.assertAlmostEqual(skilled.sprint_yards_per_second, 8.0)
             self.assertAlmostEqual(skilled.yards_per_second, 8.0 * ratio)
@@ -172,9 +232,8 @@ class TestNativeMovementIntent(unittest.TestCase):
     def test_nonexistent_run_definition_refuses_instead_of_defaulting_missing_rank(self):
         conditions = self.conditions()
         with self.assertRaises(MovementIntentRefusal) as refused:
-            evaluate_movement_rate(self.player, "walk", conditions,
-                                   universe=self.candidate.universe,
-                                   skill_dictionary=SkillDictionary())
+            self.evaluate(self.player, "walk", conditions,
+                          skill_dictionary=SkillDictionary())
         self.assertEqual(refused.exception.code, "unknown_run_skill")
 
     def test_native_object_weights_derive_carried_mass(self):
@@ -182,8 +241,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         brick_id = self.candidate.universe.make_object_for_being(
             self.player.id, "Brick", "Test carried brick")
         self.assertIsNotNone(brick_id)
-        result = evaluate_movement_rate(self.player, "sprint", conditions,
-                                        universe=self.candidate.universe)
+        result = self.evaluate(self.player, "sprint", conditions)
         self.assertEqual(result.encumbrance_lb, 1.5)
         self.assertAlmostEqual(result.maximum_yards_per_second, 7.0 * (1 - 1.5 / 300.0))
 
@@ -195,16 +253,14 @@ class TestNativeMovementIntent(unittest.TestCase):
         snapshot = capture_snapshot(self.encounter, 1)
         brick = self.candidate.universe.get_object_by_id(brick_id)
         brick.current.weight = 100.0
-        result = evaluate_movement_rate(
-            self.player, "sprint", conditions, universe=self.candidate.universe,
-            pre_action_snapshot=snapshot)
+        result = self.evaluate(self.player, "sprint", conditions,
+                               pre_action_snapshot=snapshot)
         self.assertEqual(snapshot.entity(brick_id).data["weight"], 1.5)
         self.assertEqual(result.encumbrance_lb, 1.5)
 
     def test_native_physical_fatigue_adjusts_fitness_strength_and_category_cap(self):
         self.player.set_fatigue_level(2)
-        result = evaluate_movement_rate(
-            self.player, "sprint", self.conditions(), universe=self.candidate.universe)
+        result = self.evaluate(self.player, "sprint", self.conditions())
         self.assertEqual(result.physical_fatigue_level, 2)
         self.assertAlmostEqual(result.sprint_yards_per_second, 6.5)
         self.assertAlmostEqual(result.yards_per_second, 3.25)
@@ -212,18 +268,16 @@ class TestNativeMovementIntent(unittest.TestCase):
     def test_incapacitating_native_fatigue_refuses_movement(self):
         self.player.set_fatigue_level(5)
         with self.assertRaises(MovementIntentRefusal) as refused:
-            evaluate_movement_rate(
-                self.player, "walk", self.conditions(), universe=self.candidate.universe)
+            self.evaluate(self.player, "walk", self.conditions())
         self.assertEqual(refused.exception.code, "incapacitated")
 
     def test_missing_rate_cap_input_refuses_instead_of_assuming_neutral(self):
         missing_terrain = MovementRateConditions(
             hampered_multiplier=1.0,
-            posture="standing", direction="forward",
+            direction="forward",
             concurrent_demanding_action=False)
         with self.assertRaises(MovementIntentRefusal) as refused:
-            evaluate_movement_rate(self.player, "walk", missing_terrain,
-                                   universe=self.candidate.universe)
+            self.evaluate(self.player, "walk", missing_terrain)
         self.assertEqual(refused.exception.code, "unknown_movement_limit")
         self.assertIn("terrain_multiplier", str(refused.exception))
 
@@ -231,13 +285,11 @@ class TestNativeMovementIntent(unittest.TestCase):
         conditions = self.conditions()
         self.player.set_ability("STR", 23)
         self.assertAlmostEqual(
-            evaluate_movement_rate(self.player, "walk", conditions,
-                                   universe=self.candidate.universe).yards_per_second,
+            self.evaluate(self.player, "walk", conditions).yards_per_second,
             1.75)
         self.player.set_ability("STR", 24)
         with self.assertRaises(MovementIntentRefusal) as refused:
-            evaluate_movement_rate(self.player, "walk", conditions,
-                                   universe=self.candidate.universe)
+            self.evaluate(self.player, "walk", conditions)
         self.assertEqual(refused.exception.code, "unsupported_strength")
 
     def test_intent_moves_before_co_resolving_run_observer_at_native_boundary(self):
@@ -278,7 +330,8 @@ class TestNativeMovementIntent(unittest.TestCase):
         public_after = self.session.public_view()
         public_keys = {"state", "load_available", "encounter_name", "time_seconds", "map",
                        "player", "player_action", "run_available", "advance_available",
-                       "movement_available", "movement_reason", "spot_available", "spot_reason"}
+                       "movement_available", "movement_reason", "movement_plan", "movement_outcome",
+                       "spot_available", "spot_reason"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)

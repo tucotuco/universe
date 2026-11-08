@@ -53,12 +53,13 @@ class MovementIntentRefusal(ValueError):
 
 @dataclass(frozen=True)
 class MovementRateConditions:
-    """Required movement facts that native Being/Encounter state lacks.
+    """Explicit Arena environmental/action premises; posture is native state.
 
     These have no neutral defaults. A caller must establish terrain,
-    hampering, posture, direction, and any concurrent demanding-action
-    classification before requesting a legal rate. Encumbrance and all
-    Being-derived values are read from native state.
+    hampering, and any concurrent demanding-action classification before
+    requesting an intent. Facing-relative direction is derived from its
+    destination and native facing. Posture and other Being-derived values are
+    read from the common native snapshot.
     """
 
     terrain_multiplier: float | None = None
@@ -281,7 +282,7 @@ def evaluate_movement_rate(being, rate: str,
         raise MovementIntentRefusal("unknown_movement_limit", "explicit MovementRateConditions required")
 
     missing = [name for name in (
-        "terrain_multiplier", "hampered_multiplier", "posture", "direction",
+        "terrain_multiplier", "hampered_multiplier", "direction",
         "concurrent_demanding_action")
         if getattr(conditions, name) is None]
     if missing:
@@ -293,9 +294,19 @@ def evaluate_movement_rate(being, rate: str,
     if type(conditions.concurrent_demanding_action) is not bool:
         raise MovementIntentRefusal("unknown_movement_limit", "concurrent demanding-action status must be explicit")
 
-    posture = conditions.posture
+    if conditions.posture is not None:
+        raise MovementIntentRefusal(
+            "caller_posture_forbidden", "movement posture must come from the common native Being snapshot")
+    if pre_action_snapshot is None:
+        raise MovementIntentRefusal(
+            "missing_native_snapshot", "movement rate requires the common pre-action Being snapshot")
+    try:
+        posture = pre_action_snapshot.entity(being.id).data.get("posture")
+    except Exception as exc:
+        raise MovementIntentRefusal(
+            "invalid_native_snapshot", "movement posture is unavailable in the common Being snapshot") from exc
     if posture not in ("standing", "crouching", "lying"):
-        raise MovementIntentRefusal("unsupported_posture", "posture must be standing, crouching, or lying")
+        raise MovementIntentRefusal("unknown_posture", "native Being posture is unknown")
     direction = conditions.direction
     if direction not in ("forward", "backward", "sideways", "non_forward"):
         raise MovementIntentRefusal(

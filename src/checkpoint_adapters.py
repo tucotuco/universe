@@ -185,6 +185,12 @@ class NativeInventory(_Inventory):
         if tag=='encounter.Encounter' and field=='arena_activation' and item is not None:
             raise CheckpointRejected(
                 'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+        if tag=='encounter.Encounter' and field=='arena_movement_activation' and item is not None:
+            raise CheckpointRejected(
+                'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+        if tag=='being.BeingInstance' and field=='_posture':
+            _require(item is None or type(item) is str and item in ('standing', 'crouching', 'lying'),
+                     'native Being posture must be unknown or a supported posture string')
         if tag=='activities.SpotAction' and field=='location_ledger' and item is not None:
             self.issue('unbound_location_evidence_recipient',ref,field,
                 'Observer-owned location evidence has no portable recipient binding contract; restoration remains refused.')
@@ -341,6 +347,8 @@ class NativeInventory(_Inventory):
                  'Arena activation-enabled flag is malformed')
         _require(encounter.arena_activation is None,
                  'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+        _require(encounter.arena_movement_activation is None,
+                 'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
         _require(not encounter.arena_activation_enabled,
                  'Arena activation-enabled Encounter is outside the initiated Run/Spot checkpoint subset')
         _require(encounter.initiation is None,
@@ -496,6 +504,14 @@ class NativeInventory(_Inventory):
             facing=data['hex_facing']
             _require(facing is None or type(facing) is int and 0 <= facing < 12,
                      'invalid native hex facing in Being checkpoint state')
+            posture=data['_posture']
+            _require(posture is None or type(posture) is str
+                     and posture in ('standing', 'crouching', 'lying'),
+                     'invalid native Being posture in checkpoint state')
+            try:
+                effective_posture=being.get_posture()
+            except ValueError as exc:
+                raise CheckpointRejected('contradictory native Being posture state') from exc
             original=data['original'];current=data['current']
             _require(type(original) is BeingDefinition and definition_ids.get(id(original))==original.obj_type,
                      'Being original definition is not the matching registered Library definition')
@@ -550,8 +566,8 @@ class NativeInventory(_Inventory):
             covered.append((entity_id,original.obj_type,tuple(sorted(skill_state['skills'])),
                             tuple(sorted(skill_state['weapon_skills'])),
                             ('binary64',fatigue.q.hex()),('binary64',fatigue.b.hex()),
-                            physiology_id,geometry is not None,occlusion is not None,facing))
-        return ('native.run-spot-field-closure/2',
+                            physiology_id,geometry is not None,occlusion is not None,facing,effective_posture))
+        return ('native.run-spot-field-closure/3',
             ('participants',tuple(sorted(entity_ids))),
             ('being-definitions',tuple(sorted({row[1] for row in covered}))),
             ('required-practice-skills',('run','spot')),

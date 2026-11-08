@@ -34,7 +34,7 @@ class TestBoundedClosureBlockers(unittest.TestCase):
         candidate=self.candidate();result=validate_checkpoint_candidate(self.world,self.enc,candidate,quiescent=True)
         self.assertTrue(result.inventory_validated)
         self.assertIn('bounded_run_spot_closure_verified',{d.code for d in result.diagnostics})
-        self.assertIn('native.run-spot-field-closure/2',tuple(strings(candidate.envelope)))
+        self.assertIn('native.run-spot-field-closure/3',tuple(strings(candidate.envelope)))
         self.assertFalse(result.closure_validated)
         self.assertFalse(result.portable_schema_defined)
         self.assertFalse(result.restore_verified)
@@ -81,7 +81,7 @@ class TestBoundedClosureBlockers(unittest.TestCase):
         candidate=self.candidate()
         codes={d.code for d in candidate.diagnostics}
         self.assertIn('bounded_run_spot_closure_verified',codes)
-        self.assertIn('native.run-spot-field-closure/2',tuple(strings(candidate.envelope)))
+        self.assertIn('native.run-spot-field-closure/3',tuple(strings(candidate.envelope)))
         self.assertFalse(candidate.closure_validated);self.assertFalse(candidate.portable_schema_defined)
         self.assertEqual(self.enc.time,1)
         self.assertEqual(_read_set(self.enc),before);self.assertEqual(self.rng.state,rng_before)

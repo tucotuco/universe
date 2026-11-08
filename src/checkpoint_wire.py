@@ -519,7 +519,7 @@ def _validate_descriptor_components(data):
           'envelope content digest mismatch')
     sections, node_by_ref = _validate_inventory(state)
     _need(type(certificate) is tuple and certificate
-          and certificate[0] == 'native.run-spot-field-closure/2',
+          and certificate[0] == 'native.run-spot-field-closure/3',
           'unknown Run/Spot field-closure schema')
     cert_rows = certificate[1:]
     _need(all(type(row) is tuple and len(row) == 2 and type(row[0]) is str for row in cert_rows),

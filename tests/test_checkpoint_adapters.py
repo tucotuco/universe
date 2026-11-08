@@ -12,7 +12,7 @@ from checkpoint_adapters import RecipientBinding
 from field_observation import BeliefLedger
 from history_conversation import AskAboutPastAction
 from activities import RunAction
-from encounter import ArenaActionActivation, EncounterInitiation
+from encounter import ArenaActionActivation, ArenaMovementActivation, EncounterInitiation
 from realization import Fact, FactKey, CommittedFact
 from conditional_attributes import ConditionalAttributes
 from statistical_group import StatisticalGroup
@@ -64,6 +64,17 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
             self.enc.id, self.a.id, 'choice-authored-test', self.enc.time)
         before = self.raw()
         with self.assertRaisesRegex(CheckpointRejected, 'activated Arena Encounter cannot be resumed'):
+            self.capture()
+        self.assertEqual(before, self.raw())
+
+    def test_movement_activated_arena_remains_outside_bounded_checkpoint(self):
+        self.enable()
+        self.enc.arena_activation_enabled = True
+        self.enc.arena_movement_activation = ArenaMovementActivation(
+            self.enc.id, self.a.id, 'movement-decision-test', self.enc.time)
+        before = self.raw()
+        with self.assertRaisesRegex(CheckpointRejected,
+                                    'movement-activated Arena Encounter cannot be resumed'):
             self.capture()
         self.assertEqual(before, self.raw())
 

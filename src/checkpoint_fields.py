@@ -127,16 +127,16 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'being.BeingInstance': {
-        "allowed": '_atomic_target_history _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
-        "required": '_skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry hex_facing name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "allowed": '_atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "required": '_posture _skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry hex_facing name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
     },
     'conditional_attributes.ConditionalAttributes': {
         "allowed": '_committed _external _rng_for specifications'.split(),
         "required": '_committed _external _rng_for specifications'.split(),
     },
     'encounter.Encounter': {
-        "allowed": '_active_fatigue_frame _advancing _atomic_interval_history _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running _transactional_mode active_boundary awareness arena_activation arena_activation_enabled being_list boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history finished_action_list id initiated initiation last_fatigue_frame last_processed_boundary local_frame location map name non_being_object_list parent_event_id pending_action_list start_time time type universe'.split(),
-        "required": '_active_fatigue_frame _advancing _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running active_boundary awareness arena_activation arena_activation_enabled boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history initiated last_fatigue_frame last_processed_boundary location map name parent_event_id start_time type universe'.split(),
+        "allowed": '_active_fatigue_frame _advancing _atomic_interval_history _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running _transactional_mode active_boundary awareness arena_activation arena_activation_enabled arena_movement_activation being_list boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history finished_action_list id initiated initiation last_fatigue_frame last_processed_boundary local_frame location map name non_being_object_list parent_event_id pending_action_list start_time time type universe'.split(),
+        "required": '_active_fatigue_frame _advancing _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running active_boundary awareness arena_activation arena_activation_enabled arena_movement_activation boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history initiated last_fatigue_frame last_processed_boundary location map name parent_event_id start_time type universe'.split(),
     },
     'encounter.EncounterInitiation': {
         "allowed": 'actor_id intent target_id time'.split(),
@@ -145,6 +145,10 @@ FIELD_ADAPTERS = {
     'encounter.ArenaActionActivation': {
         "allowed": 'activation_kind actor_id choice_id encounter_id time'.split(),
         "required": 'activation_kind actor_id choice_id encounter_id time'.split(),
+    },
+    'encounter.ArenaMovementActivation': {
+        "allowed": 'activation_kind actor_id encounter_id movement_decision_id time'.split(),
+        "required": 'activation_kind actor_id encounter_id movement_decision_id time'.split(),
     },
     'encounter_fatigue_bridge.FrozenFatigueFrame': {
         "allowed": '_profiles _views'.split(),
@@ -505,6 +509,7 @@ RUN_SPOT_FIELD_CLOSURE = {
         'authoritative': ('_atomic_interval_history', '_choice_book', '_coordinator_time',
                           '_interval_start', '_physiology_registry', 'active_boundary',
                           'awareness', 'arena_activation', 'arena_activation_enabled',
+                          'arena_movement_activation',
                           'being_list', 'boundary_fault', 'cancelled_action_list',
                           'difficulty_class', 'end_time', 'event_type', 'fatigue_frame_history',
                           'finished_action_list', 'id', 'initiated', 'initiation',
@@ -541,7 +546,7 @@ RUN_SPOT_FIELD_CLOSURE = {
                          ('bool', 'bool')),
     },
     'being.BeingInstance': {
-        'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',
+        'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id', '_posture',
                           'top_facing', 'front_facing', 'hex_facing', 'spatial_state', 'geometry',
                           'visual_occlusion', 'possessions', 'weapons', 'strategy',
                           'physical_fatigue', 'physiology_id', 'fatigue_level',
