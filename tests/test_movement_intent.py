@@ -89,6 +89,17 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(refused.exception.code, "unknown_movement_limit")
         self.assertIn("terrain_multiplier", str(refused.exception))
 
+    def test_strength_table_boundary_is_used_and_out_of_table_values_refuse(self):
+        conditions = self.conditions()
+        self.player.set_ability("STR", 23)
+        self.assertAlmostEqual(
+            evaluate_movement_rate(self.player, "walk", conditions).yards_per_second,
+            1.75)
+        self.player.set_ability("STR", 24)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            evaluate_movement_rate(self.player, "walk", conditions)
+        self.assertEqual(refused.exception.code, "unsupported_strength")
+
     def test_intent_moves_before_co_resolving_run_observer_at_native_boundary(self):
         action = self.activate_run_observer()
         start = self.player.get_position()

@@ -28,7 +28,7 @@ _FATIGUE_MAX_CATEGORY = ("sprint", "run", "jog", "hustle", "walk", None)
 _HEAVY_LOAD_UPPER_LB = {
     1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60, 7: 70, 8: 80, 9: 90,
     10: 100, 11: 115, 12: 130, 13: 150, 14: 175, 15: 200, 16: 230,
-    17: 260, 18: 300, 19: 350, 20: 400,
+    17: 260, 18: 300, 19: 350, 20: 400, 21: 460, 22: 520, 23: 600,
 }
 _RACE_DIVISOR = {
     "human": 2.0,
@@ -180,7 +180,7 @@ def evaluate_movement_rate(being, rate: str,
         raise MovementIntentRefusal("unsupported_strength", "carrying-capacity table requires integer Strength")
     heavy_load_limit = _HEAVY_LOAD_UPPER_LB.get(int(effective_strength))
     if heavy_load_limit is None:
-        raise MovementIntentRefusal("unsupported_strength", "carrying-capacity table supports Strength 1..20")
+        raise MovementIntentRefusal("unsupported_strength", "carrying-capacity table supports Strength 1..23")
     if encumbrance > 2 * heavy_load_limit:
         raise MovementIntentRefusal("unsupported_encumbrance", "r61 load factor is negative above twice heavy load")
 
