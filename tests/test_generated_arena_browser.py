@@ -5,7 +5,10 @@ import io
 import math
 from pathlib import Path
 import random
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,7 +117,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("traceUI('canvas_hex_selected',cell)", page)
         self.assertIn("req('/api/generated/destination'", page)
         self.assertIn("traceUI('advance_clicked')", page)
-        self.assertIn("req('/api/generated/advance',{seconds:1},seq)", page)
+        self.assertIn("req('/api/generated/advance',{seconds:1},sequence)", page)
         self.assertIn("Already at that hex center", page)
 
         trace_empty = self.session.public_view()
@@ -221,6 +224,217 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(self.session._rng_cursor.state, rng_state)
         for forbidden in (hidden.id, hidden.name, "source_record", "root_seed"):
             self.assertNotIn(forbidden, stream.getvalue())
+
+    def test_shipped_option_handlers_replace_active_plan_and_serialize_advance(self):
+        _, page = self.request("/")
+        self.assertIn("function serializeMutation(operation)", page)
+        self.assertIn("function optionChanged(event,detail)", page)
+        self.assertIn("updatePlanFromSelection(sequence,rate,policy)", page)
+        self.assertIn("server accepted ${plan.rate}/${plan.facing_policy}", page)
+        self.assertIn("selected ${selectedRate}/${selectedPolicy}", page)
+        self.assertIn("Movement plan accepted: ${state.movement_plan.rate}/${state.movement_plan.facing_policy}", page)
+        self.assertIn("await serializeMutation(async()=>{try{const state=await req('/api/generated/destination'", page)
+        self.assertIn("serializeMutation(async()=>{if(planUpdateFailure)", page)
+        self.assertIn("req('/api/generated/advance',{seconds:1},sequence)", page)
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("swift"),
+                         "JavaScriptCore via Swift is available on macOS only")
+    def test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance(self):
+        self.enable_trace()
+        _, page = self.request("/")
+        state = self.session.generate({
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        player_position = state["player"]["position_meters"]
+        layout = self.session.active_candidate.arena_map.layout
+        target = max(
+            (HexAddress(column, row)
+             for column in range(state["map"]["width_cells"])
+             for row in range(state["map"]["height_cells"])),
+            key=lambda cell: math.dist(
+                tuple(player_position.values()),
+                layout.center_position(cell, z=player_position["z"]).as_tuple()))
+
+        with tempfile.TemporaryDirectory(prefix="arena-browser-js-") as temp:
+            page_path = Path(temp) / "page.html"
+            state_path = Path(temp) / "initial-state.json"
+            cell_path = Path(temp) / "target-cell.json"
+            page_path.write_text(page, encoding="utf-8")
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            cell_path.write_text(json.dumps({"column": target.column, "row": target.row}),
+                                 encoding="utf-8")
+            module_cache = Path(tempfile.gettempdir()) / "universe-arena-jsc-module-cache"
+            module_cache.mkdir(parents=True, exist_ok=True)
+            harness = ROOT / "tests" / "arena_browser_js_harness.swift"
+            run = subprocess.run(
+                [shutil.which("swift"), "-module-cache-path", str(module_cache), str(harness),
+                 str(page_path), str(state_path), str(cell_path)],
+                check=True, capture_output=True, text=True, timeout=60)
+        result = json.loads(run.stdout)
+        movement_requests = [call for call in result["calls"]
+                             if call["path"] in ("/api/generated/destination", "/api/generated/advance")]
+        self.assertEqual([call["path"] for call in movement_requests], [
+            "/api/generated/destination", "/api/generated/destination",
+            "/api/generated/destination", "/api/generated/advance"])
+        preselection = next(call for call in result["calls"]
+                            if call["path"] == "/api/generated/trace"
+                            and call["body"].get("event") == "rate_selected"
+                            and call["body"].get("rate") == "sprint")
+        first_destination = result["calls"].index(movement_requests[0])
+        self.assertLess(result["calls"].index(preselection), first_destination)
+        self.assertEqual([call["body"]["rate"] for call in movement_requests[:3]],
+                         ["sprint", "walk", "sprint"])
+        for call in movement_requests[:3]:
+            self.assertEqual(call["body"]["facing_policy"], "turn")
+            self.assertEqual(call["body"]["column"], target.column)
+            self.assertEqual(call["body"]["row"], target.row)
+        self.assertEqual(int(movement_requests[3]["headers"]["X-Arena-Client-Seq"]),
+                         int(movement_requests[2]["headers"]["X-Arena-Client-Seq"]) + 1)
+        self.assertLess(result["calls"].index(movement_requests[2]),
+                        result["calls"].index(movement_requests[3]))
+        self.assertEqual(result["plan"]["rate"], "sprint")
+        self.assertIn("server accepted sprint/turn", result["status"])
+        self.assertEqual(result["time"], 1)
+        self.assertEqual(result["error"], "One native Encounter second committed.")
+
+    def test_destination_then_sprint_updates_accepted_plan_before_native_step(self):
+        stream = self.enable_trace()
+        self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, hidden = candidate.participants
+        being = player.native.being
+        start = being.get_position()
+        layout = candidate.arena_map.layout
+        address = max(
+            (HexAddress(column, row)
+             for column in range(candidate.arena_map.width_cells)
+             for row in range(candidate.arena_map.height_cells)),
+            key=lambda cell: math.dist(start.as_tuple(), layout.center_position(cell, z=start.z).as_tuple()))
+        before_history = dict(candidate.universe.event_history)
+        before_choices = dict(encounter._choice_book._choices)
+        before_awareness = (encounter.aware_beings(being.id),
+                            encounter.aware_beings(hidden.native.being.id))
+        before_rng = self.session._rng_cursor.state
+
+        self.request("/api/generated/trace", {"seq": 1, "event": "canvas_hex_selected",
+                     "column": address.column, "row": address.row})
+        status, walk = self.request("/api/generated/destination", {
+            "column": address.column, "row": address.row,
+            "rate": "walk", "facing_policy": "turn"},
+            headers={"X-Arena-Client-Seq": "1"})
+        self.assertEqual(status, 200)
+        self.assertEqual(walk["movement_plan"]["rate"], "walk")
+        self.request("/api/generated/trace", {"seq": 2, "event": "rate_selected", "rate": "sprint"})
+        status, sprint = self.request("/api/generated/destination", {
+            **walk["movement_plan"]["destination_cell"],
+            "rate": "sprint", "facing_policy": "turn"},
+            headers={"X-Arena-Client-Seq": "2"})
+        self.assertEqual(status, 200)
+        self.assertEqual(sprint["movement_plan"]["rate"], "sprint")
+        self.assertEqual(sprint["movement_plan"]["destination_cell"],
+                         {"column": address.column, "row": address.row})
+        self.assertEqual(sprint["time_seconds"], 0)
+        self.assertEqual(being.get_position(), start)
+        self.assertEqual(candidate.universe.event_history, before_history)
+        self.assertEqual(encounter._choice_book._choices, before_choices)
+        self.assertEqual(before_awareness, (encounter.aware_beings(being.id),
+                                           encounter.aware_beings(hidden.native.being.id)))
+        self.assertEqual(self.session._rng_cursor.state, before_rng)
+        self.assertNotIn(hidden.native.being.id, json.dumps(sprint))
+
+        self.request("/api/generated/trace", {"seq": 3, "event": "advance_clicked"})
+        status, advanced = self.request("/api/generated/advance", {"seconds": 1},
+                                        headers={"X-Arena-Client-Seq": "3"})
+        self.assertEqual(status, 200)
+        self.assertEqual(advanced["time_seconds"], 1)
+        self.assertGreater(math.dist(start.as_tuple(), being.get_position().as_tuple()), 0.9144)
+        self.assertIn("event=rate_selected rate=sprint", stream.getvalue())
+        self.assertIn("client_seq=2 action=destination status=accepted http=200", stream.getvalue())
+        self.assertIn("rate=sprint policy=turn plan=accepted", stream.getvalue())
+        self.assertIn("status=committed time=0->1", stream.getvalue())
+        self.assertIn("rate=sprint,policy=turn", stream.getvalue())
+        self.assertNotIn(hidden.native.being.id, stream.getvalue())
+        self.assertNotIn("seed=", stream.getvalue())
+
+    def test_sprint_before_destination_and_rapid_policy_rate_edits_use_latest_plan(self):
+        stream = self.enable_trace()
+        self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        being = candidate.participants[0].native.being
+        start = being.get_position()
+        layout = candidate.arena_map.layout
+        address = max(
+            (HexAddress(column, row)
+             for column in range(candidate.arena_map.width_cells)
+             for row in range(candidate.arena_map.height_cells)),
+            key=lambda cell: math.dist(start.as_tuple(), layout.center_position(cell, z=start.z).as_tuple()))
+        self.request("/api/generated/trace", {"seq": 1, "event": "rate_selected", "rate": "sprint"})
+        self.request("/api/generated/trace", {"seq": 2, "event": "facing_policy_selected",
+                     "facing_policy": "turn"})
+        status, selected = self.request("/api/generated/destination", {
+            "column": address.column, "row": address.row,
+            "rate": "sprint", "facing_policy": "turn"},
+            headers={"X-Arena-Client-Seq": "3"})
+        self.assertEqual(status, 200)
+        self.assertEqual(selected["movement_plan"]["rate"], "sprint")
+
+        # Serialized selector edits followed immediately by Advance represent
+        # the browser queue's required causal order.
+        self.request("/api/generated/trace", {"seq": 4, "event": "facing_policy_selected",
+                     "facing_policy": "maintain"})
+        status, maintained = self.request("/api/generated/destination", {
+            **selected["movement_plan"]["destination_cell"],
+            "rate": "sprint", "facing_policy": "maintain"},
+            headers={"X-Arena-Client-Seq": "4"})
+        self.assertEqual(status, 200)
+        self.assertEqual(maintained["movement_plan"]["facing_policy"], "maintain")
+        self.request("/api/generated/trace", {"seq": 5, "event": "rate_selected", "rate": "jog"})
+        status, jog = self.request("/api/generated/destination", {
+            **maintained["movement_plan"]["destination_cell"],
+            "rate": "jog", "facing_policy": "maintain"},
+            headers={"X-Arena-Client-Seq": "5"})
+        self.assertEqual(status, 200)
+        self.assertEqual(jog["movement_plan"]["rate"], "jog")
+        self.request("/api/generated/trace", {"seq": 6, "event": "rate_selected", "rate": "sprint"})
+        status, sprint = self.request("/api/generated/destination", {
+            **jog["movement_plan"]["destination_cell"],
+            "rate": "sprint", "facing_policy": "maintain"},
+            headers={"X-Arena-Client-Seq": "6"})
+        self.assertEqual(status, 200)
+        self.assertEqual(sprint["movement_plan"]["rate"], "sprint")
+        self.assertEqual(sprint["movement_plan"]["facing_policy"], "maintain")
+        self.request("/api/generated/trace", {"seq": 7, "event": "advance_clicked"})
+        status, advanced = self.request("/api/generated/advance", {"seconds": 1},
+                                        headers={"X-Arena-Client-Seq": "7"})
+        self.assertEqual(status, 200)
+        self.assertEqual(advanced["time_seconds"], 1)
+        self.assertIn("rate=sprint,policy=maintain", stream.getvalue())
+
+    def test_invalid_rate_update_keeps_previous_server_plan(self):
+        self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        start_cell = candidate.arena_map.layout.cell_at_position(
+            candidate.participants[0].native.being.get_position())
+        destination = next(HexAddress(column, row)
+            for column in range(candidate.arena_map.width_cells)
+            for row in range(candidate.arena_map.height_cells)
+            if HexAddress(column, row) != start_cell)
+        _, accepted = self.request("/api/generated/destination", {
+            "column": destination.column, "row": destination.row,
+            "rate": "walk", "facing_policy": "turn"})
+        before = self.session.public_view()
+        status, _ = self.request("/api/generated/destination", {
+            "column": destination.column, "row": destination.row,
+            "rate": "sprint-invalid", "facing_policy": "maintain"})
+        self.assertEqual(status, 409)
+        after = self.session.public_view()
+        self.assertEqual(after, before)
+        self.assertEqual(after["movement_plan"]["rate"], accepted["movement_plan"]["rate"])
+        self.assertEqual(after["movement_plan"]["facing_policy"],
+                         accepted["movement_plan"]["facing_policy"])
 
     def test_trace_schema_rejects_arbitrary_fields_and_client_sequence_is_bounded(self):
         stream = self.enable_trace()
