@@ -79,6 +79,7 @@ def _being_state_snapshot(being, target):
         'current_definition': _native_state_value(being.current.__dict__),
         'top_facing': being.top_facing,
         'front_facing': being.front_facing,
+        'hex_facing': being.hex_facing,
         'parent_container_id': being.parent_container_id,
         'position': None if position is None else tuple(position.as_tuple()),
         'spatial_state': _native_state_value(being.spatial_state),
@@ -506,7 +507,7 @@ def bind_quarantined_run_boundary(decoded, projection=None):
         instance_ref, fields = instance_refs[logical_id]
         expected_instance_fields = {
             '_atomic_target_history', '_skill_practice_baselines', 'current',
-            'effective_fitness', 'exertion', 'fatigue_level', 'front_facing',
+            'effective_fitness', 'exertion', 'fatigue_level', 'front_facing', 'hex_facing',
             'geometry', 'id', 'name', 'original', 'parent_container_id',
             'personal_history', 'physical_fatigue', 'physiology_id', 'possessions',
             'skill_experience', 'skill_use_history', 'spatial_state', 'strategy',
@@ -530,7 +531,7 @@ def bind_quarantined_run_boundary(decoded, projection=None):
         # state are rebuilt by _Graph.native, while instance fields are copied
         # from the closed inventory. No Action or practice is replayed.
         native.current = current
-        for field in ('top_facing', 'front_facing', 'parent_container_id',
+        for field in ('top_facing', 'front_facing', 'hex_facing', 'parent_container_id',
                       'physiology_id', 'fatigue_level', 'effective_fitness',
                       'skill_experience', '_skill_practice_baselines',
                       'possessions', 'weapons'):

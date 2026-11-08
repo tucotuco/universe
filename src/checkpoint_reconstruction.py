@@ -422,7 +422,7 @@ def reconstruct_initial_run_spot(decoded):
         Identifiable.__init__(instance, scalar_field(instance_ref, fields, 'name'), id=object_id)
         instance.current = current
         _need(instance.current is not instance.original, 'current Being state must be detached from definition')
-        for field in ('top_facing', 'front_facing', 'parent_container_id', 'physiology_id',
+        for field in ('top_facing', 'front_facing', 'hex_facing', 'parent_container_id', 'physiology_id',
                       'fatigue_level', 'effective_fitness', 'skill_experience',
                       '_skill_practice_baselines', 'possessions', 'weapons'):
             if field in fields:

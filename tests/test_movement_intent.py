@@ -1,9 +1,11 @@
 """Native movement-rate and one-boundary intent foundation tests."""
 
 import random
+import math
 import sys
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -15,6 +17,7 @@ from arena_hex_map import HexAddress
 from action_evaluation import capture_snapshot
 from movement_intent import (MovementIntent, MovementIntentRefusal,
                              MovementRateConditions, evaluate_movement_rate)
+from hex_facing import FacingSector, classify_vector, facing_vector
 from skill import SkillDictionary
 from spatial.state import CartesianPosition
 
@@ -79,18 +82,48 @@ class TestNativeMovementIntent(unittest.TestCase):
             terrain_multiplier=1.0, hampered_multiplier=1.0,
             posture="standing", direction="sideways",
             concurrent_demanding_action=False)
-        with self.assertRaises(MovementIntentRefusal) as refused:
-            evaluate_movement_rate(
-                self.player, "walk", lateral, universe=self.candidate.universe)
-        self.assertEqual(refused.exception.code, "unsupported_direction")
+        sideways = evaluate_movement_rate(
+            self.player, "sprint", lateral, universe=self.candidate.universe)
+        self.assertEqual(sideways.yards_per_second, 1.0)
+        self.assertAlmostEqual(sideways.meters_per_second, 0.9144)
 
     def test_native_facing_fields_do_not_supply_a_twelve_orientation_snapshot(self):
         self.assertEqual((self.player.front_facing, self.player.top_facing), (1, 0))
+        self.assertIsNone(self.player.hex_facing)
         self.encounter.time = 1
         snapshot = capture_snapshot(self.encounter, 1)
         data = snapshot.entity(self.player.id).data
-        self.assertNotIn("front_facing", data)
-        self.assertNotIn("top_facing", data)
+        self.assertIsNone(data["hex_facing"])
+
+    def test_twelve_facings_front_endpoints_are_inclusive_and_other_headings_nonforward(self):
+        for facing in range(12):
+            angle = facing * 30.0
+            for offset in (-30.0, 0.0, 30.0):
+                theta = math.radians(angle + offset)
+                self.assertIs(classify_vector(facing, (math.cos(theta), math.sin(theta), 0)),
+                              FacingSector.FRONT)
+            for offset in (-60.0, 60.0, 90.0, 120.0, 150.0, 180.0):
+                theta = math.radians(angle + offset)
+                self.assertIs(classify_vector(facing, (math.cos(theta), math.sin(theta), 0)),
+                              FacingSector.NON_FORWARD)
+            self.assertEqual(classify_vector(facing, (*facing_vector(facing), 0)), FacingSector.FRONT)
+        with self.assertRaises(ValueError):
+            self.player.set_hex_facing(12)
+
+    def test_unknown_facing_refuses_and_explicit_maintained_nonforward_caps_at_one_yard(self):
+        start = self.player.get_position()
+        conditions = self.conditions()
+        intent = MovementIntent(self.player.id,
+            CartesianPosition(start.x, start.y + 20.0, start.z), "sprint", "north", 1)
+        self.activate_run_observer()
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intent=intent, movement_conditions=conditions)
+        self.assertEqual(refused.exception.code, "unknown_facing")
+        self.player.set_hex_facing(0)
+        self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
+        self.encounter.step(1, movement_intent=intent, movement_conditions=conditions)
+        end = self.player.get_position()
+        self.assertAlmostEqual(math.dist(start.as_tuple(), end.as_tuple()), 0.9144)
 
     def activate_run_observer(self):
         self.session.choose_run()
@@ -206,6 +239,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         layout = self.candidate.arena_map.layout
         start = layout.center_position(HexAddress(0, 0))
         self.player.set_position(start)
+        self.player.set_hex_facing(1)  # Explicit test-world facing at the included +30° boundary.
         self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
         public_before = self.session.public_view()
         self.assertEqual(public_before["player"]["cell"], {"column": 0, "row": 0})
@@ -253,8 +287,65 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
         self.assertEqual(random.getstate(), self.global_rng)
 
+    def test_explicit_turn_commits_with_movement_and_is_in_same_second_snapshot(self):
+        action = self.activate_run_observer()
+        start = self.player.get_position()
+        self.player.set_hex_facing(0)
+        self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
+        destination = CartesianPosition(start.x, start.y + 20.0, start.z)
+        intent = MovementIntent(self.player.id, destination, "walk", "turn-north", 1,
+                                facing_policy="turn", target_facing=3)
+        seen = []
+        import interval_staging
+        original = interval_staging.capture_observer_context
+        def capture(*args, **kwargs):
+            context = original(*args, **kwargs)
+            seen.append(context.snapshot.entity(self.player.id).data["hex_facing"])
+            return context
+        with patch.object(interval_staging, "capture_observer_context", capture):
+            self.encounter.step(1, movement_intent=intent,
+                                movement_conditions=self.conditions(demanding=False))
+        self.assertEqual(self.player.hex_facing, 3)
+        self.assertEqual(seen, [3])
+        self.assertGreater(self.player.get_position().y, start.y)
+        self.assertEqual(self.encounter.inspect_committed(1).action(action.id).facts.outcome, "success")
+
+    def test_movement_and_turn_rollback_together_after_injected_publication_failure(self):
+        action = self.activate_run_observer()
+        start = self.player.get_position()
+        self.player.set_hex_facing(0)
+        pending_before = tuple(self.encounter.pending_action_list)
+        rng_before = self.rng.state
+        awareness_before = (tuple(self.encounter.aware_beings(self.player.id)),
+                            tuple(self.encounter.aware_beings(self.opponent.id)))
+        destination = CartesianPosition(start.x, start.y + 20.0, start.z)
+        intent = MovementIntent(self.player.id, destination, "walk", "rollback-turn", 1,
+                                facing_policy="turn", target_facing=3)
+        import atomic_publication
+        import transactional_progression
+        original = atomic_publication.publish_interval_candidate
+        def fail_after_movement(encounter, candidate, **kwargs):
+            kwargs["_fail_after"] = "movement"
+            return original(encounter, candidate, **kwargs)
+        with patch.object(atomic_publication, "publish_interval_candidate", fail_after_movement):
+            from atomic_publication import PublicationFailure
+            with self.assertRaises(PublicationFailure) as failure:
+                self.encounter.step(1, movement_intent=intent,
+                                    movement_conditions=self.conditions(demanding=False))
+        self.assertFalse(failure.exception.rollback_errors)
+        self.assertEqual(self.player.get_position(), start)
+        self.assertEqual(self.player.hex_facing, 0)
+        self.assertEqual(self.encounter.time, 0)
+        self.assertEqual(tuple(self.encounter.pending_action_list), pending_before)
+        self.assertIsNone(action.resolution)
+        self.assertEqual(self.rng.state, rng_before)
+        self.assertEqual((tuple(self.encounter.aware_beings(self.player.id)),
+                          tuple(self.encounter.aware_beings(self.opponent.id))), awareness_before)
+        self.encounter.recover_transactional_progression(failure.exception.recovery_token)
+
     def test_invalid_unknown_stale_and_arrival_intents_change_no_state(self):
         self.activate_run_observer()
+        self.player.set_hex_facing(1)
         conditions = self.conditions(demanding=False)
         start = self.player.get_position()
         before_history = dict(self.candidate.universe.event_history)

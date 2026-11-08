@@ -166,7 +166,7 @@ def _instance_signature(being):
     if type(being) is not BeingInstance:
         _fail("combined checkpoint supports exactly one native BeingInstance")
     expected_fields = {
-        "id", "name", "type", "top_facing", "front_facing", "original", "current",
+        "id", "name", "type", "top_facing", "front_facing", "hex_facing", "original", "current",
         "parent_container_id", "spatial_state", "geometry", "visual_occlusion",
         "possessions", "weapons", "strategy", "physical_fatigue", "physiology_id",
         "fatigue_level", "effective_fitness", "exertion", "skill_experience",
@@ -185,11 +185,12 @@ def _instance_signature(being):
     if (type(being.type) is not str or being.type != "BeingInstance"
             or type(being.top_facing) is not int or being.top_facing != 0
             or type(being.front_facing) is not int or being.front_facing != 1
+            or being.hex_facing is not None
             or being.parent_container_id is not None or being.spatial_state is not None
             or being.geometry is not None or being.visual_occlusion is not None
             or type(being.possessions) is not list or being.possessions != []
             or type(being.weapons) is not list or being.weapons != []):
-        _fail("only a pristine, unplaced, unequipped Being is supported")
+        _fail("only a pristine, unplaced, unequipped Being with unknown hex facing is supported")
     if (type(being.strategy) is not Strategy
             or _canonical(being.strategy.__dict__) != _canonical(Strategy().__dict__)):
         _fail("modified or unsupported Being strategy is outside this checkpoint")

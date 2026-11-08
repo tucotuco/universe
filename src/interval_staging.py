@@ -198,6 +198,7 @@ class _StagedReadFence:
     registered: object
     states: object
     positions: object
+    facings: object
 
 
 def _digest(value):
@@ -498,7 +499,7 @@ def _stage_start_fence(encounter, boundary, time, phase, positions, pending, eve
         action=events[aid]; data={'_activity_started':True}
         if type(action) is RunAction:data['start_position']=positions[action.actor_id]
         if type(action) is MeleeDefense:
-            fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initialization,registered,states,positions)
+            fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initialization,registered,states,positions,{})
             snap=capture_snapshot(encounter,boundary,rng_state=rng_state,_objective=True,_stage=fence)
             strike=snap.actions.get(initialization.get(aid,{}).get('target_action_id',action.target_action_id))
             if strike is not None:data['threat_at_schedule']=((strike.id,snap.melee_status(strike)[0]=='in_reach'),)
@@ -519,7 +520,7 @@ def _validate_closure(candidate):
     due={aid for aid,a in snapshot.actions.items() if a.boundary==candidate.boundary}
     _require(set(supported.boundary.actions)==due and set(supported.lifecycle)==due, 'missing interval due Action')
     changes=candidate.proposed_authoritative_changes
-    _require(set(changes)=={'clock','positions','environment','fatigue_history','targets','objective','recipients',
+    _require(set(changes)=={'clock','positions','facings','environment','fatigue_history','targets','objective','recipients',
         'lifecycle','action_metadata','queues','rng'}, 'incomplete authoritative recipient inventory')
     _require(changes['targets'] is supported.boundary.targets and changes['objective'] is supported.objective
         and changes['recipients'] is supported.recipients and changes['lifecycle'] is supported.lifecycle,
@@ -579,7 +580,7 @@ def _native_lock(world):
     return data['_schedule_lock']
 
 
-def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, velocity_frame='global',
+def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, velocity_frame='global', facing_updates=None,
                                rng_state=None, rng_owner=None, _restore_context=None,
                                adult_member_candidate=None):
     """Read one committed checkpoint; return one inactive, detached interval.
@@ -622,6 +623,13 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
         if velocities is not None and active_flight_ids.intersection(velocities):
             raise UnsupportedEvaluation('in-flight projectile motion is derived from its committed launch state')
         motion=_motion(positions,velocities,ed['local_frame'],velocity_frame,next_boundary-ed['time'])
+        facing_updates = {} if facing_updates is None else dict(facing_updates)
+        from being import BeingInstance
+        from hex_facing import validate_facing
+        if any(key not in ed['being_list'] or type(objects[key]) is not BeingInstance
+               or key not in motion or not any(motion[key])
+               or validate_facing(value) != value for key, value in facing_updates.items()):
+            raise UnsupportedEvaluation('facing updates require a moving participant Being and legal native orientation')
         projectile_updates=[]
         for key in tuple(positions):
             flight=object.__getattribute__(objects[key],'__dict__').get('_projectile_flight')
@@ -660,7 +668,8 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             now=dest
             if now<next_boundary:start(now,'before_boundary')
         fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),MappingProxyType(events),
-            MappingProxyType(initialization),MappingProxyType(registered),MappingProxyType(states),MappingProxyType(positions))
+            MappingProxyType(initialization),MappingProxyType(registered),MappingProxyType(states),MappingProxyType(positions),
+            MappingProxyType(facing_updates))
         context=capture_observer_context(encounter,next_boundary,rng_state=before_rng,
             _stage=fence,_restore_context=_restore_context)
         if adult_member_candidate is not None:
@@ -719,7 +728,7 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             'views':context.snapshot.fatigue}),)
         changes=MappingProxyType({'clock':freeze({'time':next_boundary,'coordinator_time':next_boundary,
             'last_processed_boundary':next_boundary,'interval_start':next_boundary,'active_boundary':None}),
-            'positions':MappingProxyType(dict(positions)), 'environment':freeze({'adapter':'native_update_environment_noop',
+            'positions':MappingProxyType(dict(positions)), 'facings':MappingProxyType(facing_updates), 'environment':freeze({'adapter':'native_update_environment_noop',
                 'fatigue':context.snapshot.fatigue,'physiology':context.snapshot.physiology}),
             'fatigue_history':history,'targets':supported.boundary.targets,'objective':supported.objective,
             'recipients':supported.recipients,'lifecycle':supported.lifecycle,

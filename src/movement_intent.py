@@ -13,6 +13,7 @@ import math
 from being import BeingInstance
 from object import ObjectInstance
 from spatial.state import CartesianPosition
+from hex_facing import FacingSector, classify_vector, validate_facing
 
 
 YARDS_TO_METERS = 0.9144
@@ -87,6 +88,8 @@ class MovementIntent:
     rate: str
     decision_id: str
     boundary: int
+    facing_policy: str = "maintain"
+    target_facing: int | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,7 @@ class PreparedMovementIntent:
     start_position: CartesianPosition
     velocity_meters_per_second: tuple[float, float, float]
     rate_result: MovementRateResult
+    facing_update: int | None = None
 
 
 def _finite_factor(value, name):
@@ -292,9 +296,9 @@ def evaluate_movement_rate(being, rate: str,
     if posture not in ("standing", "crouching", "lying"):
         raise MovementIntentRefusal("unsupported_posture", "posture must be standing, crouching, or lying")
     direction = conditions.direction
-    if direction not in ("forward", "backward"):
+    if direction not in ("forward", "backward", "sideways", "non_forward"):
         raise MovementIntentRefusal(
-            "unsupported_direction", "non-forward/non-backward movement needs an adopted hex-distance mapping")
+            "unsupported_direction", "direction must be facing-relative or an explicit legacy rate premise")
 
     native = derive_native_movement_inputs(
         being, universe, skill_dictionary=skill_dictionary,
@@ -336,8 +340,8 @@ def evaluate_movement_rate(being, rate: str,
         caps.append(1.0)  # r61: at most one yard/second while crouching.
     elif posture == "lying":
         caps.append(0.5)  # r61: at most one yard every two seconds.
-    if direction == "backward":
-        caps.append(1.0)  # r61: at most one yard/second backward.
+    if direction in ("backward", "sideways", "non_forward"):
+        caps.append(1.0)  # r61: ordinary non-forward movement is at most one yard/second.
     if conditions.concurrent_demanding_action:
         caps.append(1.0)  # r61: ordinary movement during another demanding Action.
     allowed = min([requested] + caps)
@@ -399,11 +403,47 @@ def prepare_movement_intent(encounter, intent: MovementIntent,
         raise MovementIntentRefusal("unpositioned_actor", "movement actor requires native Cartesian position")
     if not isinstance(intent.destination, CartesianPosition):
         raise MovementIntentRefusal("invalid_destination", "destination must be a native CartesianPosition")
+    if intent.facing_policy not in ("maintain", "turn"):
+        raise MovementIntentRefusal("invalid_facing_policy", "facing policy must be maintain or turn")
+    facing_update = None
+    facing = actor_view.data.get("hex_facing")
+    if actor.hex_facing != facing:
+        raise MovementIntentRefusal("stale_native_context", "native facing changed after the common pre-action snapshot")
+    if facing is not None:
+        try:
+            validate_facing(facing)
+        except ValueError as exc:
+            raise MovementIntentRefusal("invalid_facing", str(exc)) from exc
+    if intent.facing_policy == "maintain":
+        if intent.target_facing is not None:
+            raise MovementIntentRefusal("invalid_facing_policy", "maintain-facing intent cannot supply a target facing")
+        if facing is None:
+            raise MovementIntentRefusal("unknown_facing", "maintain-facing movement requires explicitly established native facing")
+        effective_facing = facing
+    else:
+        if intent.target_facing is None:
+            raise MovementIntentRefusal("missing_target_facing", "turn-and-move requires an explicitly authored target facing")
+        try:
+            effective_facing = validate_facing(intent.target_facing)
+        except ValueError as exc:
+            raise MovementIntentRefusal("invalid_facing", str(exc)) from exc
+        facing_update = effective_facing if effective_facing != facing else None
 
-    rate = evaluate_movement_rate(
-        actor, intent.rate, conditions, universe=encounter.universe,
-        pre_action_snapshot=pre_action_snapshot)
     delta = tuple(end - begin for begin, end in zip(start.as_tuple(), intent.destination.as_tuple()))
+    try:
+        sector = classify_vector(effective_facing, delta)
+    except ValueError as exc:
+        raise MovementIntentRefusal("invalid_direction", str(exc)) from exc
+    if intent.facing_policy == "turn" and sector is not FacingSector.FRONT:
+        raise MovementIntentRefusal("incompatible_target_facing", "authored target facing must place movement inside its front sector")
+    derived_conditions = MovementRateConditions(
+        conditions.terrain_multiplier, conditions.hampered_multiplier,
+        conditions.posture,
+        "forward" if sector is FacingSector.FRONT else "non_forward",
+        conditions.concurrent_demanding_action)
+    rate = evaluate_movement_rate(
+        actor, intent.rate, derived_conditions, universe=encounter.universe,
+        pre_action_snapshot=pre_action_snapshot)
     distance = math.sqrt(sum(component * component for component in delta))
     if not math.isfinite(distance):
         raise MovementIntentRefusal("invalid_destination", "destination distance is not finite")
@@ -414,4 +454,4 @@ def prepare_movement_intent(encounter, intent: MovementIntent,
             "arrival_unsupported", "requested interval could reach the destination; arrival behavior is not adopted")
     unit = tuple(component / distance for component in delta)
     velocity = tuple(component * rate.meters_per_second for component in unit)
-    return PreparedMovementIntent(intent, start, velocity, rate)
+    return PreparedMovementIntent(intent, start, velocity, rate, facing_update)

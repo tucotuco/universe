@@ -350,7 +350,7 @@ def _all_declarations(encounter,boundary,rng_owner):
             initial[aid]={key:value for key,value in packet.initialization if key!='start_position'}
             initial[aid].update(end_time=packet.end_time,parent_event_id=encounter.id)
             registered[aid]=(record.view.id,packet,declaration(member.action));states[aid]='registered'
-    fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initial,registered,states,{})
+    fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initial,registered,states,{}, {})
     return capture_observer_context(encounter,boundary,rng_state=rng,_stage=fence)
 
 
@@ -417,7 +417,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
             raise TransactionalProgressionError('transactional step must end at an exact integer boundary; fractional tails are unsupported')
         if encounter.end_time is not None and end>encounter.end_time:
             raise TransactionalProgressionError('transactional step exceeds Encounter end')
-        completed=[];motion=None;movement_decision_ids=[]
+        completed=[];motion=None;facing_updates=None;movement_decision_ids=[]
         while encounter.time<end:
             with publication_boundary(encounter,quiescent=True) as ownership:
                 # Reentrant entry checks are private control state, not timeline
@@ -432,6 +432,8 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                             encounter,movement_intent,movement_conditions,duration=duration,
                             pre_action_snapshot=context.snapshot)
                         motion={movement_intent.actor_id:prepared.velocity_meters_per_second}
+                        facing_updates = ({movement_intent.actor_id: prepared.facing_update}
+                                          if prepared.facing_update is not None else {})
                         movement_decision_ids.append(movement_intent.decision_id)
                     else:
                         motion=dict(_motion(positions,velocities,encounter.local_frame,velocity_frame,end-start))
@@ -440,6 +442,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                 _ROUTED_OWNERSHIP[id(encounter)]=ownership
                 try:
                     candidate=encounter.prepare_interval_candidate(boundary,velocities=motion,
+                        facing_updates=facing_updates,
                         rng_owner=binding.rng_owner,_restore_context=binding.restore_context,
                         adult_member_candidate=adult_member_candidate)
                     receipt=publish_interval_candidate(encounter,candidate,ownership=ownership,rng_owner=binding.rng_owner)

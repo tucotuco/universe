@@ -127,8 +127,8 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'being.BeingInstance': {
-        "allowed": '_atomic_target_history _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
-        "required": '_skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "allowed": '_atomic_target_history _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "required": '_skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry hex_facing name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
     },
     'conditional_attributes.ConditionalAttributes': {
         "allowed": '_committed _external _rng_for specifications'.split(),

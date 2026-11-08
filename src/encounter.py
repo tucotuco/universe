@@ -1055,12 +1055,12 @@ class Encounter(Event):
         guard_legacy_encounter(self, 'legacy facade/UI/replay consumer')
 
     def prepare_interval_candidate(self, next_boundary, *, velocities=None,
-                                   velocity_frame="global", rng_state=None, rng_owner=None,
+                                   velocity_frame="global", facing_updates=None, rng_state=None, rng_owner=None,
                                    _restore_context=None, adult_member_candidate=None):
         """Inactive one-interval staging; never advances or publishes live state."""
         from interval_staging import prepare_interval_candidate
         return prepare_interval_candidate(self, next_boundary, velocities=velocities,
-            velocity_frame=velocity_frame, rng_state=rng_state, rng_owner=rng_owner,
+            velocity_frame=velocity_frame, facing_updates=facing_updates, rng_state=rng_state, rng_owner=rng_owner,
             _restore_context=_restore_context,
             adult_member_candidate=adult_member_candidate)
 

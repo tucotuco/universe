@@ -392,6 +392,7 @@ def _append_projection(existing,projected):
 
 def _make_plan(encounter,candidate,rng_owner):
     """All inverse values and final values exist before the first write."""
+    from being import BeingInstance
     plan=_WritePlan();world=encounter.universe;book=encounter._choice_book
     objects=world.object_registry.object_instances;changes=candidate.proposed_authoritative_changes
     supported=candidate.supported_candidate;queues=changes['queues'];snapshot=candidate.pre_action_snapshot
@@ -446,6 +447,16 @@ def _make_plan(encounter,candidate,rng_owner):
     for key,pos in changes['positions'].items():
         if pos is not None and objects[key].spatial_state.position!=pos:
             plan.attr('movement',objects[key].spatial_state,'position',pos)
+    for key,facing in changes['facings'].items():
+        if key not in encounter.being_list or type(objects.get(key)) is not BeingInstance:
+            raise PublicationRejected('facing update recipient is not a participating Being')
+        from hex_facing import validate_facing
+        try:
+            validate_facing(facing)
+        except ValueError as exc:
+            raise PublicationRejected('facing update is outside the native twelve-way encoding') from exc
+        if objects[key].hex_facing != facing:
+            plan.attr('movement',objects[key],'hex_facing',facing)
     for update in candidate.projectile_updates:
         obj=objects.get(update.object_id)
         if (obj is None or type(update.prior_flight) is not ProjectileFlight

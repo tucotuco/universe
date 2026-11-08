@@ -202,3 +202,34 @@ walk displacement at 1.75 yd/s (1.6002 m/s). A separate rate test supplies an
 explicit test-only other-demanding-Action premise and verifies a maximum of
 1 yd/s (0.9144 m/s); stricter posture and directional caps continue to lower
 that maximum. No action-wide classifier or facing behavior was introduced.
+
+## U-ARENA-004O: native twelve-way facing and transactional orientation
+
+The native `BeingInstance.hex_facing` field is now the sole twelve-way
+orientation value. `None` means unknown; no constructor default is inferred
+from legacy `front_facing=1` or `top_facing=0`. The encoding is counter-clockwise
+from world +x in 30-degree increments: even values face a vertex, odd values a
+side normal. This is a coordinate convention; r61 supplies the six side/six
+point headings and inclusive adjacent-heading front sector. Front classification
+uses a continuous Cartesian displacement dot product with a small machine
+precision boundary tolerance. Sideways and behind are grouped as non-forward
+for movement-rate purposes.
+
+Movement intents now explicitly choose `maintain` or `turn`. Maintaining requires
+known native facing and caps a vector outside its inclusive front sector at
+1 yd/s. Turning requires a caller-authored valid facing and accepts movement
+only within that target facing's front sector. It does not choose a facing from
+the destination. The selected facing is staged with the one-second movement,
+published in the same rollback journal, and added to the shared post-movement,
+pre-Action snapshot. The co-resolving Run Action remains a displacement observer
+and does not create an implicit demanding-Action cap.
+
+The Being's existing checkpoint adapters now preserve `hex_facing`, including
+explicit unknown state. This changes the closed Being checkpoint inventory;
+older checkpoint payloads without the field are not silently migrated by this
+slice. The narrower combined reproduction/Being checkpoint still supports only
+pristine Beings and explicitly refuses known facing rather than losing it.
+General save/replay compatibility remains a separate concern. Generated
+Arena initialization still leaves facing unknown, so generated destination
+movement remains unavailable until a lawful authored initial facing and the
+remaining terrain, posture, clearance, and arrival inputs are supplied.

@@ -356,6 +356,10 @@ class BeingInstance(ObjectInstance):
         ObjectInstance.__init__(self, being_definition, name, id=id)
         self.original = being_definition
         self.current = being_definition.copy()
+        # Unknown until native world setup explicitly establishes the adopted
+        # twelve-way hex orientation. Legacy front_facing/top_facing retain
+        # their historical meanings and are not aliases for this field.
+        self.hex_facing = None
         self.possessions = []
         self.weapons = []
         self.strategy = Strategy()
@@ -380,9 +384,17 @@ class BeingInstance(ObjectInstance):
         data['skill_experience'] = self.skill_experience.copy()
         data['skill_practice_baselines'] = self._skill_practice_baselines.copy()
         data['skill_use_history'] = [entry.to_dict() for entry in self.skill_use_history]
+        data['hex_facing'] = self.hex_facing
         if self.personal_history is not None:
             data['personal_history'] = self.personal_history.to_jsonable()
         return json.dumps(data)
+
+    def set_hex_facing(self, facing):
+        """Explicitly establish a native 0..11 hex facing or clear it to unknown."""
+        if facing is not None:
+            from hex_facing import validate_facing
+            facing = validate_facing(facing)
+        self.hex_facing = facing
 
     def begin_personal_history(self, *, earliest, known_through,
                                nondeclining_skills=()):

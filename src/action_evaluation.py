@@ -363,6 +363,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 fatigue_level=freeze(od['fatigue_level']),
                 exertion=freeze(native_data(od['exertion'], (Exertion,))),
                 fatigue_adjustments=freeze(od['exertion'].fatigue_levels))
+            facing = (_stage.facings[key] if _stage is not None and key in _stage.facings
+                      else od.get('hex_facing'))
+            data['hex_facing'] = freeze(facing)
             data['possessions'] = freeze(od.get('possessions', ()))
             data['weapons'] = freeze(od.get('weapons', ()))
             # Preserve category membership and insertion order, including RNG choice.

@@ -203,6 +203,11 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         source, child, original, encoded = ready()
         with self.assertRaisesRegex(ValueError, "logical reproduction IDs collide with native Objects"):
             encode_reproduction_checkpoint(source)
+        original.set_hex_facing(9)
+        with self.assertRaisesRegex(CombinedBeingCheckpointError, "unknown hex facing"):
+            encode_combined_being_checkpoint(source)
+        original.set_hex_facing(None)
+        encoded = encode_combined_being_checkpoint(source)
         target = world("fresh target")
         before_rng = random.getstate()
         before_containers = container_refs(target)
@@ -218,6 +223,7 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         self.assertEqual(restored.original.skills.skills, original.original.skills.skills)
         self.assertEqual(restored.original.tags, original.original.tags)
         self.assertEqual(restored.physiology_id, original.physiology_id)
+        self.assertIsNone(restored.hex_facing)
         self.assertEqual(len(target.object_registry.object_instances), 1)
         self.assertEqual(set(target.event_history), {"0"})
         self.assertEqual(target._choice_books, [])
