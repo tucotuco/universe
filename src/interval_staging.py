@@ -581,6 +581,7 @@ def _native_lock(world):
 
 
 def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, velocity_frame='global', facing_updates=None,
+                               movement_stop_times=None, movement_targets=None,
                                rng_state=None, rng_owner=None, _restore_context=None,
                                adult_member_candidate=None):
     """Read one committed checkpoint; return one inactive, detached interval.
@@ -623,6 +624,17 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
         if velocities is not None and active_flight_ids.intersection(velocities):
             raise UnsupportedEvaluation('in-flight projectile motion is derived from its committed launch state')
         motion=_motion(positions,velocities,ed['local_frame'],velocity_frame,next_boundary-ed['time'])
+        movement_stop_times = {} if movement_stop_times is None else dict(movement_stop_times)
+        movement_targets = {} if movement_targets is None else dict(movement_targets)
+        _require(set(movement_stop_times) == set(movement_targets),
+            'movement arrival times and exact destination positions must have matching participants')
+        _require(all(key in motion and type(value) in (int, float)
+                     and math.isfinite(value) and ed['time'] < value <= next_boundary
+                     for key, value in movement_stop_times.items()),
+            'movement arrival time must fall inside this committed interval')
+        _require(all(key in motion and type(value) is CartesianPosition
+                     for key, value in movement_targets.items()),
+            'exact movement destinations must be native Cartesian positions')
         facing_updates = {} if facing_updates is None else dict(facing_updates)
         from being import BeingInstance
         from hex_facing import validate_facing
@@ -660,11 +672,19 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
         while now<next_boundary:
             times=[r.view.first_start for cid,r in records.items() if choice_states[cid]=='accepted' and r.view.first_start>now]
             times += [packet.start_time for aid,(_,packet,_) in registered.items() if states[aid]=='registered' and packet.start_time>now]
+            times += [value for value in movement_stop_times.values() if value > now]
             dest=min([next_boundary]+times)
-            old={key:positions[key] for key in motion}
-            new={key:integrate_position(positions[key],vector,dest-now) for key,vector in motion.items()}
+            segment_motion = {key: vector for key, vector in motion.items()
+                              if key not in movement_stop_times or now < movement_stop_times[key]}
+            old={key:positions[key] for key in segment_motion}
+            new={key:integrate_position(positions[key],vector,dest-now)
+                 for key,vector in segment_motion.items()}
+            for key, stop_time in movement_stop_times.items():
+                if stop_time == dest:
+                    new[key] = movement_targets[key]
             positions.update(new)
-            movement.append(MovementSegment(now,dest,motion,MappingProxyType(old),MappingProxyType(new)))
+            movement.append(MovementSegment(now,dest,MappingProxyType(segment_motion),
+                                             MappingProxyType(old),MappingProxyType(new)))
             now=dest
             if now<next_boundary:start(now,'before_boundary')
         fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),MappingProxyType(events),

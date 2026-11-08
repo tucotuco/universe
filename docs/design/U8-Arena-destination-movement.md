@@ -230,9 +230,9 @@ older checkpoint payloads without the field are not silently migrated by this
 slice. The narrower combined reproduction/Being checkpoint still supports only
 pristine Beings and explicitly refuses known facing rather than losing it.
 General save/replay compatibility remains a separate concern. Generated
-Arena initialization still leaves facing unknown, so generated destination
-movement remains unavailable until a lawful authored initial facing and the
-remaining terrain, posture, clearance, and arrival inputs are supplied.
+At the end of 004O, Arena initialization still left facing unknown, so
+generated destination movement remained unavailable. U-ARENA-004Q below
+supersedes that facing status and records the remaining prerequisites.
 
 ## U-ARENA-004P: bounded checkpoint contract after Arena activation and facing
 
@@ -257,3 +257,39 @@ malformed values are rejected; no historical payload migration is performed.
 The Run/Spot closure certificate is version 2 to commit this expanded field
 closure. The separate reproduction/Being checkpoint retains its prior
 known-facing refusal and was not changed by this integration.
+
+## U-ARENA-004Q: deterministic facing, exact arrival, and environment; posture blocker
+
+Generated Arena initialization now selects each participant's facing with an
+independent role-specific SHA-256 seed namespace (`initial-facing-v1`) and a
+private `random.Random` instance. The selected facing and its seed/provenance
+are retained on the private `ArenaParticipant`; only the player's facing is
+included in the player projection. Facing selection does not consume NPC
+candidate, placement, module/global, or Encounter RNG state.
+
+Turn-and-move now derives the closest native 30-degree facing from the
+continuous destination vector. Exact half-step ties select the numerically
+smaller facing, including the 11/0 wrap tie (0). The only tie tolerance is 16
+binary64 ULPs measured in facing steps. A supplied legacy target-facing hint
+is accepted only when it equals the derived nearest facing. Maintained facing
+continues to cap non-forward movement at 1 yd/s.
+
+Native one-second intents now allow a destination within the derived rate.
+They stage travel until the exact fractional arrival instant, publish the
+native destination coordinate directly at that instant, and stage no further
+displacement for the rest of the interval. This preserves the full integer
+Encounter boundary and movement-before-Action snapshot. Zero-distance intents
+remain refusals.
+
+The generated Arena now carries the explicit r61 neutral rate premise Plains
+on Road (TM=1.0), hampered factor 1.0, and an unobstructed local environment.
+The map projection states that collision/overlap is not adjudicated; empty
+display hexes do not prove body clearance. Generated initial facing and the
+environment are implemented, but generated-player movement is still
+fail-closed: no native Being or posture state currently represents standing,
+crouching, or lying. `MovementRateConditions.posture` cannot lawfully be filled
+with "standing" from the current native state. The browser exposes the player's
+facing and this exact blocker but does not offer destination controls or claim a
+playable movement slice until an adopted native posture representation exists.
+The first player Run Choice remains explicit and is not inserted by a
+destination click. General Arena save/load remains refused under U-ARENA-004P.

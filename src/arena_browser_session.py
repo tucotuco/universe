@@ -17,6 +17,10 @@ _SPOT_DISABLED = (
     "Spot is unavailable for generated Beings: the native Spot resolver requires target geometry; "
     "the generated candidate has none and resolves as unmodeled_target."
 )
+_MOVEMENT_DISABLED = (
+    "Destination movement is unavailable: generated Being state has no adopted native posture field, "
+    "so the r61 posture movement limit cannot be determined."
+)
 
 
 class ArenaBrowserRequestError(ValueError):
@@ -64,6 +68,8 @@ class GeneratedArenaSession:
                 "spot_reason": _SPOT_DISABLED,
                 "run_available": False,
                 "advance_available": False,
+                "movement_available": False,
+                "movement_reason": _MOVEMENT_DISABLED,
             }
         candidate = self._active
         player = candidate.participants[0]
@@ -82,14 +88,18 @@ class GeneratedArenaSession:
             "map": {"width_cells": candidate.arena_map.width_cells,
                     "height_cells": candidate.arena_map.height_cells,
                     "origin": candidate.arena_map.origin,
+                    "world_premise": candidate.world_premise.public_view(),
                     **candidate.arena_map.public_geometry()},
             "player": {"name": self._player_name,
+                       "hex_facing": player.native.being.hex_facing,
                        "cell": cell,
                        "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
             "player_action": action,
             "run_available": self._player_action_id is None,
             "advance_available": self._player_action_id is not None
                 and self._player_action_outcome is None and candidate.encounter.time == 0,
+            "movement_available": False,
+            "movement_reason": _MOVEMENT_DISABLED,
             "spot_available": False,
             "spot_reason": _SPOT_DISABLED,
         }

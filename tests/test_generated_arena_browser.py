@@ -81,6 +81,12 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(state["map"]["orientation"], "flat_top_odd_column_north_offset")
         self.assertEqual(state["map"]["cell_size_meters"], 0.9144)
         self.assertEqual(state["map"]["column_row_ranges"], None)
+        self.assertEqual(state["map"]["world_premise"], {
+            "terrain": "Plains", "route": "Road", "terrain_multiplier": 1.0,
+            "hampered_multiplier": 1.0, "unobstructed": True,
+            "collision_adjudicated": False})
+        self.assertFalse(state["movement_available"])
+        self.assertIn("no adopted native posture field", state["movement_reason"])
         self.assertFalse(state["spot_available"])
         candidate = self.session.active_candidate
         self.assertEqual(candidate.encounter.time, 0)
@@ -88,6 +94,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertNotEqual(candidate.participants[0].native.being.id,
                             candidate.participants[1].native.being.id)
         player_participant, hidden_participant = candidate.participants
+        self.assertEqual(state["player"]["hex_facing"], player_participant.native.being.hex_facing)
+        self.assertTrue(0 <= state["player"]["hex_facing"] < 12)
         self.assertEqual(state["player"]["cell"], {
             "column": player_participant.placement.column,
             "row": player_participant.placement.row})
@@ -101,11 +109,16 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                           "experience", "awareness", "target_id", "action_id", "participants"):
             self.assertNotIn(forbidden, encoded)
         self.assertNotIn(hidden_participant.native.being.id, encoded)
+        self.assertEqual(set(state["player"]),
+                         {"name", "hex_facing", "cell", "position_meters"})
         hidden_position = hidden_participant.native.being.get_position()
         hidden_position_payload = json.dumps({"x": hidden_position.x,
                                               "y": hidden_position.y,
                                               "z": hidden_position.z})
         self.assertNotIn(hidden_position_payload, encoded)
+        _, generated_page = self.request("/")
+        self.assertIn("movementStatus", generated_page)
+        self.assertIn("s.player.hex_facing*Math.PI/6", generated_page)
         player = candidate.participants[0].native.being
         native_id, source_bytes = player.id, candidate.participants[0].native.source_record_bytes
 

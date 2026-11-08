@@ -13,7 +13,7 @@ import math
 from being import BeingInstance
 from object import ObjectInstance
 from spatial.state import CartesianPosition
-from hex_facing import FacingSector, classify_vector, validate_facing
+from hex_facing import FacingSector, classify_vector, nearest_facing, validate_facing
 
 
 YARDS_TO_METERS = 0.9144
@@ -112,6 +112,7 @@ class PreparedMovementIntent:
     velocity_meters_per_second: tuple[float, float, float]
     rate_result: MovementRateResult
     facing_update: int | None = None
+    arrival_time_seconds: float | None = None
 
 
 def _finite_factor(value, name):
@@ -403,6 +404,12 @@ def prepare_movement_intent(encounter, intent: MovementIntent,
         raise MovementIntentRefusal("unpositioned_actor", "movement actor requires native Cartesian position")
     if not isinstance(intent.destination, CartesianPosition):
         raise MovementIntentRefusal("invalid_destination", "destination must be a native CartesianPosition")
+    delta = tuple(end - begin for begin, end in zip(start.as_tuple(), intent.destination.as_tuple()))
+    distance = math.sqrt(sum(component * component for component in delta))
+    if not math.isfinite(distance):
+        raise MovementIntentRefusal("invalid_destination", "destination distance is not finite")
+    if distance == 0:
+        raise MovementIntentRefusal("zero_distance", "destination must differ from current position")
     if intent.facing_policy not in ("maintain", "turn"):
         raise MovementIntentRefusal("invalid_facing_policy", "facing policy must be maintain or turn")
     facing_update = None
@@ -421,15 +428,18 @@ def prepare_movement_intent(encounter, intent: MovementIntent,
             raise MovementIntentRefusal("unknown_facing", "maintain-facing movement requires explicitly established native facing")
         effective_facing = facing
     else:
-        if intent.target_facing is None:
-            raise MovementIntentRefusal("missing_target_facing", "turn-and-move requires an explicitly authored target facing")
         try:
-            effective_facing = validate_facing(intent.target_facing)
+            effective_facing = nearest_facing(delta)
+            if intent.target_facing is not None:
+                authored = validate_facing(intent.target_facing)
         except ValueError as exc:
             raise MovementIntentRefusal("invalid_facing", str(exc)) from exc
+        if intent.target_facing is not None and authored != effective_facing:
+            raise MovementIntentRefusal(
+                "non_nearest_target_facing",
+                "turn-and-move facing must be the adopted nearest destination heading")
         facing_update = effective_facing if effective_facing != facing else None
 
-    delta = tuple(end - begin for begin, end in zip(start.as_tuple(), intent.destination.as_tuple()))
     try:
         sector = classify_vector(effective_facing, delta)
     except ValueError as exc:
@@ -444,14 +454,8 @@ def prepare_movement_intent(encounter, intent: MovementIntent,
     rate = evaluate_movement_rate(
         actor, intent.rate, derived_conditions, universe=encounter.universe,
         pre_action_snapshot=pre_action_snapshot)
-    distance = math.sqrt(sum(component * component for component in delta))
-    if not math.isfinite(distance):
-        raise MovementIntentRefusal("invalid_destination", "destination distance is not finite")
-    if distance == 0:
-        raise MovementIntentRefusal("zero_distance", "destination must differ from current position")
-    if distance <= rate.meters_per_second * duration:
-        raise MovementIntentRefusal(
-            "arrival_unsupported", "requested interval could reach the destination; arrival behavior is not adopted")
     unit = tuple(component / distance for component in delta)
     velocity = tuple(component * rate.meters_per_second for component in unit)
-    return PreparedMovementIntent(intent, start, velocity, rate, facing_update)
+    arrival_time = (distance / rate.meters_per_second
+                    if distance <= rate.meters_per_second * duration else None)
+    return PreparedMovementIntent(intent, start, velocity, rate, facing_update, arrival_time)

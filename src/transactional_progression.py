@@ -417,7 +417,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
             raise TransactionalProgressionError('transactional step must end at an exact integer boundary; fractional tails are unsupported')
         if encounter.end_time is not None and end>encounter.end_time:
             raise TransactionalProgressionError('transactional step exceeds Encounter end')
-        completed=[];motion=None;facing_updates=None;movement_decision_ids=[]
+        completed=[];motion=None;facing_updates=None;movement_stop_times=None;movement_targets=None;movement_decision_ids=[]
         while encounter.time<end:
             with publication_boundary(encounter,quiescent=True) as ownership:
                 # Reentrant entry checks are private control state, not timeline
@@ -434,6 +434,10 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                         motion={movement_intent.actor_id:prepared.velocity_meters_per_second}
                         facing_updates = ({movement_intent.actor_id: prepared.facing_update}
                                           if prepared.facing_update is not None else {})
+                        if prepared.arrival_time_seconds is not None:
+                            movement_stop_times = {
+                                movement_intent.actor_id: start + prepared.arrival_time_seconds}
+                            movement_targets = {movement_intent.actor_id: movement_intent.destination}
                         movement_decision_ids.append(movement_intent.decision_id)
                     else:
                         motion=dict(_motion(positions,velocities,encounter.local_frame,velocity_frame,end-start))
@@ -443,6 +447,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                 try:
                     candidate=encounter.prepare_interval_candidate(boundary,velocities=motion,
                         facing_updates=facing_updates,
+                        movement_stop_times=movement_stop_times, movement_targets=movement_targets,
                         rng_owner=binding.rng_owner,_restore_context=binding.restore_context,
                         adult_member_candidate=adult_member_candidate)
                     receipt=publish_interval_candidate(encounter,candidate,ownership=ownership,rng_owner=binding.rng_owner)

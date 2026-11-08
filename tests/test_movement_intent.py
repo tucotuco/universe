@@ -17,7 +17,7 @@ from arena_hex_map import HexAddress
 from action_evaluation import capture_snapshot
 from movement_intent import (MovementIntent, MovementIntentRefusal,
                              MovementRateConditions, evaluate_movement_rate)
-from hex_facing import FacingSector, classify_vector, facing_vector
+from hex_facing import FacingSector, classify_vector, facing_vector, nearest_facing
 from skill import SkillDictionary
 from spatial.state import CartesianPosition
 
@@ -89,7 +89,7 @@ class TestNativeMovementIntent(unittest.TestCase):
 
     def test_native_facing_fields_do_not_supply_a_twelve_orientation_snapshot(self):
         self.assertEqual((self.player.front_facing, self.player.top_facing), (1, 0))
-        self.assertIsNone(self.player.hex_facing)
+        self.player.set_hex_facing(None)
         self.encounter.time = 1
         snapshot = capture_snapshot(self.encounter, 1)
         data = snapshot.entity(self.player.id).data
@@ -107,10 +107,16 @@ class TestNativeMovementIntent(unittest.TestCase):
                 self.assertIs(classify_vector(facing, (math.cos(theta), math.sin(theta), 0)),
                               FacingSector.NON_FORWARD)
             self.assertEqual(classify_vector(facing, (*facing_vector(facing), 0)), FacingSector.FRONT)
+            self.assertEqual(nearest_facing((*facing_vector(facing), 0)), facing)
+        for lower in range(12):
+            theta = math.radians((lower + .5) * 30.0)
+            self.assertEqual(nearest_facing((math.cos(theta), math.sin(theta), 0)),
+                             min(lower, (lower + 1) % 12))
         with self.assertRaises(ValueError):
             self.player.set_hex_facing(12)
 
     def test_unknown_facing_refuses_and_explicit_maintained_nonforward_caps_at_one_yard(self):
+        self.player.set_hex_facing(None)
         start = self.player.get_position()
         conditions = self.conditions()
         intent = MovementIntent(self.player.id,
@@ -272,7 +278,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         public_after = self.session.public_view()
         public_keys = {"state", "load_available", "encounter_name", "time_seconds", "map",
                        "player", "player_action", "run_available", "advance_available",
-                       "spot_available", "spot_reason"}
+                       "movement_available", "movement_reason", "spot_available", "spot_reason"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)
@@ -318,7 +324,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         rng_before = self.rng.state
         awareness_before = (tuple(self.encounter.aware_beings(self.player.id)),
                             tuple(self.encounter.aware_beings(self.opponent.id)))
-        destination = CartesianPosition(start.x, start.y + 20.0, start.z)
+        destination = CartesianPosition(start.x, start.y + 0.5, start.z)
         intent = MovementIntent(self.player.id, destination, "walk", "rollback-turn", 1,
                                 facing_policy="turn", target_facing=3)
         import atomic_publication
@@ -343,7 +349,7 @@ class TestNativeMovementIntent(unittest.TestCase):
                           tuple(self.encounter.aware_beings(self.opponent.id))), awareness_before)
         self.encounter.recover_transactional_progression(failure.exception.recovery_token)
 
-    def test_invalid_unknown_stale_and_arrival_intents_change_no_state(self):
+    def test_invalid_unknown_stale_intents_change_no_state_and_arrival_is_exact(self):
         self.activate_run_observer()
         self.player.set_hex_facing(1)
         conditions = self.conditions(demanding=False)
@@ -356,19 +362,18 @@ class TestNativeMovementIntent(unittest.TestCase):
         before_rng = self.rng.state
         before_global_rng = random.getstate()
 
+        zero_distance = MovementIntent(self.player.id, start, "walk", "zero-distance", 1,
+                                       facing_policy="turn")
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intent=zero_distance,
+                                movement_conditions=conditions)
+        self.assertEqual(refused.exception.code, "zero_distance")
+
         far = CartesianPosition(start.x + 20.0, start.y, start.z)
         valid_shape = MovementIntent(self.player.id, far, "walk", "bad-context", 1)
         with self.assertRaises(MovementIntentRefusal):
             self.encounter.step(1, movement_intent=valid_shape,
                                 movement_conditions=MovementRateConditions())
-
-        too_close = MovementIntent(self.player.id,
-                                   CartesianPosition(start.x + 0.5, start.y, start.z),
-                                   "walk", "arrival", 1)
-        with self.assertRaises(MovementIntentRefusal) as refused:
-            self.encounter.step(1, movement_intent=too_close,
-                                movement_conditions=conditions)
-        self.assertEqual(refused.exception.code, "arrival_unsupported")
 
         stale = MovementIntent(self.player.id, far, "walk", "stale", 2)
         with self.assertRaises(MovementIntentRefusal) as refused:
@@ -385,6 +390,43 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(self.rng.state, before_rng)
         self.assertEqual(random.getstate(), before_global_rng)
         self.assertEqual(self.encounter.aware_beings(self.player.id), [])
+
+        exact = CartesianPosition(start.x + 0.5, start.y, start.z)
+        arrival = MovementIntent(self.player.id, exact, "walk", "arrival", 1,
+                                 facing_policy="turn")
+        self.encounter.step(1, movement_intent=arrival, movement_conditions=conditions)
+        self.assertEqual(self.player.get_position(), exact)
+        self.assertEqual(self.encounter.time, 1)
+        result = self.encounter.inspect_committed(1).action(self.session._player_action_id)
+        self.assertEqual(result.facts.outcome, "success")
+
+    def test_generated_facing_stream_is_reproducible_and_does_not_consume_other_rng(self):
+        another = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
+        global_before_generation = random.getstate()
+        second_view = another.generate({"starting_experience": "0", "width_cells": "5",
+                                        "height_cells": "5"})
+        self.assertEqual(random.getstate(), global_before_generation)
+        left, right = self.candidate.participants, another.active_candidate.participants
+        self.assertEqual(self.candidate.placement_seed, another.active_candidate.placement_seed)
+        self.assertEqual([row.native.being.hex_facing for row in left],
+                         [row.native.being.hex_facing for row in right])
+        self.assertEqual(second_view["player"]["hex_facing"], left[0].native.being.hex_facing)
+        self.assertEqual([row.facing_seed for row in left], [row.facing_seed for row in right])
+        self.assertEqual([row.selected_seed for row in left], [row.selected_seed for row in right])
+        self.assertEqual([row.native.source_sha256 for row in left],
+                         [row.native.source_sha256 for row in right])
+        self.assertEqual([(row.placement.column, row.placement.row, row.placement.position)
+                          for row in left],
+                         [(row.placement.column, row.placement.row, row.placement.position)
+                          for row in right])
+        self.assertEqual(len({row.facing_seed for row in left}), 2)
+        self.assertTrue(all(0 <= row.native.being.hex_facing < 12 for row in left))
+        self.assertTrue(all(row.facing_provenance == "arena.initial-facing.v1/private-seed"
+                            for row in left))
+        self.assertNotEqual(self.candidate.placement_seed, left[0].facing_seed)
+        self.assertEqual(self.session._rng_cursor.state,
+                         random.Random(self.candidate.root_seed).getstate())
+        self.assertEqual(random.getstate(), self.global_rng)
 
 
 if __name__ == "__main__":

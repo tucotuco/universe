@@ -12,6 +12,9 @@ from enum import Enum
 import math
 
 
+FACING_TIE_TOLERANCE_STEPS = 16.0 * math.ulp(1.0)
+
+
 class FacingSector(str, Enum):
     FRONT = "front"
     NON_FORWARD = "non_forward"
@@ -30,6 +33,30 @@ def facing_angle(facing: int) -> float:
 def facing_vector(facing: int) -> tuple[float, float]:
     angle = facing_angle(facing)
     return math.cos(angle), math.sin(angle)
+
+
+def nearest_facing(vector: tuple[float, float, float]) -> int:
+    """Return the nearest heading; midpoint ties choose the smaller index.
+
+    The tolerance is measured in 30-degree facing steps and is limited to 16
+    binary64 ULPs at 1.0. It only stabilizes a mathematically exact midpoint
+    represented with floating-point trigonometry.
+    """
+    if type(vector) not in (tuple, list) or len(vector) != 3:
+        raise ValueError("nearest facing requires a three-component Cartesian vector")
+    x, y = vector[0], vector[1]
+    if (isinstance(x, bool) or isinstance(y, bool)
+            or not isinstance(x, (int, float)) or not isinstance(y, (int, float))
+            or not math.isfinite(x) or not math.isfinite(y) or (x == 0 and y == 0)):
+        raise ValueError("nearest facing requires a finite, nonzero horizontal vector")
+    steps = (math.atan2(y, x) % (2.0 * math.pi)) / (math.pi / 6.0)
+    lower = math.floor(steps)
+    fraction = steps - lower
+    upper_index = (lower + 1) % 12
+    lower_index = lower % 12
+    if abs(fraction - 0.5) <= FACING_TIE_TOLERANCE_STEPS:
+        return min(lower_index, upper_index)
+    return lower_index if fraction < 0.5 else upper_index
 
 
 def classify_vector(facing: int, vector: tuple[float, float, float]) -> FacingSector:

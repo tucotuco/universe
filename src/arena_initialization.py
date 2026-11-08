@@ -60,6 +60,8 @@ class ArenaParticipant:
     native: ArenaNativeBeing
     placement: ArenaPlacement
     selected_seed: int
+    facing_seed: int
+    facing_provenance: str
 
 
 @dataclass(frozen=True)
@@ -94,10 +96,30 @@ class ArenaMap:
 
 
 @dataclass(frozen=True)
+class ArenaWorldPremise:
+    """Authored rate/environment facts for the bounded generated Arena."""
+
+    terrain: str = "Plains"
+    route: str = "Road"
+    terrain_multiplier: float = 1.0
+    hampered_multiplier: float = 1.0
+    unobstructed: bool = True
+    collision_adjudicated: bool = False
+
+    def public_view(self) -> dict:
+        return {"terrain": self.terrain, "route": self.route,
+                "terrain_multiplier": self.terrain_multiplier,
+                "hampered_multiplier": self.hampered_multiplier,
+                "unobstructed": self.unobstructed,
+                "collision_adjudicated": self.collision_adjudicated}
+
+
+@dataclass(frozen=True)
 class ArenaInitializationCandidate:
     universe: Universe
     encounter: Encounter
     arena_map: ArenaMap
+    world_premise: ArenaWorldPremise
     starting_experience: int
     root_seed: int
     placement_seed: int
@@ -223,8 +245,13 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
             or world.get_event_by_id(encounter.id) is not encounter):
         _reject("native_registration_failed", "fresh Universe did not retain the complete candidate")
 
-    participants = tuple(ArenaParticipant(role, native, placement, seed)
-                         for (role, native, seed), placement in zip(selected, placements))
+    participants = []
+    for role_index, ((role, native, seed), placement) in enumerate(zip(selected, placements)):
+        facing_seed = _seed(root_seed, identity, "initial-facing-v1", role_index)
+        facing = random.Random(facing_seed).randrange(12)
+        native.being.set_hex_facing(facing)
+        participants.append(ArenaParticipant(
+            role, native, placement, seed, facing_seed, "arena.initial-facing.v1/private-seed"))
     return ArenaInitializationCandidate(
-        world, encounter, ArenaMap(width_cells, height_cells, layout), starting_experience,
-        root_seed, placement_seed, dict(identity), participants, tuple(attempts))
+        world, encounter, ArenaMap(width_cells, height_cells, layout), ArenaWorldPremise(), starting_experience,
+        root_seed, placement_seed, dict(identity), tuple(participants), tuple(attempts))
