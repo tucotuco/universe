@@ -133,3 +133,42 @@ submission, ETA, and speed indicators disabled. The next GUI-capable slice is
 not a UI route: first add adopted direction/destination/clearance and context
 decisions, then validate that native snapshot in the transactional movement
 preflight and add tests before exposing it to the player.
+
+## U-ARENA-004L: derive supported inputs from native Being state
+
+The previous 004K observation that the native skill dictionary lacked `Run`
+was a capitalization error. The schema and installed `src/config/skills.tsv`
+already define lowercase `run` as ordinary and progressive, matching r61's
+Run skill header. Skill names are case-sensitive. The movement evaluator now
+validates that exact native definition before interpreting a missing Being
+rank (`None`) as zero; a missing/malformed definition refuses. This changes no
+Generator output, rank, experience, or practice history.
+
+`derive_native_movement_inputs` now reads race, Fitness, Strength, Run rank,
+legacy discrete physical-fatigue level, and represented carried mass from
+native Being/Universe state. The carried-mass reader deduplicates the native
+possession, weapon, armor, and held-object IDs, resolves their native pound
+weights, and includes represented contents through `parent_container_id`.
+Unknown IDs, non-finite/negative weights, and unsupported Being-as-gear
+references refuse. An empty represented inventory resolves to known 0 lb. The
+helper is read-only and runs under the existing transactional publication
+boundary before movement staging. It reads Being fields, item weights, and
+container links from the common frozen pre-action snapshot, which closes over
+represented inventories and nested contents. A regression captures a 1.5 lb
+Brick, mutates its live weight afterward, and confirms movement still uses the
+snapshot's 1.5 lb. Rate arithmetic still feeds the same native
+movement-before-Action pipeline.
+
+Generated-Arena tests now use `GeneratedArenaSession.generate()` and its
+approved `choose_run()` activation, then submit a direct one-second native
+MovementIntent in a test. The test sets a labeled clear corridor and forward
+alignment premise, plus Plains/Road, unhampered, standing posture, and the
+co-resolving Run Action's demanding classification. It verifies that the
+session projection exposes only the player allowlist, the t=1 position and Run
+outcome commit, and both global and Arena RNG remain unchanged. A no-change
+test covers refusal. No destination route was added to the browser.
+
+Remaining context gaps are unchanged: no authoritative terrain/hampering map,
+posture model, direction-to-coordinate mapping, demanding-Action classification,
+generated body geometry, collision/clearance contract, or destination-arrival
+rule. The test premises do not establish production movement legality.
