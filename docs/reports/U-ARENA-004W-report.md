@@ -1,0 +1,30 @@
+# U-ARENA-004W — native ground Pick up
+
+**Status:** Implemented. No push.
+**Rules:** U-ARENA-004W's proposed rules 1, 2, 3, and 5 were expressly adopted by the user's instruction to implement the approved pickup Action under the adopted timing, accessibility, possession, and contention rules. Recorded as the revision-64 Arena-only supplement in [the Encounter decision package](../encounters/encounters-consistency-decisions-r64.md) and linked from its [index](../encounters/README.md). Rule 4 was not separately approved and is not implemented.
+
+## Implementation
+
+- Added an exact native `PickUpAction` declaration for one ground Object, one second, and the bounded Arena hex dimensions. It uses the ChoiceBook and transactional Encounter route; its target is not reserved exclusively, so separate Beings can contend at one boundary. It has no legacy direct resolver.
+- Added pure snapshot eligibility and deterministic outcomes. Eligibility reads the common post-movement snapshot, validates free custody, Being state, same-hex Arena access, finite Object weight, transitive carried load, and the existing native heavy-load limit. Unsupported contained Objects fail closed. No random draws are added.
+- Added a typed `PickupEffect` and native settlement validation for complete outcomes, causal identity, same-target contention, and ineligible attempts. Atomic publication adds the unchanged Object ID to `Being.possessions`, sets `parent_container_id` to the carrier, and clears the Object's independent spatial state in one target phase. Post-write checks reject duplicate or conflicting custody. Existing committed inspection accepts that one receipted spatial-state transition while continuing to authenticate Object and history identities.
+- Generated Arena ground Objects now participate in the Encounter's native entity registry so a normal Choice can target the exact registered Object. This is registration only; it creates no awareness evidence or browser exposure. The browser has no pickup control, and its player projection remains free of the ground Dagger's ID, source ID, type, and placement.
+- Carried Object weight flows through existing native inventory/load derivation. The Dagger remains in `possessions`; no wielding, readying, body slot, armor, shield, protection, or combat benefit is created. The Object follows by custody relation and has no independent world-space position.
+
+## Demonstrations
+
+`tests/test_arena_ground_pickup.py` provides reproducible native demonstrations with an explicitly authored ordinary Dagger. The generated-Arena path moves the player to its hex through the existing destination movement interface, schedules a native Pick up, and commits the one-second boundary. It verifies successful outcome, unchanged Object ID and weight, exclusive carried relation, no equipment state, no observer disclosure, no pickup RNG draw, and exact later destination arrival with the same Object carried.
+
+Additional cases verify two eligible simultaneous attempts both resolve `contested`; an ineligible opponent resolves `inaccessible` while the eligible player succeeds; capacity excess and movement-before-Action loss of same-hex access are ordinary no-transfer outcomes; an Action canceled after its start fence but before its resolution boundary produces `interrupted` with no transfer; an already-carried Object cannot be acquired a second time; a malformed success proposal is refused pre-write; and an injected target-phase publication failure rolls custody back and permits explicit native recovery/retry.
+
+## Validation
+
+- `.venv/bin/python -m unittest tests.test_arena_ground_pickup -v` — **7 passed**.
+- `PYTHONPATH=tests .venv/bin/python -m unittest test_interval_staging test_atomic_publication test_transactional_progression test_movement_intent test_generated_arena_browser test_arena_ground_objects test_arena_hex_map test_arena_ground_pickup -v` — **243 passed** in 104.575 seconds, including the six pickup cases present at that run. The final seven-case pickup module was rerun separately and passed. This covers the native snapshot, scheduling, settlement, publication, movement, browser, ground-Object, and hex-map regressions.
+- `.venv/bin/python -m py_compile src/action_choice.py src/action_evaluation.py src/action_settlement.py src/activities.py src/arena_initialization.py src/atomic_publication.py src/encounter_inspection.py src/interval_staging.py src/observer_proposals.py src/scheduling.py src/transactional_progression.py tests/test_arena_ground_pickup.py` — passed.
+- `git diff --check` — passed.
+- `PYTHONPATH=tests .venv/bin/python -m unittest test_checkpoint_inventory test_checkpoint_adapters test_checkpoint_bounded_closure test_arena_s7_checkpoint test_arena_local_checkpoint -v` — **94 tests: 85 passed, 3 failed, 6 errors**. The activated Arena remains outside the strict bounded checkpoint closure: S7/local capture refuses the unrepresented `arena_activation_enabled` / `arena_activation` Encounter fields. No checkpoint vocabulary, reconstruction, or serialization behavior was broadened. The known dangling-equipment diagnostic test also remains non-green: it expected `dangling equipment`, while capture reports `unknown transitive Object identity`. The S7/local subprocess continuation cases cannot bind loopback in this sandbox; a direct launch reproduced `PermissionError: [Errno 1] Operation not permitted` at `socket.bind`. These checkpoint/environment outcomes do not block or weaken the in-memory pickup transaction.
+
+## Limits and next work
+
+Initial `Ready weapon` timing and representation remain unadopted and unsupported; pickup therefore grants no combat use. Arena access intentionally uses only the approved same-hex reference-point convention. No body geometry, reach outside the Arena rule, collision, hand capacity, perception, automatic Spot, armor donning, or shield readiness was added. Activated Arena checkpoint save/restore remains fail-closed. No NPC Generator files or source records were changed.
