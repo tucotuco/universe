@@ -36,8 +36,8 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.global_rng = random.getstate()
 
     def conditions(self, *, demanding=False):
-        # Explicit test-only rate premises: Plains/Road, unhampered, no
-        # carried equipment, upright, forward-aligned corridor, and known Action demand.
+        # Explicit test-only rate premises. ``demanding`` is an authored
+        # context fact and is never inferred from a co-resolving RunAction.
         self.assertEqual(self.player.possessions, [])
         self.assertEqual(self.player.weapons, [])
         return MovementRateConditions(
@@ -46,6 +46,51 @@ class TestNativeMovementIntent(unittest.TestCase):
             posture="standing",
             direction="forward",
             concurrent_demanding_action=demanding)
+
+    def test_another_demanding_action_cap_is_one_yard_per_second(self):
+        # The action classification is a premise for this arithmetic test;
+        # no native action-wide demanding flag exists to infer it.
+        capped = evaluate_movement_rate(
+            self.player, "walk", self.conditions(demanding=True),
+            universe=self.candidate.universe)
+        self.assertEqual(capped.yards_per_second, 1.0)
+        self.assertAlmostEqual(capped.meters_per_second, 0.9144)
+        self.assertNotEqual(capped.meters_per_second, 1.0)
+
+        backward = evaluate_movement_rate(
+            self.player, "sprint", MovementRateConditions(
+                terrain_multiplier=1.0, hampered_multiplier=1.0,
+                posture="standing", direction="backward",
+                concurrent_demanding_action=False),
+            universe=self.candidate.universe)
+        self.assertEqual(backward.yards_per_second, 1.0)
+        self.assertAlmostEqual(backward.meters_per_second, 0.9144)
+
+        stricter = evaluate_movement_rate(
+            self.player, "sprint", MovementRateConditions(
+                terrain_multiplier=1.0, hampered_multiplier=1.0,
+                posture="lying", direction="forward",
+                concurrent_demanding_action=True),
+            universe=self.candidate.universe)
+        self.assertEqual(stricter.yards_per_second, 0.5)
+        self.assertAlmostEqual(stricter.meters_per_second, 0.4572)
+
+        lateral = MovementRateConditions(
+            terrain_multiplier=1.0, hampered_multiplier=1.0,
+            posture="standing", direction="sideways",
+            concurrent_demanding_action=False)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            evaluate_movement_rate(
+                self.player, "walk", lateral, universe=self.candidate.universe)
+        self.assertEqual(refused.exception.code, "unsupported_direction")
+
+    def test_native_facing_fields_do_not_supply_a_twelve_orientation_snapshot(self):
+        self.assertEqual((self.player.front_facing, self.player.top_facing), (1, 0))
+        self.encounter.time = 1
+        snapshot = capture_snapshot(self.encounter, 1)
+        data = snapshot.entity(self.player.id).data
+        self.assertNotIn("front_facing", data)
+        self.assertNotIn("top_facing", data)
 
     def activate_run_observer(self):
         self.session.choose_run()
@@ -170,9 +215,10 @@ class TestNativeMovementIntent(unittest.TestCase):
         destination = CartesianPosition(start.x + direction[0] * 20.0,
                                         start.y + direction[1] * 20.0, start.z)
         intent = MovementIntent(self.player.id, destination, "walk", "arena-move-1", 1)
-        # Action declarations have no adopted demanding/non-demanding flag;
-        # this one-second cap is an explicit premise for this fixture.
-        conditions = self.conditions(demanding=True)
+        # RunAction records the movement's displacement; it is not classified
+        # as another demanding Action and must not impose the 1 yd/s cap.
+        conditions = self.conditions(demanding=False)
+        facing_fields = (self.player.front_facing, self.player.top_facing)
 
         step = self.encounter.step(1, movement_intent=intent,
                                    movement_conditions=conditions)
@@ -180,10 +226,11 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(step.movement_decision_ids, ("arena-move-1",))
         self.assertIn(self.player.id, step.moved_entity_ids)
         self.assertEqual((step.start_time, step.end_time), (0, 1))
-        self.assertAlmostEqual(end.x - start.x, direction[0] * 0.9144)
-        self.assertAlmostEqual(end.y - start.y, direction[1] * 0.9144)
+        self.assertAlmostEqual(end.x - start.x, direction[0] * 1.75 * 0.9144)
+        self.assertAlmostEqual(end.y - start.y, direction[1] * 1.75 * 0.9144)
         self.assertEqual(end.z, start.z)
-        self.assertEqual(layout.cell_at_position(end), HexAddress(1, 0))
+        self.assertEqual(layout.cell_at_position(end), HexAddress(2, 1))
+        self.assertEqual((self.player.front_facing, self.player.top_facing), facing_fields)
         self.assertEqual(self.encounter.time, 1)
         result = self.encounter.inspect_committed(1).action(action.id)
         self.assertEqual(result.facts.outcome, "success")
@@ -200,7 +247,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(public_after["time_seconds"], 1)
         self.assertAlmostEqual(public_after["player"]["position_meters"]["x"], end.x)
         self.assertAlmostEqual(public_after["player"]["position_meters"]["y"], end.y)
-        self.assertEqual(public_after["player"]["cell"], {"column": 1, "row": 0})
+        self.assertEqual(public_after["player"]["cell"], {"column": 2, "row": 1})
         self.assertEqual(self.encounter.aware_beings(self.player.id), [])
         self.assertEqual(self.encounter.aware_beings(self.opponent.id), [])
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
@@ -208,7 +255,7 @@ class TestNativeMovementIntent(unittest.TestCase):
 
     def test_invalid_unknown_stale_and_arrival_intents_change_no_state(self):
         self.activate_run_observer()
-        conditions = self.conditions(demanding=True)
+        conditions = self.conditions(demanding=False)
         start = self.player.get_position()
         before_history = dict(self.candidate.universe.event_history)
         before_pending = list(self.encounter.pending_action_list)
