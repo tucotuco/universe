@@ -27,16 +27,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def setUp(self):
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
 
-    def request(self, path, payload=None):
+    def request(self, path, payload=None, headers=None):
         handler_type = make_handler(self.session)
         handler = object.__new__(handler_type)
         handler.path = path
+        handler.server = type("FakeServer", (), {"server_port": 8000})()
         handler.wfile = io.BytesIO()
-        handler.headers = {}
+        handler.headers = dict(headers or {})
         if payload is not None:
             body = json.dumps(payload).encode("utf-8")
             handler.rfile = io.BytesIO(body)
             handler.headers["Content-Length"] = str(len(body))
+            handler.headers.setdefault("Content-Type", "application/json")
         result = {}
         handler._send = lambda status, body, content_type="application/json; charset=utf-8": result.update(
             status=status, body=body, content_type=content_type)
@@ -45,6 +47,13 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         if result["content_type"].startswith("application/json"):
             body = json.loads(json.dumps(body) if type(body) is not str else body)
         return result["status"], body
+
+    def enable_trace(self):
+        import io
+        stream = io.StringIO()
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+                                             trace_ui=True, trace_stream=stream)
+        return stream
 
     def test_legacy_handler_still_selects_its_original_fixed_scenario_page(self):
         legacy_handler = object.__new__(make_handler(ArenaSession(die_roll=20)))
@@ -78,6 +87,174 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertFalse(state["spot_available"])
         self.assertIsNone(self.session.active_candidate)
         self.assertEqual(self.request("/api/gm")[0], 404)
+
+    def test_trace_off_is_quiet_and_diagnostic_route_is_unavailable(self):
+        import io
+        stream = io.StringIO()
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+                                             trace_stream=stream)
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("const traceEnabled=false", page)
+        self.assertEqual(self.request("/api/generated/trace", {
+            "seq": 1, "event": "advance_clicked"})[0], 404)
+        self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_trace_events_and_native_advance_report_authoritative_transitions(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        stream = self.enable_trace()
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("const traceEnabled=true", page)
+        # This source-level contract verifies that shipped handlers correlate a
+        # fire-and-forget client event with the destination/advance request.
+        self.assertIn("traceUI('canvas_hex_selected',cell)", page)
+        self.assertIn("req('/api/generated/destination'", page)
+        self.assertIn("traceUI('advance_clicked')", page)
+        self.assertIn("req('/api/generated/advance',{seconds:1},seq)", page)
+        self.assertIn("Already at that hex center", page)
+
+        trace_empty = self.session.public_view()
+        self.request("/api/generated/trace", {"seq": 1, "event": "generate_clicked"})
+        self.request("/api/generated/trace", {
+            "seq": 2, "event": "rate_selected", "rate": "walk"})
+        self.request("/api/generated/trace", {
+            "seq": 3, "event": "facing_policy_selected", "facing_policy": "turn"})
+        self.assertEqual(self.session.public_view(), trace_empty)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"},
+            headers={"X-Arena-Client-Seq": "4"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        hidden = candidate.participants[1].native.being
+        start = player.get_position()
+        rng_state = self.session._rng_cursor.state
+        self.assertNotIn(hidden.id, json.dumps(generated))
+        self.assertNotIn("client_seq", json.dumps(generated))
+        self.assertNotIn("source_record", json.dumps(generated))
+
+        # Clicking the occupied center is a real accepted no-op, not an active
+        # plan; the browser now says so and keeps Advance disabled.
+        current_cell = generated["player"]["cell"]
+        self.request("/api/generated/trace", {
+            "seq": 5, "event": "canvas_hex_selected", **current_cell})
+        status, no_op = self.request("/api/generated/destination", {
+            **current_cell, "rate": "walk", "facing_policy": "turn"},
+            headers={"X-Arena-Client-Seq": "5"})
+        self.assertEqual(status, 200)
+        self.assertEqual(no_op["movement_outcome"], "already_at_destination")
+        self.assertFalse(no_op["advance_available"])
+        self.request("/api/generated/trace", {"seq": 6, "event": "advance_clicked"})
+        status, refused = self.request("/api/generated/advance", {"seconds": 1},
+                                       headers={"X-Arena-Client-Seq": "6"})
+        self.assertEqual(status, 409)
+        self.assertEqual(candidate.encounter.time, 0)
+
+        for payload in (
+            {"column": 99, "row": 0, "rate": "walk", "facing_policy": "turn"},
+            {"column": "1", "row": 0, "rate": "walk", "facing_policy": "turn"},
+        ):
+            status, _ = self.request("/api/generated/destination", payload)
+            self.assertEqual(status, 409)
+        self.assertEqual(candidate.encounter.time, 0)
+        self.assertIsNone(self.session.public_view()["movement_plan"])
+        self.assertEqual(self.session._rng_cursor.state, rng_state)
+
+        # Concurrent repeated clicks serialize under the session lock. Each
+        # accepted destination is a plan replacement, not an interval commit.
+        current = current_cell
+        alternatives = [(column, row) for column in range(5) for row in range(5)
+                        if (column, row) != (current["column"], current["row"])][:8]
+        with ThreadPoolExecutor(max_workers=8) as workers:
+            results = list(workers.map(lambda cell: self.request(
+                "/api/generated/destination", {"column": cell[0], "row": cell[1],
+                 "rate": "walk", "facing_policy": "turn"}), alternatives))
+        self.assertTrue(all(status == 200 for status, _ in results))
+        self.assertEqual(candidate.encounter.time, 0)
+        plan = self.session.public_view()["movement_plan"]
+        self.assertIsNotNone(plan)
+        destination_cell = plan["destination_cell"]
+        target = candidate.arena_map.layout.center_position(
+            HexAddress(destination_cell["column"], destination_cell["row"]), z=start.z)
+
+        # Injected native failure must log a rollback and leave time/position,
+        # plan, ChoiceBook, and RNG untouched.
+        from unittest.mock import patch
+        before_view = self.session.public_view()
+        before_choices = dict(candidate.encounter._choice_book._choices)
+        self.request("/api/generated/trace", {"seq": 15, "event": "advance_clicked"})
+        with patch.object(candidate.encounter, "step", side_effect=RuntimeError("injected step fault")):
+            status, _ = self.request("/api/generated/advance", {"seconds": 1},
+                                     headers={"X-Arena-Client-Seq": "15"})
+        self.assertEqual(status, 409)
+        self.assertEqual(candidate.encounter.time, 0)
+        self.assertEqual(player.get_position(), start)
+        self.assertEqual(self.session.public_view(), before_view)
+        self.assertEqual(candidate.encounter._choice_book._choices, before_choices)
+        self.assertEqual(self.session._rng_cursor.state, rng_state)
+
+        self.request("/api/generated/trace", {"seq": 16, "event": "advance_clicked"})
+        status, moving = self.request("/api/generated/advance", {"seconds": 1},
+                                      headers={"X-Arena-Client-Seq": "16"})
+        self.assertEqual(status, 200)
+        self.assertEqual(moving["time_seconds"], 1)
+        self.assertNotEqual(player.get_position(), start)
+        self.assertNotIn(hidden.id, json.dumps(moving))
+        while self.session.public_view()["movement_plan"] is not None:
+            status, view = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200)
+            self.assertNotIn(hidden.id, json.dumps(view))
+        self.assertEqual(player.get_position(), target)
+        self.assertIn("event=canvas_hex_selected", stream.getvalue())
+        self.assertIn("event=rate_selected rate=walk", stream.getvalue())
+        self.assertIn("action=generate status=accepted http=200 xp=0 map=5x5", stream.getvalue())
+        self.assertIn("plan=already_at_destination", stream.getvalue())
+        self.assertIn("movement=no_plan", stream.getvalue())
+        self.assertIn("status=rolled_back", stream.getvalue())
+        self.assertIn("reason=RuntimeError", stream.getvalue())
+        self.assertIn("action=advance status=accepted http=200", stream.getvalue())
+        self.assertIn("movement=arrival", stream.getvalue())
+        self.assertEqual(self.session._rng_cursor.state, rng_state)
+        for forbidden in (hidden.id, hidden.name, "source_record", "root_seed"):
+            self.assertNotIn(forbidden, stream.getvalue())
+
+    def test_trace_schema_rejects_arbitrary_fields_and_client_sequence_is_bounded(self):
+        stream = self.enable_trace()
+        before = self.session.public_view()
+        for payload in (
+            {"seq": 1, "event": "rate_selected", "rate": "walk", "name": "private"},
+            {"seq": 2**40, "event": "advance_clicked"},
+            {"seq": 2, "event": "rate_selected", "rate": "private-value"},
+        ):
+            status, _ = self.request("/api/generated/trace", payload)
+            self.assertEqual(status, 409)
+        self.assertEqual(self.session.public_view(), before)
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_trace_diagnostic_route_refuses_nonlocal_origin(self):
+        stream = self.enable_trace()
+        status, _ = self.request("/api/generated/trace", {
+            "seq": 1, "event": "advance_clicked"},
+            headers={"Origin": "https://example.invalid"})
+        self.assertEqual(status, 404)
+        self.assertEqual(stream.getvalue(), "")
+
+    def test_client_trace_has_a_per_second_rate_limit(self):
+        import io
+        from arena_ui_trace import ArenaUITerminalTrace
+        now = [0.0]
+        trace = ArenaUITerminalTrace(True, stream=io.StringIO(), clock=lambda: now[0])
+        for seq in range(1, 31):
+            trace.client_event({"seq": seq, "event": "advance_clicked"})
+        with self.assertRaisesRegex(ValueError, "rate limit"):
+            trace.client_event({"seq": 31, "event": "advance_clicked"})
+        now[0] = 1.0
+        self.assertEqual(trace.client_event({"seq": 32, "event": "advance_clicked"}),
+                         {"accepted": True})
 
     def test_generate_returns_only_player_allowlist_and_rename_preserves_native_identity(self):
         status, state = self.request("/api/generated/generate", {

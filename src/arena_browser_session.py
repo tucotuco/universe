@@ -14,6 +14,7 @@ from activities import RunAction
 from atomic_publication import RNGCursor
 from arena_hex_map import HexAddress
 from movement_intent import MovementIntent, MovementRateConditions
+from arena_ui_trace import ArenaUITerminalTrace
 
 
 _DECIMAL = re.compile(r"[0-9]+\Z")
@@ -25,6 +26,7 @@ _MOVEMENT_DISABLED = (
     "Destination movement is unavailable because the player's native posture or facing is unknown."
 )
 _RATES = frozenset(("walk", "hustle", "jog", "run", "sprint"))
+_CLIENT_SEQUENCE = re.compile(r"[1-9][0-9]{0,9}\Z")
 
 
 @dataclass(frozen=True)
@@ -56,7 +58,7 @@ def _parse_decimal(payload, key, minimum):
 class GeneratedArenaSession:
     """A replace-on-success generated Arena session with no initial Encounter."""
 
-    def __init__(self, *, root_seed_factory=None):
+    def __init__(self, *, root_seed_factory=None, trace_ui=False, trace_stream=None):
         self._root_seed_factory = root_seed_factory or (lambda: secrets.randbits(256))
         self._lock = threading.RLock()
         self._active = None
@@ -68,6 +70,70 @@ class GeneratedArenaSession:
         self._movement_plan = None
         self._movement_sequence = 0
         self._movement_outcome = None
+        self._trace = ArenaUITerminalTrace(trace_ui, stream=trace_stream)
+
+    @property
+    def trace_ui_enabled(self):
+        return self._trace.enabled
+
+    def begin_trace_request(self, action, client_sequence_header=None):
+        client_sequence = None
+        if (type(client_sequence_header) is str
+                and _CLIENT_SEQUENCE.fullmatch(client_sequence_header)):
+            client_sequence = int(client_sequence_header)
+        return self._trace.begin_request(action, client_sequence)
+
+    def finish_trace_request(self, request_id, client_sequence, action, status,
+                             http_status, *, classification=None, detail=None):
+        self._trace.http_result(request_id, client_sequence, action, status,
+                                http_status, classification=classification, detail=detail)
+
+    def accept_client_trace(self, payload):
+        return self._trace.client_event(payload)
+
+    @staticmethod
+    def _trace_position(position):
+        if position is None:
+            return "none"
+        return "(" + ",".join(f"{value:.6g}" for value in position.as_tuple()) + ")"
+
+    @staticmethod
+    def _trace_cell(candidate, position):
+        if position is None:
+            return "none"
+        address = candidate.arena_map.layout.cell_at_position(position)
+        return "none" if address is None else f"({address.column},{address.row})"
+
+    def _trace_advance_state(self, candidate, request_id, client_sequence,
+                             before_time, before_position, before_cell, plan,
+                             status, *, reason=None):
+        if not self._trace.enabled:
+            return
+        after_time = candidate.encounter.time
+        after_position = candidate.participants[0].native.being.get_position()
+        after_cell = self._trace_cell(candidate, after_position)
+        displacement = (None if before_position is None or after_position is None else
+                        math.dist(before_position.as_tuple(), after_position.as_tuple()))
+        plan_text = "none"
+        remaining = "none"
+        if plan is not None:
+            plan_text = (f"cell=({plan.address.column},{plan.address.row}),"
+                         f"rate={plan.rate},policy={plan.facing_policy}")
+            remaining = ("unknown" if after_position is None else
+                         f"{math.dist(after_position.as_tuple(), plan.destination.as_tuple()):.6g}")
+        movement = "no_plan" if plan is None else (
+            "arrival" if after_position == plan.destination else
+            "zero_displacement" if displacement == 0 else
+            "movement_unknown" if displacement is None else "moving")
+        parts = [f"action=advance status={status}",
+                 f"time={before_time}->{after_time}",
+                 f"position={self._trace_position(before_position)}->{self._trace_position(after_position)}",
+                 f"cell={before_cell}->{after_cell}",
+                 f"displacement_m={'unknown' if displacement is None else format(displacement, '.6g')}",
+                 f"movement={movement}", f"plan={plan_text}", f"remaining_m={remaining}"]
+        if reason:
+            parts.append(f"reason={reason}")
+        self._trace.native_advance(request_id, client_sequence, " ".join(parts))
 
     @property
     def active_candidate(self):
@@ -260,15 +326,28 @@ class GeneratedArenaSession:
             self._player_action_id = action.id
             return self._view_unlocked()
 
-    def advance_one_second(self):
+    def advance_one_second(self, *, trace_request_id=None, trace_client_sequence=None):
         """Commit exactly the native next boundary for the accepted player decision."""
         with self._lock:
-            if self._active is None or (self._player_action_id is None and self._movement_plan is None):
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before advancing")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            before_time = candidate.encounter.time
+            before_position = player.get_position()
+            before_cell = self._trace_cell(candidate, before_position)
+            accepted_plan = self._movement_plan
+            if self._player_action_id is None and self._movement_plan is None:
+                self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
+                                          before_time, before_position, before_cell, None,
+                                          "refused", reason="no_movement_plan")
                 raise ArenaBrowserRequestError("choose a destination or an explicit Run Choice before advancing")
             if (self._movement_plan is None and self._player_action_id is not None
                     and self._player_action_outcome is not None):
+                self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
+                                          before_time, before_position, before_cell, None,
+                                          "refused", reason="run_choice_resolved")
                 raise ArenaBrowserRequestError("the accepted Run Choice has already resolved")
-            candidate = self._active
             try:
                 if self._movement_plan is not None:
                     plan = self._movement_plan
@@ -295,8 +374,19 @@ class GeneratedArenaSession:
                         int(candidate.encounter.time)).action(self._player_action_id)
                     self._player_action_outcome = result.facts.outcome
             except Exception as exc:
+                after_time = candidate.encounter.time
+                after_position = player.get_position()
+                rolled_back = (after_time == before_time and after_position == before_position)
+                self._trace_advance_state(
+                    candidate, trace_request_id, trace_client_sequence,
+                    before_time, before_position, before_cell, accepted_plan,
+                    "rolled_back" if rolled_back else "failed_after_state_change",
+                    reason=type(exc).__name__)
                 raise ArenaBrowserRequestError(
                     "native one-second advancement failed; committed Arena state is unchanged") from exc
+            self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
+                                      before_time, before_position, before_cell, accepted_plan,
+                                      "committed")
             return self._view_unlocked()
 
     @staticmethod
