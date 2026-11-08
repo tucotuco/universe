@@ -1,12 +1,12 @@
-# Encounters — adopted working package (Revision 63)
+# Encounters — adopted working package (Revision 64)
 
-**Controlling rules:** [Revision 61 Markdown](encounters-working-draft-adopted-r61.md), subject to the limited adopted [revision-62 addendum](encounters-consistency-decisions-r62.md), [issue supplement](encounters-rule-issues-r62.md), and the [revision-63 spatial-precision clarification](encounters-consistency-decisions-r63.md).
+**Controlling rules:** [Revision 61 Markdown](encounters-working-draft-adopted-r61.md), subject to the limited adopted [revision-62 addendum](encounters-consistency-decisions-r62.md), [issue supplement](encounters-rule-issues-r62.md), [revision-63 spatial-precision clarification](encounters-consistency-decisions-r63.md), and [revision-64 ground Pick up Action supplement](encounters-consistency-decisions-r64.md).
 
-Revision 61 remains the adopted baseline, supplemented by revision 62 for physical dimensions, reference arm length, Reach terminology, and throwing velocity scaling, and by revision 63 for authoritative spatial precision only. Revision 63 supersedes revision 61's nearest-0.1-m movement-state commitment rule; all other revision-61 and revision-62 decisions remain unchanged. Dated revision-59/62 records remain historical decision provenance. Existing customary-unit tables are unchanged. The pure throwing helper is not connected to a native Throw Action or trajectory resolver; general physical force/Grapple work remains open.
+Revision 61 remains the adopted baseline, supplemented by revision 62 for physical dimensions, reference arm length, Reach terminology, and throwing velocity scaling; revision 63 for authoritative spatial precision; and revision 64 for one-second ground pickup in the generated Arena's bounded initial environment only. Revision 63 supersedes revision 61's nearest-0.1-m movement-state commitment rule; all other revision-61 and revision-62 decisions remain unchanged. Revision 64 does not adopt initial weapon readying. Dated revision-59/62 records remain historical decision provenance. Existing customary-unit tables are unchanged. The pure throwing helper is not connected to a native Throw Action or trajectory resolver; general physical force/Grapple work remains open.
 
 ## Compact package — latest of each document type
 
-- [Adopted rules baseline](encounters-working-draft-adopted-r61.md), with the controlling [revision-62 addendum](encounters-consistency-decisions-r62.md), [issue supplement](encounters-rule-issues-r62.md), and [revision-63 spatial-precision clarification](encounters-consistency-decisions-r63.md)
+- [Adopted rules baseline](encounters-working-draft-adopted-r61.md), with the controlling [revision-62 addendum](encounters-consistency-decisions-r62.md), [issue supplement](encounters-rule-issues-r62.md), [revision-63 spatial-precision clarification](encounters-consistency-decisions-r63.md), and [revision-64 ground Pick up Action supplement](encounters-consistency-decisions-r64.md)
 - [Cumulative decisions through revision 60](encounters-consistency-decisions-r60.md) and [supplemental revision-62 decisions](encounters-consistency-decisions-r62.md)
 - [Issue history through revision 60](encounters-rule-issues-r60.md) and [revision-62 issue supplement](encounters-rule-issues-r62.md)
 - [Outstanding-only to-do](encounters-outstanding-todo.md)

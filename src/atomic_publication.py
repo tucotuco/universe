@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -27,6 +27,9 @@ from observer_proposals import (BeliefProjection, AccountsProjection,
                                 _capture_object_evidence)
 from statistical_group import StatisticalGroup
 from object import ObjectInstance
+from being import BeingInstance
+from weapon import WeaponInstance
+from armor import ArmorInstance
 from spatial.state import CartesianPosition
 from encounter_fatigue_bridge import FrozenFatigueFrame, FrozenFatigueView
 from physiology_registry import ResolvedPhysiology
@@ -490,6 +493,33 @@ def _make_plan(encounter,candidate,rng_owner):
         plan.attr('targets',obj.spatial_state,'position',release_position,chain=True)
         plan.attr('targets',obj,'_projectile_flight',flight)
         plan.append('targets',obj,'_atomic_projectile_history',state)
+    pickup_additions={}
+    pickup_objects=[]
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is not PickupEffect:continue
+        source=events.get(effect.source_action_id)
+        actor=objects.get(effect.target_id)
+        obj=objects.get(effect.object_id)
+        if (source is None or source.actor_id!=effect.target_id
+                or type(actor) is not BeingInstance
+                or type(obj) not in (ObjectInstance,WeaponInstance,ArmorInstance)
+                or effect.object_id!=source.target_id
+                or obj.parent_container_id is not None or obj.spatial_state is None
+                or type(actor.possessions) is not list
+                or effect.object_id in actor.possessions
+                or any(effect.object_id in tuple(getattr(other,name,()) or ())
+                       for key,other in objects.items() if type(other) is BeingInstance
+                       for name in ('possessions','weapons','body_parts','armor'))):
+            raise PublicationRejected('Pick up target custody changed before atomic publication')
+        pickup_additions.setdefault(actor.id,[]).append(effect.object_id)
+        pickup_objects.append((actor,obj,effect.object_id))
+    for actor_id,ids in pickup_additions.items():
+        actor=objects[actor_id]
+        plan.contents('targets',actor.possessions,actor.possessions+ids)
+    for actor,obj,object_id in pickup_objects:
+        plan.attr('targets',obj,'parent_container_id',actor.id)
+        plan.attr('targets',obj,'spatial_state',None)
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}
@@ -514,13 +544,16 @@ def _make_plan(encounter,candidate,rng_owner):
             late=aid in endpoint_new or (aid in endpoint_started and key in ('_activity_started','start_position','threat_at_schedule'))
             plan.attr('endpoint_starts' if late else 'registrations',events[aid],key,value)
     target_anchors={}
+    picked_up_ids={row.effect.object_id for row in supported.boundary.effects.values()
+                   if type(row.effect) is PickupEffect}
     from encounter_inspection import prepare_record, fingerprint
     for key,target in supported.boundary.targets.items():
         obj=objects[key]
         if obj.current.hit_points!=target.projected_hp:plan.attr('targets',obj.current,'hit_points',target.projected_hp)
         record=TargetIntervalRecord(encounter.id,candidate.boundary,target)
         storage=plan.append('targets',obj,'_atomic_target_history',record)
-        target_anchors[key]=(id(obj),id(obj.current),id(obj.spatial_state),id(storage),id(record),fingerprint(record))
+        expected_spatial_state=id(None) if key in picked_up_ids else id(obj.spatial_state)
+        target_anchors[key]=(id(obj),id(obj.current),expected_spatial_state,id(storage),id(record),fingerprint(record))
         practice=target.practice_state
         if practice is not None:
             plan.contents('practice',obj.current.skills.skills,practice.ordinary_levels)
@@ -698,6 +731,15 @@ def _committed_consistency(encounter,candidate,plan):
                 raise PublicationRejected('projectile release post-write consistency failed: '
                     f'position={obj.spatial_state.position!r}, flight={obj.__dict__.get("_projectile_flight")!r}, '
                     f'possessed={effect.target_id in actor.possessions}')
+        elif type(effect) is PickupEffect:
+            obj=objects[effect.object_id]
+            actor=objects[effect.target_id]
+            if (actor.possessions.count(effect.object_id)!=1
+                    or obj.parent_container_id!=actor.id or obj.spatial_state is not None
+                    or any(effect.object_id in tuple(getattr(other,name,()) or ())
+                           for key,other in objects.items() if type(other) is BeingInstance
+                           and other is not actor for name in ('possessions','weapons','body_parts','armor'))):
+                raise PublicationRejected('Pick up custody post-write consistency failed')
     if candidate.adult_member_candidate is not None:
         operation,group,being,member,slot=plan.adult_realization
         objects=encounter.universe.object_registry.object_instances

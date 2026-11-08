@@ -73,6 +73,52 @@ class ThrowAction(Action):
         raise RuntimeError('ThrowAction resolves only through native transactional publication')
 
 
+class PickUpAction(Action):
+    """Revision-64 one-second acquisition of a free ground Object in Arena."""
+
+    def __init__(self, encounter, actor_id, object_id, start_time, *,
+                 map_width_cells, map_height_cells, id=None):
+        if (type(actor_id) is not str or not actor_id or type(object_id) is not str or not object_id
+                or actor_id == object_id):
+            raise ValueError('Pick up requires distinct native Being and Object identities')
+        for name, value in (('start_time', start_time),
+                            ('map_width_cells', map_width_cells),
+                            ('map_height_cells', map_height_cells)):
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError(f'{name} must be a finite native number')
+        if start_time < 0 or float(start_time).is_integer() is False:
+            raise ValueError('Pick up must begin at an integer Encounter second')
+        if (type(map_width_cells) is not int or map_width_cells < 5
+                or type(map_height_cells) is not int or map_height_cells < 5
+                or map_width_cells * map_height_cells > 1_000_000):
+            raise ValueError('Pick up requires the bounded generated-Arena hex dimensions')
+        super().__init__(encounter.universe, start_time, start_time + 1, 'pick up',
+                         actor_id, object_id, instrument_id=None, id=id)
+        self.encounter = encounter
+        self.end_time = start_time + 1
+        self.map_width_cells = map_width_cells
+        self.map_height_cells = map_height_cells
+
+    def prepare_schedule(self, encounter):
+        from being import BeingInstance
+        if (encounter is not self.encounter or not encounter.arena_activation_enabled
+                or encounter.progression_mode != 'transactional'):
+            raise ValueError('Pick up requires the activated generated-Arena transaction path')
+        actor = encounter.get_being(self.actor_id)
+        target = encounter.universe.get_object_by_id(self.target_id)
+        if actor is None or not isinstance(target, ObjectInstance) or isinstance(target, BeingInstance):
+            raise ValueError('Pick up requires a participating Being and registered physical Object')
+        if self.end_time - self.start_time != 1:
+            raise ValueError('revision-64 Pick up lasts exactly one second')
+        # The target is intentionally not an active-object reservation: native
+        # boundary evaluation resolves simultaneous pickup contention together.
+        return PreparedSchedule.from_action(self)
+
+    def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
+        raise RuntimeError('PickUpAction resolves only through native transactional publication')
+
+
 class RunAction(Action):
     """Attempt to cover a configured straight-line distance while running.
 

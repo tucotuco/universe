@@ -201,9 +201,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     shield_names = freeze(weapon_dictionary['object_categories']).get('Shields', ())
     participants = tuple(dict.fromkeys(freeze(ed['being_list']) + freeze(ed['non_being_object_list'])))
     actions = {}
-    from activities import ThrowAction
+    from activities import ThrowAction, PickUpAction
     families = {Action: 'combat', MeleeStrike: 'melee', MeleeDefense: 'defense',
-                RunAction: 'run', SpotAction: 'spot', ThrowAction: 'throw'}
+                RunAction: 'run', SpotAction: 'spot', ThrowAction: 'throw',
+                PickUpAction: 'pickup'}
     objective_actions = {}
     if _objective:
         from group_observation import ObserveGroupAction
@@ -231,7 +232,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot', 'throw') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot', 'throw', 'pick up') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -271,6 +272,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(action) is ThrowAction:
             for key in ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m'):
                 selected[key] = freeze(ad[key])
+        if type(action) is PickUpAction:
+            selected['map_width_cells'] = freeze(ad['map_width_cells'])
+            selected['map_height_cells'] = freeze(ad['map_height_cells'])
         if not cancelled:
             # Reuse Increment 3 ownership and declaration validation, after the
             # exact-type/callback preflight above. No scheduling hook executes.
@@ -522,6 +526,14 @@ class ProjectileReleaseEffect:
 
 
 @dataclass(frozen=True)
+class PickupEffect:
+    """One same-identity Object custody transfer caused by a PickUpAction."""
+    source_action_id: str
+    target_id: str  # acquiring Being, as the Target-owned recipient
+    object_id: str
+
+
+@dataclass(frozen=True)
 class ActionProposal:
     action_id: str
     actor_id: str
@@ -734,6 +746,97 @@ def _combat(snapshot, action, rng, dependencies):
     return ActionProposal(action.id, actor.id, affected, outcome, tuple(effects), tuple(dependencies), tuple(meta))
 
 
+def pickup_eligibility(snapshot, action):
+    """Return the r64 ordinary failure code or ``None`` when a pickup is eligible.
+
+    The test is entirely against the common post-movement snapshot. Arena hex
+    membership is used only as the adopted coarse access convention; this
+    helper does not infer body contact, collision, or reach geometry.
+    """
+    from arena_hex_map import ArenaHexLayout
+
+    actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    if actor.category != 'being' or target.category not in ('object', 'weapon', 'armor'):
+        return 'unavailable'
+    if _helpless(actor):
+        return 'unable_to_act'
+    if actor.position is None or target.position is None:
+        return 'unplaced' if target.data.get('parent_container_id') is None else 'unavailable'
+    if target.data.get('parent_container_id') is not None:
+        return 'unavailable'
+    inventory_refs = set()
+    for entity in snapshot.entities.values():
+        if entity.category != 'being':
+            continue
+        data = entity.data
+        inventory_refs.update(data.get('possessions', ()))
+        inventory_refs.update(data.get('weapons', ()))
+        inventory_refs.update(value for value in data.get('body_parts', {}).values()
+                              if value is not None)
+        armor_id = data.get('armor_id')
+        if armor_id is not None:
+            inventory_refs.add(armor_id)
+    if action.target_id in inventory_refs:
+        return 'unavailable'
+    if any(entity.data.get('parent_container_id') == action.target_id
+           for entity in snapshot.entities.values()):
+        return 'unsupported_contents'
+
+    try:
+        layout = ArenaHexLayout.rectangle(action.data['map_width_cells'],
+                                          action.data['map_height_cells'])
+        actor_cell = layout.cell_at_position(actor.position)
+        object_cell = layout.cell_at_position(target.position)
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise UnsupportedEvaluation('Pick up snapshot lacks its reviewed Arena hex convention') from exc
+    if actor_cell is None or object_cell is None or actor_cell != object_cell:
+        return 'inaccessible'
+
+    weight = target.data.get('weight')
+    if (type(weight) not in (int, float) or not math.isfinite(weight) or weight <= 0):
+        return 'unknown_weight'
+    from movement_intent import _HEAVY_LOAD_UPPER_LB
+    abilities, adjustments = actor.data.get('abilities'), actor.data.get('fatigue_adjustments')
+    fatigue = actor.data.get('fatigue_level')
+    fatigue_row = adjustments.get(fatigue) if hasattr(adjustments, 'get') else None
+    adjustment = fatigue_row.get('ability_adjustment') if hasattr(fatigue_row, 'get') else None
+    strength = abilities.get('STR') if hasattr(abilities, 'get') else None
+    if (type(strength) not in (int, float) or not math.isfinite(strength)
+            or type(adjustment) is not int):
+        return 'unknown_capacity'
+    effective_strength = strength + adjustment
+    if type(effective_strength) is not int or effective_strength not in _HEAVY_LOAD_UPPER_LB:
+        return 'unknown_capacity'
+
+    inventory = (tuple(actor.data.get('possessions', ()))
+                 + tuple(actor.data.get('weapons', ()))
+                 + tuple(value for value in actor.data.get('body_parts', {}).values()
+                         if value is not None)
+                 + (() if actor.data.get('armor_id') is None else (actor.data['armor_id'],)))
+    pending = list(dict.fromkeys(inventory))
+    visited = set()
+    total = 0.0
+    while pending:
+        object_id = pending.pop()
+        if object_id in visited:
+            continue
+        visited.add(object_id)
+        item = snapshot.entity(object_id)
+        if item.category in ('being', 'statistical_group'):
+            return 'unknown_capacity'
+        item_weight = item.data.get('weight')
+        if (type(item_weight) not in (int, float) or not math.isfinite(item_weight)
+                or item_weight < 0):
+            return 'unknown_capacity'
+        total += float(item_weight)
+        pending.extend(entity.id for entity in snapshot.entities.values()
+                       if entity.data.get('parent_container_id') == object_id)
+    limit = _HEAVY_LOAD_UPPER_LB[effective_strength]
+    if total + float(weight) > limit:
+        return 'over_capacity'
+    return None
+
+
 def _activity(snapshot, action, rng):
     actor = snapshot.entity(action.actor_id)
     effects = []
@@ -835,8 +938,16 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot', 'throw') for a in selected):
+    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
+    pickup_status = {action.id: pickup_eligibility(snapshot, action)
+                     for action in selected if action.lifecycle == 'pending'
+                     and action.family == 'pickup'}
+    pickup_by_object = {}
+    for action in selected:
+        if (action.lifecycle == 'pending' and action.family == 'pickup'
+                and pickup_status[action.id] is None):
+            pickup_by_object.setdefault(action.target_id, []).append(action.id)
     rng = _ProvisionalRandom(snapshot.rng_state)
     proposals = []
     defense_effects = []
@@ -850,6 +961,16 @@ def evaluate_snapshot(snapshot, action_ids=None):
             defense_effects.extend(proposal.defenses)
         elif action.family in ('combat', 'melee'):
             proposal = _combat(snapshot, action, rng, tuple(d for d in defense_effects if d.strike_id == action.id))
+        elif action.family == 'pickup':
+            status = pickup_status[action.id]
+            if status is not None:
+                proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), status)
+            elif len(pickup_by_object[action.target_id]) > 1:
+                proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), 'contested')
+            else:
+                effect = PickupEffect(action.id, action.actor_id, action.target_id)
+                proposal = ActionProposal(action.id, action.actor_id,
+                    tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
         else:
             proposal = _activity(snapshot, action, rng)
         proposals.append(proposal)

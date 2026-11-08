@@ -321,6 +321,11 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         ground_objects = ground_set.placements
         ground_item_bindings = ground_set.source_to_native_object_id
         ground_layout = ground_set.layout
+        # Native Actions may target only participating Encounter entities.
+        # Registration supplies the Object reference to the closed snapshot;
+        # it does not grant an observer evidence or a browser-visible identity.
+        for placement in ground_objects:
+            encounter.add_object(placement.native_object_id)
 
     world.add_event(encounter)
     if (world.get_object_by_id(first.being.id) is not first.being
