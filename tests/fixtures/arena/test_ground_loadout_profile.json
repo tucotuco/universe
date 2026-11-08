@@ -1,0 +1,18 @@
+{
+  "format": "npcgen-arena-loadout-profile",
+  "schema_version": 1,
+  "profile_id": "universe-ground-object-test",
+  "profile_version": "1",
+  "catalog_id": "universe-native-combat-test-catalog",
+  "catalog_version": "1",
+  "catalog": [
+    {"native_type_key": "Dagger", "category": "weapon"},
+    {"native_type_key": "Leather armor", "category": "armor"},
+    {"native_type_key": "Small shield", "category": "shield"}
+  ],
+  "categories": {
+    "weapon": {"count": 2, "items": [{"native_type_key": "Dagger", "weight": 1}]},
+    "armor": {"count": 1, "items": [{"native_type_key": "Leather armor", "weight": 1}]},
+    "shield": {"count": 1, "items": [{"native_type_key": "Small shield", "weight": 1}]}
+  }
+}

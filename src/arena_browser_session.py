@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 import random
 import secrets
@@ -58,7 +59,8 @@ def _parse_decimal(payload, key, minimum):
 class GeneratedArenaSession:
     """A replace-on-success generated Arena session with no initial Encounter."""
 
-    def __init__(self, *, root_seed_factory=None, trace_ui=False, trace_stream=None):
+    def __init__(self, *, root_seed_factory=None, trace_ui=False, trace_stream=None,
+                 ground_item_descriptions=None, ground_loadout_profile=None):
         self._root_seed_factory = root_seed_factory or (lambda: secrets.randbits(256))
         self._lock = threading.RLock()
         self._active = None
@@ -71,6 +73,10 @@ class GeneratedArenaSession:
         self._movement_sequence = 0
         self._movement_outcome = None
         self._trace = ArenaUITerminalTrace(trace_ui, stream=trace_stream)
+        # Optional caller-owned initial conditions; the browser still exposes
+        # only its existing three Generate fields and has no gear distribution.
+        self._ground_item_descriptions = copy.deepcopy(ground_item_descriptions)
+        self._ground_loadout_profile = copy.deepcopy(ground_loadout_profile)
 
     @property
     def trace_ui_enabled(self):
@@ -226,7 +232,9 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("host root seed source must return a nonnegative integer")
             try:
                 candidate = initialize_two_being_arena(
-                    starting_experience, width_cells, height_cells, root_seed)
+                    starting_experience, width_cells, height_cells, root_seed,
+                    ground_item_descriptions=self._ground_item_descriptions,
+                    ground_loadout_profile=self._ground_loadout_profile)
                 encounter = candidate.encounter
                 encounter.set_name("Encounter")
                 candidate.participants[0].native.being.set_name(

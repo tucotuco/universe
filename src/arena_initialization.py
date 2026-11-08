@@ -11,6 +11,7 @@ from pathlib import Path
 from encounter import Encounter
 from library import Library
 from arena_hex_map import ArenaHexLayout
+from arena_ground_objects import (ArenaGroundObjectRefusal, realize_arena_ground_objects)
 from npcgen_arena_adapter import ArenaNPCRefusal, ArenaNativeBeing, prepare_npcgen_arena_being
 from spatial.state import CartesianPosition
 from universe import Universe
@@ -127,6 +128,11 @@ class ArenaInitializationCandidate:
     engine_identity: dict
     participants: tuple[ArenaParticipant, ArenaParticipant]
     attempts: tuple[ArenaAttempt, ...]
+    ground_objects: tuple = ()
+    ground_item_bindings: tuple[tuple[str, str], ...] = ()
+    ground_layout: ArenaHexLayout | None = None
+    ground_placement_seed: int | None = None
+    ground_loadout_provenance: tuple[dict, ...] = ()
 
 
 def _reject(code: str, message: str, **details):
@@ -160,7 +166,9 @@ def _validate_request(starting_experience, width_cells, height_cells, root_seed)
 
 
 def initialize_two_being_arena(starting_experience: int, width_cells: int, height_cells: int,
-                               root_seed: int, *, library: Library | None = None) -> ArenaInitializationCandidate:
+                               root_seed: int, *, library: Library | None = None,
+                               ground_item_descriptions=None,
+                               ground_loadout_profile: dict | None = None) -> ArenaInitializationCandidate:
     """Prepare a complete time-zero Arena in a fresh Universe, then return it atomically.
 
     Candidate seeds are SHA-256-derived by role and attempt. Placement uses an
@@ -174,6 +182,24 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         _reject("npcgen_unavailable", "install the npcgen package before Arena initialization", error=str(exc))
     if type(identity) is not dict:
         _reject("engine_identity_unavailable", "npcgen returned no engine identity")
+    if ground_item_descriptions is not None and ground_loadout_profile is not None:
+        _reject("ambiguous_ground_equipment_source",
+                "supply typed test items or a Generator profile, not both")
+    if (ground_item_descriptions is not None
+            and type(ground_item_descriptions) not in (list, tuple)):
+        _reject("invalid_ground_items", "ground item descriptions must be a finite list")
+    normalized_loadout_profile = None
+    if ground_loadout_profile is not None:
+        if not callable(getattr(api, "arena_loadout", None)) or not callable(
+                getattr(api, "validate_loadout_profile", None)) or not callable(
+                getattr(api, "validate_loadout", None)):
+            _reject("npcgen_loadout_unavailable",
+                    "installed npcgen package lacks the validated ordinary loadout API")
+        try:
+            normalized_loadout_profile = api.validate_loadout_profile(ground_loadout_profile)
+        except Exception as exc:
+            _reject("invalid_ground_loadout_profile", "caller-supplied npcgen profile was refused",
+                    error=type(exc).__name__, message=str(exc)[:256])
 
     if library is None:
         library = Library(config_dir=str(Path(__file__).resolve().parent / "config"))
@@ -233,13 +259,69 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
     for native in (first, second):
         encounter.add_being(native.being.id)
 
-    # The Universe is still private. Only the complete pair is registered, and
-    # this candidate is returned only after every native assembly step succeeds.
+    # The Universe is still private. Register the Beings before constructing
+    # Objects so the native registry can enforce cross-type identity uniqueness.
     for native in (first, second):
         if world.get_object_by_id(native.being.id) is not None:
             _reject("native_identity_collision", "generated native Being identity already exists")
     world.add_object(first.being)
     world.add_object(second.being)
+
+    ground_descriptions = list(ground_item_descriptions or ())
+    loadout_provenance = []
+    if normalized_loadout_profile is not None:
+        for role_index, (role, native, _candidate_seed) in enumerate(selected):
+            sampling_seed = _seed(root_seed, identity, "npcgen-arena-loadout-v1", role_index)
+            try:
+                loadout = api.arena_loadout(
+                    json.loads(native.source_record_bytes), normalized_loadout_profile, sampling_seed)
+                errors = api.validate_loadout(loadout, normalized_loadout_profile)
+            except Exception as exc:
+                _reject("npcgen_loadout_refused", "installed npcgen refused the caller profile",
+                        role=role, error=type(exc).__name__, message=str(exc)[:256])
+            if errors:
+                _reject("invalid_npcgen_loadout", "npcgen output failed its versioned profile validation",
+                        role=role, errors=list(errors)[:16])
+            if (type(loadout) is not dict or loadout.get("format") != "npcgen-arena-loadout"
+                    or loadout.get("schema_version") != 1 or loadout.get("origin") != "arena-loadout"):
+                _reject("invalid_npcgen_loadout", "npcgen returned an unsupported loadout contract", role=role)
+            for item in loadout.get("items", ()):
+                ground_descriptions.append({
+                    "source_item_id": item.get("source_item_id"),
+                    "category": item.get("category"),
+                    "native_type_key": item.get("native_type_key"),
+                    "quantity": item.get("quantity"),
+                    "ordinary": item.get("ordinary"),
+                    "magical": item.get("magical"),
+                    "mechanics": item.get("mechanics"),
+                    "origin": item.get("origin"),
+                })
+            loadout_provenance.append({
+                "role": role,
+                "format": loadout["format"],
+                "schema_version": loadout["schema_version"],
+                "source": loadout["source"],
+                "profile": loadout["profile"],
+                "sampling_seed": sampling_seed,
+            })
+
+    ground_objects = ()
+    ground_item_bindings = ()
+    ground_layout = None
+    ground_placement_seed = None
+    if ground_descriptions:
+        ground_placement_seed = _seed(root_seed, identity, "ground-placement-v1")
+        try:
+            ground_set = realize_arena_ground_objects(
+                world, ground_descriptions, layout,
+                tuple(layout.cell_at_position(placement.position) for placement in placements),
+                ground_placement_seed)
+        except ArenaGroundObjectRefusal as exc:
+            _reject(exc.code, exc.message, **exc.details)
+        ground_objects = ground_set.placements
+        ground_item_bindings = ground_set.source_to_native_object_id
+        ground_layout = ground_set.layout
+
     world.add_event(encounter)
     if (world.get_object_by_id(first.being.id) is not first.being
             or world.get_object_by_id(second.being.id) is not second.being
@@ -257,4 +339,6 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
             "arena.initial-facing.v1/private-seed", "arena.initial-posture.v1/scenario"))
     return ArenaInitializationCandidate(
         world, encounter, ArenaMap(width_cells, height_cells, layout), ArenaWorldPremise(), starting_experience,
-        root_seed, placement_seed, dict(identity), tuple(participants), tuple(attempts))
+        root_seed, placement_seed, dict(identity), tuple(participants), tuple(attempts),
+        ground_objects, ground_item_bindings, ground_layout, ground_placement_seed,
+        tuple(loadout_provenance))
