@@ -19,11 +19,11 @@ def main():
             print(f"{xp} XP: {exc.code}: {exc.message}")
             continue
         print(f"{xp} XP: Encounter {candidate.encounter.id}, t={candidate.encounter.time}, "
-              f"attempts={len(candidate.attempts)}, map=5x5")
+              f"attempts={len(candidate.attempts)}, map=5x5 hexes (one yard across flats)")
         for participant in candidate.participants:
             print(f"  {participant.role}: native_id={participant.native.being.id}, "
                   f"source_sha256={participant.native.source_sha256}, "
-                  f"cell=({participant.placement.column},{participant.placement.row}), "
+              f"hex=({participant.placement.column},{participant.placement.row}), "
                   f"position_m={participant.placement.position}")
     print("Limits: two Beings only; no equipment, AI, observation layer, GUI, or generalized save; "
           "native race support remains limited to five exact names.")

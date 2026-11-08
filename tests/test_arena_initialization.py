@@ -17,6 +17,7 @@ from arena_initialization import (
     ArenaInitializationRefusal,
     initialize_two_being_arena,
 )
+from arena_hex_map import HexAddress
 from library import Library
 from npcgen_arena_adapter import ArenaNPCRefusal, prepare_npcgen_arena_being
 from spatial.state import CartesianPosition
@@ -28,7 +29,7 @@ def _library():
 
 
 class TestArenaInitialization(unittest.TestCase):
-    def test_exact_zero_and_positive_xp_time_zero_native_pair_and_yard_cells(self):
+    def test_exact_zero_and_positive_xp_time_zero_native_pair_and_one_yard_hexes(self):
         for xp in (0, 12000):
             with self.subTest(xp=xp):
                 candidate = initialize_two_being_arena(xp, 5, 5, 42, library=_library())
@@ -41,6 +42,7 @@ class TestArenaInitialization(unittest.TestCase):
                                  [p.native.being.id for p in candidate.participants])
                 self.assertEqual(candidate.arena_map.width_cells, 5)
                 self.assertEqual(candidate.arena_map.height_cells, 5)
+                self.assertEqual(len(candidate.arena_map.layout.cell_ids), 25)
                 self.assertEqual([p.role for p in candidate.participants],
                                  ["player_controlled", "arena_controlled"])
                 self.assertEqual(len({(p.placement.column, p.placement.row)
@@ -50,8 +52,9 @@ class TestArenaInitialization(unittest.TestCase):
                     self.assertEqual(p.native.being.get_experience(), xp)
                     self.assertEqual(p.native.being.get_position(), p.placement.position)
                     self.assertEqual(p.placement.position, CartesianPosition(
-                        (p.placement.column + 0.5) * 0.9144,
-                        (p.placement.row + 0.5) * 0.9144, 0.0))
+                        *candidate.arena_map.layout.center_position(
+                            HexAddress(p.placement.column, p.placement.row)).as_tuple()))
+                    self.assertAlmostEqual(candidate.arena_map.cell_size_meters, 0.9144)
                     self.assertEqual(p.native.skills_status["cost_modifiers"], "character")
                     source = json.loads(p.native.source_record_bytes)
                     self.assertEqual(source["generation"]["starting_experience"], xp)

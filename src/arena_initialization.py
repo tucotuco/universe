@@ -10,6 +10,7 @@ from pathlib import Path
 
 from encounter import Encounter
 from library import Library
+from arena_hex_map import ArenaHexLayout
 from npcgen_arena_adapter import ArenaNPCRefusal, ArenaNativeBeing, prepare_npcgen_arena_being
 from spatial.state import CartesianPosition
 from universe import Universe
@@ -65,9 +66,31 @@ class ArenaParticipant:
 class ArenaMap:
     width_cells: int
     height_cells: int
-    cell_size_meters: float = YARDS_TO_METERS
-    origin: str = "southwest corner at (0, 0, 0); x east, y north, z up"
+    layout: ArenaHexLayout
+    origin: str = "southwest footprint edge at (0, 0, 0); x east, y north, z up"
     authority: str = "initialization/presentation coordinates only; native positions remain continuous"
+
+    @property
+    def cell_size_meters(self) -> float:
+        """Adopted one-yard distance between opposite hex sides."""
+        return self.layout.side_to_side_meters
+
+    def public_geometry(self) -> dict:
+        regular = (type(self.layout.cell_ids) is range
+                   and self.layout.cell_ids == range(self.width_cells * self.height_cells))
+        columns = None if regular else [
+            [column, [list(row_range) for row_range in ranges]]
+            for column, ranges in self.layout.column_row_ranges()]
+        return {
+            "orientation": "flat_top_odd_column_north_offset",
+            "cell_size_meters": self.cell_size_meters,
+            "hex_vertex_offsets_meters": [list(point) for point in self.layout.vertex_offsets_meters],
+            "column_step_meters": self.layout.column_step_meters,
+            "row_step_meters": self.layout.row_step_meters,
+            "odd_column_offset_meters": self.layout.odd_column_offset_meters,
+            "origin_offset_meters": list(self.layout.origin_offset_meters),
+            "column_row_ranges": columns,
+        }
 
 
 @dataclass(frozen=True)
@@ -172,12 +195,13 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         _reject("native_identity_collision", "two prepared Beings have the same native identity")
 
     placement_seed = _seed(root_seed, identity, "placement")
+    layout = ArenaHexLayout.rectangle(width_cells, height_cells)
     cells = random.Random(placement_seed).sample(range(width_cells * height_cells), 2)
     placements = []
     for (role, native, candidate_seed), cell in zip(selected, cells):
-        column, row = cell % width_cells, cell // width_cells
-        position = CartesianPosition((column + 0.5) * YARDS_TO_METERS,
-                                    (row + 0.5) * YARDS_TO_METERS, 0.0)
+        address = layout.address_for_index(cell)
+        column, row = address.column, address.row
+        position = layout.center_position(address)
         native.being.set_position(position)
         placements.append(ArenaPlacement(role, native.being.id, column, row, position))
 
@@ -202,5 +226,5 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
     participants = tuple(ArenaParticipant(role, native, placement, seed)
                          for (role, native, seed), placement in zip(selected, placements))
     return ArenaInitializationCandidate(
-        world, encounter, ArenaMap(width_cells, height_cells), starting_experience,
+        world, encounter, ArenaMap(width_cells, height_cells, layout), starting_experience,
         root_seed, placement_seed, dict(identity), participants, tuple(attempts))

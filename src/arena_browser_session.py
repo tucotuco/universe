@@ -68,6 +68,8 @@ class GeneratedArenaSession:
         candidate = self._active
         player = candidate.participants[0]
         position = player.native.being.get_position()
+        address = candidate.arena_map.layout.cell_at_position(position)
+        cell = None if address is None else {"column": address.column, "row": address.row}
         action = None
         if self._player_action_id is not None:
             action = {"name": "Run", "status": "completed" if self._player_action_outcome else "executing",
@@ -79,11 +81,10 @@ class GeneratedArenaSession:
             "time_seconds": candidate.encounter.time,
             "map": {"width_cells": candidate.arena_map.width_cells,
                     "height_cells": candidate.arena_map.height_cells,
-                    "cell_size_meters": candidate.arena_map.cell_size_meters,
-                    "origin": candidate.arena_map.origin},
+                    "origin": candidate.arena_map.origin,
+                    **candidate.arena_map.public_geometry()},
             "player": {"name": self._player_name,
-                       "cell": {"column": player.placement.column,
-                                "row": player.placement.row},
+                       "cell": cell,
                        "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
             "player_action": action,
             "run_available": self._player_action_id is None,

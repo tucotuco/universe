@@ -59,6 +59,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn('id="load" disabled', page)
         self.assertIn('id="generate" disabled', page)
         self.assertIn('id="spot" disabled', page)
+        self.assertIn('hex_vertex_offsets_meters', page)
+        self.assertIn('ctx.closePath()', page)
+        self.assertNotIn("p.column+.5", page)
         status, state = self.request("/api/generated/state")
         self.assertEqual(status, 200)
         self.assertEqual(state["state"], "empty")
@@ -75,17 +78,34 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(state["time_seconds"], 0)
         self.assertEqual(state["map"]["width_cells"], 5)
         self.assertEqual(state["map"]["height_cells"], 5)
+        self.assertEqual(state["map"]["orientation"], "flat_top_odd_column_north_offset")
+        self.assertEqual(state["map"]["cell_size_meters"], 0.9144)
+        self.assertEqual(state["map"]["column_row_ranges"], None)
         self.assertFalse(state["spot_available"])
         candidate = self.session.active_candidate
         self.assertEqual(candidate.encounter.time, 0)
         self.assertEqual(len(candidate.participants), 2)
         self.assertNotEqual(candidate.participants[0].native.being.id,
                             candidate.participants[1].native.being.id)
+        player_participant, hidden_participant = candidate.participants
+        self.assertEqual(state["player"]["cell"], {
+            "column": player_participant.placement.column,
+            "row": player_participant.placement.row})
+        self.assertEqual(state["player"]["position_meters"], {
+            "x": player_participant.native.being.get_position().x,
+            "y": player_participant.native.being.get_position().y,
+            "z": player_participant.native.being.get_position().z})
         self.assertEqual([p.native.being.get_experience() for p in candidate.participants], [0, 0])
         encoded = json.dumps(state).lower()
         for forbidden in ("source_sha256", "source_record", "native_id", "class", "level",
                           "experience", "awareness", "target_id", "action_id", "participants"):
             self.assertNotIn(forbidden, encoded)
+        self.assertNotIn(hidden_participant.native.being.id, encoded)
+        hidden_position = hidden_participant.native.being.get_position()
+        hidden_position_payload = json.dumps({"x": hidden_position.x,
+                                              "y": hidden_position.y,
+                                              "z": hidden_position.z})
+        self.assertNotIn(hidden_position_payload, encoded)
         player = candidate.participants[0].native.being
         native_id, source_bytes = player.id, candidate.participants[0].native.source_record_bytes
 
@@ -233,6 +253,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         status, advanced = self.request("/api/generated/advance", {"seconds": 1})
         self.assertEqual(status, 200)
         self.assertEqual(advanced["time_seconds"], 1)
+        self.assertEqual(advanced["player"]["cell"], accepted["player"]["cell"])
         self.assertEqual(advanced["player_action"],
                          {"name": "Run", "status": "completed", "outcome": "no_movement"})
         self.assertEqual(advanced["player"]["position_meters"],

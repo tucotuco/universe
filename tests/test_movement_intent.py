@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 sys.path.insert(0, str(ROOT / "src"))
 
 from arena_browser_session import GeneratedArenaSession
+from arena_hex_map import HexAddress
 from action_evaluation import capture_snapshot
 from movement_intent import (MovementIntent, MovementIntentRefusal,
                              MovementRateConditions, evaluate_movement_rate)
@@ -26,9 +27,8 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.encounter = self.candidate.encounter
         self.player = self.candidate.participants[0].native.being
         self.opponent = self.candidate.participants[1].native.being
-        # Test-only authored positions and world premise: the corridor from
-        # (0,0,0) to (20,0,0) m is clear for this demonstration. No Arena grid,
-        # reference-point separation, or invented Being volume proves that.
+        # Test-only authored positions. The movement test below separately
+        # declares its corridor premise; the map does not prove clearance.
         self.player.set_position(CartesianPosition(0.0, 0.0, 0.0))
         self.opponent.set_position(CartesianPosition(0.0, 100.0, 0.0))
         self.rng = self.session._rng_cursor
@@ -158,9 +158,17 @@ class TestNativeMovementIntent(unittest.TestCase):
 
     def test_intent_moves_before_co_resolving_run_observer_at_native_boundary(self):
         action = self.activate_run_observer()
+        layout = self.candidate.arena_map.layout
+        start = layout.center_position(HexAddress(0, 0))
+        self.player.set_position(start)
+        self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
         public_before = self.session.public_view()
-        start = self.player.get_position()
-        destination = CartesianPosition(start.x + 20.0, start.y, start.z)
+        self.assertEqual(public_before["player"]["cell"], {"column": 0, "row": 0})
+        # Test-only authored clear corridor points toward the adjacent hex
+        # center. No production geometry or clearance is inferred.
+        direction = (3**0.5 / 2, 0.5)
+        destination = CartesianPosition(start.x + direction[0] * 20.0,
+                                        start.y + direction[1] * 20.0, start.z)
         intent = MovementIntent(self.player.id, destination, "walk", "arena-move-1", 1)
         # Action declarations have no adopted demanding/non-demanding flag;
         # this one-second cap is an explicit premise for this fixture.
@@ -172,9 +180,10 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(step.movement_decision_ids, ("arena-move-1",))
         self.assertIn(self.player.id, step.moved_entity_ids)
         self.assertEqual((step.start_time, step.end_time), (0, 1))
-        self.assertAlmostEqual(end.x - start.x, 0.9144)
-        self.assertEqual(end.y, start.y)
+        self.assertAlmostEqual(end.x - start.x, direction[0] * 0.9144)
+        self.assertAlmostEqual(end.y - start.y, direction[1] * 0.9144)
         self.assertEqual(end.z, start.z)
+        self.assertEqual(layout.cell_at_position(end), HexAddress(1, 0))
         self.assertEqual(self.encounter.time, 1)
         result = self.encounter.inspect_committed(1).action(action.id)
         self.assertEqual(result.facts.outcome, "success")
@@ -190,6 +199,8 @@ class TestNativeMovementIntent(unittest.TestCase):
             self.assertNotIn("opponent", projection)
         self.assertEqual(public_after["time_seconds"], 1)
         self.assertAlmostEqual(public_after["player"]["position_meters"]["x"], end.x)
+        self.assertAlmostEqual(public_after["player"]["position_meters"]["y"], end.y)
+        self.assertEqual(public_after["player"]["cell"], {"column": 1, "row": 0})
         self.assertEqual(self.encounter.aware_beings(self.player.id), [])
         self.assertEqual(self.encounter.aware_beings(self.opponent.id), [])
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
