@@ -625,6 +625,43 @@ def _make_plan(encounter,candidate,rng_owner):
     for key,value in new_awareness.items():
         data=encounter.awareness
         plan._add('observers',('attribute',id(data),key),_AttributeWrite(data,key,value,False,None,tuple(data)))
+    # Revision-65 Arena perception is refreshed from the same detached shared
+    # post-movement snapshot. The ledger update is part of this publication,
+    # after movement and custody writes have been prepared and before readers
+    # can observe the committed boundary.
+    from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger, BASIS
+    picked_up_ids = {row.effect.object_id for row in supported.boundary.effects.values()
+                     if type(row.effect) is PickupEffect}
+    for observer_id in encounter.being_list:
+        observer = objects.get(observer_id)
+        if type(observer) is not BeingInstance:
+            continue
+        ledger = object.__getattribute__(observer, '__dict__').get('_arena_perception_ledger')
+        if ledger is None and not encounter.arena_activation_enabled:
+            continue
+        if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != observer_id:
+            raise PublicationRejected('Arena observer perception ledger is missing or misowned')
+        current = dict(ledger._current)
+        history = list(ledger._history)
+        for entity_id, prior in tuple(current.items()):
+            view = candidate.pre_action_snapshot.entities.get(entity_id)
+            if view is None or view.geometry is not None or view.visual_occlusion is not None:
+                raise PublicationRejected('Arena passive perception lacks an unobstructed native snapshot')
+            position = changes['positions'].get(entity_id, view.position)
+            carried = entity_id in picked_up_ids or view.data.get('parent_container_id') is not None
+            state = ('present' if prior.category == 'being' else
+                     'carried' if carried else 'ground' if position is not None else 'unplaced')
+            updated = ArenaPerceptionEvidence(observer_id, entity_id, prior.category,
+                view.data.get('name') or prior.type_key,
+                prior.type_key if prior.category == 'being' else view.obj_type,
+                None if carried else position, state, candidate.boundary,
+                float(candidate.boundary), BASIS)
+            current[entity_id] = updated
+            if (updated.name, updated.type_key, updated.position, updated.present_state) != (
+                    prior.name, prior.type_key, prior.position, prior.present_state):
+                history.append(updated)
+        plan.contents('observers', ledger._current, current)
+        plan.contents('observers', ledger._history, history)
     for aid,proposal in supported.boundary.actions.items():
         action=events[aid]
         plan.attr('lifecycle',action,'resolution',proposal)

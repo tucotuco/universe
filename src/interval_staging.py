@@ -308,7 +308,7 @@ _DATA_MODULES = frozenset(('being','object','weapon','armor','action','activitie
     'melee_defense','group_observation','history_conversation','personal_history','realization',
     'statistical_group','field_observation','field_interpretation','objective_reality','action_choice',
     'transactional_progression','encounter_inspection','atomic_publication','action_evaluation','action_settlement','frozen_practice','scheduling','spatial.state','spatial.geometry','spatial.occlusion','spatial.frame','strategy',
-    'location_observation',
+    'location_observation','arena_perception',
     'skill','states','abilities','exertion','physical_fatigue','physiology_registry','library',
     'ability','experience','condition','encounter','standard_fatigue_check','encounter_fatigue_bridge'))
 

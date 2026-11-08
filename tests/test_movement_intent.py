@@ -329,7 +329,8 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.session._player_action_outcome = result.facts.outcome
         public_after = self.session.public_view()
         public_keys = {"state", "load_available", "encounter_name", "time_seconds", "map",
-                       "player", "player_action", "run_available", "advance_available",
+                       "player", "player_action", "pickup_action", "entities", "selected_entity",
+                       "run_available", "advance_available",
                        "movement_available", "movement_reason", "movement_plan", "movement_outcome",
                        "spot_available", "spot_reason"}
         for projection in (public_before, public_after):
@@ -341,8 +342,8 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertAlmostEqual(public_after["player"]["position_meters"]["x"], end.x)
         self.assertAlmostEqual(public_after["player"]["position_meters"]["y"], end.y)
         self.assertEqual(public_after["player"]["cell"], {"column": 2, "row": 1})
-        self.assertEqual(self.encounter.aware_beings(self.player.id), [])
-        self.assertEqual(self.encounter.aware_beings(self.opponent.id), [])
+        self.assertEqual(self.encounter.aware_beings(self.player.id), [self.opponent.id])
+        self.assertEqual(self.encounter.aware_beings(self.opponent.id), [self.player.id])
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
         self.assertEqual(random.getstate(), self.global_rng)
 
@@ -442,7 +443,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(self.session.public_view(), before_public_view)
         self.assertEqual(self.rng.state, before_rng)
         self.assertEqual(random.getstate(), before_global_rng)
-        self.assertEqual(self.encounter.aware_beings(self.player.id), [])
+        self.assertEqual(self.encounter.aware_beings(self.player.id), [self.opponent.id])
 
         exact = CartesianPosition(start.x + 0.5, start.y, start.z)
         arrival = MovementIntent(self.player.id, exact, "walk", "arrival", 1,

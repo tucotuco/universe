@@ -5,6 +5,8 @@ From the repository root:
   ARENA_TRACE_UI=1 PYTHONPATH=../npc-generator .venv/bin/python examples/generated_arena_browser.py
 """
 from pathlib import Path
+import argparse
+import json
 import os
 import sys
 
@@ -17,10 +19,33 @@ from arena_web import serve_local
 
 
 def main():
-    trace_ui = os.environ.get("ARENA_TRACE_UI") == "1"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--ground-loadout-profile",
+                        help="opt in to a caller-authored local JSON ground-equipment profile")
+    parser.add_argument("--trace-ui", action="store_true",
+                        help="print bounded browser/server/native Arena action traces")
+    args = parser.parse_args()
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535")
+    profile = None
+    if args.ground_loadout_profile:
+        profile_path = Path(args.ground_loadout_profile).resolve()
+        try:
+            profile_path.relative_to(ROOT)
+        except ValueError:
+            parser.error("ground-loadout profile must be inside the repository")
+        if not profile_path.is_file():
+            parser.error("ground-loadout profile file does not exist")
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            parser.error(f"ground-loadout profile is not readable JSON: {exc}")
+    trace_ui = args.trace_ui or os.environ.get("ARENA_TRACE_UI") == "1"
     if trace_ui:
-        print("Arena UI terminal tracing enabled (ARENA_TRACE_UI=1).", flush=True)
-    serve_local(8000, session=GeneratedArenaSession(trace_ui=trace_ui))
+        print("Arena UI terminal tracing enabled.", flush=True)
+    serve_local(args.port, session=GeneratedArenaSession(
+        trace_ui=trace_ui, ground_loadout_profile=profile))
 
 
 if __name__ == "__main__":

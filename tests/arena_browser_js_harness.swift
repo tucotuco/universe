@@ -31,13 +31,14 @@ function __element(id){
   if(!__elements[id]){
     const e={id,value:id==='xp'?'10000':id==='width'?'10':id==='height'?'5':id==='rate'?'walk':'turn',
       disabled:false,textContent:'',listeners:Object.create(null),clientWidth:800,clientHeight:520,
+      children:[],dataset:Object.create(null),replaceChildren(){this.children=[]},appendChild(e){this.children.push(e)},
       addEventListener(name,fn){this.listeners[name]=fn},getContext(){return __canvasContext},
       getBoundingClientRect(){return {left:0,top:0}}};
     __elements[id]=e;
   }
   return __elements[id];
 }
-var document={getElementById:__element};
+var document={getElementById:__element,createElement(tag){return {tagName:tag,textContent:'',dataset:Object.create(null),listeners:Object.create(null),addEventListener(name,fn){this.listeners[name]=fn}}}};
 var window={devicePixelRatio:1,addEventListener:function(){}};
 var __serverState={state:'empty'};
 var __initialView=__INITIAL_VIEW__;
@@ -58,6 +59,11 @@ function fetch(path,options={}){
     __serverState.advance_available=true;__serverState.movement_outcome='destination_selected';
   } else if(path==='/api/generated/advance'){
     __serverState.time_seconds+=1;__serverState.movement_outcome='progressed';
+  } else if(path==='/api/generated/inspect'){
+    __serverState.selected_entity=__serverState.entities.find(e=>e.handle===body.handle)||null;
+    if(__serverState.selected_entity&&__serverState.selected_entity.category==='object')__serverState.selected_entity.pickup_available=true;
+  } else if(path==='/api/generated/pickup'){
+    __serverState.pickup_action={name:'Pick up',status:'executing',outcome:null};
   }
   return Promise.resolve(__response());
 }
@@ -88,8 +94,11 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   const optionRequest=__element('rate').listeners.change();
   const advanceRequest=__element('advance').onclick();
   await Promise.all([optionRequest,advanceRequest]);
+  const visibleObject=__element('entities').children.find(e=>e.textContent.includes('Dagger'));
+  if(visibleObject){await visibleObject.listeners.click();await __element('pickup').onclick();}
   globalThis.__result=JSON.stringify({calls:__calls,plan:currentView.movement_plan,
-    time:currentView.time_seconds,status:__element('movementStatus').textContent,error:__element('error').textContent});
+    time:currentView.time_seconds,status:__element('movementStatus').textContent,error:__element('error').textContent,
+    entityDetails:__element('entityDetails').textContent,pickupStatus:__element('pickupStatus').textContent});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """#
 context.evaluateScript(scenario)

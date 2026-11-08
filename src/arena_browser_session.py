@@ -69,6 +69,8 @@ class GeneratedArenaSession:
         self._rng_cursor = None
         self._player_action_id = None
         self._player_action_outcome = None
+        self._pickup_action_id = None
+        self._pickup_action_outcome = None
         self._movement_plan = None
         self._movement_sequence = 0
         self._movement_outcome = None
@@ -77,6 +79,8 @@ class GeneratedArenaSession:
         # only its existing three Generate fields and has no gear distribution.
         self._ground_item_descriptions = copy.deepcopy(ground_item_descriptions)
         self._ground_loadout_profile = copy.deepcopy(ground_loadout_profile)
+        self._view_handles = {}
+        self._selected_entity_handle = None
 
     @property
     def trace_ui_enabled(self):
@@ -161,6 +165,10 @@ class GeneratedArenaSession:
             }
         candidate = self._active
         player = candidate.participants[0]
+        from arena_perception import ArenaPerceptionLedger
+        ledger = object.__getattribute__(player.native.being, "__dict__").get("_arena_perception_ledger")
+        if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.native.being.id:
+            raise ArenaBrowserRequestError("player perception evidence is unavailable")
         position = player.native.being.get_position()
         address = candidate.arena_map.layout.cell_at_position(position)
         cell = None if address is None else {"column": address.column, "row": address.row}
@@ -168,6 +176,10 @@ class GeneratedArenaSession:
         if self._player_action_id is not None:
             action = {"name": "Run", "status": "completed" if self._player_action_outcome else "executing",
                       "outcome": self._player_action_outcome}
+        pickup_action = None
+        if self._pickup_action_id is not None:
+            pickup_action = {"name": "Pick up", "status": "completed" if self._pickup_action_outcome else "executing",
+                             "outcome": self._pickup_action_outcome}
         movement_plan = None
         movement_available = player.native.being.posture in ("standing", "crouching", "lying")
         movement_available = movement_available and player.native.being.hex_facing is not None
@@ -182,6 +194,26 @@ class GeneratedArenaSession:
                 "facing_policy": self._movement_plan.facing_policy,
                 "remaining_distance_meters": remaining,
             }
+        perceived = []
+        for evidence in ledger.current:
+            handle = self._view_handles.get(evidence.entity_id)
+            if handle is None:
+                handle = secrets.token_urlsafe(18)
+                self._view_handles[evidence.entity_id] = handle
+            p = evidence.position
+            address = None if p is None else candidate.arena_map.layout.cell_at_position(p)
+            perceived.append({
+                "handle": handle, "category": evidence.category,
+                "name": evidence.name, "type": evidence.type_key,
+                "present_state": evidence.present_state,
+                "position_meters": None if p is None else {"x": p.x, "y": p.y, "z": p.z},
+                "cell": None if address is None else {"column": address.column, "row": address.row},
+                "pickup_available": (evidence.category == "object" and evidence.present_state == "ground"
+                    and p is not None and candidate.encounter.initiated
+                    and address == candidate.arena_map.layout.cell_at_position(position)),
+            })
+        selected = next((row for row in perceived
+                         if row["handle"] == self._selected_entity_handle), None)
         return {
             "state": "active",
             "load_available": False,
@@ -199,9 +231,14 @@ class GeneratedArenaSession:
                        "cell": cell,
                        "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
             "player_action": action,
+            "pickup_action": pickup_action,
+            "entities": perceived,
+            "selected_entity": selected,
             "run_available": self._player_action_id is None and not candidate.encounter.initiated,
             "advance_available": ((self._player_action_id is not None
                                     and self._player_action_outcome is None)
+                                   or (self._pickup_action_id is not None
+                                       and self._pickup_action_outcome is None)
                                    or movement_plan is not None),
             "movement_available": movement_available,
             "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
@@ -239,6 +276,8 @@ class GeneratedArenaSession:
                 encounter.set_name("Encounter")
                 candidate.participants[0].native.being.set_name(
                     candidate.participants[0].native.being.name or "Player")
+                from arena_perception import refresh_candidate_names
+                refresh_candidate_names(encounter)
             except ArenaInitializationRefusal as exc:
                 refusal = exc.details.get("refusal", {})
                 message = refusal.get("message", exc.message) if type(refusal) is dict else exc.message
@@ -255,9 +294,13 @@ class GeneratedArenaSession:
             self._rng_cursor = RNGCursor(random.Random(candidate.root_seed).getstate())
             self._player_action_id = None
             self._player_action_outcome = None
+            self._pickup_action_id = None
+            self._pickup_action_outcome = None
             self._movement_plan = None
             self._movement_sequence = 0
             self._movement_outcome = None
+            self._view_handles = {}
+            self._selected_entity_handle = None
             return self._view_unlocked()
 
     def choose_destination(self, payload):
@@ -334,6 +377,70 @@ class GeneratedArenaSession:
             self._player_action_id = action.id
             return self._view_unlocked()
 
+    def inspect_entity(self, payload):
+        from arena_perception import ArenaPerceptionLedger
+        if type(payload) is not dict or set(payload) != {"handle"}:
+            raise ArenaBrowserRequestError("inspection requires one visible entity handle")
+        handle = payload["handle"]
+        with self._lock:
+            if self._active is None or type(handle) is not str:
+                raise ArenaBrowserRequestError("visible entity handle is unavailable")
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            ledger = object.__getattribute__(self._active.participants[0].native.being,
+                                             "__dict__").get("_arena_perception_ledger")
+            if (type(ledger) is not ArenaPerceptionLedger
+                    or ledger.observer_id != self._active.participants[0].native.being.id
+                    or entity_id is None
+                    or entity_id not in {row.entity_id for row in ledger.current}):
+                raise ArenaBrowserRequestError("entity is not supported by current observer evidence")
+            self._selected_entity_handle = handle
+            return self._view_unlocked()
+
+    def choose_pickup(self, payload):
+        from activities import PickUpAction
+        from arena_perception import ArenaPerceptionLedger
+        if type(payload) is not dict or set(payload) != {"handle"}:
+            raise ArenaBrowserRequestError("Pick up requires one visible entity handle")
+        handle = payload["handle"]
+        with self._lock:
+            if self._active is None or type(handle) is not str:
+                raise ArenaBrowserRequestError("visible ground Object handle is unavailable")
+            if self._pickup_action_id is not None and self._pickup_action_outcome is None:
+                raise ArenaBrowserRequestError("a Pick up Action is already resolving")
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            player = self._active.participants[0].native.being
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if (type(ledger) is not ArenaPerceptionLedger
+                    or ledger.observer_id != player.id):
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            if evidence is None or evidence.category != "object" or evidence.present_state != "ground":
+                raise ArenaBrowserRequestError("Pick up requires a currently perceived ground Object")
+            obj = self._active.universe.get_object_by_id(entity_id)
+            if (obj is None or obj.parent_container_id is not None or obj.get_position() is None
+                    or obj.geometry is not None or obj.visual_occlusion is not None):
+                raise ArenaBrowserRequestError("current native Object state does not support this visible ground target")
+            if obj.get_position() != evidence.position:
+                raise ArenaBrowserRequestError("visible Object evidence is stale against current native position")
+            layout = self._active.arena_map.layout
+            player_cell, object_cell = layout.cell_at_position(player.get_position()), layout.cell_at_position(obj.get_position())
+            if player_cell is None or player_cell != object_cell:
+                raise ArenaBrowserRequestError("Pick up requires the player and free ground Object in the same hex")
+            if not self._active.encounter.initiated:
+                raise ArenaBrowserRequestError("activate the native Encounter before choosing Pick up")
+            action = PickUpAction(self._active.encounter, player.id, entity_id,
+                self._active.encounter.time, map_width_cells=self._active.arena_map.width_cells,
+                map_height_cells=self._active.arena_map.height_cells)
+            try:
+                self._active.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError("native Pick up Choice was not accepted; Arena state is unchanged") from exc
+            self._pickup_action_id = action.id
+            self._pickup_action_outcome = None
+            self._selected_entity_handle = handle
+            return self._view_unlocked()
+
     def advance_one_second(self, *, trace_request_id=None, trace_client_sequence=None):
         """Commit exactly the native next boundary for the accepted player decision."""
         with self._lock:
@@ -345,7 +452,7 @@ class GeneratedArenaSession:
             before_position = player.get_position()
             before_cell = self._trace_cell(candidate, before_position)
             accepted_plan = self._movement_plan
-            if self._player_action_id is None and self._movement_plan is None:
+            if self._player_action_id is None and self._pickup_action_id is None and self._movement_plan is None:
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
                                           "refused", reason="no_movement_plan")
@@ -356,6 +463,9 @@ class GeneratedArenaSession:
                                           before_time, before_position, before_cell, None,
                                           "refused", reason="run_choice_resolved")
                 raise ArenaBrowserRequestError("the accepted Run Choice has already resolved")
+            if (self._movement_plan is None and self._pickup_action_id is not None
+                    and self._pickup_action_outcome is not None):
+                raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             try:
                 if self._movement_plan is not None:
                     plan = self._movement_plan
@@ -381,6 +491,12 @@ class GeneratedArenaSession:
                     result = candidate.encounter.inspect_committed(
                         int(candidate.encounter.time)).action(self._player_action_id)
                     self._player_action_outcome = result.facts.outcome
+                if (self._pickup_action_id is not None
+                        and candidate.encounter.time >= 1
+                        and self._pickup_action_outcome is None):
+                    result = candidate.encounter.inspect_committed(
+                        int(candidate.encounter.time)).action(self._pickup_action_id)
+                    self._pickup_action_outcome = result.facts.outcome
             except Exception as exc:
                 after_time = candidate.encounter.time
                 after_position = player.get_position()

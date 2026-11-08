@@ -342,6 +342,8 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         participants.append(ArenaParticipant(
             role, native, placement, seed, facing_seed,
             "arena.initial-facing.v1/private-seed", "arena.initial-posture.v1/scenario"))
+    from arena_perception import initialize_arena_perception
+    initialize_arena_perception(encounter)
     return ArenaInitializationCandidate(
         world, encounter, ArenaMap(width_cells, height_cells, layout), ArenaWorldPremise(), starting_experience,
         root_seed, placement_seed, dict(identity), tuple(participants), tuple(attempts),

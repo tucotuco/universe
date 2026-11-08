@@ -54,6 +54,45 @@ def move_player_to(session, candidate, player, address):
 
 
 class TestArenaGroundPickup(unittest.TestCase):
+    def test_visible_remote_dagger_native_browser_pickup_and_carried_projection(self):
+        session, initial, candidate, player, placement, item = fixture(seed=20261107)
+        visible = next(row for row in initial["entities"] if row["type"] == "Dagger")
+        self.assertEqual(visible["present_state"], "ground")
+        self.assertEqual(visible["cell"], {"column": placement.column, "row": placement.row})
+        self.assertNotIn(item.id, json.dumps(initial))
+        self.assertFalse(visible["pickup_available"])
+        with self.assertRaisesRegex(ValueError, "currently perceived"):
+            session.choose_pickup({"handle": "forged-view-handle"})
+        original_position = item.get_position()
+        item.set_position(player.get_position())
+        with self.assertRaisesRegex(ValueError, "evidence is stale"):
+            session.choose_pickup({"handle": visible["handle"]})
+        item.set_position(original_position)
+        with self.assertRaisesRegex(ValueError, "same hex"):
+            session.choose_pickup({"handle": visible["handle"]})
+
+        inspected = session.inspect_entity({"handle": visible["handle"]})
+        self.assertEqual(inspected["selected_entity"]["name"], "Dagger")
+        move_player_to(session, candidate, player, HexAddress(placement.column, placement.row))
+        at_item = session.public_view()
+        visible = next(row for row in at_item["entities"] if row["handle"] == visible["handle"])
+        self.assertTrue(visible["pickup_available"])
+        accepted = session.choose_pickup({"handle": visible["handle"]})
+        self.assertEqual(accepted["pickup_action"]["status"], "executing")
+        resolved = session.advance_one_second()
+        self.assertEqual(resolved["pickup_action"]["outcome"], "success")
+        carried = next(row for row in resolved["entities"] if row["handle"] == visible["handle"])
+        self.assertEqual(carried["present_state"], "carried")
+        self.assertIsNone(carried["position_meters"])
+        self.assertIsNone(item.spatial_state)
+        self.assertEqual(item.parent_container_id, player.id)
+        ledger = player._arena_perception_ledger
+        history = [row for row in ledger.history if row.entity_id == item.id]
+        self.assertEqual([row.present_state for row in history], ["ground", "carried"])
+        session.generate(GENERATE)
+        with self.assertRaisesRegex(ValueError, "currently perceived"):
+            session.choose_pickup({"handle": visible["handle"]})
+
     def test_generated_dagger_pickup_then_native_movement_carries_same_object(self):
         session, initial, candidate, player, placement, item = fixture()
         self.assertIsInstance(item, WeaponInstance)
@@ -61,7 +100,7 @@ class TestArenaGroundPickup(unittest.TestCase):
         public = json.dumps(initial, sort_keys=True)
         self.assertNotIn(placement.native_object_id, public)
         self.assertNotIn(placement.source_item_id, public)
-        self.assertNotIn("Dagger", public)
+        self.assertIn("Dagger", public)
 
         ground_cell = HexAddress(placement.column, placement.row)
         move_player_to(session, candidate, player, ground_cell)
@@ -88,7 +127,7 @@ class TestArenaGroundPickup(unittest.TestCase):
                          "success")
         self.assertNotIn(item.id, json.dumps(session.public_view(), sort_keys=True))
         self.assertNotIn(placement.source_item_id, json.dumps(session.public_view(), sort_keys=True))
-        self.assertNotIn("Dagger", json.dumps(session.public_view(), sort_keys=True))
+        self.assertIn('"present_state": "carried"', json.dumps(session.public_view(), sort_keys=True))
 
         origin = player.get_position()
         destination = max(candidate.arena_map.layout.addresses(),
@@ -269,6 +308,8 @@ class TestArenaGroundPickup(unittest.TestCase):
         position_before = item.get_position()
         item_state_before = item.spatial_state
         possessions_before = list(player.possessions)
+        evidence_before = (dict(player._arena_perception_ledger._current),
+                           list(player._arena_perception_ledger._history))
         time_before = candidate.encounter.time
         original_apply_phase = _WritePlan.apply_phase
         def fail_after_targets(plan, phase):
@@ -284,6 +325,8 @@ class TestArenaGroundPickup(unittest.TestCase):
         self.assertIs(item.spatial_state, item_state_before)
         self.assertEqual(item.get_position(), position_before)
         self.assertEqual(candidate.encounter.time, time_before)
+        self.assertEqual(player._arena_perception_ledger._current, evidence_before[0])
+        self.assertEqual(player._arena_perception_ledger._history, evidence_before[1])
         candidate.encounter.recover_transactional_progression(
             caught.exception.recovery_token)
         candidate.encounter.step(1)

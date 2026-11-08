@@ -352,7 +352,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             optics = VisualOcclusion(**freeze(native_data(optics, (VisualOcclusion,))))
         data = {'hardness': freeze(cd['hardness']), 'weight': freeze(cd.get('weight')),
                 'parent_container_id': freeze(od.get('parent_container_id')),
-                'discovery_dc': freeze(cd.get('discovery_dc'))}
+                'discovery_dc': freeze(cd.get('discovery_dc')),
+                'name': freeze(od.get('name'))}
         category = 'object'
         if type(obj) is BeingInstance:
             category = 'being'
