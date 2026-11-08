@@ -172,3 +172,33 @@ Remaining context gaps are unchanged: no authoritative terrain/hampering map,
 posture model, direction-to-coordinate mapping, demanding-Action classification,
 generated body geometry, collision/clearance contract, or destination-arrival
 rule. The test premises do not establish production movement legality.
+
+## U-ARENA-004N: facing-policy and demanding-Action audit
+
+Revision 61 permits choosing to change facing while moving and distinguishes
+movement toward the front from movement in other hex-relative directions. The
+generated Being's `front_facing` and `top_facing` integers do not yet form a
+validated twelve-orientation native contract: their constructor comments
+describe a six-direction horizontal value and vertical `up`, the common
+pre-action snapshot omits both fields, and transactional movement stages only
+Cartesian positions. The rules also do not select a target orientation for a
+continuous movement vector that lies between facing directions. Therefore a
+turn-and-move versus maintain-facing choice cannot yet be committed and used
+for rate validation without a new native facing representation/adapter and an
+adopted direction-to-orientation tie rule. The movement preflight continues to
+accept only explicit forward/backward classifications and refuses sideways
+classification; it does not infer facing or rotate a Being.
+
+The ordinary one-yard-per-second cap during another demanding Action is
+already present in r61 and in rate evaluation when its explicit
+`concurrent_demanding_action` condition is true. Native Action declarations
+still have no general demanding classification, so this is not automatically
+enforced for all generated Arena Actions. `RunAction` observes and reports
+displacement created by the Encounter step; it does not itself move the Being.
+The 004L test had treated the co-resolving RunAction as another demanding
+Action and imposed the one-yard cap on the movement being measured. The
+corrected integration premise sets that condition false and verifies ordinary
+walk displacement at 1.75 yd/s (1.6002 m/s). A separate rate test supplies an
+explicit test-only other-demanding-Action premise and verifies a maximum of
+1 yd/s (0.9144 m/s); stricter posture and directional caps continue to lower
+that maximum. No action-wide classifier or facing behavior was introduced.
