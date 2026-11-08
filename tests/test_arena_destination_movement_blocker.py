@@ -1,4 +1,4 @@
-"""Prove the supported boundary between native velocity integration and destination control."""
+"""Regression for the boundary between explicit movement intent and unsupported geometry."""
 
 import inspect
 import json
@@ -22,13 +22,15 @@ import io
 
 
 class TestArenaDestinationMovementBlocker(unittest.TestCase):
-    def test_native_generation_and_apis_have_no_destination_movement_contract(self):
+    def test_spatial_state_remains_position_only_and_intent_requires_explicit_limits(self):
         candidate = initialize_two_being_arena(0, 5, 5, 20261107)
         encounter = candidate.encounter
         player = candidate.participants[0].native.being
         self.assertEqual(SpatialState.__annotations__, {"position": "CartesianPosition"})
         self.assertIn("velocities", inspect.signature(encounter.step).parameters)
         self.assertNotIn("destination", inspect.signature(encounter.step).parameters)
+        self.assertIn("movement_intent", inspect.signature(encounter.step).parameters)
+        self.assertIn("movement_conditions", inspect.signature(encounter.step).parameters)
         self.assertIsNone(encounter.choose_movement())
         self.assertEqual(player.sprint(), 0)
         self.assertNotIn("Run", player.current.skills.skills)

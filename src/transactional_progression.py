@@ -392,12 +392,20 @@ def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
     return descriptor
 
 
-def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_member_candidate=None):
+def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_member_candidate=None,
+                        movement_intent=None,movement_conditions=None):
     from atomic_publication import publication_boundary,publish_interval_candidate
     from interval_staging import _motion
     from encounter import EncounterStep
     assert_not_quarantined(encounter, 'Encounter progression')
     if mode_of(encounter)!='transactional':raise TransactionalProgressionError('explicit transactional selection required')
+    if movement_intent is None and movement_conditions is not None:
+        raise TransactionalProgressionError('movement conditions require a MovementIntent')
+    if movement_intent is not None:
+        if velocities is not None:
+            raise TransactionalProgressionError('MovementIntent and caller-supplied velocities cannot be combined')
+        if duration != 1.0:
+            raise TransactionalProgressionError('MovementIntent applies to exactly one native second')
     binding=_BINDINGS[id(encounter)]
     if not binding.running.acquire(blocking=False):raise TransactionalProgressionError('reentrant/concurrent transactional progression')
     try:
@@ -409,7 +417,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
             raise TransactionalProgressionError('transactional step must end at an exact integer boundary; fractional tails are unsupported')
         if encounter.end_time is not None and end>encounter.end_time:
             raise TransactionalProgressionError('transactional step exceeds Encounter end')
-        completed=[];motion=None
+        completed=[];motion=None;movement_decision_ids=[]
         while encounter.time<end:
             with publication_boundary(encounter,quiescent=True) as ownership:
                 # Reentrant entry checks are private control state, not timeline
@@ -418,7 +426,14 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                 context=_all_declarations(encounter,boundary,binding.rng_owner)
                 if motion is None:
                     positions={key:context.snapshot.entities[key].position for key in context.snapshot.participant_ids}
-                    motion=dict(_motion(positions,velocities,encounter.local_frame,velocity_frame,end-start))
+                    if movement_intent is not None:
+                        from movement_intent import prepare_movement_intent
+                        prepared=prepare_movement_intent(
+                            encounter,movement_intent,movement_conditions,duration=duration)
+                        motion={movement_intent.actor_id:prepared.velocity_meters_per_second}
+                        movement_decision_ids.append(movement_intent.decision_id)
+                    else:
+                        motion=dict(_motion(positions,velocities,encounter.local_frame,velocity_frame,end-start))
                 # The same scope covers validation, staging and publication.
                 if mode_of(encounter)!='transactional':raise TransactionalProgressionError('mode changed')
                 _ROUTED_OWNERSHIP[id(encounter)]=ownership
@@ -432,7 +447,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                     # one interval; later boundaries in a long step are normal.
                     adult_member_candidate=None
                 finally:_ROUTED_OWNERSHIP.pop(id(encounter),None)
-        return EncounterStep(start,end,tuple(motion),tuple(completed))
+        return EncounterStep(start,end,tuple(motion),tuple(completed),tuple(movement_decision_ids))
     finally:binding.running.release()
 
 

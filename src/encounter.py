@@ -94,6 +94,7 @@ class EncounterStep:
     end_time: float
     moved_entity_ids: tuple
     completed_action_ids: tuple
+    movement_decision_ids: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -1171,20 +1172,28 @@ class Encounter(Event):
         self._pending_schedule()
 
     def step(self, duration=1.0, velocities=None, velocity_frame="global", *,
-             adult_member_candidate=None):
+             adult_member_candidate=None, movement_intent=None,
+             movement_conditions=None):
         """Advance fractional kinematics; dispatch only crossed integer boundaries."""
         if self._running:
             raise BoundaryInvariantError('Reentrant progression during run()')
         return self._advance(duration, velocities, velocity_frame,
-                             adult_member_candidate=adult_member_candidate)
+                             adult_member_candidate=adult_member_candidate,
+                             movement_intent=movement_intent,
+                             movement_conditions=movement_conditions)
 
     def _advance(self, duration, velocities=None, velocity_frame="global", *,
-                 adult_member_candidate=None):
+                 adult_member_candidate=None, movement_intent=None,
+                 movement_conditions=None):
         from transactional_progression import assert_not_quarantined, mode_of, step_transactionally
         assert_not_quarantined(self, 'Encounter progression')
         if mode_of(self) == 'transactional':
             return step_transactionally(self, duration, velocities, velocity_frame,
-                adult_member_candidate=adult_member_candidate)
+                adult_member_candidate=adult_member_candidate,
+                movement_intent=movement_intent,
+                movement_conditions=movement_conditions)
+        if movement_intent is not None or movement_conditions is not None:
+            raise BoundaryInvariantError('native movement intents require transactional progression')
         if adult_member_candidate is not None:
             raise BoundaryInvariantError(
                 'adult-member realization is available only through opt-in transactional progression')
