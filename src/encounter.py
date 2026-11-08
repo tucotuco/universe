@@ -82,6 +82,22 @@ class ArenaActionActivation:
                 "choice_id": self.choice_id, "time": self.time,
                 "activation_kind": self.activation_kind}
 
+
+@dataclass(frozen=True)
+class ArenaMovementActivation:
+    """Target-free Arena start record for an accepted native movement plan."""
+
+    encounter_id: str
+    actor_id: str
+    movement_decision_id: str
+    time: float
+    activation_kind: str = "first_player_movement"
+
+    def to_dict(self):
+        return {"encounter_id": self.encounter_id, "actor_id": self.actor_id,
+                "movement_decision_id": self.movement_decision_id, "time": self.time,
+                "activation_kind": self.activation_kind}
+
 @dataclass(frozen=True)
 class EncounterStep:
     """Outcome of one bounded Encounter simulation step.
@@ -140,6 +156,7 @@ class Encounter(Event):
         self.initiated = initiated
         self.arena_activation_enabled = bool(arena_activation_enabled)
         self.arena_activation = None
+        self.arena_movement_activation = None
         self.map = map
         self.set_local_frame(local_frame)
         if time is None:
@@ -968,6 +985,54 @@ class Encounter(Event):
                 book.revision = state["revision"]
                 data = object.__getattribute__(action, "__dict__")
                 data.clear(); data.update(state["action"])
+                raise
+
+    def activate_arena_for_player_movement(self, actor_id, movement_decision_id, *, rng_owner):
+        """Atomically accept a target-free movement plan as first Arena activity.
+
+        This selects native transactional progression without manufacturing an
+        Action or Choice. The accepted movement decision is separately typed
+        from target-directed EncounterInitiation and Action activation.
+        """
+        from atomic_publication import publication_boundary
+        from transactional_progression import _enable_transactional_progression_owned
+
+        if not self.arena_activation_enabled:
+            raise RuntimeError("target-free movement activation is unavailable for this Encounter")
+        if (self.initiated or self.arena_activation is not None
+                or self.arena_movement_activation is not None or self.initiation is not None):
+            raise RuntimeError("Arena Encounter is already activated")
+        if (type(actor_id) is not str or not actor_id or self.get_being(actor_id) is None
+                or type(movement_decision_id) is not str or not movement_decision_id.strip()
+                or self.time != self.start_time):
+            raise ValueError("first Arena movement requires a participating actor, decision ID, and start-time plan")
+
+        book = self._choice_book
+        with publication_boundary(self, quiescent=True), book.lock:
+            self._assert_timeline()
+            if (self.initiated or self.arena_activation is not None
+                    or self.arena_movement_activation is not None or self.initiation is not None
+                    or self.pending_action_list or book._choices or book._drafts or book._registered):
+                raise RuntimeError("Arena movement activation requires a pristine unstarted timeline")
+            state = {"initiated": self.initiated,
+                     "activation": self.arena_movement_activation,
+                     "transactional_mode": object.__getattribute__(self, "__dict__").get("_transactional_mode")}
+            record = ArenaMovementActivation(self.id, actor_id, movement_decision_id, self.time)
+            try:
+                self.initiated = True
+                self.arena_movement_activation = record
+                _enable_transactional_progression_owned(self, rng_owner=rng_owner)
+                return record
+            except BaseException:
+                import transactional_progression as tp
+                binding = tp._BINDINGS.get(id(self))
+                if binding is not None and binding.mode.encounter_identity == id(self):
+                    tp._BINDINGS.pop(id(self), None)
+                object.__getattribute__(self, "__dict__").pop("_transactional_mode", None)
+                if state["transactional_mode"] is not None:
+                    object.__getattribute__(self, "__dict__")["_transactional_mode"] = state["transactional_mode"]
+                self.initiated = state["initiated"]
+                self.arena_movement_activation = state["activation"]
                 raise
 
     def cancel_action(self, action_id, *, reason='interrupted'):

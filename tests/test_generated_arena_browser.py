@@ -2,6 +2,7 @@
 
 import json
 import io
+import math
 from pathlib import Path
 import random
 import sys
@@ -17,6 +18,9 @@ from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSessio
 from arena_web import ArenaSession, make_handler
 from atomic_publication import RNGCursor
 from attention_intent import accept_spot_attention
+from arena_hex_map import HexAddress
+from spatial.state import CartesianPosition
+from hex_facing import nearest_facing
 
 
 class TestGeneratedArenaBrowser(unittest.TestCase):
@@ -59,6 +63,11 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn('id="load" disabled', page)
         self.assertIn('id="generate" disabled', page)
         self.assertIn('id="spot" disabled', page)
+        self.assertIn('id="rate"', page)
+        self.assertIn('id="facingPolicy"', page)
+        self.assertIn('id="stop"', page)
+        self.assertIn("/api/generated/destination", page)
+        self.assertIn("/api/generated/stop", page)
         self.assertIn('hex_vertex_offsets_meters', page)
         self.assertIn('ctx.closePath()', page)
         self.assertNotIn("p.column+.5", page)
@@ -85,8 +94,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "terrain": "Plains", "route": "Road", "terrain_multiplier": 1.0,
             "hampered_multiplier": 1.0, "unobstructed": True,
             "collision_adjudicated": False})
-        self.assertFalse(state["movement_available"])
-        self.assertIn("no adopted native posture field", state["movement_reason"])
+        self.assertTrue(state["movement_available"])
         self.assertFalse(state["spot_available"])
         candidate = self.session.active_candidate
         self.assertEqual(candidate.encounter.time, 0)
@@ -95,6 +103,11 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                             candidate.participants[1].native.being.id)
         player_participant, hidden_participant = candidate.participants
         self.assertEqual(state["player"]["hex_facing"], player_participant.native.being.hex_facing)
+        self.assertEqual(state["player"]["posture"], "standing")
+        self.assertEqual(state["player"]["posture_source"],
+                         "arena.initial-posture.v1/scenario")
+        self.assertEqual(player_participant.native.being.posture, "standing")
+        self.assertEqual(hidden_participant.native.being.posture, "standing")
         self.assertTrue(0 <= state["player"]["hex_facing"] < 12)
         self.assertEqual(state["player"]["cell"], {
             "column": player_participant.placement.column,
@@ -110,7 +123,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             self.assertNotIn(forbidden, encoded)
         self.assertNotIn(hidden_participant.native.being.id, encoded)
         self.assertEqual(set(state["player"]),
-                         {"name", "hex_facing", "cell", "position_meters"})
+                         {"name", "hex_facing", "posture", "posture_source",
+                          "cell", "position_meters"})
         hidden_position = hidden_participant.native.being.get_position()
         hidden_position_payload = json.dumps({"x": hidden_position.x,
                                               "y": hidden_position.y,
@@ -239,6 +253,34 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(self.session._rng_cursor.state, rng_state)
         self.assertEqual(self.session.public_view(), before_view)
 
+    def test_movement_activation_rolls_back_without_choice_or_rng_changes(self):
+        from unittest.mock import patch
+
+        self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player = candidate.participants[0].native.being
+        before_view = self.session.public_view()
+        before_history = dict(candidate.universe.event_history)
+        before_choices = dict(encounter._choice_book._choices)
+        before_revision = encounter._choice_book.revision
+        rng_state = self.session._rng_cursor.state
+        with patch("transactional_progression._enable_transactional_progression_owned",
+                   side_effect=RuntimeError("injected pre-commit abort")):
+            with self.assertRaises(ArenaBrowserRequestError):
+                self.session.choose_destination({"column": 4, "row": 4,
+                    "rate": "walk", "facing_policy": "turn"})
+        self.assertFalse(encounter.initiated)
+        self.assertIsNone(encounter.arena_movement_activation)
+        self.assertIsNone(encounter.arena_activation)
+        self.assertIsNone(encounter.initiation)
+        self.assertEqual(encounter.time, 0)
+        self.assertEqual(candidate.universe.event_history, before_history)
+        self.assertEqual(encounter._choice_book._choices, before_choices)
+        self.assertEqual(encounter._choice_book.revision, before_revision)
+        self.assertEqual(self.session._rng_cursor.state, rng_state)
+        self.assertEqual(self.session.public_view(), before_view)
+
     def test_generated_run_choice_activates_then_commits_one_native_second(self):
         self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
         candidate = self.session.active_candidate
@@ -280,6 +322,126 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         before = self.session.public_view()
         self.assertNotEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
         self.assertEqual(self.session.public_view(), before)
+
+    def test_destination_movement_activates_without_action_and_arrives_from_native_commits(self):
+        self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, hidden = candidate.participants
+        being = player.native.being
+        start = being.get_position()
+        layout = candidate.arena_map.layout
+        addresses = [HexAddress(column, row)
+                     for column in range(candidate.arena_map.width_cells)
+                     for row in range(candidate.arena_map.height_cells)]
+        target_address = max(addresses, key=lambda address: math.dist(
+            start.as_tuple(), layout.center_position(address, z=start.z).as_tuple()))
+        target = layout.center_position(target_address, z=start.z)
+        self.assertGreater(math.dist(start.as_tuple(), target.as_tuple()), 0)
+        expected_facing = nearest_facing((target.x - start.x, target.y - start.y,
+                                           target.z - start.z))
+        before_history = dict(candidate.universe.event_history)
+        before_choices = dict(encounter._choice_book._choices)
+        before_awareness = (encounter.aware_beings(being.id),
+                            encounter.aware_beings(hidden.native.being.id))
+        before_rng = self.session._rng_cursor.state
+        before_global_rng = random.getstate()
+
+        status, selected = self.request("/api/generated/destination", {
+            "column": target_address.column, "row": target_address.row,
+            "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200)
+        self.assertEqual(encounter.time, 0)
+        self.assertTrue(encounter.initiated)
+        self.assertEqual(encounter.progression_mode, "transactional")
+        activation = encounter.arena_movement_activation
+        self.assertEqual(activation.actor_id, being.id)
+        self.assertEqual(activation.movement_decision_id, "arena-movement-1")
+        self.assertEqual(activation.time, 0)
+        self.assertIsNone(encounter.arena_activation)
+        self.assertIsNone(encounter.initiation)
+        self.assertEqual(candidate.universe.event_history, before_history)
+        self.assertEqual(encounter._choice_book._choices, before_choices)
+        self.assertEqual(before_awareness, (encounter.aware_beings(being.id),
+                                           encounter.aware_beings(hidden.native.being.id)))
+        self.assertTrue(selected["advance_available"])
+        self.assertEqual(selected["movement_plan"]["rate"], "walk")
+        self.assertNotIn(hidden.native.being.id, json.dumps(selected))
+
+        committed = []
+        while self.session.public_view()["movement_plan"] is not None:
+            before = being.get_position()
+            status, view = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200)
+            after = being.get_position()
+            committed.append(after)
+            self.assertEqual(view["player"]["position_meters"],
+                             {"x": after.x, "y": after.y, "z": after.z})
+            self.assertGreater((after.x - before.x) ** 2 + (after.y - before.y) ** 2, 0)
+            self.assertEqual(view["time_seconds"], encounter.time)
+            self.assertNotIn(hidden.native.being.id, json.dumps(view))
+            if len(committed) == 1:
+                self.assertEqual(being.hex_facing, expected_facing)
+        final = self.session.public_view()
+        self.assertGreater(len(committed), 1)
+        self.assertEqual(being.get_position(), target)
+        self.assertEqual(final["player"]["position_meters"],
+                         {"x": target.x, "y": target.y, "z": target.z})
+        self.assertEqual(final["player"]["cell"], {
+            "column": target_address.column, "row": target_address.row})
+        self.assertEqual(final["movement_outcome"], "arrived")
+        self.assertIsNone(final["movement_plan"])
+        self.assertEqual(encounter.aware_beings(being.id), [])
+        self.assertEqual(encounter.aware_beings(hidden.native.being.id), [])
+        self.assertEqual(encounter._choice_book._choices, {})
+        self.assertEqual(self.session._rng_cursor.state, before_rng)
+        self.assertEqual(random.getstate(), before_global_rng)
+
+    def test_destination_can_be_changed_or_stopped_at_a_committed_boundary(self):
+        self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        being = candidate.participants[0].native.being
+        start = candidate.arena_map.layout.center_position(HexAddress(0, 0))
+        being.set_position(start)
+        being.set_hex_facing(0)
+        self.request("/api/generated/destination", {
+            "column": 4, "row": 4, "rate": "walk", "facing_policy": "maintain"})
+        self.request("/api/generated/advance", {"seconds": 1})
+        committed = being.get_position()
+        status, changed = self.request("/api/generated/destination", {
+            "column": 0, "row": 4, "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200)
+        self.assertEqual(being.get_position(), committed)
+        self.assertEqual(changed["movement_plan"]["destination_cell"], {"column": 0, "row": 4})
+        self.assertEqual(changed["movement_plan"]["facing_policy"], "turn")
+        self.assertEqual(changed["time_seconds"], 1)
+        status, stopped = self.request("/api/generated/stop", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(being.get_position(), committed)
+        self.assertIsNone(stopped["movement_plan"])
+        self.assertEqual(stopped["movement_outcome"], "stopped")
+        before = self.session.public_view()
+        self.assertNotEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(self.session.public_view(), before)
+
+    def test_unknown_posture_rejects_destination_without_activation_or_publication(self):
+        self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        being = candidate.participants[0].native.being
+        being.set_posture(None)
+        before = self.session.public_view()
+        with self.assertRaises(ArenaBrowserRequestError):
+            self.session.choose_destination({"column": 4, "row": 4,
+                                             "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(self.session.public_view(), before)
+        self.assertFalse(encounter.initiated)
+        self.assertIsNone(encounter.arena_movement_activation)
+        self.assertEqual(encounter.time, 0)
+        self.assertEqual(encounter._choice_book._choices, {})
 
     def test_native_spot_proof_fails_closed_without_generated_geometry(self):
         self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})

@@ -6,10 +6,14 @@ import re
 import random
 import secrets
 import threading
+import math
+from dataclasses import dataclass
 
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
 from activities import RunAction
 from atomic_publication import RNGCursor
+from arena_hex_map import HexAddress
+from movement_intent import MovementIntent, MovementRateConditions
 
 
 _DECIMAL = re.compile(r"[0-9]+\Z")
@@ -18,9 +22,18 @@ _SPOT_DISABLED = (
     "the generated candidate has none and resolves as unmodeled_target."
 )
 _MOVEMENT_DISABLED = (
-    "Destination movement is unavailable: generated Being state has no adopted native posture field, "
-    "so the r61 posture movement limit cannot be determined."
+    "Destination movement is unavailable because the player's native posture or facing is unknown."
 )
+_RATES = frozenset(("walk", "hustle", "jog", "run", "sprint"))
+
+
+@dataclass(frozen=True)
+class _MovementPlan:
+    decision_id: str
+    destination: object
+    address: HexAddress
+    rate: str
+    facing_policy: str
 
 
 class ArenaBrowserRequestError(ValueError):
@@ -52,6 +65,9 @@ class GeneratedArenaSession:
         self._rng_cursor = None
         self._player_action_id = None
         self._player_action_outcome = None
+        self._movement_plan = None
+        self._movement_sequence = 0
+        self._movement_outcome = None
 
     @property
     def active_candidate(self):
@@ -80,6 +96,20 @@ class GeneratedArenaSession:
         if self._player_action_id is not None:
             action = {"name": "Run", "status": "completed" if self._player_action_outcome else "executing",
                       "outcome": self._player_action_outcome}
+        movement_plan = None
+        movement_available = player.native.being.posture in ("standing", "crouching", "lying")
+        movement_available = movement_available and player.native.being.hex_facing is not None
+        if self._movement_plan is not None:
+            target = self._movement_plan.destination
+            remaining = math.dist(position.as_tuple(), target.as_tuple())
+            movement_plan = {
+                "destination_cell": {"column": self._movement_plan.address.column,
+                                     "row": self._movement_plan.address.row},
+                "destination_position_meters": {"x": target.x, "y": target.y, "z": target.z},
+                "rate": self._movement_plan.rate,
+                "facing_policy": self._movement_plan.facing_policy,
+                "remaining_distance_meters": remaining,
+            }
         return {
             "state": "active",
             "load_available": False,
@@ -92,14 +122,19 @@ class GeneratedArenaSession:
                     **candidate.arena_map.public_geometry()},
             "player": {"name": self._player_name,
                        "hex_facing": player.native.being.hex_facing,
+                       "posture": player.native.being.posture,
+                       "posture_source": player.posture_provenance,
                        "cell": cell,
                        "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
             "player_action": action,
-            "run_available": self._player_action_id is None,
-            "advance_available": self._player_action_id is not None
-                and self._player_action_outcome is None and candidate.encounter.time == 0,
-            "movement_available": False,
-            "movement_reason": _MOVEMENT_DISABLED,
+            "run_available": self._player_action_id is None and not candidate.encounter.initiated,
+            "advance_available": ((self._player_action_id is not None
+                                    and self._player_action_outcome is None)
+                                   or movement_plan is not None),
+            "movement_available": movement_available,
+            "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
+            "movement_plan": movement_plan,
+            "movement_outcome": self._movement_outcome,
             "spot_available": False,
             "spot_reason": _SPOT_DISABLED,
         }
@@ -146,6 +181,62 @@ class GeneratedArenaSession:
             self._rng_cursor = RNGCursor(random.Random(candidate.root_seed).getstate())
             self._player_action_id = None
             self._player_action_outcome = None
+            self._movement_plan = None
+            self._movement_sequence = 0
+            self._movement_outcome = None
+            return self._view_unlocked()
+
+    def choose_destination(self, payload):
+        if type(payload) is not dict or set(payload) != {"column", "row", "rate", "facing_policy"}:
+            raise ArenaBrowserRequestError(
+                "destination requires exactly column, row, rate, and facing_policy")
+        column, row = payload["column"], payload["row"]
+        if type(column) is not int or type(row) is not int:
+            raise ArenaBrowserRequestError("destination cell coordinates must be native integers")
+        rate, facing_policy = payload["rate"], payload["facing_policy"]
+        if type(rate) is not str or rate not in _RATES:
+            raise ArenaBrowserRequestError("rate must be Walk, Hustle, Jog, Run, or Sprint")
+        if type(facing_policy) is not str or facing_policy not in ("turn", "maintain"):
+            raise ArenaBrowserRequestError("facing_policy must be turn or maintain")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing a destination")
+            candidate = self._active
+            layout = candidate.arena_map.layout
+            address = HexAddress(column, row)
+            if not layout.contains(address):
+                raise ArenaBrowserRequestError("destination cell is outside the generated hex footprint")
+            player = candidate.participants[0].native.being
+            if not self._view_unlocked()["movement_available"]:
+                raise ArenaBrowserRequestError(_MOVEMENT_DISABLED)
+            current = player.get_position()
+            destination = layout.center_position(address, z=current.z)
+            if destination == current:
+                self._movement_plan = None
+                self._movement_outcome = "already_at_destination"
+                return self._view_unlocked()
+            decision_id = f"arena-movement-{self._movement_sequence + 1}"
+            if not candidate.encounter.initiated:
+                try:
+                    candidate.encounter.activate_arena_for_player_movement(
+                        player.id, decision_id, rng_owner=self._rng_cursor)
+                except Exception as exc:
+                    raise ArenaBrowserRequestError(
+                        "native movement Choice was not accepted; Arena state is unchanged") from exc
+            self._movement_sequence += 1
+            self._movement_plan = _MovementPlan(decision_id, destination, address,
+                                                rate, facing_policy)
+            self._movement_outcome = "destination_selected"
+            return self._view_unlocked()
+
+    def stop_movement(self, payload):
+        if type(payload) is not dict or payload:
+            raise ArenaBrowserRequestError("Stop accepts an empty request")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before stopping movement")
+            self._movement_plan = None
+            self._movement_outcome = "stopped"
             return self._view_unlocked()
 
     def choose_run(self):
@@ -156,6 +247,8 @@ class GeneratedArenaSession:
             if self._player_action_id is not None:
                 raise ArenaBrowserRequestError("the first player Action has already been chosen")
             candidate = self._active
+            if candidate.encounter.initiated:
+                raise ArenaBrowserRequestError("the Arena timeline has already been activated")
             player = candidate.participants[0].native.being
             action = RunAction(candidate.universe, player.id, candidate.encounter.time,
                                duration=1, minimum_distance=0.1, experience=0)
@@ -168,20 +261,60 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def advance_one_second(self):
-        """Commit exactly the native next boundary for the accepted Run Choice."""
+        """Commit exactly the native next boundary for the accepted player decision."""
         with self._lock:
-            if self._active is None or self._player_action_id is None:
-                raise ArenaBrowserRequestError("choose Run before advancing the Encounter")
+            if self._active is None or (self._player_action_id is None and self._movement_plan is None):
+                raise ArenaBrowserRequestError("choose a destination or an explicit Run Choice before advancing")
+            if (self._movement_plan is None and self._player_action_id is not None
+                    and self._player_action_outcome is not None):
+                raise ArenaBrowserRequestError("the accepted Run Choice has already resolved")
             candidate = self._active
-            if candidate.encounter.time != 0 or self._player_action_outcome is not None:
-                raise ArenaBrowserRequestError("this Arena supports one committed first-player second")
             try:
-                candidate.encounter.step(1)
-                result = candidate.encounter.inspect_committed(1).action(self._player_action_id)
-                self._player_action_outcome = result.facts.outcome
+                if self._movement_plan is not None:
+                    plan = self._movement_plan
+                    conditions = self._movement_conditions(candidate)
+                    next_boundary = candidate.encounter.last_processed_boundary + 1
+                    intent = MovementIntent(
+                        candidate.participants[0].native.being.id, plan.destination,
+                        plan.rate, f"{plan.decision_id}:boundary:{next_boundary}", next_boundary,
+                        facing_policy=plan.facing_policy)
+                    candidate.encounter.step(1, movement_intent=intent,
+                                             movement_conditions=conditions)
+                    position = candidate.participants[0].native.being.get_position()
+                    if position == plan.destination:
+                        self._movement_plan = None
+                        self._movement_outcome = "arrived"
+                    else:
+                        self._movement_outcome = "progressed"
+                else:
+                    candidate.encounter.step(1)
+                if (self._player_action_id is not None
+                        and candidate.encounter.time >= 1
+                        and self._player_action_outcome is None):
+                    result = candidate.encounter.inspect_committed(
+                        int(candidate.encounter.time)).action(self._player_action_id)
+                    self._player_action_outcome = result.facts.outcome
             except Exception as exc:
-                raise ArenaBrowserRequestError("native one-second advancement failed") from exc
+                raise ArenaBrowserRequestError(
+                    "native one-second advancement failed; committed Arena state is unchanged") from exc
             return self._view_unlocked()
+
+    @staticmethod
+    def _movement_conditions(candidate):
+        from activities import RunAction
+        from movement_intent import MovementIntentRefusal
+
+        for action_id in candidate.encounter.pending_action_list:
+            action = candidate.universe.event_history.get(action_id)
+            if type(action) is not RunAction:
+                raise MovementIntentRefusal(
+                    "unknown_action_demand", "movement cannot classify another active Action's demand")
+        premise = candidate.world_premise
+        return MovementRateConditions(
+            terrain_multiplier=premise.terrain_multiplier,
+            hampered_multiplier=premise.hampered_multiplier,
+            direction=None,
+            concurrent_demanding_action=False)
 
     def rename_encounter(self, payload):
         if type(payload) is not dict or set(payload) != {"name"}:
