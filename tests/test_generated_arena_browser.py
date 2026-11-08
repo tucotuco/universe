@@ -147,6 +147,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         player, hidden = candidate.participants
         self.assertIsNone(player.native.being.geometry)
         self.assertIsNone(hidden.native.being.geometry)
+        # This explicit flag isolates the geometry gate in this test. It is
+        # not a generated-Arena activation path or an initiation proof.
         encounter.initiated = True
         cursor = RNGCursor(random.Random(17).getstate())
         encounter.enable_transactional_progression(quiescent=True, rng_owner=cursor)
