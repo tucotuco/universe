@@ -43,7 +43,8 @@ _NATIVE_GRAPHS = WeakKeyDictionary()
 _SUPPORTED_TAGS = frozenset({
     'universe.Universe', 'library.Library', 'being.BeingDictionary',
     'skill.SkillDictionary', 'being.BeingDefinition', 'being.BeingInstance',
-    'encounter.Encounter', 'event.Event', 'action_choice.ChoiceBook',
+    'encounter.Encounter', 'encounter.EncounterInitiation',
+    'encounter.ArenaActionActivation', 'event.Event', 'action_choice.ChoiceBook',
     'object.ObjectRegistry', 'actiondictionary.ActionDictionary',
     'armor.ArmorDictionary', 'object.ObjectDictionary', 'weapon.WeaponDictionary',
     'abilities.Abilities', 'speeds.Speed',
@@ -422,11 +423,12 @@ def reconstruct_initial_run_spot(decoded):
         Identifiable.__init__(instance, scalar_field(instance_ref, fields, 'name'), id=object_id)
         instance.current = current
         _need(instance.current is not instance.original, 'current Being state must be detached from definition')
-        for field in ('top_facing', 'front_facing', 'hex_facing', 'parent_container_id', 'physiology_id',
+        for field in ('top_facing', 'front_facing', 'parent_container_id', 'physiology_id',
                       'fatigue_level', 'effective_fitness', 'skill_experience',
                       '_skill_practice_baselines', 'possessions', 'weapons'):
             if field in fields:
                 setattr(instance, field, graph.value(fields[field]))
+        instance.set_hex_facing(graph.data(fields['hex_facing']))
         for field, setter in (('spatial_state', 'set_spatial_state'),
                                ('geometry', 'set_geometry'),
                                ('visual_occlusion', 'set_visual_occlusion')):
@@ -738,6 +740,9 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
         _need(graph.data(values['id']) == logical_id and
               graph.data(values['type']) == 'BeingInstance',
               'Being logical identity or native type field is inconsistent')
+        facing = graph.data(values['hex_facing'])
+        _need(facing is None or type(facing) is int and 0 <= facing < 12,
+              'Being hex facing must be null or an integer from 0 through 11')
         _need(graph.data(values['personal_history']) is None,
               'personal-history reconstruction is unsupported')
         for name in ('skill_use_history', 'possessions', 'weapons'):
@@ -763,6 +768,15 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
               'Being current state aliases its Library definition')
 
     encounter_fields = fields('encounter.Encounter')
+    arena_enabled = graph.data(encounter_fields['arena_activation_enabled'])
+    _need(type(arena_enabled) is bool,
+          'Arena activation-enabled state is not a native Boolean')
+    _need(encounter_fields['arena_activation'] == ('null',),
+          'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+    _need(encounter_fields['initiation'] == ('null',),
+          'target-directed Encounter initiation is outside the bounded checkpoint subset')
+    _need(not arena_enabled,
+          'Arena activation-enabled Encounter is outside the initiated Run/Spot checkpoint subset')
     _need(graph.data(encounter_fields['id']) == encounter_id,
           'Encounter logical identity mismatch')
     start = graph.data(encounter_fields['start_time'])

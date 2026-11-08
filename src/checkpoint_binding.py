@@ -325,6 +325,15 @@ def bind_quarantined_run_boundary(decoded, projection=None):
           'wire roots do not identify the native Universe and Encounter')
     universe_fields = graph.fields(universe_ref)[1]
     encounter_fields = graph.fields(encounter_ref)[1]
+    arena_enabled = graph.data(encounter_fields['arena_activation_enabled'])
+    _need(type(arena_enabled) is bool,
+          'Arena activation-enabled state is not a native Boolean')
+    _need(encounter_fields['arena_activation'] == ('null',),
+          'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+    _need(encounter_fields['initiation'] == ('null',),
+          'target-directed Encounter initiation is outside the bounded checkpoint subset')
+    _need(not arena_enabled,
+          'Arena activation-enabled Encounter is outside the initiated Run/Spot checkpoint subset')
     _need(graph.data(encounter_fields['time']) == projection.boundary
           and graph.data(encounter_fields['last_processed_boundary']) == projection.boundary
           and graph.data(encounter_fields['start_time']) == _data_number(projection.start, 'boundary start'),
@@ -514,6 +523,9 @@ def bind_quarantined_run_boundary(decoded, projection=None):
             'top_facing', 'type', 'visual_occlusion', 'weapons'}
         _need(set(fields) == expected_instance_fields,
               'Being has missing or unsupported current-state fields')
+        facing = graph.data(fields['hex_facing'])
+        _need(facing is None or type(facing) is int and 0 <= facing < 12,
+              'Being hex facing must be null or an integer from 0 through 11')
         name = graph.data(fields['name'])
         _need(type(name) is str and name,
               'Being identity has no supported display name')
@@ -531,11 +543,12 @@ def bind_quarantined_run_boundary(decoded, projection=None):
         # state are rebuilt by _Graph.native, while instance fields are copied
         # from the closed inventory. No Action or practice is replayed.
         native.current = current
-        for field in ('top_facing', 'front_facing', 'hex_facing', 'parent_container_id',
+        for field in ('top_facing', 'front_facing', 'parent_container_id',
                       'physiology_id', 'fatigue_level', 'effective_fitness',
                       'skill_experience', '_skill_practice_baselines',
                       'possessions', 'weapons'):
             setattr(native, field, graph.value(fields[field]))
+        native.set_hex_facing(facing)
         for field, setter in (('spatial_state', 'set_spatial_state'),
                               ('geometry', 'set_geometry'),
                               ('visual_occlusion', 'set_visual_occlusion')):

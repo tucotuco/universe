@@ -29,7 +29,8 @@ from universe import Universe
 from weapon import WeaponDictionary
 
 
-def build_source(*, future=False):
+def build_source(*, future=False, arena_activation_enabled=False, initiated=True,
+                 facings=None):
     library = Library(load_definitions=False)
     library.action_dictionary = ActionDictionary()
     library.armor_dictionary = ArmorDictionary()
@@ -50,13 +51,17 @@ def build_source(*, future=False):
     world = Universe('5D2C6 fixture', library)
     observer = world.get_object_by_id(world.make_being('Observer', 'Observer'))
     target = world.get_object_by_id(world.make_being('Target', 'Target'))
+    facings = {} if facings is None else facings
+    observer.set_hex_facing(facings.get('Observer'))
+    target.set_hex_facing(facings.get('Target'))
     observer.set_position(CartesianPosition(0.125, 0, 0))
     target.set_position(CartesianPosition(1.25, 0, 0))
     target.set_geometry(Sphere(0.75))
     observer.physical_fatigue = PhysicalFatigueState(.73, .61)
     observer.skill_experience['spot'] = 17
     observer.current.skills.skills['spot'] = 2
-    encounter = Encounter(world, 11, 0, initiated=True)
+    encounter = Encounter(world, 11, 0, initiated=initiated,
+                          arena_activation_enabled=arena_activation_enabled)
     world.add_event(encounter)
     encounter.add_being(observer.id)
     encounter.add_being(target.id)
@@ -74,12 +79,24 @@ def build_source(*, future=False):
     return world, encounter, cursor, envelope, actions
 
 
-def source_wire(future=False):
-    _, _, _, envelope, _ = build_source(future=future)
+def source_wire(future=False, facings=None):
+    _, _, _, envelope, _ = build_source(future=future, facings=facings)
     return encode_run_spot_envelope(envelope)
 
 
 class TestInitialNativeReconstruction(unittest.TestCase):
+    def test_inactive_encounter_and_both_facing_states_round_trip(self):
+        source_world, source_encounter, _, envelope, _ = build_source(
+            facings={'Observer': 11, 'Target': None})
+        decoded = decode_run_spot_wire(encode_run_spot_envelope(envelope))
+        result = reconstruct_initial_run_spot(decoded)
+        native_world, native_encounter, _ = _NATIVE_GRAPHS[result]
+        self.assertFalse(native_encounter.arena_activation_enabled)
+        self.assertTrue(native_encounter.initiated)
+        self.assertIsNone(native_encounter.arena_activation)
+        self.assertEqual(native_world.get_object_by_id(source_encounter.being_list[0]).hex_facing, 11)
+        self.assertIsNone(native_world.get_object_by_id(source_encounter.being_list[1]).hex_facing)
+
     def test_identity_topology_numeric_state_rng_and_quarantine(self):
         source_world, source_encounter, source_rng, envelope, _ = build_source()
         wire = encode_run_spot_envelope(envelope)
@@ -212,7 +229,7 @@ class TestInitialNativeReconstruction(unittest.TestCase):
         self.assertEqual(legacy_encounter.time, .25)
 
     def test_separate_process_decode_and_reconstruction_after_source_process_encoding(self):
-        wire = source_wire(future=True)
+        wire = source_wire(future=True, facings={'Observer': 2, 'Target': None})
         source_data = decode_run_spot_wire(wire).envelope_data
         source_sections = {row[0]: row[1:] for row in source_data[5][1:]}
         source_nodes = source_sections['nodes'][0]
@@ -225,15 +242,18 @@ class TestInitialNativeReconstruction(unittest.TestCase):
 import json,sys
 sys.path.insert(0, sys.argv[1])
 from checkpoint_wire import decode_run_spot_wire
-from checkpoint_reconstruction import reconstruct_initial_run_spot
+from checkpoint_reconstruction import reconstruct_initial_run_spot, _NATIVE_GRAPHS
 r = reconstruct_initial_run_spot(decode_run_spot_wire(sys.stdin.buffer.read()))
 assert r.quarantined and not hasattr(r, 'encounter') and not hasattr(r, 'universe')
+world, encounter, _rng = _NATIVE_GRAPHS[r]
 v = r.view
 print(json.dumps({"encounter": v.encounter_id,
  "beings": sorted(v.being_ids), "time": v.encounter_time,
  "choices": [row[1] for row in v.accepted_choices],
  "actions": [row.logical_id for row in v.actions],
  "positions": {row.logical_id: row.position for row in v.beings},
+ "facings": [world.get_object_by_id(identity).hex_facing
+             for identity in encounter.being_list],
  "qb": {row.logical_id: row.physical_fatigue for row in v.beings},
  "rng_state_version": v.rng_state[0]}))
 '''
@@ -245,6 +265,7 @@ print(json.dumps({"encounter": v.encounter_id,
         self.assertEqual(output['beings'], expected_ids)
         self.assertEqual(output['choices'], expected_choice_ids)
         self.assertEqual(output['actions'], expected_action_ids)
+        self.assertEqual(output['facings'], [2, None])
         self.assertCountEqual([tuple(value) for value in output['positions'].values()],
                               [(0.125, 0.0, 0.0), (1.25, 0.0, 0.0)])
         self.assertIn((.73, .61),

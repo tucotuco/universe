@@ -233,3 +233,27 @@ General save/replay compatibility remains a separate concern. Generated
 Arena initialization still leaves facing unknown, so generated destination
 movement remains unavailable until a lawful authored initial facing and the
 remaining terrain, posture, clearance, and arrival inputs are supplied.
+
+## U-ARENA-004P: bounded checkpoint contract after Arena activation and facing
+
+The existing Run/Spot checkpoint inventory now names both Encounter Arena
+activation fields and the target-free `ArenaActionActivation` record, and the
+Being inventory includes `hex_facing`. The checkpoint closure explicitly
+classifies all Encounter fields and binds Being facing into the closure
+certificate. `arena_activation_enabled` must be an exact Boolean. This
+checkpoint path accepts only the existing initiated Run/Spot Encounter subset
+with the activation flag false, no activation record, and no target-directed
+initiation record. An unstarted Arena is outside this path because capture
+requires an initiated Encounter. An activation-enabled Encounter and any
+target-directed initiation are refused with explicit reasons; a non-null
+target-free activation record is also refused because the accepted checkpoint
+does not reconstruct activation/Choice execution state. This does not define
+Arena save/resume.
+
+For accepted Encounter snapshots, `hex_facing` is required and must be `None`
+or an exact integer in 0..11. Binding and fresh reconstruction preserve either
+unknown or authored orientation through `set_hex_facing`. Missing fields and
+malformed values are rejected; no historical payload migration is performed.
+The Run/Spot closure certificate is version 2 to commit this expanded field
+closure. The separate reproduction/Being checkpoint retains its prior
+known-facing refusal and was not changed by this integration.

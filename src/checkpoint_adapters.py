@@ -180,6 +180,11 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if tag=='encounter.Encounter' and field=='arena_activation_enabled':
+            _require(type(item) is bool,'Arena activation-enabled flag must be an explicit native Boolean')
+        if tag=='encounter.Encounter' and field=='arena_activation' and item is not None:
+            raise CheckpointRejected(
+                'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
         if tag=='activities.SpotAction' and field=='location_ledger' and item is not None:
             self.issue('unbound_location_evidence_recipient',ref,field,
                 'Observer-owned location evidence has no portable recipient binding contract; restoration remains refused.')
@@ -332,6 +337,15 @@ class NativeInventory(_Inventory):
         from transactional_progression import _BINDINGS
         binding=_BINDINGS.get(id(encounter))
 
+        _require(type(encounter.arena_activation_enabled) is bool,
+                 'Arena activation-enabled flag is malformed')
+        _require(encounter.arena_activation is None,
+                 'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+        _require(not encounter.arena_activation_enabled,
+                 'Arena activation-enabled Encounter is outside the initiated Run/Spot checkpoint subset')
+        _require(encounter.initiation is None,
+                 'target-directed Encounter initiation is outside the bounded checkpoint subset')
+
         _require(type(world.library) is Library,'Run/Spot closure requires one exact native Library')
         _require(type(world.id) is str and world.id and type(encounter.id) is str and encounter.id
                  and type(world.library.id) is str and world.library.id,
@@ -479,6 +493,9 @@ class NativeInventory(_Inventory):
             data=_fields(being)
             _require(data['id']==entity_id and data['type']=='BeingInstance',
                      'Being identity fields disagree with the registry')
+            facing=data['hex_facing']
+            _require(facing is None or type(facing) is int and 0 <= facing < 12,
+                     'invalid native hex facing in Being checkpoint state')
             original=data['original'];current=data['current']
             _require(type(original) is BeingDefinition and definition_ids.get(id(original))==original.obj_type,
                      'Being original definition is not the matching registered Library definition')
@@ -533,8 +550,8 @@ class NativeInventory(_Inventory):
             covered.append((entity_id,original.obj_type,tuple(sorted(skill_state['skills'])),
                             tuple(sorted(skill_state['weapon_skills'])),
                             ('binary64',fatigue.q.hex()),('binary64',fatigue.b.hex()),
-                            physiology_id,geometry is not None,occlusion is not None))
-        return ('native.run-spot-field-closure/1',
+                            physiology_id,geometry is not None,occlusion is not None,facing))
+        return ('native.run-spot-field-closure/2',
             ('participants',tuple(sorted(entity_ids))),
             ('being-definitions',tuple(sorted({row[1] for row in covered}))),
             ('required-practice-skills',('run','spot')),

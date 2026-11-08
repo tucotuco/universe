@@ -12,11 +12,13 @@ from checkpoint_adapters import RecipientBinding
 from field_observation import BeliefLedger
 from history_conversation import AskAboutPastAction
 from activities import RunAction
+from encounter import ArenaActionActivation, EncounterInitiation
 from realization import Fact, FactKey, CommittedFact
 from conditional_attributes import ConditionalAttributes
 from statistical_group import StatisticalGroup
 from personal_history import PersonalHistory
 from test_checkpoint_inventory import strings,tags
+from interval_staging import IntervalIntegrityError
 
 
 class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
@@ -46,6 +48,53 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
     def test_initial_native_closed_vocabulary_is_partial_readonly(self):
         self.enable();before=self.raw();c=self.capture();self.assert_partial(c)
         self.assertEqual(before,self.raw());self.assertIn('native-closure-recipes/1',set(strings(c.envelope)))
+
+    def test_unstarted_arena_opt_in_is_outside_the_initiated_checkpoint_path(self):
+        self.enable()
+        self.enc.arena_activation_enabled = True
+        self.enc.initiated = False
+        with self.assertRaisesRegex(IntervalIntegrityError, 'interval requires an initiated Encounter'):
+            self.capture()
+
+    def test_activated_arena_is_refused_without_capture_mutation(self):
+        self.enable()
+        self.enc.arena_activation_enabled = True
+        self.enc.initiated = True
+        self.enc.arena_activation = ArenaActionActivation(
+            self.enc.id, self.a.id, 'choice-authored-test', self.enc.time)
+        before = self.raw()
+        with self.assertRaisesRegex(CheckpointRejected, 'activated Arena Encounter cannot be resumed'):
+            self.capture()
+        self.assertEqual(before, self.raw())
+
+    def test_target_directed_initiation_is_not_confused_with_arena_activation(self):
+        self.enable()
+        self.enc.initiated = True
+        self.enc.initiation = EncounterInitiation(self.a.id, self.b.id, 'approach', self.enc.time)
+        candidate = self.capture()
+        reasons = tuple(item.reason for item in candidate.diagnostics)
+        self.assertTrue(any('target-directed Encounter initiation' in reason for reason in reasons))
+        self.assertNotIn('bounded_run_spot_closure_verified',
+                         {item.code for item in candidate.diagnostics})
+
+    def test_hex_facing_requires_unknown_or_canonical_integer(self):
+        self.enable()
+        self.a.set_hex_facing(0)
+        self.assert_partial(self.capture())
+        self.a.set_hex_facing(11)
+        self.assert_partial(self.capture())
+        self.a.hex_facing = True
+        candidate = self.capture()
+        self.assertTrue(any('invalid native hex facing' in item.reason
+                            for item in candidate.diagnostics))
+        self.assertNotIn('bounded_run_spot_closure_verified',
+                         {item.code for item in candidate.diagnostics})
+
+    def test_missing_hex_facing_is_rejected_by_closed_required_inventory(self):
+        self.enable()
+        del self.a.hex_facing
+        with self.assertRaisesRegex(CheckpointRejected, 'missing native fields: being.BeingInstance'):
+            self.capture()
 
     def test_accepted_unstarted_future_and_fractional_positions(self):
         self.enable();a=RunAction(self.world,self.a.id,.25,1,1);b=self.f.spot(self.c,start=3)

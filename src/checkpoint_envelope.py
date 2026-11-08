@@ -138,7 +138,7 @@ def _logical_roots(sections):
 
 def _parts(certificate):
     _require(type(certificate) is tuple and len(certificate) >= 1
-             and certificate[0] == 'native.run-spot-field-closure/1',
+             and certificate[0] == 'native.run-spot-field-closure/2',
              'missing or incompatible Run/Spot field-closure certificate')
     rows = certificate[1:]
     _require(all(type(row) is tuple and len(row) == 2 and type(row[0]) is str for row in rows),

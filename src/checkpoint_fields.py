@@ -135,12 +135,16 @@ FIELD_ADAPTERS = {
         "required": '_committed _external _rng_for specifications'.split(),
     },
     'encounter.Encounter': {
-        "allowed": '_active_fatigue_frame _advancing _atomic_interval_history _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running _transactional_mode active_boundary awareness being_list boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history finished_action_list id initiated initiation last_fatigue_frame last_processed_boundary local_frame location map name non_being_object_list parent_event_id pending_action_list start_time time type universe'.split(),
-        "required": '_active_fatigue_frame _advancing _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running active_boundary awareness boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history initiated last_fatigue_frame last_processed_boundary location map name parent_event_id start_time type universe'.split(),
+        "allowed": '_active_fatigue_frame _advancing _atomic_interval_history _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running _transactional_mode active_boundary awareness arena_activation arena_activation_enabled being_list boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history finished_action_list id initiated initiation last_fatigue_frame last_processed_boundary local_frame location map name non_being_object_list parent_event_id pending_action_list start_time time type universe'.split(),
+        "required": '_active_fatigue_frame _advancing _boundary_context _choice_book _coordinator_time _dispatching _interval_start _physiology_registry _running active_boundary awareness arena_activation arena_activation_enabled boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history initiated last_fatigue_frame last_processed_boundary location map name parent_event_id start_time type universe'.split(),
     },
     'encounter.EncounterInitiation': {
         "allowed": 'actor_id intent target_id time'.split(),
         "required": 'actor_id intent target_id time'.split(),
+    },
+    'encounter.ArenaActionActivation': {
+        "allowed": 'activation_kind actor_id choice_id encounter_id time'.split(),
+        "required": 'activation_kind actor_id choice_id encounter_id time'.split(),
     },
     'encounter_fatigue_bridge.FrozenFatigueFrame': {
         "allowed": '_profiles _views'.split(),
@@ -151,8 +155,8 @@ FIELD_ADAPTERS = {
         "required": 'b being_id check_modifier physiology_id q'.split(),
     },
     'encounter_inspection.CommittedBoundaryRecord': {
-        "allowed": 'action_anchors actions effects end entities objective objective_use participants recipients schedule start starts target_anchors'.split(),
-        "required": 'action_anchors actions effects end entities objective objective_use participants recipients schedule start starts target_anchors'.split(),
+        "allowed": 'action_anchors actions effects end entities objective objective_use participants projectile_states recipients schedule start starts target_anchors'.split(),
+        "required": 'action_anchors actions effects end entities objective objective_use participants projectile_states recipients schedule start starts target_anchors'.split(),
     },
     'encounter_inspection.EntityInspection': {
         "allowed": 'category name obj_type position pre_action'.split(),
@@ -497,6 +501,21 @@ FIELD_ADAPTERS = {
 # native Run/Spot dependency graph.  It deliberately does not claim closure
 # for unrelated Library dictionaries or checkpoint reconstruction.
 RUN_SPOT_FIELD_CLOSURE = {
+    'encounter.Encounter': {
+        'authoritative': ('_atomic_interval_history', '_choice_book', '_coordinator_time',
+                          '_interval_start', '_physiology_registry', 'active_boundary',
+                          'awareness', 'arena_activation', 'arena_activation_enabled',
+                          'being_list', 'boundary_fault', 'cancelled_action_list',
+                          'difficulty_class', 'end_time', 'event_type', 'fatigue_frame_history',
+                          'finished_action_list', 'id', 'initiated', 'initiation',
+                          'last_fatigue_frame', 'last_processed_boundary', 'local_frame',
+                          'location', 'map', 'name', 'non_being_object_list',
+                          'parent_event_id', 'pending_action_list', 'start_time', 'time',
+                          'universe'),
+        'derived': ('type',),
+        'transient': ('_active_fatigue_frame', '_advancing', '_boundary_context',
+                      '_dispatching', '_running', '_transactional_mode'),
+    },
     'universe.Universe': {
         'authoritative': ('id', 'name', 'library', 'object_registry', 'event_history',
                           '_schedule_revision', '_choice_books'),
@@ -523,7 +542,7 @@ RUN_SPOT_FIELD_CLOSURE = {
     },
     'being.BeingInstance': {
         'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',
-                          'top_facing', 'front_facing', 'spatial_state', 'geometry',
+                          'top_facing', 'front_facing', 'hex_facing', 'spatial_state', 'geometry',
                           'visual_occlusion', 'possessions', 'weapons', 'strategy',
                           'physical_fatigue', 'physiology_id', 'fatigue_level',
                           'effective_fitness', 'exertion', 'skill_experience',

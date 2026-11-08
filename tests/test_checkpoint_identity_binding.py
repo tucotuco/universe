@@ -16,7 +16,8 @@ from checkpoint_binding import (IdentityBindingRejected,
     QuarantinedRunIdentityBinding, _NATIVE_BINDINGS,
     _native_state_value, bind_quarantined_run_boundary)
 from checkpoint_projection import project_quarantined_run_boundary
-from checkpoint_wire import DecodedRunSpotWire, decode_run_spot_wire
+from checkpoint_wire import (DecodedRunSpotWire, decode_run_spot_wire,
+    encode_run_spot_envelope)
 from frozen_practice import freeze_imported_run_practice
 from test_checkpoint_projection import committed_run_wire
 
@@ -92,6 +93,28 @@ def _assert_binding_receipt_isolation(test, before, binding_result):
 
 
 class TestQuarantinedRunIdentityBinding(unittest.TestCase):
+    def test_explicit_unknown_and_authored_hex_facing_survive_binding(self):
+        from activities import RunAction
+        from checkpoint_envelope import assemble_native_run_spot_envelope
+        from test_checkpoint_reconstruction import build_source
+
+        world, encounter, _cursor, _, _ = build_source()
+        actor, observed = (world.get_object_by_id(identity)
+                           for identity in encounter.being_list)
+        actor.set_hex_facing(0)
+        observed.set_hex_facing(None)
+        action = RunAction(world, actor.id, 0, 1, .5, experience=4)
+        encounter.schedule_choice((action,))
+        encounter.step(1, velocities={actor.id: (1, 0, 0)})
+        envelope = assemble_native_run_spot_envelope(
+            world, encounter, quiescent=True, rng_scope='exclusive_encounter')
+        decoded = decode_run_spot_wire(encode_run_spot_envelope(envelope))
+        result = bind_quarantined_run_boundary(decoded)
+        private = _NATIVE_BINDINGS[result]
+        beings = dict(private.beings)
+        self.assertEqual(beings[actor.id].hex_facing, 0)
+        self.assertIsNone(beings[observed.id].hex_facing)
+
     def test_binding_receipt_check_is_scoped_while_unrelated_interval_commits(self):
         wire, _ = committed_run_wire()
         decoded = decode_run_spot_wire(wire)
