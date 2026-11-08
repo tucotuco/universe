@@ -357,32 +357,39 @@ def _all_declarations(encounter,boundary,rng_owner):
 def enable_transactional_progression(encounter, *, quiescent=False, rng_owner=None):
     from encounter import Encounter
     from atomic_publication import publication_boundary
-    from interval_staging import _rng_input
     if type(encounter) is not Encounter:raise TransactionalProgressionError('native Encounter required')
     if mode_of(encounter)!='legacy':raise TransactionalProgressionError('transactional mode is irreversible and cannot be reconfigured')
     with publication_boundary(encounter,quiescent=quiescent):
-        if mode_of(encounter)!='legacy':
-            raise TransactionalProgressionError('transactional selection already completed; mode cannot be reconfigured')
-        ed=object.__getattribute__(encounter,'__dict__')
-        facade=_FACADES.get(id(encounter));used=_LEGACY_USED.get(id(encounter))
-        if (ed['time']!=ed['start_time'] or ed['fatigue_frame_history'] or ed['finished_action_list'] or ed['cancelled_action_list']
-                or ed.get('_atomic_interval_history') or (used is not None and used() is encounter)
-                or (facade is not None and facade[0]() is encounter and facade[1]() is not None)):
-            raise TransactionalProgressionError('select native programmatic mode before any legacy progression/resolution, incompatible history or facade ownership')
-        role,identity,_=_rng_input(encounter,None,rng_owner)
-        if role not in ('module','native_random','caller_cursor'):
-            raise TransactionalProgressionError('facade RNG ownership is outside native programmatic progression (5C3B)')
-        _all_declarations(encounter,ed['last_processed_boundary']+1,rng_owner)
-        # Dynamic outcomes/facts/practice depend on the requested movement.
-        # Evaluate them only at the actual staged boundary, never at selection.
-        descriptor=ProgressionMode('transactional',id(encounter),role,identity)
-        key=id(encounter)
-        binding=_Binding(weakref.ref(encounter,lambda ref:_BINDINGS.pop(key,None)),descriptor,rng_owner,threading.Lock())
-        _BINDINGS[key]=binding
-        try:ed['_transactional_mode']=descriptor
-        except BaseException:
-            _BINDINGS.pop(key,None);raise
-        return descriptor
+        return _enable_transactional_progression_owned(encounter, rng_owner=rng_owner)
+
+
+def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
+    """Select transactional mode inside an already-held publication lease."""
+    from encounter import Encounter
+    from atomic_publication import publication_owned
+    from interval_staging import _rng_input
+    if type(encounter) is not Encounter or not publication_owned(encounter):
+        raise TransactionalProgressionError('transactional selection requires native publication ownership')
+    if mode_of(encounter)!='legacy':
+        raise TransactionalProgressionError('transactional mode is irreversible and cannot be reconfigured')
+    ed=object.__getattribute__(encounter,'__dict__')
+    facade=_FACADES.get(id(encounter));used=_LEGACY_USED.get(id(encounter))
+    if (ed['time']!=ed['start_time'] or ed['fatigue_frame_history'] or ed['finished_action_list'] or ed['cancelled_action_list']
+            or ed.get('_atomic_interval_history') or (used is not None and used() is encounter)
+            or (facade is not None and facade[0]() is encounter and facade[1]() is not None)):
+        raise TransactionalProgressionError('select native programmatic mode before any legacy progression/resolution, incompatible history or facade ownership')
+    role,identity,_=_rng_input(encounter,None,rng_owner)
+    if role not in ('module','native_random','caller_cursor'):
+        raise TransactionalProgressionError('facade RNG ownership is outside native programmatic progression (5C3B)')
+    _all_declarations(encounter,ed['last_processed_boundary']+1,rng_owner)
+    descriptor=ProgressionMode('transactional',id(encounter),role,identity)
+    key=id(encounter)
+    binding=_Binding(weakref.ref(encounter,lambda ref:_BINDINGS.pop(key,None)),descriptor,rng_owner,threading.Lock())
+    _BINDINGS[key]=binding
+    try:ed['_transactional_mode']=descriptor
+    except BaseException:
+        _BINDINGS.pop(key,None);raise
+    return descriptor
 
 
 def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_member_candidate=None):

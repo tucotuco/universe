@@ -180,7 +180,8 @@ class ChoiceBook:
             self._drafts[draft.id] = updated
             return updated
 
-    def _evaluate(self, draft, *, exclude_choice=None, interrupt=None):
+    def _evaluate(self, draft, *, exclude_choice=None, interrupt=None,
+                  allow_arena_uninitiated=False):
         from melee_defense import MeleeDefense
         from scheduling import native_preparer
         from encounter import BoundaryInvariantError
@@ -218,7 +219,8 @@ class ChoiceBook:
                     reference = candidates[member.action.target_action_id].id
                 proposed = {a.id: a for a in candidates.values()}
                 packet = self.encounter.prepare_action(member.action,
-                    _proposed_actions=proposed, _target_action_id=reference)
+                    _proposed_actions=proposed, _target_action_id=reference,
+                    _arena_activation_preparation=allow_arena_uninitiated)
                 packets.append((member, packet))
             except (TypeError, ValueError, RuntimeError) as exc:
                 code = ('unsupported' if isinstance(exc, UnsupportedScheduleExtension) else
@@ -259,7 +261,7 @@ class ChoiceBook:
                     "Interruption requires this actor's pending Action"))
         return tuple(errors), tuple(p for _, p in packets), tuple(signatures), tuple(reservations)
 
-    def validate(self, draft, *, replacing=None):
+    def validate(self, draft, *, replacing=None, _arena_activation_preparation=False):
         planning_entry(self.encounter)
         with self.lock:
             self.encounter._assert_timeline()
@@ -267,7 +269,9 @@ class ChoiceBook:
                 self._reject('stale_draft', 'Validate the current open draft')
             if replacing is not None:
                 self._undoable(replacing)
-            errors, _, signatures, _ = self._evaluate(draft, exclude_choice=replacing)
+            errors, _, signatures, _ = self._evaluate(
+                draft, exclude_choice=replacing,
+                allow_arena_uninitiated=_arena_activation_preparation)
             token = ChoiceValidation(self._id('validation'), draft.id, draft.version,
                                      self.revision, errors, signatures)
             self._tokens[token.id] = (token, replacing)
@@ -290,12 +294,12 @@ class ChoiceBook:
             raise ChoiceRejected(errors)
         return draft, packets, signatures, reservations
 
-    def accept(self, token):
+    def accept(self, token, *, origin='choice'):
         planning_entry(self.encounter)
         with self.lock:
             self.encounter._assert_timeline()
             draft, packets, signatures, reservations = self._authorized(token)
-            return self._accept(draft, packets, signatures, reservations)
+            return self._accept(draft, packets, signatures, reservations, origin=origin)
 
     def _accept(self, draft, packets, signatures, reservations, *, replacing=None, origin='choice'):
         planning_entry(self.encounter)

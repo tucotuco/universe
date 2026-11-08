@@ -165,6 +165,12 @@ def publication_boundary(encounter, *, quiescent=False):
                 _ACTIVE = None
 
 
+def publication_owned(encounter):
+    """Whether the current thread owns the explicit native publication lease."""
+    return (_ACTIVE is not None and _ACTIVE.encounter is encounter
+            and _ACTIVE.thread == threading.get_ident())
+
+
 @contextmanager
 def coordinated_access(world):
     """Bracket ALL native reads/writes by a cooperating external participant.

@@ -181,7 +181,8 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         native.being.set_position(position)
         placements.append(ArenaPlacement(role, native.being.id, column, row, position))
 
-    encounter = Encounter(world, difficulty_class=0, start_time=0, name="Arena")
+    encounter = Encounter(world, difficulty_class=0, start_time=0, name="Arena",
+                          arena_activation_enabled=True)
     for native in (first, second):
         encounter.add_being(native.being.id)
 

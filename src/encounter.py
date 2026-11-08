@@ -65,6 +65,23 @@ class EncounterInitiation:
             "time": self.time,
         }
 
+
+@dataclass(frozen=True)
+class ArenaActionActivation:
+    """Arena authority to start the native timeline from its first player Choice."""
+
+    encounter_id: str
+    actor_id: str
+    choice_id: str
+    time: float
+    activation_kind: str = "first_player_choice"
+
+    def to_dict(self):
+        # Deliberately has no target field: this is not interpersonal initiation.
+        return {"encounter_id": self.encounter_id, "actor_id": self.actor_id,
+                "choice_id": self.choice_id, "time": self.time,
+                "activation_kind": self.activation_kind}
+
 @dataclass(frozen=True)
 class EncounterStep:
     """Outcome of one bounded Encounter simulation step.
@@ -114,11 +131,14 @@ class Encounter(Event):
                  pending_action_list=None, finished_action_list=None,
                  cancelled_action_list=None, initiated=False,
                  map=None, awareness=None, initiation=None, local_frame=None,
-                 fatigue_frame_history=None, _post_boundary_token=None):
+                 fatigue_frame_history=None, _post_boundary_token=None,
+                 arena_activation_enabled=False):
         Event.__init__(self, universe, start_time, end_time, 
                  event_type, location, name, parent_event_id, id)
         self.difficulty_class = convert_to_dc(difficulty_class)
         self.initiated = initiated
+        self.arena_activation_enabled = bool(arena_activation_enabled)
+        self.arena_activation = None
         self.map = map
         self.set_local_frame(local_frame)
         if time is None:
@@ -714,7 +734,8 @@ class Encounter(Event):
         self.initiated = True
         return self.initiation
 
-    def prepare_action(self, action, *, _proposed_actions=None, _target_action_id=None):
+    def prepare_action(self, action, *, _proposed_actions=None, _target_action_id=None,
+                       _arena_activation_preparation=False):
         """Prepare and validate one native schedule without publishing effects.
 
         No opaque extension callback is invoked. Native preparers treat this
@@ -725,7 +746,13 @@ class Encounter(Event):
         from transactional_progression import validate_action_contract
         validate_action_contract(self, action)
         preparer = native_preparer(action)
-        if not self.initiated:
+        if _arena_activation_preparation:
+            from atomic_publication import publication_owned
+            arena_preparation = (publication_owned(self) and self.arena_activation_enabled
+                                 and not self.initiated and action.target_id is None)
+        else:
+            arena_preparation = False
+        if not self.initiated and not arena_preparation:
             raise RuntimeError("Encounter must be initiated before scheduling actions")
         if action.universe is not self.universe:
             raise ValueError("action must belong to this Universe")
@@ -862,6 +889,85 @@ class Encounter(Event):
         planning_entry(self)
         validate_choice_actions(self, actions)
         return self._choice_book.schedule_complete(actions)
+
+    def activate_arena_for_player_action(self, actor_id, action, *, rng_owner):
+        """Atomically accept the first target-free Run Choice and select native time.
+
+        This narrowly scoped authority exists only on generated Arena Encounters.
+        Preparation is read-only. Invalid requests leave initiation, ChoiceBook,
+        event history, clock, and RNG untouched.
+        """
+        from activities import RunAction
+        from action_choice import ChoiceRejected
+
+        if not self.arena_activation_enabled:
+            raise RuntimeError("target-free activation is unavailable for this Encounter")
+        if self.initiated or self.arena_activation is not None or self.initiation is not None:
+            raise RuntimeError("Arena Encounter is already activated")
+        if type(action) is not RunAction or action.actor_id != actor_id or action.target_id is not None:
+            raise ValueError("first Arena Choice must be this actor's native target-free RunAction")
+        if self.get_being(actor_id) is None or action.start_time != self.time:
+            raise ValueError("Run actor must participate and begin at native Encounter time")
+
+        book = self._choice_book
+        # One owner lock spans validation, acceptance, first Action publication,
+        # and mode selection. The draft exists only in local memory until valid.
+        from atomic_publication import publication_boundary
+        with publication_boundary(self, quiescent=True), book.lock:
+            self._assert_timeline()
+            if self.initiated or self.arena_activation is not None:
+                raise RuntimeError("Arena Encounter is already activated")
+            # Snapshot only native publication metadata; no action execution,
+            # clock advance, or RNG draw occurs during activation.
+            state = {
+                "initiated": self.initiated,
+                "arena_activation": self.arena_activation,
+                "universe_history": dict(self.universe.event_history),
+                "pending": list(self.pending_action_list),
+                "counter": book._counter, "drafts": dict(book._drafts),
+                "tokens": dict(book._tokens),
+                "choices": dict(book._choices), "reservations": book._reservations,
+                "closed": set(book._closed_drafts), "registered": dict(book._registered),
+                "states": dict(book._states), "revision": book.revision,
+                "action": dict(object.__getattribute__(action, "__dict__")),
+            }
+            try:
+                draft = book.propose((action,))
+                validation = book.validate(draft, _arena_activation_preparation=True)
+                if not validation.valid:
+                    raise ChoiceRejected(validation.diagnostics)
+                activation = ArenaActionActivation(self.id, actor_id, draft.id, self.time)
+                self.initiated = True
+                self.arena_activation = activation
+                accepted = book.accept(validation, origin="arena-first-player-choice")
+                book.publish(accepted.id)
+                from transactional_progression import _enable_transactional_progression_owned
+                _enable_transactional_progression_owned(self, rng_owner=rng_owner)
+                return book.view(accepted.id), activation
+            except BaseException:
+                # Transactional selection is the final operation. If it failed
+                # after binding, remove only this just-created pristine binding.
+                import transactional_progression as tp
+                binding = tp._BINDINGS.get(id(self))
+                if binding is not None and binding.mode.encounter_identity == id(self):
+                    tp._BINDINGS.pop(id(self), None)
+                    object.__getattribute__(self, "__dict__").pop("_transactional_mode", None)
+                self.initiated = state["initiated"]
+                self.arena_activation = state["arena_activation"]
+                self.universe.event_history.clear(); self.universe.event_history.update(state["universe_history"])
+                self.pending_action_list[:] = state["pending"]
+                book._counter = state["counter"]
+                book._drafts.clear(); book._drafts.update(state["drafts"])
+                book._tokens.clear(); book._tokens.update(state["tokens"])
+                book._choices.clear(); book._choices.update(state["choices"])
+                book._reservations = state["reservations"]
+                book._closed_drafts.clear(); book._closed_drafts.update(state["closed"])
+                book._registered.clear(); book._registered.update(state["registered"])
+                book._states.clear(); book._states.update(state["states"])
+                book.revision = state["revision"]
+                data = object.__getattribute__(action, "__dict__")
+                data.clear(); data.update(state["action"])
+                raise
 
     def cancel_action(self, action_id, *, reason='interrupted'):
         planning_entry(self)
