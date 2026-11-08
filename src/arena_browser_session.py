@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
+import random
 import secrets
 import threading
 
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
+from activities import RunAction
+from atomic_publication import RNGCursor
 
 
 _DECIMAL = re.compile(r"[0-9]+\Z")
@@ -42,6 +45,9 @@ class GeneratedArenaSession:
         self._active = None
         self._encounter_name = None
         self._player_name = None
+        self._rng_cursor = None
+        self._player_action_id = None
+        self._player_action_outcome = None
 
     @property
     def active_candidate(self):
@@ -56,9 +62,16 @@ class GeneratedArenaSession:
                 "load_available": False,
                 "spot_available": False,
                 "spot_reason": _SPOT_DISABLED,
+                "run_available": False,
+                "advance_available": False,
             }
         candidate = self._active
         player = candidate.participants[0]
+        position = player.native.being.get_position()
+        action = None
+        if self._player_action_id is not None:
+            action = {"name": "Run", "status": "completed" if self._player_action_outcome else "executing",
+                      "outcome": self._player_action_outcome}
         return {
             "state": "active",
             "load_available": False,
@@ -70,7 +83,12 @@ class GeneratedArenaSession:
                     "origin": candidate.arena_map.origin},
             "player": {"name": self._player_name,
                        "cell": {"column": player.placement.column,
-                                "row": player.placement.row}},
+                                "row": player.placement.row},
+                       "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
+            "player_action": action,
+            "run_available": self._player_action_id is None,
+            "advance_available": self._player_action_id is not None
+                and self._player_action_outcome is None and candidate.encounter.time == 0,
             "spot_available": False,
             "spot_reason": _SPOT_DISABLED,
         }
@@ -114,6 +132,44 @@ class GeneratedArenaSession:
             self._active = candidate
             self._encounter_name = encounter.name
             self._player_name = candidate.participants[0].native.being.name
+            self._rng_cursor = RNGCursor(random.Random(candidate.root_seed).getstate())
+            self._player_action_id = None
+            self._player_action_outcome = None
+            return self._view_unlocked()
+
+    def choose_run(self):
+        """Accept the player's first native target-free Run Choice."""
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Run")
+            if self._player_action_id is not None:
+                raise ArenaBrowserRequestError("the first player Action has already been chosen")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            action = RunAction(candidate.universe, player.id, candidate.encounter.time,
+                               duration=1, minimum_distance=0.1, experience=0)
+            try:
+                candidate.encounter.activate_arena_for_player_action(
+                    player.id, action, rng_owner=self._rng_cursor)
+            except Exception as exc:
+                raise ArenaBrowserRequestError("native player Choice was not accepted; the Arena remains unchanged") from exc
+            self._player_action_id = action.id
+            return self._view_unlocked()
+
+    def advance_one_second(self):
+        """Commit exactly the native next boundary for the accepted Run Choice."""
+        with self._lock:
+            if self._active is None or self._player_action_id is None:
+                raise ArenaBrowserRequestError("choose Run before advancing the Encounter")
+            candidate = self._active
+            if candidate.encounter.time != 0 or self._player_action_outcome is not None:
+                raise ArenaBrowserRequestError("this Arena supports one committed first-player second")
+            try:
+                candidate.encounter.step(1)
+                result = candidate.encounter.inspect_committed(1).action(self._player_action_id)
+                self._player_action_outcome = result.facts.outcome
+            except Exception as exc:
+                raise ArenaBrowserRequestError("native one-second advancement failed") from exc
             return self._view_unlocked()
 
     def rename_encounter(self, payload):

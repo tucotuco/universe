@@ -140,6 +140,113 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             self.assertNotEqual(status, 200)
             self.assertEqual(self.session.public_view(), before)
 
+    def test_native_invalid_first_choice_leaves_unstarted_arena_unchanged(self):
+        from activities import RunAction
+        from action_choice import ChoiceRejected
+
+        self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player = candidate.participants[0].native.being
+        # The declaration is otherwise a valid Run Choice but collides with the
+        # already-registered Encounter Event identity during native preflight.
+        action = RunAction(candidate.universe, player.id, 0, 1, 0.1,
+                          experience=0, id=encounter.id)
+        before_history = dict(candidate.universe.event_history)
+        before_view = self.session.public_view()
+        before_revision = encounter._choice_book.revision
+        before_counter = encounter._choice_book._counter
+        rng_state = self.session._rng_cursor.state
+        with self.assertRaises(ChoiceRejected):
+            encounter.activate_arena_for_player_action(
+                player.id, action, rng_owner=self.session._rng_cursor)
+        self.assertFalse(encounter.initiated)
+        self.assertIsNone(encounter.arena_activation)
+        self.assertEqual(encounter.time, 0)
+        self.assertEqual(candidate.universe.event_history, before_history)
+        self.assertEqual(encounter.pending_action_list, [])
+        self.assertEqual(encounter._choice_book._choices, {})
+        self.assertEqual(encounter._choice_book._counter, before_counter)
+        self.assertEqual(encounter._choice_book._drafts, {})
+        self.assertEqual(encounter._choice_book._tokens, {})
+        self.assertEqual(encounter._choice_book.revision, before_revision)
+        self.assertEqual(self.session._rng_cursor.state, rng_state)
+        self.assertEqual(self.session.public_view(), before_view)
+
+    def test_activation_rolls_back_if_native_mode_selection_aborts_after_publication(self):
+        from activities import RunAction
+        from unittest.mock import patch
+
+        self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player = candidate.participants[0].native.being
+        action = RunAction(candidate.universe, player.id, 0, 1, 0.1, experience=0)
+        before_history = dict(candidate.universe.event_history)
+        before_view = self.session.public_view()
+        before_revision = encounter._choice_book.revision
+        before_counter = encounter._choice_book._counter
+        rng_state = self.session._rng_cursor.state
+        with patch("transactional_progression._enable_transactional_progression_owned",
+                   side_effect=RuntimeError("injected pre-commit abort")):
+            with self.assertRaises(RuntimeError):
+                encounter.activate_arena_for_player_action(
+                    player.id, action, rng_owner=self.session._rng_cursor)
+        self.assertFalse(encounter.initiated)
+        self.assertIsNone(encounter.arena_activation)
+        self.assertEqual(encounter.time, 0)
+        self.assertEqual(candidate.universe.event_history, before_history)
+        self.assertEqual(encounter.pending_action_list, [])
+        self.assertEqual(encounter._choice_book._choices, {})
+        self.assertEqual(encounter._choice_book._registered, {})
+        self.assertEqual(encounter._choice_book._counter, before_counter)
+        self.assertEqual(encounter._choice_book._drafts, {})
+        self.assertEqual(encounter._choice_book._tokens, {})
+        self.assertEqual(encounter._choice_book.revision, before_revision)
+        self.assertEqual(self.session._rng_cursor.state, rng_state)
+        self.assertEqual(self.session.public_view(), before_view)
+
+    def test_generated_run_choice_activates_then_commits_one_native_second(self):
+        self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, hidden = candidate.participants
+        start = player.native.being.get_position()
+
+        status, accepted = self.request("/api/generated/run", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted["time_seconds"], 0)
+        self.assertTrue(accepted["advance_available"])
+        self.assertEqual(encounter.progression_mode, "transactional")
+        self.assertTrue(encounter.initiated)
+        activation = encounter.arena_activation
+        self.assertEqual(activation.actor_id, player.native.being.id)
+        self.assertEqual(activation.time, 0)
+        self.assertEqual(activation.activation_kind, "first_player_choice")
+        self.assertFalse(hasattr(activation, "target_id"))
+        self.assertIsNone(encounter.initiation)
+        self.assertEqual(encounter.aware_beings(player.native.being.id), [])
+        encoded = json.dumps(accepted).lower()
+        for forbidden in (hidden.native.being.id.lower(), "target_id", "activation", "source_record"):
+            self.assertNotIn(forbidden, encoded)
+
+        status, advanced = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(advanced["time_seconds"], 1)
+        self.assertEqual(advanced["player_action"],
+                         {"name": "Run", "status": "completed", "outcome": "no_movement"})
+        self.assertEqual(advanced["player"]["position_meters"],
+                         {"x": start.x, "y": start.y, "z": start.z})
+        action_id = encounter._choice_book._choices[activation.choice_id].view.action_ids[0]
+        native_result = encounter.inspect_committed(1).action(action_id)
+        self.assertEqual(native_result.facts.outcome, "no_movement")
+        self.assertEqual(encounter.time, 1)
+        self.assertEqual(encounter.aware_beings(player.native.being.id), [])
+        self.assertNotIn(hidden.native.being.id, json.dumps(advanced))
+        before = self.session.public_view()
+        self.assertNotEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(self.session.public_view(), before)
+
     def test_native_spot_proof_fails_closed_without_generated_geometry(self):
         self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
         candidate = self.session.active_candidate
