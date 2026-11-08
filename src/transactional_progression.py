@@ -429,7 +429,8 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                     if movement_intent is not None:
                         from movement_intent import prepare_movement_intent
                         prepared=prepare_movement_intent(
-                            encounter,movement_intent,movement_conditions,duration=duration)
+                            encounter,movement_intent,movement_conditions,duration=duration,
+                            pre_action_snapshot=context.snapshot)
                         motion={movement_intent.actor_id:prepared.velocity_meters_per_second}
                         movement_decision_ids.append(movement_intent.decision_id)
                     else:

@@ -293,7 +293,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     wanted = set(participants)
     for a in actions.values():
         wanted.update(x for x in (a.actor_id, a.target_id, a.instrument_id) if x is not None)
-    # Pull transitive body holdings and armor with IDs intact, before evaluating.
+    # Pull represented Being inventory and container contents into the same
+    # pre-action snapshot used by the interval movement and Action phases.
+    inventory_roots = set()
     for key in tuple(wanted):
         if key not in objects:
             raise EvaluationIntegrityError('unknown Object identity')
@@ -301,9 +303,19 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         od = native_data(obj, object_classes)
         if type(obj) is BeingInstance:
             current = native_data(od['current'], (BeingDefinition,))
-            wanted.update(x for x in freeze(current['body_parts']).values() if x is not None)
-            if current['armor_id'] is not None:
-                wanted.add(freeze(current['armor_id']))
+            inventory = (tuple(freeze(od.get('possessions', ())))
+                + tuple(freeze(od.get('weapons', ())))
+                + tuple(x for x in freeze(current['body_parts']).values() if x is not None)
+                + (() if current['armor_id'] is None else (freeze(current['armor_id']),)))
+            wanted.update(inventory)
+            inventory_roots.update(inventory)
+    while inventory_roots:
+        parent_id = inventory_roots.pop()
+        for child_id, child in objects.items():
+            child_data = native_data(child, object_classes)
+            if child_data.get('parent_container_id') == parent_id and child_id not in wanted:
+                wanted.add(child_id)
+                inventory_roots.add(child_id)
     # Complete transitive type preflight before reading any held item metadata.
     for key in wanted:
         if key not in objects:
@@ -335,6 +347,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if optics is not None:
             optics = VisualOcclusion(**freeze(native_data(optics, (VisualOcclusion,))))
         data = {'hardness': freeze(cd['hardness']), 'weight': freeze(cd.get('weight')),
+                'parent_container_id': freeze(od.get('parent_container_id')),
                 'discovery_dc': freeze(cd.get('discovery_dc'))}
         category = 'object'
         if type(obj) is BeingInstance:
@@ -351,6 +364,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 exertion=freeze(native_data(od['exertion'], (Exertion,))),
                 fatigue_adjustments=freeze(od['exertion'].fatigue_levels))
             data['possessions'] = freeze(od.get('possessions', ()))
+            data['weapons'] = freeze(od.get('weapons', ()))
             # Preserve category membership and insertion order, including RNG choice.
             shields = shield_names
             data['held'] = tuple(v for v in data['body_parts'].values() if v is not None and
