@@ -55,3 +55,81 @@ feeds the existing movement-before-Action phase. Only that native resolver may
 ground speed and ETA display. Do not derive a velocity or arrival time in the
 browser, treat cells as collision geometry, or use `RunAction` as a movement
 resolver.
+
+## U-ARENA-004K: bounded movement-rate and intent foundation
+
+The native `movement_intent` service now implements rate derivation from r61
+and a one-second destination intent for already-initiated transactional
+Encounters. `MovementIntent` is a distinct value containing actor ID,
+full-precision `CartesianPosition`, selected rate category, decision ID, and
+target boundary. It is supplied separately from `ChoiceBook` Action Choices.
+`Encounter.step` preflights it under the existing transactional publication
+boundary, converts it to a one-second velocity, and passes that vector through
+the existing movement staging/integration path. `EncounterStep` reports the
+movement decision ID. Staging still moves before Actions resolved at the
+boundary. No movement value is stored on `SpatialState`, and no destination is
+retained after that one-boundary request.
+
+The evaluator uses native race, Fitness, Run rank (missing ordinary Run skill
+means rank zero), legacy physical fatigue level, and Strength. r61 contributes
+the race-specific base sprint, Run's one-foot-per-second per-level maximum
+speed increment, rate-category ratios, MMR, fatigue category ceilings,
+heavy-load and encumbrance factor, posture and backward caps, and the usual
+one-yard-per-second cap during a concurrent demanding Action. It converts
+yards per second to meters per second at 0.9144 without rounding position.
+Terrain, hampering, encumbrance, posture, direction, and Action demand are
+required explicit `MovementRateConditions`; there are no neutral defaults.
+Unsupported race/Strength table values, invalid or absent conditions, fatigue
+incapacity, and nonpositive resulting rates refuse explicitly.
+
+Movement is an interval decision, not a persistent path. To change direction or
+category, submit a new intent for the next untouched boundary; omitting an
+intent means no destination-derived movement on that interval. There is no
+implicit arrival clamp: an intent is refused if the selected interval could
+reach its destination. This avoids inventing endpoint behavior. The interface
+also refuses simultaneous caller velocities, non-one-second duration, stale
+boundary references, and uninitiated/nontransactional Encounters. It does not
+register an Action, activate an Encounter, add Awareness, or alter the target-
+free activation record.
+
+### Verified proof boundary and remaining decisions
+
+Focused tests author a neutral Plains/Road, unhampered, fresh, unencumbered,
+standing, forward-aligned test case and a clear 20-meter corridor. The authored
+fixture places the player at `(0,0,0)` and opponent reference point at
+`(0,100,0)` meters, but expressly does **not** infer clearance or collision
+safety from those points. A selected walk while a one-second `RunAction` is
+pending derives 1 yd/s due to the concurrent-Action cap, commits 0.9144 meters
+at t=1 through the native movement phase, then the Run observer succeeds on
+that displacement. The generated browser still has no destination route. This
+is a test-fixture proof of the native integration seam, not proof that generated
+Arena corridors are traversable.
+
+Unresolved before generated-player movement can be safely enabled:
+
+- **Facing and direction:** the Being's native `SpatialState` has no
+  orientation. Adopt a facing source/relative-direction mapping or restrict
+  movement to a rule-backed direction that can be proven. The test explicitly
+  premises forward alignment; runtime does not establish it.
+- **Destination completion:** adopt what happens when a step reaches or passes
+  a destination (stop, clamp, or preserve category motion), and what constitutes
+  a revised/withdrawn destination at a boundary. The current contract refuses
+  an interval that could arrive and retains no destination.
+- **Clearance and occupied space:** adopt Being geometry/reference-point
+  semantics and path/obstacle/occupied-space handling, including the
+  movement-while-connected cases in r61. The current intent does not test
+  collision or path clearance.
+- **World context:** provide an authoritative source for terrain and hampering
+  along a proposed path, carried mass, posture, and whether other Actions limit
+  movement. These factors are explicit caller inputs today; production Arena
+  has not established them as a coherent native snapshot.
+- **Non-forward directions:** r61 expresses these limits using hex movement,
+  while r63 Arena coordinates remain continuous meters and the Arena grid is a
+  presentation overlay. Adopt the direction-to-rate mapping before enabling
+  sideways/oblique movement.
+
+Until those decisions and authoritative inputs exist, keep browser destination
+submission, ETA, and speed indicators disabled. The next GUI-capable slice is
+not a UI route: first add adopted direction/destination/clearance and context
+decisions, then validate that native snapshot in the transactional movement
+preflight and add tests before exposing it to the player.
