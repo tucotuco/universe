@@ -45,7 +45,7 @@ authorize a native movement-intent contract that names a permitted rate (or a
 documented default), specifies how the destination constrains motion and
 arrival, and defines path/occupied-space handling. The existing rule text gives
 movement-rate formulas but does not settle how this generated continuous Arena
-represents an unobstructed path and occupied Being space: its square cells are
+represents an unobstructed path and occupied Being space: its hexes are
 presentation/initial-placement only, and generated Being geometry is absent.
 
 The minimum next engineering slice after that decision is a native Movement

@@ -1,6 +1,6 @@
 # Universe 8 Arena v1 — requirements baseline and unresolved decisions
 
-**Status:** Requirements record for the proposed Universe 8 Arena v1. This document records the baseline supplied in U-ARENA-004A; it is not an Encounter rule amendment, a generator contract, or authorization to implement features. **Reviewed:** 2026-11-06.
+**Status:** Requirements record for the proposed Universe 8 Arena v1. This document records the baseline supplied in U-ARENA-004A; it is not an Encounter rule amendment, a generator contract, or authorization to implement features. **Reviewed:** 2026-11-08.
 
 ## 1. Product boundary
 
@@ -13,7 +13,7 @@ The browser is an operator/player interface, not a second simulation engine. Nat
 ### 2.1 Startup and generated encounter
 
 - The empty Arena offers **Generate Encounter** and **Load Encounter**.
-- The Generate form has three required integer text inputs: common starting experience `>= 0`; initial map width `>= 5`; and initial map height `>= 5`. Width and height are measured in one-yard cells.
+- The Generate form has three required integer text inputs: common starting experience `>= 0`; initial map width `>= 5`; and initial map height `>= 5`. Width and height count regular flat-top hexes, each one yard between opposite sides.
 - Generate is enabled only while all three values are valid. Activation generates exactly two independent random NPC-Generator-scope Beings at the requested starting experience and starts Encounter elapsed time at 0. One Being is player-controlled; the other is Arena-controlled.
 - The generated candidate data must become complete, legitimate native Universe Being/Object state without silently dropping source fields or inventing mechanics. Native Universe owns authoritative mutable state and history after generation.
 - Existing `npcgen-npc` importers are bounded examples, not the complete Arena contract. Generator changes may be needed. The transfer must preserve the actual requested/generated experience and generated Objects.
@@ -27,7 +27,7 @@ The browser is an operator/player interface, not a second simulation engine. Nat
 
 ### 2.3 Spatial and marker presentation
 
-- Each displayed cell is a square yard. The cell display must make native facing geometry visually intelligible; it must not quantize native movement or assume that facing has only four directions.
+- Each displayed cell is a regular flat-top hexagon, one yard between opposite sides. The cell display must make native facing geometry visually intelligible; it must not quantize native movement or assume that facing has only four directions.
 - A Being is shown as a circle with a contrasting background and the first visible character of its current name. Another Object is shown as a triangle with a contrasting background and the first visible character of its current name.
 - The user chooses an intended movement destination. A movement arrow is attached to the Being. Selecting the arrow shows destination, speed, and estimated arrival time when the native state supports those values.
 - Clicking a visible Being or Object opens an information dialog, subject to the observer-information limits below.
@@ -67,12 +67,12 @@ The following are intentionally not decided by this requirements record:
 
 1. **Object dialog versus perception:** whether an Object dialog must use only the controlled Being’s perceived properties, and which safe label/details an undiscovered or partly perceived Object can show.
 2. **Renaming hidden entities:** how global direct name editing can coexist with not revealing an undiscovered Entity’s existence or identity. The UI may need distinct operator and player surfaces; no policy is selected here.
-3. **Facing and square cells:** how native facing (including adopted hex-side/hex-point orientations) is drawn over square-yard presentation cells while movement remains continuous and unquantized.
+3. **Facing and hex cells:** how native facing (including adopted hex-side/hex-point orientations) is drawn over hexagonal presentation cells while movement remains continuous and unquantized. The generated map now uses a flat-top odd-column-offset display layout, but the NPCs still have no generated facing value.
 4. **Opponent strategy:** when a strategy is chosen, whether it is session/save data or presentation preference, how it obtains legal candidates only from available knowledge, and what it does when none exist.
 5. **Initial contact:** what native mechanism gives the controlled Being its initial perceptible world view; initial generated participants do not automatically become known.
 6. **Generator contract and XP:** the NPC Generator currently owns random generation and uses per-character experience vectors. A stable contract must define how one integer starting-experience input is applied without conflating it with Universe earned/practice experience or fabricating class/level rules.
 7. **Complete generated Objects:** source possessions include structured item strings, exchanges, and gold; no general native Object mapping is adopted. A typed export or explicit mapping/rejection contract is required before claiming complete transfer.
-8. **Grid projection:** how initial random cell placement maps to native metric coordinates, geometry, multi-cell Objects, and initial exclusivity where native shape/size is unavailable must be explicit. The map must not become a competing collision model.
+8. **Object geometry and occupancy:** how any future multi-cell Objects or initial exclusivity map to native metric coordinates where native shape/size is unavailable must be explicit. Current generated Being reference points map read-only to display hexes; the map is not a competing collision model.
 9. **Random stream ownership:** generation, initial placement, opponent choices, and simulation may need separate deterministic streams; stream boundaries, seeds, and persisted state require a contract.
 10. **File picker/browser support:** browser APIs for native pickers have different compatibility and secure-context requirements. Choose supported browser scope and fallback behavior without claiming every browser can save to an arbitrary selected path.
 11. **Native save closure:** the fixed Arena restore path is host-approved and tightly bound to one scenario. A general save requires an authoritative atomic load contract, provenance/receipt handling, active Action reconstruction, observer evidence closure, and deterministic continuation.
