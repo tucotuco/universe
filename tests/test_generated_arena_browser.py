@@ -502,6 +502,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination", "/api/generated/advance",
             "/api/generated/advance",
+            "/api/generated/advance", "/api/generated/advance",
             "/api/generated/destination",
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination",
@@ -516,7 +517,11 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("/api/generated/inspect", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/run", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/pickup", [call["path"] for call in result["calls"]])
-        self.assertNotIn("/api/generated/ready-weapon", [call["path"] for call in result["calls"]])
+        draw_calls = [call for call in result["calls"]
+                      if call["path"] == "/api/generated/ready-weapon"]
+        self.assertEqual(len(draw_calls), 1)
+        self.assertEqual(draw_calls[0]["body"]["hand"], "right hand")
+        self.assertNotIn("native_id", json.dumps(draw_calls[0]["body"]))
         self.assertIn("/api/generated/rename-entity", [call["path"] for call in result["calls"]])
         rename_call = next(call for call in result["calls"] if call["path"] == "/api/generated/rename-entity")
         self.assertEqual(rename_call["body"]["name"], "Renamed Dagger")
@@ -965,14 +970,14 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                            if row["name"] == "ready weapon")
         self.assertEqual(ready_entry["status"], "unavailable")
         self.assertEqual(ready_entry["hands"], [])
-        self.assertIn("drawable location", ready_entry["reason"])
-        self.assertIn("timing is undetermined", ready_entry["reason"])
+        self.assertIn("no authored drawable source location", ready_entry["reason"])
+        self.assertIn("Ground Pick up does not designate a sheath", ready_entry["reason"])
         self.assertEqual(ready_entry["target"]["handle"], target["handle"])
         time_before_ready_attempt = self.session.active_candidate.encounter.time
         status, refused_ready = self.request("/api/generated/ready-weapon",
             {"handle": target["handle"], "hand": "right hand"})
         self.assertEqual(status, 409)
-        self.assertIn("drawable location", refused_ready["error"])
+        self.assertIn("drawable source location", refused_ready["error"])
         self.assertEqual(self.session.active_candidate.encounter.time, time_before_ready_attempt)
         inventory = self.session.public_view()["character"]["inventory"]
         self.assertEqual(len(inventory["items"]), 1)
@@ -1031,6 +1036,66 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertNotIn("http-dagger", trace)
         self.assertNotIn("My Dagger", trace)
         self.assertNotIn("Carried Dagger", trace)
+
+    def test_authored_native_draw_http_choice_and_two_one_second_boundaries(self):
+        from arena_perception import ArenaPerceptionEvidence
+        from weapon import WeaponInstance, author_worn_sheath_draw_location
+
+        _, page = self.request("/")
+        self.assertIn("button.textContent=action.display_name||action.name", page)
+        state = self.session.generate({
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        weapon_id = candidate.encounter.make_weapon("Dagger", "Test Drawer")
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        self.assertIs(type(weapon), WeaponInstance)
+        player.possessions.append(weapon.id)
+        weapon.parent_container_id = player.id
+        player.current.body_parts["right hand"] = None
+        author_worn_sheath_draw_location(weapon, player.id)
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, weapon.id, "object", weapon.name,
+            "Dagger", None, "carried", 0, 0.0)
+        ledger._current[weapon.id] = evidence
+        ledger._history.append(evidence)
+
+        status, activated = self.request("/api/generated/run", {})
+        self.assertEqual(status, 200)
+        status, activated = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        handle = next(row["handle"] for row in activated["entities"]
+                      if row["type"] == "Dagger" and row["name"] == "Test Drawer")
+        status, inspected = self.request("/api/generated/inspect", {"handle": handle})
+        self.assertEqual(status, 200)
+        draw = next(row for row in inspected["action_catalog"]["entries"]
+                    if row["name"] == "ready weapon")
+        self.assertEqual((draw["status"], draw["display_name"], draw["hands"]),
+                         ("available", "Draw (2 s)", ["right hand"]))
+        status, accepted = self.request("/api/generated/ready-weapon",
+            {"handle": handle, "hand": "right hand"})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted["ready_weapon_action"]["seconds_remaining"], 2)
+        self.assertEqual(accepted["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        status, first = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(first["ready_weapon_action"]["status"], "executing")
+        self.assertEqual(first["ready_weapon_action"]["seconds_remaining"], 1)
+        self.assertEqual(first["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        self.assertEqual(player.current.body_parts["right hand"], None)
+        status, second = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(second["ready_weapon_action"]["status"], "completed")
+        self.assertEqual(second["ready_weapon_action"]["outcome"], "success")
+        self.assertEqual(second["character"]["inventory"]["items"][0]["status"],
+                         "readied in right hand")
+        self.assertEqual(player.current.body_parts["right hand"], weapon.id)
+        self.assertEqual(player.weapons, [weapon.id])
+        self.assertEqual(player.possessions, [weapon.id])
+        self.assertEqual(weapon.parent_container_id, player.id)
+        self.assertNotIn(weapon.id, json.dumps(second))
 
     def test_display_name_overlay_is_safe_observer_scoped_and_replacement_atomic(self):
         original_history = None

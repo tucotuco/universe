@@ -52,6 +52,7 @@ var __pickedUpView=__PICKED_UP_VIEW__;
 var __movementRefusal=__MOVEMENT_REFUSAL__;
 var __movementRefusalUsed=false;
 var __enableMovementRefusal=false;
+var __enableDrawableDraw=false;
 var __calls=[];
 var __lastPlan=null;
 function __refreshActionCatalog(){
@@ -60,7 +61,7 @@ function __refreshActionCatalog(){
   if(run&&run.status!=='not_implemented'){run.status=__serverState.run_available?'available':'unavailable';run.reason=__serverState.run_available?'The native target-free Run Choice can activate this Arena.':'Run is only accepted as the first player Action; this Encounter is already activated.'}
   const pickup=entries.find(e=>e.name==='Pick up');
   if(pickup){const target=__serverState.selected_entity;pickup.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){pickup.status='unavailable';pickup.reason='A native Pick up Action is already resolving.'}else if(!target||target.category!=='object'||target.present_state!=='ground'){pickup.status='unavailable';pickup.reason='Select a currently perceived ground Object first.'}else if(!__serverState.run_available&&target.pickup_available){pickup.status='available';pickup.reason='Native one-second Pick up is currently available for this Object.'}else{pickup.status='unavailable';pickup.reason=target.pickup_unavailable_reason||'Move into the same hex as this Object before choosing Pick up.'}}
-  const ready=entries.find(e=>e.name.toLowerCase()==='ready weapon');if(ready){const target=__serverState.selected_entity;ready.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;ready.hands=[];ready.status='unavailable';ready.reason=target&&target.present_state==='carried'?'Native custody does not record whether this Dagger is in a drawable location or stored inside another carried Object, so the Ready weapon timing is undetermined. An ordinary draw takes 2 seconds; variable retrieval and post-strike re-readying use different rules.':'Select a currently perceived, carried Weapon first.'}
+  const ready=entries.find(e=>e.name.toLowerCase()==='ready weapon');if(ready){const target=__serverState.selected_entity;ready.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;if(__enableDrawableDraw&&target&&target.present_state==='carried'){ready.hands=['right hand'];ready.status='available';ready.display_name='Draw (2 s)';ready.reason='Test-authored worn sheath and free right hand; native ordinary drawing takes 2 seconds.'}else{ready.hands=[];ready.status='unavailable';ready.reason=target&&target.present_state==='carried'?'The carried Dagger has no authored drawable source location. Ground Pick up does not designate a sheath or hand; retrieval time is undetermined. Ordinary drawing is 2 seconds; post-strike re-readying is separate.':'Select a currently perceived, carried Weapon first.'}}
 }
 function __response(){return {ok:true,json:()=>Promise.resolve(JSON.parse(JSON.stringify(__serverState)))}}
 function __clickMap(clientX,clientY){
@@ -97,6 +98,9 @@ function fetch(path,options={}){
       if(__serverState.character){__serverState.character.movement.position_meters=JSON.parse(JSON.stringify(__serverState.player.position_meters));__serverState.character.movement.cell=JSON.parse(JSON.stringify(__serverState.player.cell));__serverState.character.movement.selected_plan=null;}
       __serverState.movement_plan=null;__serverState.movement_outcome='arrived';
       for(const e of __serverState.entities||[])if(e.category==='object'&&e.cell&&e.cell.column===__serverState.player.cell.column&&e.cell.row===__serverState.player.cell.row)e.pickup_available=true;
+    }else if(__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'){
+      __serverState.ready_weapon_action.seconds_remaining-=1;
+      if(__serverState.ready_weapon_action.seconds_remaining===0){__serverState.ready_weapon_action={name:'Draw',status:'completed',outcome:'success',duration_seconds:2,seconds_remaining:0};if(__serverState.character&&__serverState.character.inventory.items.length)__serverState.character.inventory.items[0].status='readied in right hand';}
     }else if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){
       __serverState.pickup_action={name:'Pick up',status:'completed',outcome:'success'};
       const e=__serverState.entities.find(row=>row.handle===__serverState.selected_entity.handle);
@@ -118,6 +122,9 @@ function fetch(path,options={}){
   } else if(path==='/api/generated/pickup'){
     __serverState.pickup_action={name:'Pick up',status:'executing',outcome:null};
     __refreshActionCatalog();
+  } else if(path==='/api/generated/ready-weapon'){
+    __serverState.ready_weapon_action={name:'Draw',status:'executing',outcome:null,duration_seconds:2,seconds_remaining:2};
+    __serverState.advance_available=true;__refreshActionCatalog();
   } else if(path==='/api/generated/rename-entity'){
     const e=__serverState.entities.find(row=>row.handle===body.handle);
     if(e){e.name=body.name;__serverState.selected_entity=e;}
@@ -231,9 +238,24 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   const readyButton=__find(__element('dialogBody'),'actionReadyWeapon'),readyHand=__find(__element('dialogBody'),'readyWeaponHand');
   if(!readyButton||!readyButton.disabled||readyHand)throw Error('unsupported Ready weapon Action was not disabled without drawable-location state');
   const readyReason=__find(__element('dialogBody'),'actionReadyWeapon').title;
-  if(!readyReason.includes('drawable location')||!readyReason.includes('timing is undetermined')||!readyReason.includes('ordinary draw takes 2 seconds')||!readyReason.includes('post-strike re-readying'))throw Error('Ready weapon refusal did not distinguish the native timing rules: '+readyReason);
+  if(!readyReason.includes('drawable source location')||!readyReason.includes('Ground Pick up')||!readyReason.includes('2 seconds')||!readyReason.includes('post-strike re-readying'))throw Error('Ready weapon refusal did not distinguish the native timing rules: '+readyReason);
   if(__calls.some(call=>call.path==='/api/generated/ready-weapon'))throw Error('disabled Ready weapon submitted a request');
-  const playerSummary=body;
+  const playerSummary=body,carriedInventory=currentView.character.inventory.items.map(item=>`${item.name} · ${item.status}`);
+  // This is an explicitly test-authored browser fixture: the carried dagger is
+  // given an owner-linked drawable sheath record and the Being a free hand.
+  __enableDrawableDraw=true;__serverState.selected_entity=__serverState.entities.find(e=>e.handle===initialObject.handle);
+  __refreshActionCatalog();show(__serverState);
+  const drawEntry=currentView.action_catalog.entries.find(e=>e.name.toLowerCase()==='ready weapon');
+  const drawButton=__find(__element('dialogBody'),'actionReadyWeapon'),drawHand=__find(__element('dialogBody'),'readyWeaponHand');
+  if(drawEntry.status!=='available'||drawEntry.display_name!=='Draw (2 s)'||!drawButton||drawButton.disabled||!drawHand||drawHand.value!=='right hand')throw Error('explicit native Draw prerequisites did not reach the browser selector');
+  await drawButton.listeners.click();
+  if(!currentView.ready_weapon_action||currentView.ready_weapon_action.status!=='executing'||currentView.ready_weapon_action.seconds_remaining!==2)throw Error('browser Draw Choice did not show a pending two-second Action');
+  if(!__calls.some(call=>call.path==='/api/generated/ready-weapon'&&call.body.handle===initialObject.handle&&call.body.hand==='right hand'))throw Error('browser did not submit the selected handle and free native hand');
+  await __element('advance').onclick();
+  if(currentView.ready_weapon_action.status!=='executing'||currentView.ready_weapon_action.seconds_remaining!==1||currentView.character.inventory.items[0].status!=='carried; not readied')throw Error('browser exposed Draw readiness before its second boundary');
+  await __element('advance').onclick();
+  if(currentView.ready_weapon_action.status!=='completed'||currentView.ready_weapon_action.outcome!=='success'||currentView.character.inventory.items[0].status!=='readied in right hand')throw Error('browser did not show atomic Draw completion at the second boundary');
+  if(__calls.filter(call=>call.path==='/api/generated/advance').length<3)throw Error('browser Draw progression did not use native one-second Advance requests');
   const inventoryButton=__findHandle(__element('dialogBody'),initialObject.handle);
   if(!inventoryButton)throw Error('carried inventory item is not inspectable');
   await inventoryButton.listeners.click();
@@ -242,7 +264,6 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   await __element('dialogClose').listeners.click();
   if(dialog.open||!__element('characterButton').focused)throw Error('popup close or focus restoration failed');
   const carriedEntity=currentView.selected_entity;
-  const carriedInventory=currentView.character.inventory.items.map(item=>`${item.name} · ${item.status}`);
   const runCountBeforeMovement=__calls.filter(call=>call.path==='/api/generated/run').length;
   await __element('generate').onclick();
   const freshPosition=currentView.player.position_meters;
