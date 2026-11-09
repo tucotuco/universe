@@ -158,6 +158,7 @@ class GeneratedArenaSession:
         self._pickup_action_outcome = None
         self._ready_weapon_action_id = None
         self._ready_weapon_action_outcome = None
+        self._ready_weapon_end_time = None
         self._movement_plan = None
         self._movement_sequence = 0
         self._movement_outcome = None
@@ -252,6 +253,7 @@ class GeneratedArenaSession:
                 "movement_reason": _MOVEMENT_DISABLED,
             }
         candidate = self._active
+        from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction
         player = candidate.participants[0]
         from arena_perception import ArenaPerceptionLedger
         ledger = object.__getattribute__(player.native.being, "__dict__").get("_arena_perception_ledger")
@@ -270,12 +272,10 @@ class GeneratedArenaSession:
                              "outcome": self._pickup_action_outcome}
         ready_weapon_action = None
         if self._ready_weapon_action_id is not None:
-            ready_event = candidate.universe.get_event_by_id(self._ready_weapon_action_id)
-            duration = (None if ready_event is None else
-                        int(ready_event.end_time - ready_event.start_time))
-            remaining = (None if ready_event is None else
-                         max(0, int(ready_event.end_time - candidate.encounter.time)))
-            ready_weapon_action = {"name": "Ready weapon",
+            duration = ReadyWeaponAction.DRAW_DURATION_SECONDS
+            remaining = (None if self._ready_weapon_end_time is None else
+                         max(0, int(self._ready_weapon_end_time - candidate.encounter.time)))
+            ready_weapon_action = {"name": "Draw",
                 "status": "completed" if self._ready_weapon_action_outcome is not None else "executing",
                 "outcome": self._ready_weapon_action_outcome,
                 "duration_seconds": duration, "seconds_remaining": remaining}
@@ -293,7 +293,6 @@ class GeneratedArenaSession:
                 "facing_policy": self._movement_plan.facing_policy,
                 "remaining_distance_meters": remaining,
             }
-        from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
             for action_type in (RunAction, SpotAction, PickUpAction, ReadyWeaponAction)
@@ -405,7 +404,7 @@ class GeneratedArenaSession:
         return True, "Native one-second Pick up is currently available for this Object."
 
     def _ready_weapon_target_unlocked(self, candidate, player, entity_id, evidence):
-        from weapon import WeaponInstance
+        from weapon import WeaponInstance, native_weapon_draw_location
         if evidence is None or evidence.category != "object" or evidence.present_state != "carried":
             return None, (), "Select a currently perceived, carried Weapon first."
         obj = candidate.universe.get_object_by_id(entity_id)
@@ -426,21 +425,28 @@ class GeneratedArenaSession:
             return None, (), "The native Arena Action pathway is unavailable."
         if self._ready_weapon_action_id is not None and self._ready_weapon_action_outcome is None:
             return None, (), "A native Ready weapon Action is already resolving."
+        try:
+            location = native_weapon_draw_location(obj)
+        except (TypeError, ValueError):
+            return None, (), "The native Dagger draw-location record is malformed."
+        if location is None:
+            return None, (), (
+                "The carried Dagger has no authored drawable source location. Ground Pick up does "
+                "not designate a sheath or hand; retrieval time is undetermined."
+            )
+        if location["owner_id"] != player.id:
+            return None, (), "The Dagger's drawable sheath is not assigned to the player Being."
         body_parts = player.current.body_parts
         hands = tuple(sorted(slot for slot, held in body_parts.items()
                              if slot in ReadyWeaponAction.HANDS and held is None))
         if not hands:
             return None, (), (
-                "No explicitly modeled, free native left or right hand is available. Native custody "
-                "also does not record whether this Dagger is in a drawable location or stored inside "
-                "another carried Object, so its timing is undetermined. Ordinary drawing is 2 seconds; "
-                "variable retrieval and post-strike re-readying follow different rules."
+                "No explicitly modeled, free native left or right hand is available for this "
+                "otherwise drawable Dagger."
             )
-        return None, (), (
-            "Native custody does not record whether this Dagger is in a drawable location "
-            "or stored inside another carried Object, so the Ready weapon timing is undetermined. "
-            "An ordinary draw takes 2 seconds; variable retrieval and post-strike re-readying "
-            "use different rules."
+        return obj, hands, (
+            "Native Draw from the explicitly authored worn sheath takes 2 seconds. "
+            "Post-strike re-ready timing is separate."
         )
 
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
@@ -466,6 +472,7 @@ class GeneratedArenaSession:
                           else "The native Ready weapon scheduler or resolver contract is unavailable.")
                 catalog_rows.append({
                     "name": name, "group": "Arena Actions",
+                    "display_name": "Draw (2 s)",
                     "target_type": target_type, "required_skill": source_row["required_skill"],
                     "is_melee": source_row["is_melee"],
                     "status": "available" if ready_available else "unavailable",
@@ -843,6 +850,7 @@ class GeneratedArenaSession:
             self._pickup_action_outcome = None
             self._ready_weapon_action_id = None
             self._ready_weapon_action_outcome = None
+            self._ready_weapon_end_time = None
             self._movement_plan = None
             self._movement_sequence = 0
             self._movement_outcome = None
@@ -1034,6 +1042,7 @@ class GeneratedArenaSession:
                     "native Ready weapon Choice was not accepted; Arena state is unchanged") from exc
             self._ready_weapon_action_id = action.id
             self._ready_weapon_action_outcome = None
+            self._ready_weapon_end_time = action.end_time
             self._selected_entity_handle = handle
             return self._view_unlocked()
 

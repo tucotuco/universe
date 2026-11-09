@@ -298,6 +298,22 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                      'unreceipted projectile boundary state')
         properties=meta.entities[key].pre_action
         _require(detached(current['hardness']) == properties['hardness'], 'unreceipted protection change')
+        from action_evaluation import ReadyWeaponEffect
+        ready_draws = [row.effect for row in meta.effects.values()
+                       if type(row.effect) is ReadyWeaponEffect and row.effect.object_id == key]
+        if target.category == 'weapon':
+            from weapon import native_weapon_draw_location
+            source_location = native_weapon_draw_location(obj)
+            expected_location = properties.get('draw_location')
+            if ready_draws:
+                _require(len(ready_draws) == 1
+                    and expected_location is not None
+                    and expected_location.get('owner_id') == ready_draws[0].target_id
+                    and source_location is None,
+                    'Draw did not consume its owned native sheath-location evidence')
+            else:
+                _require(detached(source_location) == expected_location,
+                         'unreceipted native Weapon draw-location change')
         if target.category == 'being':
             states=native_data(current['states'],(States,))
             abilities=native_data(current['abilities'],(Abilities,))

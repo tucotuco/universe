@@ -14,6 +14,44 @@ import math
 from object import ObjectInstance, ObjectDefinition, ObjectDictionary
 from utils import convert_to_numeric
 
+
+NATIVE_DRAW_LOCATION_TAG = "universe.native_draw_location"
+DRAWABLE_WORN_SHEATH = "worn_sheath"
+
+
+def native_weapon_draw_location(weapon):
+    """Read an explicitly authored, owner-linked native weapon source location.
+
+    The location record lives in the Weapon's existing instance-specific
+    current definition tags. This adds no Object identity, generic container,
+    body rule, or checkpoint field.
+    """
+    if type(weapon) is not WeaponInstance:
+        raise TypeError("draw-location evidence requires an exact native WeaponInstance")
+    tags = weapon.current.tags
+    if type(tags) is not dict:
+        raise ValueError("native weapon tags are malformed")
+    record = tags.get(NATIVE_DRAW_LOCATION_TAG)
+    if record is None:
+        return None
+    if (type(record) is not dict or set(record) != {"kind", "owner_id"}
+            or record.get("kind") != DRAWABLE_WORN_SHEATH
+            or type(record.get("owner_id")) is not str or not record["owner_id"]):
+        raise ValueError("native weapon draw-location record is malformed")
+    return record
+
+
+def author_worn_sheath_draw_location(weapon, owner_id):
+    """Author explicit per-instance worn-sheath evidence for a known owner."""
+    if type(weapon) is not WeaponInstance:
+        raise TypeError("draw-location evidence requires an exact native WeaponInstance")
+    if type(owner_id) is not str or not owner_id:
+        raise ValueError("worn-sheath draw location requires a native Being identity")
+    if type(weapon.current.tags) is not dict:
+        raise ValueError("native weapon tags are malformed")
+    weapon.current.tags[NATIVE_DRAW_LOCATION_TAG] = {
+        "kind": DRAWABLE_WORN_SHEATH, "owner_id": owner_id}
+
 class WeaponDefinition(ObjectDefinition):
     '''
     A template for characteristics of a Weapon, which is a subtype of Object.

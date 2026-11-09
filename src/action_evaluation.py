@@ -386,8 +386,20 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             freeze(od['physiology_id'])
         elif type(obj) is WeaponInstance:
             category = 'weapon'
+            from weapon import NATIVE_DRAW_LOCATION_TAG, DRAWABLE_WORN_SHEATH
+            tags = cd.get('tags')
+            if type(tags) is not dict:
+                raise EvaluationIntegrityError('Weapon tags must be a native dictionary')
+            location = tags.get(NATIVE_DRAW_LOCATION_TAG)
+            if location is not None and (type(location) is not dict
+                    or set(location) != {'kind', 'owner_id'}
+                    or location.get('kind') != DRAWABLE_WORN_SHEATH
+                    or type(location.get('owner_id')) is not str
+                    or not location['owner_id']):
+                raise EvaluationIntegrityError('native Weapon draw-location record is malformed')
             data.update(attacks=freeze(cd['attacks']), size=freeze(cd['weapon_size']),
-                        original_type=freeze(native_data(od['original'], (WeaponDefinition,))['obj_type']))
+                        original_type=freeze(native_data(od['original'], (WeaponDefinition,))['obj_type']),
+                        draw_location=freeze(location))
         elif type(obj) is ArmorInstance:
             category = 'armor'
             data['defenses'] = freeze(cd['defenses'])
@@ -882,10 +894,12 @@ def ready_weapon_eligibility(snapshot, action):
                 or action.target_id in tuple(data.get('body_parts', {}).values())
                 or action.target_id == data.get('armor_id')):
             return 'unavailable'
-    # Native possession and parent custody do not represent whether a weapon
-    # is in a drawable location or buried in another carried container. Until
-    # that state exists, an initial draw cannot be admitted safely.
-    return 'unavailable'
+    location = target.data.get('draw_location')
+    if (type(location) not in (dict, MappingProxyType)
+            or location.get('kind') != 'worn_sheath'
+            or location.get('owner_id') != actor.id):
+        return 'unavailable'
+    return None
 
 
 def _activity(snapshot, action, rng):

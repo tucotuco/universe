@@ -524,6 +524,7 @@ def _make_plan(encounter,candidate,rng_owner):
     for row in supported.boundary.effects.values():
         effect=row.effect
         if type(effect) is not ReadyWeaponEffect:continue
+        from weapon import NATIVE_DRAW_LOCATION_TAG, native_weapon_draw_location
         source=events.get(effect.source_action_id)
         actor=objects.get(effect.target_id)
         obj=objects.get(effect.object_id)
@@ -538,6 +539,8 @@ def _make_plan(encounter,candidate,rng_owner):
                 or actor.possessions.count(effect.object_id)!=1
                 or effect.object_id in actor.weapons
                 or obj.parent_container_id!=actor.id or obj.spatial_state is not None
+                or native_weapon_draw_location(obj) is None
+                or native_weapon_draw_location(obj).get('owner_id')!=actor.id
                 or any(effect.object_id in tuple(getattr(other,name,()) or ())
                        for key,other in objects.items() if type(other) is BeingInstance
                        and other is not actor for name in ('possessions','weapons','body_parts','armor'))
@@ -549,6 +552,9 @@ def _make_plan(encounter,candidate,rng_owner):
         updated=dict(actor.current.body_parts)
         updated[hand]=object_id
         plan.contents('targets',actor.current.body_parts,updated)
+        updated_tags=dict(obj.current.tags)
+        updated_tags.pop(NATIVE_DRAW_LOCATION_TAG, None)
+        plan.contents('targets',obj.current.tags,updated_tags)
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}

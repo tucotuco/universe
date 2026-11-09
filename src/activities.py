@@ -151,7 +151,7 @@ class ReadyWeaponAction(Action):
 
     def prepare_schedule(self, encounter):
         from being import BeingInstance
-        from weapon import WeaponInstance
+        from weapon import WeaponInstance, native_weapon_draw_location
         if (encounter is not self.encounter or not encounter.arena_activation_enabled
                 or encounter.progression_mode != 'transactional'):
             raise ValueError('Ready weapon requires the activated generated-Arena transaction path')
@@ -161,6 +161,15 @@ class ReadyWeaponAction(Action):
             raise ValueError('Ready weapon requires a participating Being and registered WeaponInstance')
         if self.end_time - self.start_time != self.DRAW_DURATION_SECONDS:
             raise ValueError('ordinary weapon drawing uses the adopted two-second duration')
+        location = native_weapon_draw_location(target)
+        if location is None or location.get('owner_id') != actor.id:
+            raise ValueError('Draw requires explicitly authored drawable-source evidence for this Being')
+        if (self.target_id not in actor.possessions
+                or target.parent_container_id != actor.id or target.spatial_state is not None):
+            raise ValueError('Draw requires exact native carried custody')
+        if (self.hand not in actor.current.body_parts
+                or actor.current.body_parts[self.hand] is not None):
+            raise ValueError('Draw requires an explicitly represented free native hand')
         return PreparedSchedule.from_action(self)
 
     def resolve(self, difficulty_class):
