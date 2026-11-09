@@ -90,6 +90,43 @@ class _MovementPlan:
 class ArenaBrowserRequestError(ValueError):
     """A malformed or unavailable generated-Arena browser request."""
 
+    def __init__(self, message, *, movement_refusal=None):
+        super().__init__(message)
+        self.movement_refusal = movement_refusal
+
+
+def _safe_movement_refusal(refusal):
+    """Map privileged native refusal details to an allowlisted player reason."""
+    from movement_intent import MovementIntentRefusal
+
+    current = refusal
+    while current is not None and not isinstance(current, MovementIntentRefusal):
+        current = current.__cause__
+    if current is None:
+        return None
+    if current.code == "ineligible_actor":
+        category = "actor_unable_to_move"
+        message = ("Your Being is at 0 HP or below and cannot take voluntary movement under "
+                   "the adopted rules.")
+    elif current.code in ("no_movement_rate", "incapacitated"):
+        category = "rate_unavailable"
+        message = ("Your current native condition and the selected movement rate permit no "
+                   "positive movement this second.")
+    elif current.code == "unsupported_race":
+        category = "unsupported_movement_profile"
+        message = "Your Being's native movement profile is not supported, so this rate cannot be evaluated."
+    elif current.code == "invalid_rate":
+        category = "unsupported_rate"
+        message = "The selected movement rate is not supported by the native movement rules."
+    elif current.code.startswith(("unknown_", "missing_", "invalid_native", "stale_native")):
+        category = "native_prerequisite_unavailable"
+        message = "A required authoritative movement condition is unavailable; movement was not committed."
+    else:
+        category = "movement_prerequisite_not_met"
+        message = "The native movement prerequisites were not met; movement was not committed."
+    message += " No Encounter time or position changed; your destination plan remains selected."
+    return {"category": category, "message": message}
+
 
 def _parse_decimal(payload, key, minimum):
     value = payload.get(key)
@@ -952,11 +989,17 @@ class GeneratedArenaSession:
                 after_time = candidate.encounter.time
                 after_position = player.get_position()
                 rolled_back = (after_time == before_time and after_position == before_position)
+                movement_refusal = _safe_movement_refusal(exc)
                 self._trace_advance_state(
                     candidate, trace_request_id, trace_client_sequence,
                     before_time, before_position, before_cell, accepted_plan,
                     "rolled_back" if rolled_back else "failed_after_state_change",
-                    reason=type(exc).__name__)
+                    reason=(movement_refusal["category"] if movement_refusal
+                            else type(exc).__name__))
+                if movement_refusal is not None:
+                    raise ArenaBrowserRequestError(
+                        movement_refusal["message"],
+                        movement_refusal=movement_refusal) from exc
                 raise ArenaBrowserRequestError(
                     "native one-second advancement failed; committed Arena state is unchanged") from exc
             self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,

@@ -19,6 +19,8 @@ from universe import Universe
 
 
 _ABILITY_ORDER = ("Str", "Int", "Wis", "Dex", "Con", "Cha")
+_MOVEMENT_RACE_CATEGORIES = frozenset((
+    "human", "elf", "half-elf", "half-orc", "dwarf", "gnome", "halfling"))
 _ABILITY_KEYWORDS = {
     "Str": "strength", "Int": "intelligence", "Wis": "wisdom",
     "Dex": "dexterity", "Con": "constitution", "Cha": "charisma",
@@ -243,6 +245,16 @@ def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experi
         _refuse("record_mismatch", "npcgen API record and canonical JSON export disagree")
 
     definition = fields["template"].copy()
+    # Native templates intentionally leave several common human Being races
+    # blank. The Generator profile has already been validated against this
+    # exact template name, so retain its native race category when present and
+    # otherwise use the matched template's own type as the supported category.
+    # This keeps Human movement inputs authoritative without overwriting
+    # aliases such as High elf -> Elf from the native dictionary.
+    if (definition.race is None
+            and type(definition.obj_type) is str
+            and definition.obj_type.strip().casefold() in _MOVEMENT_RACE_CATEGORIES):
+        definition.race = definition.obj_type
     definition.length = fields["height"]
     definition.weight = fields["weight"]
     definition.hit_points = fields["hit_points"]

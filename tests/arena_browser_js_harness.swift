@@ -1,7 +1,7 @@
 import Foundation
 import JavaScriptCore
 
-guard CommandLine.arguments.count == 5 else {
+guard CommandLine.arguments.count == 5 || CommandLine.arguments.count == 6 else {
     fputs("usage: arena_browser_js_harness.swift PAGE_HTML INITIAL_VIEW_JSON TARGET_CELL_JSON PICKED_UP_VIEW_JSON\n", stderr)
     exit(2)
 }
@@ -14,6 +14,7 @@ let html = read(CommandLine.arguments[1])
 let initialView = read(CommandLine.arguments[2])
 let targetCell = read(CommandLine.arguments[3])
 let pickedUpView = read(CommandLine.arguments[4])
+let movementRefusal = CommandLine.arguments.count == 6 ? read(CommandLine.arguments[5]) : "null"
 guard let start = html.range(of: "<script>"),
       let end = html.range(of: "</script>", range: start.upperBound..<html.endIndex) else {
     fputs("generated page has no inline script\n", stderr)
@@ -48,6 +49,9 @@ var __serverState={state:'empty'};
 var __initialView=__INITIAL_VIEW__;
 var __targetCell=__TARGET_CELL__;
 var __pickedUpView=__PICKED_UP_VIEW__;
+var __movementRefusal=__MOVEMENT_REFUSAL__;
+var __movementRefusalUsed=false;
+var __enableMovementRefusal=false;
 var __calls=[];
 var __lastPlan=null;
 function __refreshActionCatalog(){
@@ -67,6 +71,10 @@ function __clickMap(clientX,clientY){
 function fetch(path,options={}){
   const body=options.body===undefined?null:JSON.parse(options.body);
   __calls.push({path,method:options.method||'GET',body,headers:options.headers||{}});
+  if(path==='/api/generated/advance'&&__enableMovementRefusal&&__movementRefusal&&!__movementRefusalUsed){
+    __movementRefusalUsed=true;
+    return Promise.resolve({ok:false,json:()=>Promise.resolve(__movementRefusal)});
+  }
   if(path==='/api/generated/generate')__serverState=JSON.parse(JSON.stringify(__initialView));
   else if(path==='/api/generated/destination'){
     const m=__serverState.map, b=body;
@@ -120,6 +128,7 @@ let preparedPrelude = prelude
     .replacingOccurrences(of: "__INITIAL_VIEW__", with: initialView)
     .replacingOccurrences(of: "__TARGET_CELL__", with: targetCell)
     .replacingOccurrences(of: "__PICKED_UP_VIEW__", with: pickedUpView)
+    .replacingOccurrences(of: "__MOVEMENT_REFUSAL__", with: movementRefusal)
 context.evaluateScript(preparedPrelude)
 context.evaluateScript(pageScript)
 let scenario = #"""
@@ -254,12 +263,24 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   await __element('advance').onclick();
   if(currentView.time_seconds!==1||currentView.player.position_meters.x===freshPosition.x&&currentView.player.position_meters.y===freshPosition.y)throw Error('fresh destination did not advance to a displaced native position');
   if(__calls.filter(call=>call.path==='/api/generated/run').length!==runCountBeforeMovement)throw Error('movement activation submitted Run');
+  if(__movementRefusal){
+    const current=currentView.player.cell,cell=current.column===0&&current.row===0?{column:1,row:1}:{column:0,row:0};
+    const x=currentView.map.origin_offset_meters[0]+cell.column*currentView.map.column_step_meters;
+    const y=currentView.map.origin_offset_meters[1]+cell.row*currentView.map.row_step_meters+(cell.column%2)*currentView.map.odd_column_offset_meters;
+    const beforeTime=currentView.time_seconds;
+    __enableMovementRefusal=true;
+    await __clickMap(mapView.toX(x),mapView.toY(y));
+    await __element('advance').onclick();
+    if(!__element('error').textContent.includes(__movementRefusal.movement_refusal.message))throw Error('structured movement refusal was not shown in the shipped UI');
+    if(__element('error').dataset.refusalCategory!==__movementRefusal.movement_refusal.category||currentView.time_seconds!==beforeTime||!currentView.movement_plan)throw Error('UI refusal lost its category or authoritative plan');
+  }
   globalThis.__result=JSON.stringify({calls:__calls,plan:__lastPlan,time:currentView.time_seconds,
     freshMovement:{position:currentView.player.position_meters,start:freshPosition,
       time:currentView.time_seconds,playerAction:currentView.player_action,
       runCountBefore:runCountBeforeMovement,
       runCount:__calls.filter(call=>call.path==='/api/generated/run').length},
     status:__element('movementStatus').textContent,error:__element('error').textContent,
+    refusalCategory:__element('error').dataset.refusalCategory||'',
     entityDetails:body,pickupStatus:'Pick up accepted',renameStatus:'renamed',finalEntity:carriedEntity,
     characterSummary:playerSummary,characterInventory:carriedInventory,
     entityLabels:__element('entities').children.map(e=>e.textContent),actionCatalog:currentView.action_catalog});

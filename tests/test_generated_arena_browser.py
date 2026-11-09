@@ -57,6 +57,147 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                                              trace_ui=True, trace_stream=stream)
         return stream
 
+    def test_fixed_generated_candidates_classify_hp_refusal_and_native_race_import(self):
+        import copy
+        from movement_intent import MovementIntentRefusal
+        from arena_browser_session import _safe_movement_refusal
+
+        # This fixed root reproduces the observed cases in installed npcgen:
+        # Human/0 XP is born at 0 HP, while Human/10,000 XP is mobile but the
+        # checked-in native Human template has an empty race field.
+        import io
+        trace = io.StringIO()
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261108,
+                                             trace_ui=True, trace_stream=trace)
+        zero_status, zero_view = self.request("/api/generated/generate", {
+            "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        self.assertEqual(zero_status, 200)
+        zero_candidate = self.session.active_candidate
+        zero_player = zero_candidate.participants[0].native.being
+        self.assertEqual((zero_player.current.obj_type, zero_player.current.race,
+                          zero_player.get_hit_points(), zero_player.hex_facing),
+                         ("Human", "Human", 0, 3))
+        zero_start = zero_player.get_position()
+        zero_address = max(zero_candidate.arena_map.layout.addresses(), key=lambda cell: math.dist(
+            zero_candidate.arena_map.layout.center_position(cell, z=zero_start.z).as_tuple(),
+            zero_start.as_tuple()))
+        selected = self.request("/api/generated/destination", {
+            "column": zero_address.column, "row": zero_address.row,
+            "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(selected[0], 200)
+
+        ledger = object.__getattribute__(zero_player, "__dict__")["_arena_perception_ledger"]
+        opponent = zero_candidate.participants[1].native.being
+        before = {
+            "time": zero_candidate.encounter.time,
+            "position": zero_player.get_position(),
+            "facing": zero_player.hex_facing,
+            "plan": self.session._movement_plan,
+            "rng": self.session._rng_cursor.state,
+            "global_rng": random.getstate(),
+            "history": copy.copy(zero_candidate.universe.event_history),
+            "pending": list(zero_candidate.encounter.pending_action_list),
+            "choices": zero_candidate.encounter.choice_state,
+            "awareness": (tuple(zero_candidate.encounter.aware_beings(zero_player.id)),
+                          tuple(zero_candidate.encounter.aware_beings(opponent.id))),
+            "evidence": tuple(ledger.current),
+        }
+        status, refusal = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 409)
+        self.assertEqual(refusal["movement_refusal"], {
+            "category": "actor_unable_to_move",
+            "message": ("Your Being is at 0 HP or below and cannot take voluntary movement under "
+                        "the adopted rules. No Encounter time or position changed; your destination "
+                        "plan remains selected."),
+        })
+        self.assertEqual(zero_candidate.encounter.time, before["time"])
+        self.assertEqual(zero_player.get_position(), before["position"])
+        self.assertEqual(zero_player.hex_facing, before["facing"])
+        self.assertIs(self.session._movement_plan, before["plan"])
+        self.assertEqual(self.session._rng_cursor.state, before["rng"])
+        self.assertEqual(random.getstate(), before["global_rng"])
+        self.assertEqual(zero_candidate.universe.event_history, before["history"])
+        self.assertEqual(list(zero_candidate.encounter.pending_action_list), before["pending"])
+        self.assertEqual(zero_candidate.encounter.choice_state, before["choices"])
+        self.assertEqual((tuple(zero_candidate.encounter.aware_beings(zero_player.id)),
+                          tuple(zero_candidate.encounter.aware_beings(opponent.id))),
+                         before["awareness"])
+        self.assertEqual(tuple(ledger.current), before["evidence"])
+        self.assertEqual(self.session.public_view()["movement_plan"], selected[1]["movement_plan"])
+        self.assertNotIn(opponent.id, json.dumps(refusal))
+        self.assertNotIn("seed", json.dumps(refusal).lower())
+        self.assertNotIn("MovementIntentRefusal", json.dumps(refusal))
+        self.assertIn("reason=actor_unable_to_move", trace.getvalue())
+        self.assertNotIn("ineligible_actor", trace.getvalue())
+        self.assertNotIn(opponent.id, trace.getvalue())
+        self.assertTrue(zero_candidate.engine_identity)
+
+        # Privileged integration diagnostics retain the exact native code and
+        # message behind the browser-safe refusal category.
+        with self.assertRaises(ArenaBrowserRequestError) as native_error:
+            self.session.advance_one_second()
+        cause = native_error.exception.__cause__
+        while cause is not None and not hasattr(cause, "code"):
+            cause = cause.__cause__
+        self.assertEqual((cause.code, str(cause)),
+                         ("ineligible_actor", "a Being at 0 HP or below cannot choose voluntary movement"))
+        self.assertEqual(_safe_movement_refusal(MovementIntentRefusal(
+            "no_movement_rate", "privileged detail"))["category"], "rate_unavailable")
+        self.assertEqual(_safe_movement_refusal(MovementIntentRefusal(
+            "unknown_movement_limit", "privileged detail"))["category"],
+            "native_prerequisite_unavailable")
+        self.assertEqual(_safe_movement_refusal(MovementIntentRefusal(
+            "unsupported_race", "private race value"))["category"],
+            "unsupported_movement_profile")
+
+        # The same documented root seed at positive XP proves the template
+        # race omission was a data-import defect, not a valid race refusal.
+        for rate in ("walk", "sprint"):
+            self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261108)
+            status, generated = self.request("/api/generated/generate", {
+                "starting_experience": "10000", "width_cells": "5", "height_cells": "5"})
+            self.assertEqual(status, 200)
+            candidate = self.session.active_candidate
+            player = candidate.participants[0].native.being
+            self.assertEqual(player.current.race, "Human")
+            self.assertGreater(player.get_hit_points(), 0)
+            self.assertEqual(player.hex_facing, 3)
+            start = player.get_position()
+            target = max(candidate.arena_map.layout.addresses(), key=lambda cell: math.dist(
+                candidate.arena_map.layout.center_position(cell, z=start.z).as_tuple(),
+                start.as_tuple()))
+            status, plan = self.request("/api/generated/destination", {
+                "column": target.column, "row": target.row,
+                "rate": rate, "facing_policy": "turn"})
+            self.assertEqual(status, 200)
+            self.assertEqual(plan["movement_plan"]["rate"], rate)
+            status, advanced = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200)
+            self.assertEqual(advanced["time_seconds"], 1)
+            self.assertNotEqual(player.get_position(), start)
+
+        # A distinct generated race/template alias and initial heading remain
+        # mobile at zero XP when HP is positive.
+        for rate in ("walk", "sprint"):
+            self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
+            status, _ = self.request("/api/generated/generate", {
+                "starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+            self.assertEqual(status, 200)
+            candidate = self.session.active_candidate
+            player = candidate.participants[0].native.being
+            self.assertEqual((player.current.obj_type, player.current.race,
+                              player.get_hit_points(), player.hex_facing),
+                             ("High elf", "Elf", 7, 4))
+            start = player.get_position()
+            target = max(candidate.arena_map.layout.addresses(), key=lambda cell: math.dist(
+                candidate.arena_map.layout.center_position(cell, z=start.z).as_tuple(),
+                start.as_tuple()))
+            self.assertEqual(self.request("/api/generated/destination", {
+                "column": target.column, "row": target.row,
+                "rate": rate, "facing_policy": "turn"})[0], 200)
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+            self.assertNotEqual(player.get_position(), start)
+
     def test_legacy_handler_still_selects_its_original_fixed_scenario_page(self):
         legacy_handler = object.__new__(make_handler(ArenaSession(die_roll=20)))
         legacy_handler.path = "/"
@@ -102,9 +243,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         handler.end_headers = lambda: None
         handler.do_GET()
         self.assertEqual(response_headers["cache-control"], "no-store")
-        self.assertEqual(response_headers["x-arena-ui-generation"], "005C")
+        self.assertEqual(response_headers["x-arena-ui-generation"], "005D")
         page = handler.wfile.getvalue().decode("utf-8")
-        self.assertIn('<meta name="arena-ui-generation" content="005C">', page)
+        self.assertIn('<meta name="arena-ui-generation" content="005D">', page)
 
     def test_trace_off_is_quiet_and_diagnostic_route_is_unavailable(self):
         import io
@@ -126,7 +267,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         stream = self.enable_trace()
         status, page = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn('<meta name="arena-ui-generation" content="005C">', page)
+        self.assertIn('<meta name="arena-ui-generation" content="005D">', page)
         self.assertIn("Close this dialog to return to the map and movement controls.", page)
         self.assertIn("const traceEnabled=true", page)
         # This source-level contract verifies that shipped handlers correlate a
@@ -256,7 +397,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
 
     def test_map_click_trace_is_fixed_schema_and_contains_no_entity_identity(self):
         stream = self.enable_trace()
-        self.assertIn('<meta name="arena-ui-generation" content="005C">',
+        self.assertIn('<meta name="arena-ui-generation" content="005D">',
                       self.request("/")[1])
         events = [
             {"event": "page_script_ready"},
@@ -333,17 +474,21 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             state_path = Path(temp) / "initial-state.json"
             cell_path = Path(temp) / "target-cell.json"
             picked_up_path = Path(temp) / "picked-up-view.json"
+            refusal_path = Path(temp) / "movement-refusal.json"
             page_path.write_text(page, encoding="utf-8")
             state_path.write_text(json.dumps(state), encoding="utf-8")
             cell_path.write_text(json.dumps({"column": target.column, "row": target.row}),
                                  encoding="utf-8")
             picked_up_path.write_text(json.dumps(picked_up_view), encoding="utf-8")
+            refusal_path.write_text(json.dumps({"error": "Your Being is at 0 HP or below and cannot take voluntary movement under the adopted rules. No Encounter time or position changed; your destination plan remains selected.",
+                "movement_refusal": {"category": "actor_unable_to_move", "message": "Your Being is at 0 HP or below and cannot take voluntary movement under the adopted rules. No Encounter time or position changed; your destination plan remains selected."}}), encoding="utf-8")
             module_cache = Path(tempfile.gettempdir()) / "universe-arena-jsc-module-cache"
             module_cache.mkdir(parents=True, exist_ok=True)
             harness = ROOT / "tests" / "arena_browser_js_harness.swift"
             run = subprocess.run(
                 [shutil.which("swift"), "-module-cache-path", str(module_cache), str(harness),
-                 str(page_path), str(state_path), str(cell_path), str(picked_up_path)],
+                 str(page_path), str(state_path), str(cell_path), str(picked_up_path),
+                 str(refusal_path)],
                 check=False, capture_output=True, text=True, timeout=60)
             self.assertEqual(run.returncode, 0, run.stderr)
         result = json.loads(run.stdout)
@@ -356,11 +501,12 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "/api/generated/advance", "/api/generated/destination",
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination",
+            "/api/generated/advance", "/api/generated/destination",
             "/api/generated/advance"])
         destination_requests = [call for call in movement_requests
                                 if call["path"] == "/api/generated/destination"]
         self.assertEqual([call["body"]["rate"] for call in destination_requests],
-                         ["sprint", "walk", "sprint", "walk", "walk", "walk", "sprint"])
+                         ["sprint", "walk", "sprint", "walk", "walk", "walk", "sprint", "sprint"])
         self.assertIn("Dagger", result["entityDetails"])
         self.assertIn("Pick up", result["pickupStatus"])
         self.assertIn("/api/generated/inspect", [call["path"] for call in result["calls"]])
@@ -374,6 +520,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(result["finalEntity"]["present_state"], "carried")
         self.assertIn("Renamed Dagger", result["entityDetails"])
         self.assertIn("carried", result["entityDetails"])
+        self.assertEqual(result["refusalCategory"], "actor_unable_to_move")
+        self.assertIn("cannot take voluntary movement", result["error"])
         inventory_output = " ".join(result["characterInventory"])
         self.assertIn("Renamed Dagger", inventory_output)
         self.assertIn("carried; not readied", inventory_output)
@@ -383,8 +531,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             self.assertIn(label, character_text)
         self.assertIn("Represented carried weight", character_text)
         self.assertEqual([call["body"]["facing_policy"] for call in destination_requests],
-                         ["turn", "turn", "turn", "turn", "maintain", "turn", "turn"])
-        for call in destination_requests:
+                         ["turn", "turn", "turn", "turn", "maintain", "turn", "turn", "turn"])
+        for call in destination_requests[:-1]:
             self.assertEqual(call["body"]["column"], target.column)
             self.assertEqual(call["body"]["row"], target.row)
         self.assertGreater(int(movement_requests[4]["headers"]["X-Arena-Client-Seq"]),
@@ -392,7 +540,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertLess(result["calls"].index(destination_requests[2]),
                         result["calls"].index(movement_requests[4]))
         self.assertEqual(result["plan"]["rate"], "sprint")
-        self.assertIn("Destination reached", result["status"])
+        self.assertIn("server accepted sprint/turn", result["status"])
         self.assertEqual(result["time"], 1)
         self.assertEqual(result["freshMovement"]["time"], 1)
         self.assertIsNone(result["freshMovement"]["playerAction"])
@@ -405,7 +553,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                       "canvas_entity_marker_hit", "destination_request_queued",
                       "destination_request_accepted"):
             self.assertIn(event, trace_events)
-        self.assertEqual(result["error"], "One native Encounter second committed.")
+        self.assertIn("cannot take voluntary movement", result["error"])
         self.assertTrue(any(label.lower().startswith("small shield · ground")
                             for label in result["entityLabels"]))
         self.assertFalse(any("small shield · small shield" in label.lower()
