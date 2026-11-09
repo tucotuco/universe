@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -520,6 +520,35 @@ def _make_plan(encounter,candidate,rng_owner):
     for actor,obj,object_id in pickup_objects:
         plan.attr('targets',obj,'parent_container_id',actor.id)
         plan.attr('targets',obj,'spatial_state',None)
+    ready_weapons=[]
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is not ReadyWeaponEffect:continue
+        source=events.get(effect.source_action_id)
+        actor=objects.get(effect.target_id)
+        obj=objects.get(effect.object_id)
+        if (source is None or source.actor_id!=effect.target_id
+                or source.target_id!=effect.object_id
+                or type(actor) is not BeingInstance or type(obj) is not WeaponInstance
+                or effect.hand not in ('left hand','right hand')
+                or type(actor.current.body_parts) is not dict
+                or effect.hand not in actor.current.body_parts
+                or actor.current.body_parts[effect.hand] is not None
+                or effect.object_id not in actor.possessions
+                or actor.possessions.count(effect.object_id)!=1
+                or effect.object_id in actor.weapons
+                or obj.parent_container_id!=actor.id or obj.spatial_state is not None
+                or any(effect.object_id in tuple(getattr(other,name,()) or ())
+                       for key,other in objects.items() if type(other) is BeingInstance
+                       and other is not actor for name in ('possessions','weapons','body_parts','armor'))
+                or effect.object_id in tuple(actor.current.body_parts.values())):
+            raise PublicationRejected('Ready weapon identity, custody, or hand changed before atomic publication')
+        ready_weapons.append((actor,obj,effect.object_id,effect.hand))
+    for actor,obj,object_id,hand in ready_weapons:
+        plan.contents('targets',actor.weapons,actor.weapons+[object_id])
+        updated=dict(actor.current.body_parts)
+        updated[hand]=object_id
+        plan.contents('targets',actor.current.body_parts,updated)
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}
@@ -777,6 +806,18 @@ def _committed_consistency(encounter,candidate,plan):
                            for key,other in objects.items() if type(other) is BeingInstance
                            and other is not actor for name in ('possessions','weapons','body_parts','armor'))):
                 raise PublicationRejected('Pick up custody post-write consistency failed')
+        elif type(effect) is ReadyWeaponEffect:
+            obj=objects[effect.object_id]
+            actor=objects[effect.target_id]
+            if (actor.weapons.count(effect.object_id)!=1
+                    or actor.current.body_parts.get(effect.hand)!=effect.object_id
+                    or actor.possessions.count(effect.object_id)!=1
+                    or obj.parent_container_id!=actor.id or obj.spatial_state is not None
+                    or sum(value==effect.object_id for value in actor.current.body_parts.values())!=1
+                    or any(effect.object_id in tuple(getattr(other,name,()) or ())
+                           for key,other in objects.items() if type(other) is BeingInstance
+                           and other is not actor for name in ('possessions','weapons','body_parts','armor'))):
+                raise PublicationRejected('Ready weapon identity/custody post-write consistency failed')
     if candidate.adult_member_candidate is not None:
         operation,group,being,member,slot=plan.adult_realization
         objects=encounter.universe.object_registry.object_instances

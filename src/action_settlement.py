@@ -13,7 +13,7 @@ from spatial.state import CartesianPosition
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
     EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, EffectIdentity, IdentifiedEffect,
-    RandomDraw, ProjectileReleaseEffect, PickupEffect, UnsupportedEvaluation,
+    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
 
 
@@ -80,8 +80,8 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect, PickupEffect)
-_FAMILIES = frozenset(('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup', 'observe_group', 'history_request'))
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect)
+_FAMILIES = frozenset(('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
@@ -96,6 +96,8 @@ _OUTCOMES = {
     'pickup': frozenset(('unplaced', 'unavailable', 'inaccessible', 'over_capacity',
                          'unknown_weight', 'unknown_capacity', 'unable_to_act',
                          'unsupported_contents', 'contested', 'success')),
+    'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
+                               'hand_unavailable', 'already_ready', 'contested', 'success')),
 }
 _METADATA = {'combat': (), 'melee': ('distance',), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
@@ -103,7 +105,7 @@ _METADATA = {'combat': (), 'melee': ('distance',), 'defense': (), 'run': ('displ
                       'objective_key', 'evidence_kind', 'visible_count'),
              'observe_group': ('skill_level_used', 'roll', 'observation_id', 'objective_key'),
              'history_request': ('account_id', 'objective_key', 'newly_constructed'),
-             'pickup': ()}
+             'pickup': (), 'ready_weapon': ()}
 _METADATA['throw'] = ('release_speed_yd_s', 'impact_time')
 
 
@@ -143,6 +145,9 @@ def _effect(effect):
     _identity(values['strike_id'] if type(effect) is DefenseEffect else values['target_id'])
     if type(effect) is PickupEffect:
         _identity(values['object_id'])
+    if type(effect) is ReadyWeaponEffect:
+        _identity(values['object_id'])
+        _require(values['hand'] in ('left hand', 'right hand'), 'unsupported native Ready weapon hand')
     for key in ('component', 'layer', 'skill', 'observed_id', 'basis', 'kind'):
         if key in values:
             _identity(values[key])
@@ -215,12 +220,14 @@ def _copy_proposal(proposal, actions, entities):
         expected_targets.update(e.target_id for e in effects)
     if action.family == 'pickup':
         expected_targets.update(e.target_id for e in effects)
+    if action.family == 'ready_weapon':
+        expected_targets.update(e.target_id for e in effects)
     _require(set(targets) == expected_targets, 'affected Target references do not match causal records')
     return ActionProposal(proposal.action_id, proposal.actor_id, tuple(sorted(targets)),
                           proposal.outcome, effects, defenses, tuple(sorted(metadata)))
 
 
-def _validate_effect(effect, proposal, action, actions, entities, participants):
+def _validate_effect(effect, proposal, action, actions, entities, participants, snapshot):
     _require(effect.source_action_id == action.id, 'effect source contradicts owner Action')
     actor = entities[action.actor_id]
     if type(effect) is DefenseEffect:
@@ -250,6 +257,17 @@ def _validate_effect(effect, proposal, action, actions, entities, participants):
                  and entities[effect.object_id].category in ('object', 'weapon', 'armor'),
                  'Pick up effect does not transfer its declared Object to its actor')
         return effect.target_id, ('pickup', action.id, effect.object_id)
+    if type(effect) is ReadyWeaponEffect:
+        _identity(effect.object_id)
+        _require(action.family == 'ready_weapon' and proposal.outcome == 'success'
+                 and effect.target_id == action.actor_id and effect.object_id == action.target_id
+                 and effect.hand == action.data.get('hand') and recipient.category == 'being'
+                 and entities[effect.object_id].category == 'weapon',
+                 'Ready weapon effect does not match its declared actor, Weapon, and hand')
+        from action_evaluation import ready_weapon_eligibility
+        _require(ready_weapon_eligibility(snapshot, action) is None,
+                 'Ready weapon effect is ineligible in the common snapshot')
+        return effect.target_id, ('ready_weapon', action.id, effect.object_id, effect.hand)
     if type(effect) is ProjectileReleaseEffect:
         _require(action.family == 'throw' and proposal.outcome == 'released'
                  and action.instrument_id == effect.target_id and recipient.category == 'object',
@@ -358,6 +376,9 @@ def _validate_complete_outcome(proposal, action, entities):
     pickups = [e for e in effects if type(e) is PickupEffect]
     _require(len(pickups) == int(action.family == 'pickup' and proposal.outcome == 'success'),
              'missing/extra native Pick up custody effect')
+    ready = [e for e in effects if type(e) is ReadyWeaponEffect]
+    _require(len(ready) == int(action.family == 'ready_weapon' and proposal.outcome == 'success'),
+             'missing/extra native Ready weapon equipment effect')
     releases = [e for e in effects if type(e) is ProjectileReleaseEffect]
     _require(len(releases) == int(action.family == 'throw' and proposal.outcome == 'released'),
              'missing/extra projectile release contribution')
@@ -486,7 +507,7 @@ def reconcile_boundary(snapshot, result):
         effect = _effect(raw.effect)
         _require((type(effect) is DefenseEffect) == (key.channel == 'defense'), 'effect channel mismatch')
         owner = key.source_action_id
-        recipient, semantic = _validate_effect(effect, proposals[owner], actions[owner], actions, entities, participants)
+        recipient, semantic = _validate_effect(effect, proposals[owner], actions[owner], actions, entities, participants, snapshot)
         _require(semantic not in seen_semantics, 'duplicate causal contribution under different identities')
         seen_semantics.add(semantic)
         rows[key] = (IdentifiedEffect(EffectIdentity(key.encounter_id, key.boundary, owner, key.channel, key.slot), effect), recipient)
@@ -513,6 +534,26 @@ def reconcile_boundary(snapshot, result):
                     'contested' if len(eligible_pickups[action.target_id]) > 1 else 'success')
         _require(proposals[aid].outcome == expected,
                  'Pick up outcome contradicts same-snapshot eligibility/contention')
+    from action_evaluation import ready_weapon_eligibility
+    ready_claims = {}
+    for aid in due:
+        action = actions[aid]
+        if action.family == 'ready_weapon' and action.lifecycle == 'pending':
+            status = ready_weapon_eligibility(snapshot, action)
+            if status is None:
+                ready_claims.setdefault((action.actor_id, action.data['hand']), []).append(aid)
+                ready_claims.setdefault(('weapon', action.target_id), []).append(aid)
+    for aid in due:
+        action = actions[aid]
+        if action.family != 'ready_weapon' or action.lifecycle != 'pending':
+            continue
+        status = ready_weapon_eligibility(snapshot, action)
+        expected = (status if status is not None else
+                    'contested' if any(len(ready_claims[key]) > 1 for key in (
+                        (action.actor_id, action.data['hand']), ('weapon', action.target_id)))
+                    else 'success')
+        _require(proposals[aid].outcome == expected,
+                 'Ready weapon outcome contradicts same-snapshot eligibility/contention')
     # Defense references are not applied twice. Check all due owning outcomes,
     # including failures, against the explicit strike dependencies.
     for aid, p in proposals.items():

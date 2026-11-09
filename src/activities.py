@@ -119,6 +119,45 @@ class PickUpAction(Action):
         raise RuntimeError('PickUpAction resolves only through native transactional publication')
 
 
+class ReadyWeaponAction(Action):
+    """Bounded one-second initial readying of a carried ordinary Dagger."""
+
+    HANDS = frozenset(('left hand', 'right hand'))
+
+    def __init__(self, encounter, actor_id, weapon_id, hand, start_time, *, id=None):
+        if (type(actor_id) is not str or not actor_id or type(weapon_id) is not str
+                or not weapon_id or actor_id == weapon_id):
+            raise ValueError('Ready weapon requires distinct native Being and Weapon identities')
+        if type(hand) is not str or hand not in self.HANDS:
+            raise ValueError('Ready weapon requires an explicitly selected native hand')
+        if (type(start_time) not in (int, float) or not math.isfinite(start_time)
+                or start_time < 0 or not float(start_time).is_integer()):
+            raise ValueError('Ready weapon must begin at an integer Encounter second')
+        super().__init__(encounter.universe, start_time, start_time + 1, 'ready weapon',
+                         actor_id, weapon_id, instrument_id=None, id=id)
+        self.encounter = encounter
+        self.end_time = start_time + 1
+        self.hand = hand
+
+    def prepare_schedule(self, encounter):
+        from being import BeingInstance
+        from weapon import WeaponInstance
+        if (encounter is not self.encounter or not encounter.arena_activation_enabled
+                or encounter.progression_mode != 'transactional'):
+            raise ValueError('Ready weapon requires the activated generated-Arena transaction path')
+        actor = encounter.get_being(self.actor_id)
+        target = encounter.universe.get_object_by_id(self.target_id)
+        if actor is None or type(target) is not WeaponInstance:
+            raise ValueError('Ready weapon requires a participating Being and registered WeaponInstance')
+        if self.end_time - self.start_time != 1:
+            raise ValueError('initial Ready weapon lasts exactly one second')
+        return PreparedSchedule.from_action(self)
+
+    def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
+        raise RuntimeError('ReadyWeaponAction resolves only through native transactional publication')
+
+
 class RunAction(Action):
     """Attempt to cover a configured straight-line distance while running.
 

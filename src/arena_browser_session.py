@@ -15,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
-from activities import RunAction
+from activities import RunAction, ReadyWeaponAction
 from atomic_publication import RNGCursor
 from arena_hex_map import HexAddress
 from movement_intent import MovementIntent, MovementRateConditions
@@ -156,6 +156,8 @@ class GeneratedArenaSession:
         self._player_action_outcome = None
         self._pickup_action_id = None
         self._pickup_action_outcome = None
+        self._ready_weapon_action_id = None
+        self._ready_weapon_action_outcome = None
         self._movement_plan = None
         self._movement_sequence = 0
         self._movement_outcome = None
@@ -266,6 +268,11 @@ class GeneratedArenaSession:
         if self._pickup_action_id is not None:
             pickup_action = {"name": "Pick up", "status": "completed" if self._pickup_action_outcome else "executing",
                              "outcome": self._pickup_action_outcome}
+        ready_weapon_action = None
+        if self._ready_weapon_action_id is not None:
+            ready_weapon_action = {"name": "Ready weapon",
+                "status": "completed" if self._ready_weapon_action_outcome is not None else "executing",
+                "outcome": self._ready_weapon_action_outcome}
         movement_plan = None
         movement_available = player.native.being.posture in ("standing", "crouching", "lying")
         movement_available = movement_available and player.native.being.hex_facing is not None
@@ -280,10 +287,10 @@ class GeneratedArenaSession:
                 "facing_policy": self._movement_plan.facing_policy,
                 "remaining_distance_meters": remaining,
             }
-        from activities import PickUpAction, RunAction, SpotAction
+        from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
-            for action_type in (RunAction, SpotAction, PickUpAction)
+            for action_type in (RunAction, SpotAction, PickUpAction, ReadyWeaponAction)
         }
         perceived = []
         for evidence in ledger.current:
@@ -330,6 +337,7 @@ class GeneratedArenaSession:
             "character": character,
             "player_action": action,
             "pickup_action": pickup_action,
+            "ready_weapon_action": ready_weapon_action,
             "entities": perceived,
             "selected_entity": selected,
             "action_catalog": action_catalog,
@@ -338,6 +346,8 @@ class GeneratedArenaSession:
                                     and self._player_action_outcome is None)
                                    or (self._pickup_action_id is not None
                                        and self._pickup_action_outcome is None)
+                                   or (self._ready_weapon_action_id is not None
+                                       and self._ready_weapon_action_outcome is None)
                                    or movement_plan is not None),
             "movement_available": movement_available,
             "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
@@ -388,9 +398,47 @@ class GeneratedArenaSession:
             return False, str(exc)
         return True, "Native one-second Pick up is currently available for this Object."
 
+    def _ready_weapon_target_unlocked(self, candidate, player, entity_id, evidence):
+        from weapon import WeaponInstance
+        if evidence is None or evidence.category != "object" or evidence.present_state != "carried":
+            return None, (), "Select a currently perceived, carried Weapon first."
+        obj = candidate.universe.get_object_by_id(entity_id)
+        if (type(obj) is not WeaponInstance or obj.id != entity_id
+                or obj.current.obj_type != "Dagger"):
+            return None, (), "Initial readying currently supports only an ordinary native Dagger."
+        if (entity_id not in player.possessions or player.possessions.count(entity_id) != 1
+                or obj.parent_container_id != player.id or obj.get_position() is not None):
+            return None, (), "The selected Dagger is not in the player's native carried custody."
+        if entity_id in player.weapons or entity_id in player.current.body_parts.values():
+            return None, (), "This Dagger is already held/readied."
+        if player.current.hit_points <= 0 or player.is_helpless():
+            return None, (), "The player Being cannot perform a voluntary Action in its current native condition."
+        if not candidate.encounter.initiated:
+            return None, (), "Activate the native Encounter with movement or Run before readying a weapon."
+        if (candidate.encounter.progression_mode != "transactional"
+                or not candidate.encounter.arena_activation_enabled):
+            return None, (), "The native Arena Action pathway is unavailable."
+        if self._ready_weapon_action_id is not None and self._ready_weapon_action_outcome is None:
+            return None, (), "A native Ready weapon Action is already resolving."
+        body_parts = player.current.body_parts
+        hands = tuple(sorted(slot for slot, held in body_parts.items()
+                             if slot in ReadyWeaponAction.HANDS and held is None))
+        if not hands:
+            return None, (), "No explicitly modeled, free native left or right hand is available."
+        return obj, hands, "Choose a free native hand for this Dagger."
+
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction
 
+        handle = None if selected is None else selected.get("handle")
+        entity_id = (None if type(handle) is not str else
+                     next((key for key, value in self._view_handles.items() if value == handle), None))
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        evidence = None if entity_id is None else next(
+            (row for row in ledger.current if row.entity_id == entity_id), None)
+        ready_target, ready_hands, ready_reason = self._ready_weapon_target_unlocked(
+            candidate, player, entity_id, evidence)
+        ready_available = ready_target is not None and supported_actions.get(ReadyWeaponAction, False)
         catalog_rows = []
         for source_row in _native_action_catalog():
             name = source_row["name"]
@@ -398,8 +446,20 @@ class GeneratedArenaSession:
                 reason = ("The legacy Grab object catalog Action is not admitted for this use. "
                           "Revision 64 defines Pick up as a separate native Action for a free ground Object.")
             elif name.casefold() == "ready weapon":
-                reason = ("Initial weapon-readying timing and native ready-state rules are not adopted; "
-                          "this catalog Action has no supported transactional Arena submission path.")
+                reason = (ready_reason if supported_actions.get(ReadyWeaponAction, False)
+                          else "The native Ready weapon scheduler or resolver contract is unavailable.")
+                catalog_rows.append({
+                    "name": name, "group": "Arena Actions",
+                    "target_type": target_type, "required_skill": source_row["required_skill"],
+                    "is_melee": source_row["is_melee"],
+                    "status": "available" if ready_available else "unavailable",
+                    "reason": reason,
+                    "target": (None if selected is None else {"handle": handle,
+                        "name": selected["name"], "type": selected["type"],
+                        "present_state": selected["present_state"]}),
+                    "hands": list(ready_hands),
+                })
+                continue
             elif name.casefold() == "ready object":
                 reason = "No native transactional ready-object Action is implemented for the generated Arena."
             elif name.casefold() == "throw":
@@ -439,14 +499,6 @@ class GeneratedArenaSession:
         arena_rows.append({"name": "Spot", "group": "Arena Actions",
                            "status": spot_status, "reason": spot_reason})
 
-        handle = None if selected is None else selected.get("handle")
-        entity_id = (None if type(handle) is not str else
-                     next((key for key, value in self._view_handles.items() if value == handle), None))
-        evidence = None
-        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
-        if entity_id is not None:
-            evidence = next((row for row in ledger.current
-                             if row.entity_id == entity_id), None)
         if supported_actions.get(PickUpAction):
             pickup_available, pickup_reason = self._pickup_status_unlocked(
                 candidate, player, entity_id, evidence)
@@ -692,7 +744,7 @@ class GeneratedArenaSession:
                     status = "equipped armor"
                 elif object_id in body_slots:
                     status = (f"held shield at {body_slots[object_id]} (native shield reference)"
-                              if kind == "shield" else f"held at {body_slots[object_id]}")
+                              if kind == "shield" else f"readied in {body_slots[object_id]}")
                 elif parent_name is not None:
                     status = f"contained in {parent_name}"
                 else:
@@ -773,6 +825,8 @@ class GeneratedArenaSession:
             self._player_action_outcome = None
             self._pickup_action_id = None
             self._pickup_action_outcome = None
+            self._ready_weapon_action_id = None
+            self._ready_weapon_action_outcome = None
             self._movement_plan = None
             self._movement_sequence = 0
             self._movement_outcome = None
@@ -929,6 +983,44 @@ class GeneratedArenaSession:
             self._selected_entity_handle = handle
             return self._view_unlocked()
 
+    def choose_ready_weapon(self, payload):
+        from activities import ReadyWeaponAction
+        from arena_perception import ArenaPerceptionLedger
+        if type(payload) is not dict or set(payload) != {"handle", "hand"}:
+            raise ArenaBrowserRequestError("Ready weapon requires a visible Object handle and selected hand")
+        handle, hand = payload["handle"], payload["hand"]
+        with self._lock:
+            if self._active is None or type(handle) is not str or type(hand) is not str:
+                raise ArenaBrowserRequestError("Ready weapon target or hand is unavailable")
+            if not _has_native_transactional_action_contract(ReadyWeaponAction):
+                raise ArenaBrowserRequestError("The native Ready weapon Choice contract is unavailable")
+            if self._ready_weapon_action_id is not None and self._ready_weapon_action_outcome is None:
+                raise ArenaBrowserRequestError("A native Ready weapon Action is already resolving.")
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            player = self._active.participants[0].native.being
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            obj, hands, reason = self._ready_weapon_target_unlocked(
+                self._active, player, entity_id, evidence)
+            if obj is None:
+                raise ArenaBrowserRequestError(reason)
+            if hand not in hands:
+                raise ArenaBrowserRequestError("Choose one of the currently free native hands shown by the Action selector.")
+            action = ReadyWeaponAction(self._active.encounter, player.id, entity_id,
+                hand, self._active.encounter.time)
+            try:
+                self._active.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Ready weapon Choice was not accepted; Arena state is unchanged") from exc
+            self._ready_weapon_action_id = action.id
+            self._ready_weapon_action_outcome = None
+            self._selected_entity_handle = handle
+            return self._view_unlocked()
+
     def advance_one_second(self, *, trace_request_id=None, trace_client_sequence=None):
         """Commit exactly the native next boundary for the accepted player decision."""
         with self._lock:
@@ -940,20 +1032,28 @@ class GeneratedArenaSession:
             before_position = player.get_position()
             before_cell = self._trace_cell(candidate, before_position)
             accepted_plan = self._movement_plan
-            if self._player_action_id is None and self._pickup_action_id is None and self._movement_plan is None:
+            if (self._player_action_id is None and self._pickup_action_id is None
+                    and self._ready_weapon_action_id is None and self._movement_plan is None):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
                                           "refused", reason="no_movement_plan")
                 raise ArenaBrowserRequestError("choose a destination or an explicit Run Choice before advancing")
             if (self._movement_plan is None and self._player_action_id is not None
-                    and self._player_action_outcome is not None):
+                    and self._player_action_outcome is not None
+                    and not (self._ready_weapon_action_id is not None
+                             and self._ready_weapon_action_outcome is None)):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
                                           "refused", reason="run_choice_resolved")
                 raise ArenaBrowserRequestError("the accepted Run Choice has already resolved")
             if (self._movement_plan is None and self._pickup_action_id is not None
-                    and self._pickup_action_outcome is not None):
+                    and self._pickup_action_outcome is not None
+                    and not (self._ready_weapon_action_id is not None
+                             and self._ready_weapon_action_outcome is None)):
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
+            if (self._movement_plan is None and self._ready_weapon_action_id is not None
+                    and self._ready_weapon_action_outcome is not None):
+                raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
                 if self._movement_plan is not None:
                     plan = self._movement_plan
@@ -985,6 +1085,13 @@ class GeneratedArenaSession:
                     result = candidate.encounter.inspect_committed(
                         int(candidate.encounter.time)).action(self._pickup_action_id)
                     self._pickup_action_outcome = result.facts.outcome
+                if (self._ready_weapon_action_id is not None
+                        and self._ready_weapon_action_outcome is None):
+                    result = candidate.encounter.inspect_committed(
+                        int(candidate.encounter.time)).action(self._ready_weapon_action_id)
+                    self._ready_weapon_action_outcome = result.facts.outcome
+                    self._trace.native_advance(trace_request_id, trace_client_sequence,
+                        f"action=ready_weapon outcome={self._ready_weapon_action_outcome}")
             except Exception as exc:
                 after_time = candidate.encounter.time
                 after_position = player.get_position()

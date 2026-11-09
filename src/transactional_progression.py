@@ -262,7 +262,7 @@ def planning_entry(encounter):
 
 def validate_action_contract(encounter,action,*,_force=False):
     """Closed declaration checks before native preparation or publication."""
-    from activities import SpotAction, PickUpAction
+    from activities import SpotAction, PickUpAction, ReadyWeaponAction
     if type(action) is SpotAction:
         if (type(action.start_time) not in (int, float)
                 or type(action.end_time) not in (int, float)
@@ -285,12 +285,20 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or action.map_width_cells < 5 or action.map_height_cells < 5
                 or action.map_width_cells * action.map_height_cells > 1_000_000):
             raise TransactionalProgressionError('Pick up must retain the approved one-second Arena declaration')
+    if type(action) is ReadyWeaponAction:
+        if (type(action.start_time) not in (int, float)
+                or type(action.end_time) not in (int, float)
+                or not math.isfinite(action.start_time) or not math.isfinite(action.end_time)
+                or action.event_type != 'ready weapon'
+                or action.end_time - action.start_time != 1
+                or action.hand not in ReadyWeaponAction.HANDS):
+            raise TransactionalProgressionError('Ready weapon must retain the approved one-second hand declaration')
     if not _force and mode_of(encounter)!='transactional':return
     from interval_staging import _guard_methods
     _guard_methods()
     import inspect
     from action import Action
-    from activities import RunAction,SpotAction,PickUpAction
+    from activities import RunAction,SpotAction,PickUpAction,ReadyWeaponAction
     from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
@@ -299,7 +307,7 @@ def validate_action_contract(encounter,action,*,_force=False):
     from observer_proposals import _NATIVE_RESOLVERS,_NATIVE_HOOKS,_capture_belief,frozen_value
     from objective_reality import objective_action_data
     from action_evaluation import UnsupportedEvaluation
-    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
+    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
         raise UnsupportedEvaluation('transactional progression requires a reviewed exact native Action family')
     data=object.__getattribute__(action,'__dict__')
     if (inspect.getattr_static(type(action),'resolve') is not _NATIVE_RESOLVERS[type(action)]

@@ -201,10 +201,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     shield_names = freeze(weapon_dictionary['object_categories']).get('Shields', ())
     participants = tuple(dict.fromkeys(freeze(ed['being_list']) + freeze(ed['non_being_object_list'])))
     actions = {}
-    from activities import ThrowAction, PickUpAction
+    from activities import ThrowAction, PickUpAction, ReadyWeaponAction
     families = {Action: 'combat', MeleeStrike: 'melee', MeleeDefense: 'defense',
                 RunAction: 'run', SpotAction: 'spot', ThrowAction: 'throw',
-                PickUpAction: 'pickup'}
+                PickUpAction: 'pickup', ReadyWeaponAction: 'ready_weapon'}
     objective_actions = {}
     if _objective:
         from group_observation import ObserveGroupAction
@@ -232,7 +232,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot', 'throw', 'pick up') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -275,6 +275,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(action) is PickUpAction:
             selected['map_width_cells'] = freeze(ad['map_width_cells'])
             selected['map_height_cells'] = freeze(ad['map_height_cells'])
+        if type(action) is ReadyWeaponAction:
+            selected['hand'] = freeze(ad['hand'])
         if not cancelled:
             # Reuse Increment 3 ownership and declaration validation, after the
             # exact-type/callback preflight above. No scheduling hook executes.
@@ -532,6 +534,15 @@ class PickupEffect:
     source_action_id: str
     target_id: str  # acquiring Being, as the Target-owned recipient
     object_id: str
+
+
+@dataclass(frozen=True)
+class ReadyWeaponEffect:
+    """Atomically add a carried weapon to the native weapon and hand slots."""
+    source_action_id: str
+    target_id: str  # acting Being
+    object_id: str
+    hand: str
 
 
 @dataclass(frozen=True)
@@ -838,6 +849,41 @@ def pickup_eligibility(snapshot, action):
     return None
 
 
+def ready_weapon_eligibility(snapshot, action):
+    """Return a bounded initial-readying refusal code from the common snapshot."""
+    actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    if actor.category != 'being' or target.category != 'weapon':
+        return 'unavailable'
+    if _helpless(actor):
+        return 'unable_to_act'
+    if target.data.get('original_type') != 'Dagger':
+        return 'unsupported_weapon'
+    if action.data.get('hand') not in ('left hand', 'right hand'):
+        return 'hand_unavailable'
+    body_parts = actor.data.get('body_parts')
+    if type(body_parts) not in (dict, MappingProxyType) or action.data['hand'] not in body_parts:
+        return 'hand_unavailable'
+    if body_parts[action.data['hand']] is not None:
+        return 'hand_unavailable'
+    if action.target_id not in actor.data.get('possessions', ()):
+        return 'unavailable'
+    if target.data.get('parent_container_id') != actor.id or target.position is not None:
+        return 'unavailable'
+    if (action.target_id in actor.data.get('weapons', ())
+            or action.target_id in tuple(body_parts.values())):
+        return 'already_ready'
+    for entity in snapshot.entities.values():
+        if entity.category != 'being' or entity.id == actor.id:
+            continue
+        data = entity.data
+        if (action.target_id in data.get('possessions', ())
+                or action.target_id in data.get('weapons', ())
+                or action.target_id in tuple(data.get('body_parts', {}).values())
+                or action.target_id == data.get('armor_id')):
+            return 'unavailable'
+    return None
+
+
 def _activity(snapshot, action, rng):
     actor = snapshot.entity(action.actor_id)
     effects = []
@@ -939,16 +985,25 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup') for a in selected):
+    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     pickup_status = {action.id: pickup_eligibility(snapshot, action)
                      for action in selected if action.lifecycle == 'pending'
                      and action.family == 'pickup'}
+    ready_status = {action.id: ready_weapon_eligibility(snapshot, action)
+                    for action in selected if action.lifecycle == 'pending'
+                    and action.family == 'ready_weapon'}
     pickup_by_object = {}
     for action in selected:
         if (action.lifecycle == 'pending' and action.family == 'pickup'
                 and pickup_status[action.id] is None):
             pickup_by_object.setdefault(action.target_id, []).append(action.id)
+    ready_claims = {}
+    for action in selected:
+        if (action.lifecycle == 'pending' and action.family == 'ready_weapon'
+                and ready_status[action.id] is None):
+            ready_claims.setdefault((action.actor_id, action.data['hand']), []).append(action.id)
+            ready_claims.setdefault(('weapon', action.target_id), []).append(action.id)
     rng = _ProvisionalRandom(snapshot.rng_state)
     proposals = []
     defense_effects = []
@@ -970,6 +1025,18 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), 'contested')
             else:
                 effect = PickupEffect(action.id, action.actor_id, action.target_id)
+                proposal = ActionProposal(action.id, action.actor_id,
+                    tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
+        elif action.family == 'ready_weapon':
+            status = ready_status[action.id]
+            if status is not None:
+                proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), status)
+            elif any(len(ready_claims[key]) > 1 for key in (
+                    (action.actor_id, action.data['hand']), ('weapon', action.target_id))):
+                proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), 'contested')
+            else:
+                effect = ReadyWeaponEffect(action.id, action.actor_id, action.target_id,
+                                           action.data['hand'])
                 proposal = ActionProposal(action.id, action.actor_id,
                     tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
         else:

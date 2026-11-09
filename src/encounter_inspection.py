@@ -8,7 +8,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from types import MappingProxyType
 import importlib
 
-from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation)
 from spatial.state import CartesianPosition
 
@@ -147,12 +147,21 @@ class EncounterInspection:
 _ALLOWED = None
 
 
+def _expected_body_parts(meta, target_id, initial):
+    expected = dict(initial)
+    for row in meta.effects.values():
+        effect = row.effect
+        if type(effect) is ReadyWeaponEffect and effect.target_id == target_id:
+            expected[effect.hand] = effect.object_id
+    return expected
+
+
 def detached(value):
     global _ALLOWED
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',
@@ -294,7 +303,7 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
             abilities=native_data(current['abilities'],(Abilities,))
             _require(detached(states['states']) == properties['states']
                 and detached(abilities['abilities']) == properties['abilities']
-                and detached(current['body_parts']) == properties['body_parts']
+                and detached(current['body_parts']) == _expected_body_parts(meta, key, properties['body_parts'])
                 and detached(current['armor_id']) == properties['armor_id']
                 and detached(current['experience']) == properties['experience'], 'unreceipted participant state change')
         practice = target.practice_state
