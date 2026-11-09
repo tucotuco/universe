@@ -56,7 +56,13 @@ _SUPPORTED_TAGS = frozenset({
     'spatial.occlusion.VisualOcclusion', 'activities.RunAction',
     'activities.SpotAction', 'action_choice.ChoiceMember',
     'action_choice.ChoiceView', 'action_choice._Accepted',
-    'scheduling.PreparedSchedule',
+    'scheduling.PreparedSchedule', 'observer_proposals.ObserverProjection',
+    'frozen_practice.PracticeProjection', 'frozen_practice.CandidatePracticeUse',
+    'frozen_practice.CandidateSkillTransition', 'experience.SkillUse',
+    'experience.BatchSkillUse', 'action_evaluation.IdentifiedEffect',
+    'action_evaluation.EffectIdentity', 'action_evaluation.AwarenessEffect',
+    'action_evaluation.PracticeEffect', 'observer_proposals.LifecycleEffect',
+    'observer_proposals.ActionOutcomeEffect',
 })
 
 
@@ -139,7 +145,7 @@ class _Graph:
         if tag == 'reference':
             ref = self.raw_ref(value)
             node_tag, content = self.nodes[ref]
-            _need(node_tag in ('ordered-map', 'list', 'tuple', 'set'),
+            _need(node_tag in ('ordered-map', 'list', 'tuple', 'set', 'frozenset'),
                   'unexpected native object in data-only mapping')
             if ref in self.cache:
                 return self.cache[ref]
@@ -151,9 +157,11 @@ class _Graph:
             if node_tag == 'list':
                 result = []; self.cache[ref] = result
                 result.extend(self.data(item) for item in content); return result
-            if node_tag == 'set':
-                result = set(); self.cache[ref] = result
-                result.update(self.data(item) for item in content); return result
+            if node_tag in ('set', 'frozenset'):
+                values = (self.data(item) for item in content)
+                result = set(values) if node_tag == 'set' else frozenset(values)
+                self.cache[ref] = result
+                return result
             result = tuple(self.data(item) for item in content)
             self.cache[ref] = result; return result
         raise ReconstructionRejected('unsupported encoded native data value')
@@ -193,6 +201,13 @@ class _Graph:
         from states import States
         from strategy import Strategy
         from skill import Skills
+        from observer_proposals import ObserverProjection
+        from frozen_practice import (PracticeProjection, CandidatePracticeUse,
+                                     CandidateSkillTransition)
+        from experience import SkillUse, BatchSkillUse
+        from action_evaluation import (IdentifiedEffect, EffectIdentity,
+                                       AwarenessEffect, PracticeEffect)
+        from observer_proposals import LifecycleEffect, ActionOutcomeEffect
         if tag == 'abilities.Abilities':
             table = values['abilities']
             names = {'STR': 'strength', 'DEX': 'dexterity', 'CON': 'constitution',
@@ -218,6 +233,19 @@ class _Graph:
                   'Exertion definition differs from the native reconstruction contract')
         elif tag == 'being.BeingDefinition':
             obj = BeingDefinition(**values)
+        elif tag == 'observer_proposals.ObserverProjection':
+            obj = ObserverProjection(**values)
+        elif tag == 'frozen_practice.PracticeProjection': obj = PracticeProjection(**values)
+        elif tag == 'frozen_practice.CandidatePracticeUse': obj = CandidatePracticeUse(**values)
+        elif tag == 'frozen_practice.CandidateSkillTransition': obj = CandidateSkillTransition(**values)
+        elif tag == 'experience.SkillUse': obj = SkillUse(**values)
+        elif tag == 'experience.BatchSkillUse': obj = BatchSkillUse(**values)
+        elif tag == 'action_evaluation.IdentifiedEffect': obj = IdentifiedEffect(**values)
+        elif tag == 'action_evaluation.EffectIdentity': obj = EffectIdentity(**values)
+        elif tag == 'action_evaluation.AwarenessEffect': obj = AwarenessEffect(**values)
+        elif tag == 'action_evaluation.PracticeEffect': obj = PracticeEffect(**values)
+        elif tag == 'observer_proposals.LifecycleEffect': obj = LifecycleEffect(**values)
+        elif tag == 'observer_proposals.ActionOutcomeEffect': obj = ActionOutcomeEffect(**values)
         else:
             raise ReconstructionRejected(f'native object requires a root adapter: {tag}')
         actual_fields = object.__getattribute__(obj, '__dict__')
@@ -232,7 +260,7 @@ class _Graph:
     def value(self, value):
         if type(value) is tuple and value and value[0] == 'reference':
             ref = self.raw_ref(value)
-            if self.nodes[ref][0] in ('ordered-map', 'list', 'tuple', 'set'):
+            if self.nodes[ref][0] in ('ordered-map', 'list', 'tuple', 'set', 'frozenset'):
                 return self.data(value)
             return self.native(ref)
         return self.data(value)

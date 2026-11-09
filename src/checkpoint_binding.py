@@ -5,7 +5,9 @@ import random
 from weakref import WeakKeyDictionary
 
 from checkpoint_projection import (PROJECTION_SCHEMA,
-    QuarantinedRunBoundaryProjection, project_quarantined_run_boundary)
+    MOVEMENT_PROJECTION_SCHEMA, QuarantinedMovementBoundaryProjection,
+    QuarantinedRunBoundaryProjection, project_quarantined_movement_boundary,
+    project_quarantined_run_boundary)
 from checkpoint_views import (NativeIdentityView, NativeRunActionIdentityView,
     QuarantinedNativeEncounterView, QuarantinedRunBindingView,
     freeze_inspection_value)
@@ -14,6 +16,7 @@ from checkpoint_wire import (DecodedRunSpotWire, WIRE_SCHEMA,
 
 
 BINDING_SCHEMA = 'universe.quarantined-run-native-identity-binding/1'
+MOVEMENT_BINDING_SCHEMA = 'universe.quarantined-movement-native-identity-binding/1'
 
 
 class IdentityBindingRejected(ValueError):
@@ -242,6 +245,31 @@ class QuarantinedRunIdentityBinding:
     schema: str
     view: QuarantinedRunBindingView
     historical: QuarantinedRunHistoricalSidecar
+    quarantined: bool = True
+
+
+@dataclass(frozen=True)
+class QuarantinedMovementHistoricalSidecar:
+    schema: str
+    projection: QuarantinedMovementBoundaryProjection
+    participant_identity_ids: tuple
+    participant_definition_values: tuple
+    movement_activation: tuple
+    target_record_identity_ids: tuple
+    observer_evidence: tuple
+    rng_state: tuple
+    choice_ids: tuple = ()
+    action_ids: tuple = ()
+    effect_ids: tuple = ()
+
+
+@dataclass(frozen=True)
+class QuarantinedMovementIdentityBinding:
+    schema: str
+    universe_id: str
+    encounter_id: str
+    boundary: int
+    sidecar: QuarantinedMovementHistoricalSidecar
     quarantined: bool = True
 
 
@@ -723,6 +751,167 @@ def bind_quarantined_run_boundary(decoded, projection=None):
     _NATIVE_BINDINGS[result] = _PrivateNativeBinding(native_universe, native_encounter,
         tuple(native_beings.items()), tuple(native_actions.items()), rng_owner)
     return result
+
+
+def bind_quarantined_movement_boundary(decoded, projection=None):
+    """Bind the existing movement-only Target identities without installing history.
+
+    The result is a detached sidecar over validated native graph identities.
+    It deliberately does not create an Action/Choice, issue a receipt, or make
+    the reconstructed Encounter executable.
+    """
+    _need(type(decoded) is DecodedRunSpotWire and decoded.schema == WIRE_SCHEMA,
+          'strict DecodedRunSpotWire/1 is required')
+    try:
+        wire = encode_detached_run_spot_data(decoded.envelope_data)
+        canonical = decode_run_spot_wire(wire)
+        current = project_quarantined_movement_boundary(canonical)
+    except (TypeError, ValueError) as exc:
+        raise IdentityBindingRejected(f'movement projection refused: {exc}') from exc
+    _need(canonical.wire_digest == decoded.wire_digest,
+          'decoded movement checkpoint changed after digest validation')
+    if projection is not None:
+        _need(type(projection) is QuarantinedMovementBoundaryProjection
+              and projection.schema == MOVEMENT_PROJECTION_SCHEMA
+              and projection.to_data() == current.to_data(),
+              'supplied movement projection differs from revalidated wire data')
+    projection = current
+    data = canonical.envelope_data
+    from checkpoint_inventory import _compatibility
+    _need(data[3] == _compatibility(),
+          'runtime/rules compatibility does not match movement identity adapter')
+    from checkpoint_reconstruction import (_Graph, _sections, _rng_data,
+        _projection, _validate_being_definition_bindings)
+    sections = _sections(data[5])
+    _need(sections.get('readiness') == (False, False, False)
+          and sections.get('host-bindings') == ((),),
+          'movement binding requires false readiness and no external recipients')
+    rng_record = sections.get('rng')
+    _need(type(rng_record) is tuple and len(rng_record) == 3
+          and rng_record[:2] == ('caller_cursor', 'exclusive_encounter'),
+          'exclusive private Encounter RNG ownership is required')
+    rng_state = _rng_data(rng_record[2])
+    def receipt_rng(value):
+        _need(type(value) is tuple and len(value) == 2
+              and value[0] == 'sequence' and type(value[1]) is tuple,
+              'movement receipt RNG state is malformed')
+        def convert(item):
+            if type(item) is tuple and len(item) == 2 and item[0] == 'sequence':
+                return ('tuple', tuple(convert(child) for child in item[1]))
+            return item
+        return ('tuple', tuple(convert(item) for item in value[1]))
+    _need(data[9][:2] == rng_record[:2]
+          and _rng_data(data[9][2]) == rng_state
+          and _rng_data(receipt_rng(projection.rng_after)) == rng_state,
+          'committed RNG cursor differs from native movement receipt')
+    nodes_row = sections.get('nodes')
+    _need(type(nodes_row) is tuple and len(nodes_row) == 1,
+          'native graph nodes are missing')
+    graph = _Graph(nodes_row[0])
+    universe_ref = ('universe', data[1])
+    encounter_ref = ('encounter', data[2])
+    _need(universe_ref in graph.nodes and encounter_ref in graph.nodes,
+          'movement checkpoint roots are missing')
+    universe_fields = graph.fields(universe_ref, 'universe.Universe')[1]
+    encounter_fields = graph.fields(encounter_ref, 'encounter.Encounter')[1]
+    _need(graph.data(encounter_fields['time']) == 1
+          and graph.data(encounter_fields['last_processed_boundary']) == 1
+          and graph.data(encounter_fields['_coordinator_time']) == 1
+          and graph.data(encounter_fields['_interval_start']) == 1,
+          'committed native chronology differs from movement Target boundary')
+    _need(graph.data(encounter_fields['pending_action_list']) == []
+          and graph.data(encounter_fields['finished_action_list']) == []
+          and graph.data(encounter_fields['cancelled_action_list']) == [],
+          'movement-only boundary contains native Action lifecycle state')
+    choice_ref = graph.raw_ref(encounter_fields['_choice_book'])
+    choice_fields = graph.fields(choice_ref, 'action_choice.ChoiceBook')[1]
+    _need(graph.raw_mapping(choice_fields['_choices']) == {}
+          and graph.data(choice_fields['_counter']) == 0
+          and graph.data(choice_fields['_states']) == {},
+          'movement-only boundary contains native Choice state')
+    registry_ref = graph.raw_ref(universe_fields['object_registry'])
+    registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
+    registry = graph.raw_mapping(registry_fields['object_instances'])
+    participants = projection.participant_ids
+    _need(set(registry) == set(participants) and len(registry) == 2,
+          'native registry identity set differs from movement participants')
+    library_ref = graph.raw_ref(universe_fields['library'])
+    library_fields = graph.fields(library_ref, 'library.Library')[1]
+    dictionary_ref = graph.raw_ref(library_fields['being_dictionary'])
+    dictionary_fields = graph.fields(dictionary_ref, 'being.BeingDictionary')[1]
+    all_definitions = graph.raw_mapping(dictionary_fields['objects'])
+    referenced_names = set()
+    for target_id in participants:
+        instance_ref = graph.raw_ref(registry[target_id])
+        original_ref = graph.raw_ref(graph.fields(instance_ref)[1]['original'])
+        original_fields = graph.fields(original_ref, 'being.BeingDefinition')[1]
+        referenced_names.add(graph.data(original_fields['obj_type']))
+    _need(referenced_names and referenced_names <= set(all_definitions),
+          'Being originals have no matching registered Library templates')
+    definitions = {name: all_definitions[name] for name in referenced_names}
+    try:
+        _validate_being_definition_bindings(graph, registry, definitions)
+    except (TypeError, ValueError) as exc:
+        raise IdentityBindingRejected(f'Being original identity binding refused: {exc}') from exc
+
+    from atomic_publication import TargetIntervalRecord
+    from action_settlement import TargetCandidate
+    from checkpoint_receipts import _value
+    record_identity_ids = []
+    definition_values = []
+    targets_by_id = {row[0]: row for row in projection.target_records}
+    _need(set(targets_by_id) == set(participants),
+          'portable Target identities do not cover the participant set')
+    for target_id in participants:
+        instance_ref = graph.raw_ref(registry[target_id])
+        instance_tag, instance_fields = graph.fields(instance_ref, 'being.BeingInstance')
+        _need(graph.data(instance_fields['id']) == target_id,
+              'Target owner and ObjectRegistry logical identity differ')
+        original_ref = graph.raw_ref(instance_fields['original'])
+        current_ref = graph.raw_ref(instance_fields['current'])
+        definition_values.append((target_id, _projection(graph.native(original_ref)),
+                                  _projection(graph.native(current_ref))))
+        history_ref = graph.raw_ref(instance_fields['_atomic_target_history'])
+        history_tag, history_values = graph.nodes[history_ref]
+        _need(history_tag == 'list' and len(history_values) == 1,
+              'each movement participant must own exactly one Target interval record')
+        target_ref = graph.raw_ref(history_values[0])
+        record_fields = graph.fields(target_ref, 'atomic_publication.TargetIntervalRecord')[1]
+        _need(set(record_fields) == {'boundary', 'encounter_id', 'state'}
+              and graph.data(record_fields['encounter_id']) == projection.encounter_id
+              and graph.data(record_fields['boundary']) == projection.boundary,
+              'Target interval record has a wrong or duplicate committed identity')
+        state_ref = graph.raw_ref(record_fields['state'])
+        state_fields = graph.fields(state_ref, 'action_settlement.TargetCandidate')[1]
+        candidate = TargetCandidate(**{key: graph.value(value)
+                                       for key, value in state_fields.items()})
+        _need(_value(candidate) == targets_by_id[target_id][3],
+              'Target-owned native state differs from its committed portable receipt')
+        record_identity_ids.append((target_id, target_ref))
+
+    entity_ids = tuple(sorted(registry))
+    observer_rows = []
+    from checkpoint_arena_perception import decode_arena_perception_ledger
+    for observer_id, encoded in projection.observer_evidence:
+        current_rows = encoded[3]
+        visible_ids = tuple(row[0] for row in current_rows)
+        try:
+            ledger = decode_arena_perception_ledger(encoded,
+                observer_id=observer_id, entity_ids=entity_ids,
+                visible_entity_ids=visible_ids, boundary=1, time=1)
+        except (TypeError, ValueError) as exc:
+            raise IdentityBindingRejected(f'observer-owned evidence refused: {exc}') from exc
+        observer_rows.append((observer_id, ledger.observer_id,
+                              tuple(sorted(ledger._current)), tuple(ledger._history), encoded))
+    participant_identity_ids = tuple((target_id, graph.raw_ref(registry[target_id]))
+                                     for target_id in participants)
+    sidecar = QuarantinedMovementHistoricalSidecar(
+        'universe.quarantined-movement-history-sidecar/1', projection,
+        participant_identity_ids, tuple(definition_values),
+        projection.movement_activation, tuple(record_identity_ids), tuple(observer_rows),
+        rng_state)
+    return QuarantinedMovementIdentityBinding(MOVEMENT_BINDING_SCHEMA,
+        data[1], data[2], projection.boundary, sidecar, True)
 
 
 # The legacy symbol now calls the Run-only binder; Spot projection data is
