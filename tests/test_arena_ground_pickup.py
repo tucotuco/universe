@@ -311,6 +311,7 @@ class TestArenaGroundPickup(unittest.TestCase):
         evidence_before = (dict(player._arena_perception_ledger._current),
                            list(player._arena_perception_ledger._history))
         time_before = candidate.encounter.time
+        character_inventory_before = session.public_view()["character"]["inventory"]
         original_apply_phase = _WritePlan.apply_phase
         def fail_after_targets(plan, phase):
             original_apply_phase(plan, phase)
@@ -327,12 +328,44 @@ class TestArenaGroundPickup(unittest.TestCase):
         self.assertEqual(candidate.encounter.time, time_before)
         self.assertEqual(player._arena_perception_ledger._current, evidence_before[0])
         self.assertEqual(player._arena_perception_ledger._history, evidence_before[1])
+        self.assertEqual(session.public_view()["character"]["inventory"], character_inventory_before)
         candidate.encounter.recover_transactional_progression(
             caught.exception.recovery_token)
         candidate.encounter.step(1)
         self.assertEqual(player.possessions.count(item.id), 1)
         self.assertEqual(item.parent_container_id, player.id)
         self.assertIsNone(item.spatial_state)
+        recovered_inventory = session.public_view()["character"]["inventory"]
+        self.assertEqual(len(recovered_inventory["items"]), 1)
+        self.assertEqual(recovered_inventory["items"][0]["name"], "Dagger")
+        self.assertEqual(recovered_inventory["carried_weight_pounds"], item.current.weight)
+
+    def test_character_inventory_keeps_distinct_same_type_objects(self):
+        descriptions = [dict(ONE_DAGGER[0], source_item_id=f"arena-test-pickup:v1:dagger-{index}")
+                        for index in (1, 2)]
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+                                        ground_item_descriptions=descriptions)
+        initial = session.generate(GENERATE)
+        candidate = session.active_candidate
+        player = candidate.participants[0].native.being
+        daggers = [row for row in initial["entities"]
+                   if row["category"] == "object" and row["type"] == "Dagger"]
+        self.assertEqual(len(daggers), 2)
+        for dagger in daggers:
+            address = HexAddress(dagger["cell"]["column"], dagger["cell"]["row"])
+            move_player_to(session, candidate, player, address)
+            session.inspect_entity({"handle": dagger["handle"]})
+            session.choose_pickup({"handle": dagger["handle"]})
+            session.advance_one_second()
+        inventory = session.public_view()["character"]["inventory"]
+        self.assertEqual(len(inventory["items"]), 2)
+        self.assertEqual({row["type"] for row in inventory["items"]}, {"Dagger"})
+        self.assertEqual(len({row["handle"] for row in inventory["items"]}), 2)
+        self.assertEqual([row["status"] for row in inventory["items"]],
+                         ["carried; not readied", "carried; not readied"])
+        self.assertEqual(inventory["carried_weight_pounds"],
+                         2 * candidate.universe.get_object_by_id(
+                             candidate.ground_objects[0].native_object_id).current.weight)
 
 
 if __name__ == "__main__":

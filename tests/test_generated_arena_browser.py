@@ -253,21 +253,37 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         object_view = next(row for row in state["entities"]
                            if row["category"] == "object" and row["type"] == "Dagger")
         target = HexAddress(object_view["cell"]["column"], object_view["cell"]["row"])
+        self.session.rename_entity({"handle": object_view["handle"], "name": "Renamed Dagger"})
+        self.session.choose_destination({"column": target.column, "row": target.row,
+                                         "rate": "sprint", "facing_policy": "turn"})
+        for _ in range(100):
+            if self.session.public_view()["movement_plan"] is None:
+                break
+            self.session.advance_one_second()
+        self.assertIsNone(self.session.public_view()["movement_plan"])
+        self.session.inspect_entity({"handle": object_view["handle"]})
+        self.session.choose_pickup({"handle": object_view["handle"]})
+        self.session.advance_one_second()
+        picked_up_view = self.session.public_view()
+        self.assertEqual(picked_up_view["character"]["inventory"]["items"][0]["name"],
+                         "Renamed Dagger")
 
         with tempfile.TemporaryDirectory(prefix="arena-browser-js-") as temp:
             page_path = Path(temp) / "page.html"
             state_path = Path(temp) / "initial-state.json"
             cell_path = Path(temp) / "target-cell.json"
+            picked_up_path = Path(temp) / "picked-up-view.json"
             page_path.write_text(page, encoding="utf-8")
             state_path.write_text(json.dumps(state), encoding="utf-8")
             cell_path.write_text(json.dumps({"column": target.column, "row": target.row}),
                                  encoding="utf-8")
+            picked_up_path.write_text(json.dumps(picked_up_view), encoding="utf-8")
             module_cache = Path(tempfile.gettempdir()) / "universe-arena-jsc-module-cache"
             module_cache.mkdir(parents=True, exist_ok=True)
             harness = ROOT / "tests" / "arena_browser_js_harness.swift"
             run = subprocess.run(
                 [shutil.which("swift"), "-module-cache-path", str(module_cache), str(harness),
-                 str(page_path), str(state_path), str(cell_path)],
+                 str(page_path), str(state_path), str(cell_path), str(picked_up_path)],
                 check=True, capture_output=True, text=True, timeout=60)
         result = json.loads(run.stdout)
         movement_requests = [call for call in result["calls"]
@@ -296,6 +312,14 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(result["finalEntity"]["present_state"], "carried")
         self.assertIn("Renamed Dagger", result["entityDetails"])
         self.assertIn("carried", result["entityDetails"])
+        inventory_output = " ".join(result["characterInventory"])
+        self.assertIn("Renamed Dagger", inventory_output)
+        self.assertIn("carried; not readied", inventory_output)
+        self.assertIn("Represented carried weight", inventory_output)
+        character_text = json.dumps(result["characterSummary"])
+        for label in ("Fitness", "Total native XP", "Hit points", "Skills and recorded practice",
+                      "Position and movement", "Age is not represented", "Class XP"):
+            self.assertIn(label, character_text)
         for call in movement_requests[:3]:
             self.assertEqual(call["body"]["facing_policy"], "turn")
             self.assertEqual(call["body"]["column"], target.column)
@@ -522,9 +546,12 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "z": player_participant.native.being.get_position().z})
         self.assertEqual([p.native.being.get_experience() for p in candidate.participants], [0, 0])
         encoded = json.dumps(state).lower()
-        for forbidden in ("source_sha256", "source_record", "native_id", "class", "level",
-                          "experience", "awareness", "target_id", "action_id", "participants"):
+        for forbidden in ("source_sha256", "source_record", "native_id", "awareness",
+                          "target_id", "action_id", "participants"):
             self.assertNotIn(forbidden, encoded)
+        self.assertIsNone(state["character"]["identity"]["class_levels"])
+        self.assertIsNone(state["character"]["experience"]["class_allocation"])
+        self.assertEqual(state["character"]["experience"]["total"], 0)
         self.assertNotIn(other_participant.native.being.id, encoded)
         self.assertEqual(len(state["entities"]), 1)
         self.assertEqual(state["entities"][0]["category"], "being")
@@ -579,6 +606,21 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         placement = next(row for row in candidate.ground_objects if row.native_type_key == "Dagger")
         native = candidate.universe.get_object_by_id(placement.native_object_id)
         player = candidate.participants[0].native.being
+        character = state["character"]
+        self.assertEqual(character["identity"]["display_name"], state["player"]["name"])
+        self.assertEqual(character["identity"]["native_type"], player.current.obj_type)
+        self.assertEqual(character["identity"]["race"], player.current.race)
+        self.assertIsNone(character["identity"]["age"])
+        self.assertIsNone(character["identity"]["class_levels"])
+        self.assertEqual(character["identity"]["stature_inches"], player.current.length)
+        self.assertEqual(character["identity"]["body_weight_pounds"], player.current.weight)
+        self.assertEqual(character["experience"]["total"], player.get_experience())
+        self.assertEqual(character["condition"]["hit_points_current"], player.get_hit_points())
+        self.assertIsNone(character["condition"]["hit_points_maximum"])
+        self.assertEqual(character["movement"]["position_meters"], state["player"]["position_meters"])
+        self.assertEqual(character["inventory"]["status"], "available")
+        self.assertEqual(character["inventory"]["items"], [])
+        self.assertEqual(character["inventory"]["carried_weight_pounds"], 0.0)
         ledgers = tuple(participant.native.being._arena_perception_ledger
                         for participant in candidate.participants)
         evidence_before = tuple((dict(ledger._current), tuple(ledger.history)) for ledger in ledgers)
@@ -596,6 +638,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             {"handle": target["handle"], "name": "My Dagger"}, {"X-Arena-Client-Seq": "2"})
         self.assertEqual(status, 200)
         self.assertEqual(renamed["selected_entity"]["name"], "My Dagger")
+        self.assertEqual(renamed["character"]["inventory"]["items"], [])
         self.assertEqual(native.id, native_id)
         self.assertEqual(native.name, native_name)
         self.assertEqual(candidate.encounter.time, time_before)
@@ -615,6 +658,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                     break
                 status, moving = self.request("/api/generated/advance", {"seconds": 1})
                 self.assertEqual(status, 200)
+                self.assertEqual(moving["character"]["movement"]["position_meters"],
+                                 moving["player"]["position_meters"])
         expected_destination = self.session.active_candidate.arena_map.layout.center_position(
             HexAddress(cell["column"], cell["row"]))
         self.assertEqual(player.get_position(), expected_destination)
@@ -630,6 +675,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(settled["pickup_action"]["outcome"], "success")
         self.assertEqual(native.parent_container_id, player.id)
+        inventory = settled["character"]["inventory"]
+        self.assertEqual(inventory["status"], "available")
+        self.assertEqual(len(inventory["items"]), 1)
+        self.assertEqual(inventory["items"][0]["name"], "My Dagger")
+        self.assertEqual(inventory["items"][0]["status"], "carried; not readied")
+        self.assertEqual(inventory["items"][0]["kind"], "weapon")
+        self.assertEqual(inventory["items"][0]["weight_pounds"], native.current.weight)
+        self.assertEqual(inventory["carried_weight_pounds"], native.current.weight)
+        self.assertNotIn(native.id, json.dumps(inventory))
+        self.assertIsNone(player.current.armor_id)
+        self.assertEqual(player.current.body_parts, {})
+        self.assertEqual(player.weapons, [])
         carried = next(row for row in settled["entities"] if row["handle"] == target["handle"])
         self.assertEqual(carried["present_state"], "carried")
         self.assertIsNone(carried["position_meters"])
@@ -640,9 +697,31 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(renamed_carried["selected_entity"]["present_state"], "carried")
         self.assertEqual(renamed_carried["selected_entity"]["name"], "Carried Dagger")
+        self.assertEqual(renamed_carried["character"]["inventory"]["items"][0]["name"],
+                         "Carried Dagger")
         self.assertEqual(native.name, "Dagger")
         self.assertIsNone(native.spatial_state)
         self.assertEqual(native.parent_container_id, self.session.active_candidate.participants[0].native.being.id)
+        next_cell = next(cell for cell in candidate.arena_map.layout.neighbors(
+            HexAddress(target["cell"]["column"], target["cell"]["row"]))
+                         if candidate.arena_map.layout.contains(cell))
+        status, moving = self.request("/api/generated/destination", {
+            "column": next_cell.column, "row": next_cell.row,
+            "rate": "sprint", "facing_policy": "turn"})
+        self.assertEqual(status, 200)
+        status, moving = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(moving["character"]["movement"]["position_meters"],
+                         moving["player"]["position_meters"])
+        self.assertEqual(len(moving["character"]["inventory"]["items"]), 1)
+        self.assertEqual(moving["character"]["inventory"]["items"][0]["name"], "Carried Dagger")
+        valid_weight = native.current.weight
+        native.current.weight = math.nan
+        invalid_inventory = self.session.public_view()["character"]["inventory"]
+        self.assertEqual(invalid_inventory["status"], "unavailable")
+        self.assertEqual(invalid_inventory["items"], [])
+        self.assertIsNone(invalid_inventory["carried_weight_pounds"])
+        native.current.weight = valid_weight
         trace = trace_stream.getvalue()
         self.assertIn("action=inspect status=accepted", trace)
         self.assertIn("action=pickup status=accepted", trace)
@@ -660,6 +739,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         candidate = self.session.active_candidate
         candidate_identity = candidate
         self.assertEqual(candidate.ground_objects, ())
+        self.assertEqual(initial["character"]["inventory"]["status"], "available")
+        self.assertEqual(initial["character"]["inventory"]["items"], [])
+        self.assertEqual(initial["character"]["inventory"]["carried_weight_pounds"], 0.0)
         player, opponent = (row.native.being for row in candidate.participants)
         opponent_view = next(row for row in initial["entities"] if row["category"] == "being")
         native_name, native_id = opponent.name, opponent.id
@@ -709,6 +791,45 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "handle": opponent_view["handle"], "name": "Stale"})
         self.assertEqual(status, 409)
         self.assertEqual(self.session.active_candidate.encounter.time, 0)
+
+    def test_character_sheet_reads_native_state_without_history_or_opponent_disclosure(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
+        initial = self.session.generate({"starting_experience": "10000",
+                                         "width_cells": "10", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        player, opponent = (row.native.being for row in candidate.participants)
+        rng_before, time_before = self.session._rng_cursor.state, candidate.encounter.time
+        event_history_before = dict(candidate.universe.event_history)
+        player_ledger = player._arena_perception_ledger
+        history_before = tuple(player_ledger.history)
+        character_a = self.session.public_view()["character"]
+        character_b = self.session.public_view()["character"]
+        self.assertEqual(character_a, character_b)
+        self.assertEqual(character_a["experience"]["total"], player.get_experience())
+        self.assertEqual({row["name"]: row["score"] for row in character_a["abilities"]},
+                         player.current.get_abilities())
+        self.assertEqual(character_a["condition"]["physical_fatigue_reserves"], {
+            "q": player.physical_fatigue.q, "b": player.physical_fatigue.b,
+            "profile_status": "unresolved"})
+        opponent_view = next(row for row in initial["entities"]
+                             if row["category"] == "being" and row["handle"] != initial["player"].get("handle"))
+        inspected = self.session.inspect_entity({"handle": opponent_view["handle"]})
+        self.assertEqual(inspected["selected_entity"]["category"], "being")
+        for private_key in ("abilities", "skills", "experience", "condition", "possessions", "source_record"):
+            self.assertNotIn(private_key, inspected["selected_entity"])
+        self.assertEqual(inspected["character"]["identity"]["display_name"], initial["player"]["name"])
+        self.assertEqual(candidate.encounter.time, time_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
+        self.assertEqual(candidate.universe.event_history, event_history_before)
+        self.assertEqual(tuple(player_ledger.history), history_before)
+
+        player.possessions.append("missing-native-object-reference")
+        unavailable = self.session.public_view()["character"]["inventory"]
+        self.assertEqual(unavailable["status"], "unavailable")
+        self.assertEqual(unavailable["items"], [])
+        self.assertIn("validation failed", unavailable["encumbrance_status"])
+        self.assertNotIn("missing-native-object-reference", json.dumps(unavailable))
+        player.possessions.clear()
 
     def test_strict_server_inputs_and_failed_regeneration_leave_active_session_unchanged(self):
         for payload in (

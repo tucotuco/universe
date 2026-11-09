@@ -329,7 +329,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.session._player_action_outcome = result.facts.outcome
         public_after = self.session.public_view()
         public_keys = {"state", "load_available", "encounter_name", "time_seconds", "map",
-                       "player", "player_action", "pickup_action", "entities", "selected_entity",
+                       "player", "character", "player_action", "pickup_action", "entities", "selected_entity",
                        "run_available", "advance_available",
                        "movement_available", "movement_reason", "movement_plan", "movement_outcome",
                        "spot_available", "spot_reason"}

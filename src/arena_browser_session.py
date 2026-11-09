@@ -216,6 +216,8 @@ class GeneratedArenaSession:
             })
         selected = next((row for row in perceived
                          if row["handle"] == self._selected_entity_handle), None)
+        character = self._player_character_sheet_unlocked(
+            candidate, player, position, cell, movement_plan)
         return {
             "state": "active",
             "load_available": False,
@@ -232,6 +234,7 @@ class GeneratedArenaSession:
                        "posture_source": player.posture_provenance,
                        "cell": cell,
                        "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
+            "character": character,
             "player_action": action,
             "pickup_action": pickup_action,
             "entities": perceived,
@@ -249,6 +252,267 @@ class GeneratedArenaSession:
             "spot_available": False,
             "spot_reason": _SPOT_DISABLED,
         }
+
+    def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
+                                         movement_plan):
+        """Build an allowlisted, live projection from the player's native state.
+
+        This intentionally does not read NPC Generator source records, the
+        opponent's Being state, or the historical perception ledger for the
+        inventory. Native values are read under the Universe's coordinated
+        access boundary while the session lock is already held.
+        """
+        from atomic_publication import coordinated_access
+        from being import BeingInstance
+
+        being = participant.native.being
+        if type(being) is not BeingInstance:
+            raise ArenaBrowserRequestError("player character sheet requires the native player Being")
+
+        with coordinated_access(candidate.universe):
+            current = being.current
+            position = being.get_position()
+            if position is None:
+                raise ArenaBrowserRequestError("native player position is unavailable")
+            address = candidate.arena_map.layout.cell_at_position(position)
+            cell = None if address is None else {"column": address.column, "row": address.row}
+            abilities = current.get_abilities()
+            if (type(abilities) is not dict or not abilities
+                    or any(type(key) is not str or type(value) not in (int, float)
+                           or not math.isfinite(value) for key, value in abilities.items())):
+                raise ArenaBrowserRequestError("native player abilities cannot be projected safely")
+            skill_groups = []
+            skill_experience = being.skill_experience
+            if type(skill_experience) is not dict:
+                raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
+            for group_name, rank_map in (("ordinary", current.skills.skills),
+                                         ("weapon", current.skills.weapon_skills)):
+                if type(rank_map) is not dict:
+                    raise ArenaBrowserRequestError("native skill ranks cannot be projected safely")
+                rows = []
+                for name, rank in sorted(rank_map.items()):
+                    if (type(name) is not str or not name
+                            or type(rank) not in (int, float) or not math.isfinite(rank)
+                            or rank < 0):
+                        raise ArenaBrowserRequestError("native skill ranks cannot be projected safely")
+                    practice = skill_experience.get(name, 0)
+                    if type(practice) is not int or practice < 0:
+                        raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
+                    rows.append({"name": name, "rank": rank,
+                                 "practice_experience": practice})
+                skill_groups.append({"kind": group_name, "skills": rows})
+            for name, practice in skill_experience.items():
+                if type(name) is not str or not name or type(practice) is not int or practice < 0:
+                    raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
+                if not any(row["name"] == name for group in skill_groups for row in group["skills"]):
+                    skill_groups[0]["skills"].append({"name": name, "rank": 0,
+                                                       "practice_experience": practice})
+            for group in skill_groups:
+                group["skills"].sort(key=lambda row: row["name"])
+
+            experience = being.get_experience()
+            hit_points = being.get_hit_points()
+            stature_inches, body_weight_pounds = current.length, current.weight
+            if (type(current.obj_type) is not str or not current.obj_type.strip()
+                    or current.race is not None and type(current.race) is not str
+                    or type(experience) not in (int, float) or not math.isfinite(experience)
+                    or experience < 0 or type(hit_points) not in (int, float)
+                    or not math.isfinite(hit_points)
+                    or type(stature_inches) not in (int, float) or not math.isfinite(stature_inches)
+                    or stature_inches <= 0
+                    or type(body_weight_pounds) not in (int, float)
+                    or not math.isfinite(body_weight_pounds) or body_weight_pounds <= 0):
+                raise ArenaBrowserRequestError("native player measurements or condition cannot be projected safely")
+            states = current.get_states()
+            if type(states) is not dict or any(type(key) is not str or type(value) is not bool
+                                               for key, value in states.items()):
+                raise ArenaBrowserRequestError("native player condition states cannot be projected safely")
+            fatigue = being.get_physical_fatigue()
+            if (not all(type(value) in (int, float) and math.isfinite(value)
+                        and 0 <= value <= 1 for value in (fatigue.q, fatigue.b))
+                    or type(being.get_fatigue_level()) is not int
+                    or not 0 <= being.get_fatigue_level() <= 5):
+                raise ArenaBrowserRequestError("native player fatigue cannot be projected safely")
+
+            inventory = self._native_inventory_projection(candidate, being)
+            movement = {
+                "position_meters": {"x": position.x, "y": position.y, "z": position.z},
+                "cell": cell,
+                "hex_facing": being.hex_facing,
+                "posture": being.posture,
+                "selected_plan": None,
+                "speed": None,
+                "speed_status": "Native rate is evaluated at each committed movement boundary; no ETA is projected.",
+            }
+            if movement_plan is not None:
+                movement["selected_plan"] = {
+                    "rate": movement_plan["rate"],
+                    "facing_policy": movement_plan["facing_policy"],
+                    "destination_cell": dict(movement_plan["destination_cell"]),
+                    "remaining_distance_meters": movement_plan["remaining_distance_meters"],
+                }
+
+            return {
+                "identity": {
+                    "display_name": self._player_name,
+                    "native_type": current.obj_type,
+                    "race": current.race,
+                    "age": None,
+                    "age_status": "Age is not represented in the native Being state.",
+                    "class_levels": None,
+                    "class_levels_status": "Generator class/level allocations are not imported into native Being state.",
+                    "stature_inches": float(stature_inches),
+                    "body_weight_pounds": float(body_weight_pounds),
+                },
+                "experience": {
+                    "total": experience,
+                    "class_allocation": None,
+                    "class_allocation_status": "Native class-specific XP allocation is not represented.",
+                },
+                "abilities": [{"name": name, "score": score}
+                              for name, score in sorted(abilities.items())],
+                "skills": skill_groups,
+                "condition": {
+                    "hit_points_current": hit_points,
+                    "hit_points_maximum": None,
+                    "hit_points_maximum_status": "A maximum HP value is not modeled by the native Arena import.",
+                    "legacy_fatigue_level": being.get_fatigue_level(),
+                    "physical_fatigue_reserves": {"q": fatigue.q, "b": fatigue.b,
+                                                  "profile_status": "resolved" if being.physiology_id else "unresolved"},
+                    "posture": being.posture,
+                    "states": dict(sorted(states.items())),
+                },
+                "movement": movement,
+                "inventory": inventory,
+            }
+
+    def _native_inventory_projection(self, candidate, being):
+        """Resolve every native ownership/equipment reference or expose failure."""
+        from armor import ArmorInstance
+        from being import BeingInstance
+        from object import ObjectInstance
+        from weapon import WeaponInstance
+
+        registry = candidate.universe.get_object_registry().object_instances
+        inventory = {"status": "available", "items": [], "carried_weight_pounds": 0.0,
+                     "encumbrance_status": "No standalone native encumbrance category is stored."}
+        try:
+            if type(registry) is not dict:
+                raise ValueError("native Object registry is unavailable")
+            if (type(being.possessions) is not list or type(being.weapons) is not list
+                    or type(being.current.body_parts) is not dict):
+                raise ValueError("native custody references are malformed")
+            if any(type(key) is not str or not key for key in being.current.body_parts):
+                raise ValueError("native body-part references are malformed")
+            possession_ids = list(being.possessions)
+            weapon_ids = list(being.weapons)
+            body_refs = [(slot, object_id) for slot, object_id in being.current.body_parts.items()
+                         if object_id is not None]
+            armor_id = being.current.armor_id
+            references = possession_ids + weapon_ids + [object_id for _, object_id in body_refs]
+            if armor_id is not None:
+                references.append(armor_id)
+            if any(type(key) is not str or not key for key in references):
+                raise ValueError("native custody references are malformed")
+            if len(possession_ids) != len(set(possession_ids)) or len(weapon_ids) != len(set(weapon_ids)):
+                raise ValueError("native inventory contains duplicate custody references")
+
+            body_slots = {}
+            for slot, object_id in body_refs:
+                if object_id in body_slots:
+                    raise ValueError("one native Object is assigned to multiple body parts")
+                body_slots[object_id] = slot
+            reference_ids = list(dict.fromkeys(references))
+            root_order = []
+            for object_id in reference_ids:
+                item = registry.get(object_id)
+                if item is not None and getattr(item, "parent_container_id", None) in (None, being.id):
+                    root_order.append(object_id)
+                elif object_id in weapon_ids or object_id in body_slots or object_id == armor_id:
+                    raise ValueError("equipped Object has conflicting container custody")
+            root_order.extend(sorted(key for key, item in registry.items()
+                                     if getattr(item, "parent_container_id", None) == being.id
+                                     and key not in root_order))
+
+            shield_types = set(candidate.universe.library.weapon_dictionary
+                               .get_objects_in_category("Shields"))
+            rows = []
+            visited = set()
+            active = set()
+            total_weight = 0.0
+
+            def visit(object_id, expected_parent_id=None, parent_name=None):
+                nonlocal total_weight
+                if object_id in active:
+                    raise ValueError("native inventory contains a custody cycle")
+                if object_id in visited:
+                    return
+                item = registry.get(object_id)
+                if (not isinstance(item, ObjectInstance) or isinstance(item, BeingInstance)
+                        or item.id != object_id):
+                    raise ValueError("native inventory references a missing or unsupported Object")
+                parent_id = item.parent_container_id
+                if expected_parent_id is None:
+                    if object_id not in root_order:
+                        raise ValueError("native inventory reference has no directly owned root")
+                    if parent_id not in (None, being.id):
+                        raise ValueError("native inventory Object has conflicting custody")
+                    if item.get_position() is not None:
+                        raise ValueError("native inventory Object is still spatially placed")
+                elif parent_id != expected_parent_id or item.get_position() is not None:
+                    raise ValueError("nested native Object has conflicting custody or spatial state")
+                current = item.current
+                type_key, native_name, weight = current.obj_type, item.name, current.weight
+                if (type(type_key) is not str or not type_key.strip()
+                        or native_name is not None and type(native_name) is not str
+                        or type(weight) not in (int, float) or not math.isfinite(weight) or weight < 0):
+                    raise ValueError("native inventory Object has an invalid name, type, or pound weight")
+                if type(item) is ArmorInstance:
+                    kind = "armor"
+                elif type(item) is WeaponInstance:
+                    kind = "shield" if type_key in shield_types else "weapon"
+                elif type(item) is ObjectInstance:
+                    kind = "object"
+                else:
+                    raise ValueError("native inventory Object subtype is unsupported")
+                if object_id == armor_id:
+                    if type(item) is not ArmorInstance:
+                        raise ValueError("native armor slot does not reference an Armor Object")
+                    status = "equipped armor"
+                elif object_id in body_slots:
+                    status = (f"held shield at {body_slots[object_id]} (native shield reference)"
+                              if kind == "shield" else f"held at {body_slots[object_id]}")
+                elif parent_name is not None:
+                    status = f"contained in {parent_name}"
+                else:
+                    status = ("carried; not readied" if kind in ("weapon", "shield")
+                              else "carried")
+                display_name = self._display_names.get(object_id, native_name or type_key)
+                handle = self._view_handles.get(object_id)
+                if handle is None:
+                    raise ValueError("native inventory Object has no observer-authorized handle")
+                rows.append({"handle": handle, "name": display_name, "type": type_key,
+                             "kind": kind, "weight_pounds": float(weight), "status": status})
+                total_weight += float(weight)
+                if not math.isfinite(total_weight):
+                    raise ValueError("native carried weight is not finite")
+                visited.add(object_id)
+                active.add(object_id)
+                for child_id, child in sorted(registry.items()):
+                    if getattr(child, "parent_container_id", None) == object_id:
+                        visit(child_id, object_id, display_name)
+                active.remove(object_id)
+
+            for object_id in root_order:
+                visit(object_id)
+            if not set(reference_ids).issubset(visited):
+                raise ValueError("native inventory reference is outside player custody")
+            inventory["items"] = rows
+            inventory["carried_weight_pounds"] = total_weight
+            return inventory
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            return {"status": "unavailable", "items": [], "carried_weight_pounds": None,
+                    "encumbrance_status": "Unavailable: native custody, Object identity, type, or weight validation failed."}
 
     def public_view(self):
         """Return an allowlisted player-facing projection, never Reality/source data."""
