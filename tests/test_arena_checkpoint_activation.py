@@ -65,10 +65,8 @@ class GeneratedArenaCheckpointActivationTests(unittest.TestCase):
         self.assertFalse(captured.closure_validated)
         self.assertFalse(captured.portable_schema_defined)
         self.assertFalse(captured.restore_verified)
-        receipt_blocker = next(row.reason for row in captured.diagnostics
-                               if row.code == "bounded_run_spot_closure_refused")
-        self.assertEqual(receipt_blocker,
-            "Being original definition is not the matching registered Library definition")
+        self.assertIn("bounded_run_spot_closure_verified",
+                      {row.code for row in captured.diagnostics})
         activation_node = _find_activation_node(captured.envelope)
         self.assertIsNotNone(activation_node)
         activation_fields = dict(activation_node[2])

@@ -279,13 +279,31 @@ print(repr(roundtrip))
             encounter.arena_activation_enabled = True
             encounter.arena_movement_activation = original
 
-    def test_activated_capture_closes_action_free_receipt_and_reaches_next_blocker(self):
+    def test_activated_capture_closes_action_free_receipt_and_definition_identity(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
         candidate = session.active_candidate
         encounter = candidate.encounter
         player = candidate.participants[0].native.being
+        opponent = candidate.participants[1].native.being
+        template = next(definition for definition in candidate.universe.library.being_dictionary.objects.values()
+                        if definition.obj_type == player.original.obj_type)
+        self.assertEqual(opponent.original.obj_type, player.original.obj_type)
+        self.assertIsNot(player.original, template)
+        self.assertIsNot(opponent.original, template)
+        self.assertIsNot(player.original, opponent.original)
+        self.assertEqual(player.current.hit_points, player.original.hit_points)
+        self.assertEqual(opponent.current.hit_points, opponent.original.hit_points)
+        self.assertEqual(player.current.experience, player.original.experience)
+        self.assertEqual(opponent.current.experience, opponent.original.experience)
+        self.assertEqual(player.current.length, player.original.length)
+        self.assertEqual(opponent.current.length, opponent.original.length)
+        self.assertEqual(player.current.weight, player.original.weight)
+        self.assertEqual(opponent.current.weight, opponent.original.weight)
+        self.assertEqual(player.current.body_parts, {"left hand": None, "right hand": None})
+        self.assertEqual(opponent.current.body_parts, {"left hand": None, "right hand": None})
+        template_snapshot = dict(template.__dict__)
         start = player.get_position()
         origin = candidate.arena_map.layout.cell_at_position(start)
         destination = next(a for a in candidate.arena_map.layout.addresses() if a != origin)
@@ -379,14 +397,48 @@ print(repr(roundtrip))
             self.assertEqual(encode_ledger.call_count, 4)
         validation = validate_checkpoint_candidate(candidate.universe, encounter,
             checkpoint, quiescent=True)
-        blocker = next(row.reason for row in checkpoint.diagnostics
-                       if row.code == "bounded_run_spot_closure_refused")
-        self.assertEqual(blocker,
-            "Being original definition is not the matching registered Library definition")
         self.assertTrue(validation.inventory_validated)
+        self.assertIn("bounded_run_spot_closure_verified",
+                      {row.code for row in checkpoint.diagnostics})
         self.assertFalse(checkpoint.closure_validated)
         self.assertFalse(checkpoint.portable_schema_defined)
         self.assertFalse(checkpoint.restore_verified)
+        self.assertEqual(template.__dict__, template_snapshot)
+        receipt_rebinding = {(row.field, row.reason) for row in checkpoint.diagnostics
+                             if row.code == "receipt_rebinding_required"}
+        self.assertEqual(receipt_rebinding, {
+            ("action_anchors", "Native identity/digest anchors require new authenticated identity-preserving issuance on restore."),
+            ("target_anchors", "Native identity/digest anchors require new authenticated identity-preserving issuance on restore."),
+        })
+        semantic_closure = next(row.reason for row in checkpoint.diagnostics
+                                if row.code == "semantic_closure_adapter_incomplete")
+        self.assertEqual(semantic_closure,
+            "A bounded native Run/Spot field certificate may be present, but it does not close unrelated "
+            "Library dictionaries/entities, all Universe alias roles, fresh declaration signatures, "
+            "receipt reissuance/anchors, or restoration. Whole-checkpoint readiness remains refused.")
+        original_player_definition = player.original
+        altered = original_player_definition.copy()
+        altered.alignment = "Unreviewed alignment"
+        try:
+            player.original = altered
+            rejected = capture_checkpoint_candidate(candidate.universe, encounter,
+                quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+            refusal = next(row.reason for row in rejected.diagnostics
+                           if row.code == "bounded_run_spot_closure_refused")
+            self.assertEqual(refusal,
+                "individualized Being original differs from its native type template outside mapped fields")
+        finally:
+            player.original = original_player_definition
+        try:
+            player.original = opponent.original
+            rejected = capture_checkpoint_candidate(candidate.universe, encounter,
+                quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+            refusal = next(row.reason for row in rejected.diagnostics
+                           if row.code == "bounded_run_spot_closure_refused")
+            self.assertEqual(refusal,
+                "individualized Being original definition is aliased by multiple Beings")
+        finally:
+            player.original = original_player_definition
         self.assertEqual(source_state(), before)
 
 

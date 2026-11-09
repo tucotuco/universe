@@ -74,6 +74,37 @@ def _fields(value):
     return data
 
 
+def _definition_values_equal(first, second, active=None):
+    """Compare copied native definition values without relying on object identity."""
+    if type(first) is not type(second):
+        return False
+    if first is None or type(first) in (str, bool, int):
+        return first == second
+    if type(first) is float:
+        return math.isfinite(first) and math.isfinite(second) and first.hex() == second.hex()
+    active = set() if active is None else active
+    pair = (id(first), id(second))
+    _require(pair not in active, 'cycle in native definition comparison')
+    active.add(pair)
+    try:
+        if type(first) is dict:
+            return (first.keys() == second.keys()
+                    and all(_definition_values_equal(first[key], second[key], active)
+                            for key in first))
+        if type(first) in (list, tuple):
+            return (len(first) == len(second)
+                    and all(_definition_values_equal(a, b, active)
+                            for a, b in zip(first, second)))
+        if type(first) in (set, frozenset):
+            return first == second
+        first_data, second_data = _fields(first), _fields(second)
+        return (first_data.keys() == second_data.keys()
+                and all(_definition_values_equal(first_data[name], second_data[name], active)
+                        for name in first_data))
+    finally:
+        active.remove(pair)
+
+
 def _movement_activation_state(encounter):
     """Validate the existing movement-start record without adding authority."""
     from encounter import ArenaMovementActivation
@@ -552,7 +583,7 @@ class NativeInventory(_Inventory):
         registry=world.object_registry.object_instances
         _require(set(registry)==entity_ids and all(type(value) is BeingInstance for value in registry.values()),
                  'bounded Universe registry contains unrelated objects or Beings outside the selected Encounter')
-        current_owned=dict(definition_mutables);covered=[]
+        current_owned=dict(definition_mutables);covered=[];individualized_original_ids=set()
         for entity_id in sorted(entity_ids):
             being=registry.get(entity_id)
             _require(type(entity_id) is str and type(being) is BeingInstance
@@ -573,8 +604,11 @@ class NativeInventory(_Inventory):
             except ValueError as exc:
                 raise CheckpointRejected('contradictory native Being posture state') from exc
             original=data['original'];current=data['current']
-            _require(type(original) is BeingDefinition and definition_ids.get(id(original))==original.obj_type,
-                     'Being original definition is not the matching registered Library definition')
+            original_kind=self._validate_being_original_definition(
+                original, entity_id=entity_id, definitions=definitions,
+                definition_ids=definition_ids,
+                individualized_original_ids=individualized_original_ids,
+                mutable_owners=current_owned)
             _require(type(current) is BeingDefinition and current.obj_type==original.obj_type
                      and current is not original,'Being current definition has unsupported type or aliases its Library original')
             owner=('being-current',entity_id)
@@ -623,11 +657,12 @@ class NativeInventory(_Inventory):
             occlusion=data.get('visual_occlusion')
             _require(occlusion is None or type(occlusion) is VisualOcclusion,
                      'unsupported optional Being visual-occlusion value')
-            covered.append((entity_id,original.obj_type,tuple(sorted(skill_state['skills'])),
+            covered.append((entity_id,original.obj_type,original_kind,
+                            tuple(sorted(skill_state['skills'])),
                             tuple(sorted(skill_state['weapon_skills'])),
                             ('binary64',fatigue.q.hex()),('binary64',fatigue.b.hex()),
                             physiology_id,geometry is not None,occlusion is not None,facing,effective_posture))
-        return ('native.run-spot-field-closure/3',
+        return ('native.run-spot-field-closure/4',
             ('participants',tuple(sorted(entity_ids))),
             ('being-definitions',tuple(sorted({row[1] for row in covered}))),
             ('required-practice-skills',('run','spot')),
@@ -641,9 +676,10 @@ class NativeInventory(_Inventory):
                                    tuple(sorted(row.get('unsupported_optional',()))),
                                    tuple(sorted(row.get('optional_values',{}))))
                                   for tag,row in sorted(RUN_SPOT_FIELD_CLOSURE.items()))),
-            ('ownership-policy',('original-definition-shared-by-key',
+            ('ownership-policy',('original-definition-canonical-or-template-derived',
+                                 'individualized-original-exclusive-per-Being',
                                  'current-definition-exclusive-per-Being',
-                                 'mutable-current-subgraphs-cross-Being-exclusive',
+                                 'mutable-definition-subgraphs-cross-Being-exclusive',
                                  'logical-IDs-resolve-through-native-registry')))
 
     def _closed_definition_value(self,value,*,owner,active=None,mutable_owners=None):
@@ -687,7 +723,47 @@ class NativeInventory(_Inventory):
             self._closed_definition_value(item,owner=owner,active=active,mutable_owners=mutable_owners)
         active.remove(identity)
 
-    def _validate_being_definition(self,definition):
+    def _validate_being_original_definition(self, original, *, entity_id,
+                                           definitions, definition_ids,
+                                           individualized_original_ids,
+                                           mutable_owners):
+        _require(type(original) is BeingDefinition,
+                 'Being original definition has an unsupported native type')
+        data=_fields(original)
+        registered=tuple(key for key,value in definitions.items() if value is original)
+        if registered:
+            _require(len(registered)==1 and registered[0]==data['obj_type']
+                     and definition_ids.get(id(original))==data['obj_type'],
+                     'Being original definition has a foreign or ambiguous Library registration')
+            return 'library-template'
+
+        template=definitions.get(data['obj_type'])
+        _require(type(template) is BeingDefinition and template.obj_type==data['obj_type'],
+                 'individualized Being original has no matching registered native type template')
+        _require(id(original) not in individualized_original_ids,
+                 'individualized Being original definition is aliased by multiple Beings')
+        template_data=_fields(template)
+        self._validate_being_definition(original, individualized=True)
+        mapped_fields={'length','weight','hit_points','experience','race','abilities','skills'}
+        for field in set(template_data)-mapped_fields:
+            _require(_definition_values_equal(data[field], template_data[field]),
+                     'individualized Being original differs from its native type template outside mapped fields')
+
+        expected_race=template_data['race']
+        if expected_race is None:
+            from npcgen_arena_adapter import _MOVEMENT_RACE_CATEGORIES
+            obj_type=template_data['obj_type']
+            if (type(obj_type) is str and obj_type.strip()
+                    and obj_type.casefold() in _MOVEMENT_RACE_CATEGORIES):
+                expected_race=obj_type
+        _require(data['race']==expected_race,
+                 'individualized Being original has a race value inconsistent with its native template')
+        owner=('being-original',entity_id)
+        self._closed_definition_value(original,owner=owner,mutable_owners=mutable_owners)
+        individualized_original_ids.add(id(original))
+        return 'individualized-native-template'
+
+    def _validate_being_definition(self,definition,*,individualized=False):
         from abilities import Abilities
         from skill import Skills
         from speeds import Speed
@@ -712,7 +788,11 @@ class NativeInventory(_Inventory):
                  'Being definition armor reference is not a logical ID')
         _require(d['physiology_id'] is None or type(d['physiology_id']) is str,
                  'Being definition physiology reference is not a logical ID')
-        _require(d['race'] is None or d['race'] in ('Elf', 'Half-elf'),
+        race_supported=(d['race'] is None or d['race'] in ('Elf', 'Half-elf'))
+        if individualized and type(d['race']) is str:
+            from npcgen_arena_adapter import _MOVEMENT_RACE_CATEGORIES
+            race_supported=race_supported or d['race'].casefold() in _MOVEMENT_RACE_CATEGORIES
+        _require(race_supported,
                  'Being definition has unsupported Spot action aptitude race')
         _require(d['discovery_dc'] is None or type(d['discovery_dc']) is int
                  and d['discovery_dc'] >= 0,

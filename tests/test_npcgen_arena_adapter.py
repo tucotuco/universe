@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from library import Library
+from checkpoint_adapters import NativeInventory
 from npcgen import api
 from npcgen_arena_adapter import ArenaNPCRefusal, generate_npcgen_arena_being
 from universe import Universe
@@ -63,6 +64,24 @@ class TestNpcgenArenaAdapter(unittest.TestCase):
         self.assertNotEqual(positive.being.id, positive_again.being.id)
         self.assertIs(world.get_object_by_id(positive.being.id), positive.being)
         self.assertIs(world.get_object_by_id(positive_again.being.id), positive_again.being)
+        self.assertIsNot(positive.being.original, half_elf_template)
+        self.assertIsNot(positive_again.being.original, half_elf_template)
+        self.assertIsNot(positive.being.original, positive_again.being.original)
+        inventory = object.__new__(NativeInventory)
+        mutable_owners = {}
+        inventory._closed_definition_value(half_elf_template,
+            owner=("definition", "Half-elf"), mutable_owners=mutable_owners)
+        individualized_ids = set()
+        for index, result in enumerate((positive, positive_again)):
+            kind = inventory._validate_being_original_definition(
+                result.being.original, entity_id=result.being.id,
+                definitions={"Half-elf": half_elf_template},
+                definition_ids={id(half_elf_template): "Half-elf"},
+                individualized_original_ids=individualized_ids,
+                mutable_owners=mutable_owners)
+            self.assertEqual(kind, "individualized-native-template")
+            inventory._closed_definition_value(result.being.current,
+                owner=("being-current", str(index)), mutable_owners=mutable_owners)
 
     def test_resolved_empty_is_imported_but_unresolved_refuses_without_registration(self):
         world = _world()
