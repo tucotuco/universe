@@ -333,7 +333,7 @@ class TestNativeMovementIntent(unittest.TestCase):
                        "action_catalog",
                        "run_available", "advance_available",
                        "movement_available", "movement_reason", "movement_plan", "movement_outcome",
-                       "spot_available", "spot_reason"}
+                       "ready_weapon_action", "spot_available", "spot_reason"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)

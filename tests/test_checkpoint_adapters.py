@@ -278,7 +278,10 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
 
     def test_dangling_equipment_and_possessions_refuse(self):
         self.enable();self.a.possessions.append('missing')
-        with self.assertRaisesRegex(ValueError,'dangling equipment'):self.capture()
+        # The strict snapshot gate may reject the missing Object while
+        # traversing identity, before the equipment-specific check runs.
+        with self.assertRaisesRegex(ValueError,'dangling equipment|unknown transitive Object identity'):
+            self.capture()
 
     def test_native_adapter_requires_private_rng_assertion(self):
         self.enable()

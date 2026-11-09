@@ -40,7 +40,8 @@ _ENCOUNTER_FIELDS = frozenset((
     "_interval_start", "_physiology_registry", "_running", "_transactional_mode",
     "active_boundary", "awareness", "being_list", "boundary_fault", "cancelled_action_list",
     "difficulty_class", "end_time", "event_type", "fatigue_frame_history",
-    "finished_action_list", "id", "initiated", "initiation", "last_fatigue_frame",
+    "finished_action_list", "id", "initiated", "initiation", "arena_activation",
+    "arena_activation_enabled", "arena_movement_activation", "last_fatigue_frame",
     "last_processed_boundary", "local_frame", "location", "map", "name",
     "non_being_object_list", "parent_event_id", "pending_action_list", "start_time",
     "time", "type", "universe",
@@ -662,6 +663,11 @@ def _capture_payload(summary, prefix):
                      and encounter.parent_event_id is None and encounter.map is None
                      and encounter.local_frame is None and encounter.name == "",
                      "Encounter has unsupported lifecycle, fatigue, location or planning state")
+            _require(type(encounter.arena_activation_enabled) is bool
+                     and not encounter.arena_activation_enabled
+                     and encounter.arena_activation is None
+                     and encounter.arena_movement_activation is None,
+                     "Arena activation records are outside the detached six-boundary Spot subset")
             view = encounter.inspect_committed(6)
             _require(view.boundary == 6 and view.latest_boundary == 6
                      and tuple(view.participants) == ids,

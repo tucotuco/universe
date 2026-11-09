@@ -34,9 +34,9 @@ from arena_state_candidate import (
 SCHEMA = "universe.arena.host-accepted-quarantined-being-state/1"
 TRUST = "host-accepted post-Spot state claim; native historical receipt authenticity is not established"
 _EXPECTED_BEING_FIELDS = frozenset((
-    "_atomic_target_history", "_skill_practice_baselines", "current",
+    "_atomic_target_history", "_posture", "_skill_practice_baselines", "current",
     "effective_fitness", "exertion", "fatigue_level", "front_facing",
-    "geometry", "id", "name", "original", "parent_container_id",
+    "geometry", "hex_facing", "id", "name", "original", "parent_container_id",
     "personal_history", "physical_fatigue", "physiology_id", "possessions",
     "skill_experience", "skill_use_history", "spatial_state", "strategy",
     "top_facing", "type", "visual_occlusion", "weapons",
@@ -352,6 +352,12 @@ def _construct_private_beings(candidate_view, candidate):
                     or fields["original"].obj_type != "Human"
                     or type(fields["current"]).__name__ != "BeingDefinition"):
                 raise ArenaStateAdmissionRejected("candidate native definitions/identity differ from host-approved state")
+            from being import BeingInstance
+            if fields["_posture"] not in (None, "standing", "crouching", "lying") \
+                    or (fields["hex_facing"] is not None
+                        and (type(fields["hex_facing"]) is not int
+                             or not 0 <= fields["hex_facing"] < 12)):
+                raise ArenaStateAdmissionRejected("candidate native posture/facing is unsupported")
             being = BeingInstance(fields["original"], name=fields["name"], id=fields["id"])
             # Native history and receipt identity remain a detached B1/B2
             # sidecar. Never install candidate inspection rows as authority.

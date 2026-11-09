@@ -112,6 +112,10 @@ class ArenaStateAdmissionTests(unittest.TestCase):
         self.assertEqual(tuple(type(value).__name__ for value in private),
                          ("BeingInstance", "BeingInstance"))
         self.assertTrue(all(value.id in result.logical_ids for value in private))
+        for restored, logical_id in zip(private, result.logical_ids):
+            source = self.encounter.universe.get_object_by_id(logical_id)
+            self.assertEqual((restored.hex_facing, restored._posture),
+                             (source.hex_facing, source._posture))
         self.assertTrue(all(value._checkpoint_quarantined is True for value in private))
         self.assertIs(private[0].original, private[1].original)
         self.assertIsNot(private[0].current, private[1].current)
@@ -212,6 +216,33 @@ class ArenaStateAdmissionTests(unittest.TestCase):
             separators=(",", ":"), allow_nan=False).encode("utf-8")
         with self.assertRaises(ArenaStateRejected):
             decode_arena_post_spot_state(changed)
+
+    def test_detached_spot_candidate_refuses_live_arena_activation_state(self):
+        # These fields now exist on Encounter, but this historical detached
+        # six-boundary Spot projection does not serialize or restore them.
+        # Keep the boundary explicit instead of silently accepting live state.
+        originals = (self.encounter.arena_activation_enabled,
+                     self.encounter.arena_activation,
+                     self.encounter.arena_movement_activation)
+        try:
+            for field, value in (
+                ("arena_activation_enabled", True),
+                ("arena_activation", object()),
+                ("arena_movement_activation", object()),
+            ):
+                with self.subTest(field=field):
+                    setattr(self.encounter, field, value)
+                    with self.assertRaisesRegex(
+                            ArenaStateRejected,
+                            "outside the detached six-boundary Spot subset"):
+                        capture_arena_post_spot_state(self.source, self.prefix)
+                    setattr(self.encounter, field, originals[
+                        ("arena_activation_enabled", "arena_activation",
+                         "arena_movement_activation").index(field)])
+        finally:
+            (self.encounter.arena_activation_enabled,
+             self.encounter.arena_activation,
+             self.encounter.arena_movement_activation) = originals
 
     def test_candidate_state_requires_exact_history_object_and_consumes_on_mismatch(self):
         token = _authorize(self.candidate, self.prefix, self.history)
