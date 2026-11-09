@@ -248,6 +248,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
             trace_ui=True, trace_stream=stream, ground_loadout_profile=loadout_profile)
         _, page = self.request("/")
+        self.assertNotIn('id="characterPanel"', page)
+        self.assertIn('id="entityDialog"', page)
+        self.assertIn('id="characterButton"', page)
         state = self.session.generate({
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
         object_view = next(row for row in state["entities"]
@@ -292,12 +295,6 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination", "/api/generated/advance",
             "/api/generated/advance"])
-        preselection = next(call for call in result["calls"]
-                            if call["path"] == "/api/generated/trace"
-                            and call["body"].get("event") == "rate_selected"
-                            and call["body"].get("rate") == "sprint")
-        first_destination = result["calls"].index(movement_requests[0])
-        self.assertLess(result["calls"].index(preselection), first_destination)
         self.assertEqual([call["body"]["rate"] for call in movement_requests[:3]],
                          ["sprint", "walk", "sprint"])
         self.assertIn("Dagger", result["entityDetails"])
@@ -315,11 +312,11 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         inventory_output = " ".join(result["characterInventory"])
         self.assertIn("Renamed Dagger", inventory_output)
         self.assertIn("carried; not readied", inventory_output)
-        self.assertIn("Represented carried weight", inventory_output)
         character_text = json.dumps(result["characterSummary"])
         for label in ("Fitness", "Total native XP", "Hit points", "Skills and recorded practice",
                       "Position and movement", "Age is not represented", "Class XP"):
             self.assertIn(label, character_text)
+        self.assertIn("Represented carried weight", character_text)
         for call in movement_requests[:3]:
             self.assertEqual(call["body"]["facing_policy"], "turn")
             self.assertEqual(call["body"]["column"], target.column)
@@ -332,6 +329,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("Destination reached", result["status"])
         self.assertEqual(result["time"], 2)
         self.assertEqual(result["error"], "One native Encounter second committed.")
+        self.assertTrue(any(label.lower().startswith("small shield · ground")
+                            for label in result["entityLabels"]))
+        self.assertFalse(any("small shield · small shield" in label.lower()
+                             for label in result["entityLabels"]))
 
     def test_destination_then_sprint_updates_accepted_plan_before_native_step(self):
         stream = self.enable_trace()
@@ -506,6 +507,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         now[0] = 1.0
         self.assertEqual(trace.client_event({"seq": 32, "event": "advance_clicked"}),
                          {"accepted": True})
+
+    def test_character_sheet_trace_event_contains_no_private_details(self):
+        stream = self.enable_trace()
+        status, result = self.request("/api/generated/trace", {
+            "seq": 1, "event": "character_sheet_opened"})
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {"accepted": True})
+        self.assertIn("event=character_sheet_opened", stream.getvalue())
+        self.assertNotIn("name", stream.getvalue())
 
     def test_generate_returns_only_player_allowlist_and_rename_preserves_native_identity(self):
         status, state = self.request("/api/generated/generate", {

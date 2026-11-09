@@ -32,14 +32,17 @@ function __element(id){
   if(!__elements[id]){
     const e={id,value:id==='xp'?'10000':id==='width'?'10':id==='height'?'5':id==='rate'?'walk':'turn',
       disabled:false,textContent:'',listeners:Object.create(null),clientWidth:800,clientHeight:520,
-      children:[],dataset:Object.create(null),replaceChildren(){this.children=[]},appendChild(e){this.children.push(e)},
-      addEventListener(name,fn){this.listeners[name]=fn},getContext(){return __canvasContext},
+      children:[],dataset:Object.create(null),replaceChildren(){this.children=[]},appendChild(e){this.children.push(e)},append(...items){this.children.push(...items)},
+      addEventListener(name,fn){this.listeners[name]=fn},showModal(){this.open=true},close(){this.open=false;if(this.listeners.close)this.listeners.close()},focus(){this.focused=true},getContext(){return __canvasContext},
       getBoundingClientRect(){return {left:0,top:0}}};
     __elements[id]=e;
   }
   return __elements[id];
 }
-var document={getElementById:__element,createElement(tag){return {tagName:tag,textContent:'',dataset:Object.create(null),listeners:Object.create(null),children:[],appendChild(e){this.children.push(e)},replaceChildren(){this.children=[]},addEventListener(name,fn){this.listeners[name]=fn}}}};
+var document={getElementById:__element,createElement(tag){return {tagName:tag,id:'',value:'',maxLength:0,type:'',className:'',textContent:'',dataset:Object.create(null),listeners:Object.create(null),children:[],appendChild(e){this.children.push(e)},append(...items){this.children.push(...items)},replaceChildren(){this.children=[]},addEventListener(name,fn){this.listeners[name]=fn},focus(){this.focused=true}}}};
+function __find(root,id){if(root.id===id)return root;for(const child of root.children||[]){const found=__find(child,id);if(found)return found}return null}
+function __findHandle(root,handle){if(root.dataset&&root.dataset.handle===handle)return root;for(const child of root.children||[]){const found=__findHandle(child,handle);if(found)return found}return null}
+function __text(root){return [root.textContent||'',...(root.children||[]).map(__text)].join(' ')}
 var window={devicePixelRatio:1,addEventListener:function(){}};
 var __serverState={state:'empty'};
 var __initialView=__INITIAL_VIEW__;
@@ -99,18 +102,42 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
 (async()=>{
   await Promise.resolve();
   await __element('generate').onclick();
-  if(__element('characterPanel').hidden)throw Error('generated character sheet remained hidden');
-  __element('rate').value='sprint';
-  await __element('rate').listeners.change();
-  const initialObject=currentView.entities.find(e=>e.type==='Dagger'&&e.category==='object');
+  const c=__element('map'),dialog=__element('entityDialog');
+  if(__element('characterPanel').children.length)throw Error('expanded character sheet remains in page');
+  __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
+  if(!dialog.open||__element('dialogTitle').textContent!=='Your Being — Character')throw Error('Character button did not open player popup');
+  let body=__text(__element('dialogBody'));
+  if(!body.includes('Identity and experience')||!body.includes('Skills and recorded practice')||!body.includes('No items carried'))throw Error('native character projection missing from player popup');
+  if(!body.includes('Age is not represented')||!body.includes('Class XP'))throw Error('unsupported native fields are not labeled');
+  __element('rate').value='sprint';await __element('rate').listeners.change();
+  const movementCount=()=>__calls.filter(call=>call.path==='/api/generated/destination').length;
+  let before=movementCount(),p=currentView.player.position_meters;
+  await c.listeners.click({clientX:mapView.toX(p.x),clientY:mapView.toY(p.y)});
+  if(movementCount()!==before||__element('dialogTitle').textContent!=='Your Being — Character')throw Error('player marker changed destination or missed popup');
+  const opponent=currentView.entities.find(e=>e.category==='being');
+  if(!opponent)throw Error('opponent evidence missing');
+  before=movementCount();await c.listeners.click({clientX:mapView.toX(opponent.position_meters.x),clientY:mapView.toY(opponent.position_meters.y)});
+  body=__text(__element('dialogBody'));
+  if(movementCount()!==before||!body.includes(opponent.type)||!body.includes(opponent.present_state)||body.includes('Total native XP')||body.includes('inventory'))throw Error('opponent popup exceeded observer projection or changed movement');
+  const shield=currentView.entities.find(e=>e.category==='object'&&e.type.toLowerCase()==='small shield');
+  if(!shield)throw Error('Small Shield evidence missing');
+  const shieldRow=__element('entities').children.find(e=>e.dataset.handle===shield.handle);
+  if(!shieldRow||shieldRow.textContent.includes('Small Shield · Small Shield'))throw Error('default duplicate name/type label remains');
+  before=movementCount();await c.listeners.click({clientX:mapView.toX(shield.position_meters.x),clientY:mapView.toY(shield.position_meters.y)});
+  if(movementCount()!==before||!__text(__element('dialogBody')).includes('Weight: Unavailable from observer evidence'))throw Error('Object popup did not preserve movement/authority boundary');
+  const daggers=currentView.entities.filter(e=>e.category==='object'&&e.type==='Dagger');
+  if(daggers.length<2||daggers[0].handle===daggers[1].handle)throw Error('duplicate-type Objects lost separate handles');
+  before=movementCount();await __element('entities').children.find(e=>e.dataset.handle===daggers[0].handle).listeners.click();
+  if(movementCount()!==before)throw Error('Entity list inspection changed destination');
+  await __element('entities').children.find(e=>e.dataset.handle===daggers[1].handle).listeners.click();
+  if(currentView.selected_entity.handle!==daggers[1].handle)throw Error('second same-type Object was not independently selectable');
+  const initialObject=daggers[0];
   if(!initialObject)throw Error('generated object was not visible on the map');
-  if(!__element('characterSummary').children.length)throw Error('generated character sheet was not rendered');
-  if(!__element('characterInventory').children.some(e=>e.textContent==='No items carried'))throw Error('initial inventory is not shown as empty');
-  const c=__element('map');
-  await c.listeners.click({clientX:mapView.toX(initialObject.position_meters.x),
-    clientY:mapView.toY(initialObject.position_meters.y)});
-  __element('entityName').value='Renamed Dagger';
-  await __element('renameEntity').onclick();
+  before=movementCount();await c.listeners.click({clientX:mapView.toX(initialObject.position_meters.x),clientY:mapView.toY(initialObject.position_meters.y)});
+  if(movementCount()!==before)throw Error('Object inspection changed destination');
+  let input=__find(__element('dialogBody'),'entityName');input.value='Renamed Dagger';
+  await __find(__element('dialogBody'),'renameEntity').listeners.click();
+  if(!__text(__element('dialogBody')).includes('Renamed Dagger')||!__text(__element('dialogBody')).includes('Type: Dagger'))throw Error('renamed popup lost distinct native type');
   const m=currentView.map,cell=__targetCell;
   const minX=0,maxX=m.origin_offset_meters[0]+(m.width_cells-1)*m.column_step_meters+m.hex_vertex_offsets_meters[0][0];
   const minY=0,maxY=m.height_cells*m.row_step_meters+(m.width_cells>1?m.odd_column_offset_meters:0);
@@ -119,30 +146,35 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   const cx=m.origin_offset_meters[0]+cell.column*m.column_step_meters;
   const cy=m.origin_offset_meters[1]+cell.row*m.row_step_meters+(cell.column%2)*m.odd_column_offset_meters;
   await c.listeners.click({clientX:ox+(cx-minX)*scale+24,clientY:c.clientHeight-oy-(cy-minY)*scale});
-  __element('rate').value='walk';
-  await __element('rate').listeners.change();
-  __element('rate').value='sprint';
-  const optionRequest=__element('rate').listeners.change();
-  const advanceRequest=__element('advance').onclick();
-  await Promise.all([optionRequest,advanceRequest]);
+  __element('rate').value='walk';await __element('rate').listeners.change();
+  __element('rate').value='sprint';const optionRequest=__element('rate').listeners.change();
+  const advanceRequest=__element('advance').onclick();await Promise.all([optionRequest,advanceRequest]);
   const visibleObject=__element('entities').children.find(e=>e.textContent.includes('Renamed Dagger'));
   if(!visibleObject)throw Error('renamed object disappeared after movement');
   await visibleObject.listeners.click();
-  if(__element('pickup').disabled)throw Error('same-hex object was not pickup-eligible after arrival');
-  await __element('pickup').onclick();
-  await __element('advance').onclick();
+  if(__find(__element('dialogBody'),'pickup').disabled)throw Error('same-hex object was not pickup-eligible after arrival');
+  await __find(__element('dialogBody'),'pickup').listeners.click();await __element('advance').onclick();
   const carried=__element('entities').children.find(e=>e.textContent.includes('Renamed Dagger'));
   if(!carried)throw Error('carried display name was not retained');
-  if(!__element('characterInventory').children.some(e=>e.textContent.includes('Renamed Dagger')&&e.textContent.includes('carried; not readied')))throw Error('committed inventory did not refresh with carried non-readied Object');
-  await carried.listeners.click();
-  globalThis.__result=JSON.stringify({calls:__calls,plan:__lastPlan,
-    time:currentView.time_seconds,status:__element('movementStatus').textContent,error:__element('error').textContent,
-    entityDetails:__element('entityDetails').textContent,pickupStatus:__element('pickupStatus').textContent,
-    renameStatus:__element('renameStatus').textContent,finalEntity:currentView.selected_entity,
-    characterSummary:__element('characterSummary').children.map(g=>g.children.map(e=>e.textContent)),
-    characterInventory:__element('characterInventory').children.map(e=>e.textContent)});
+  __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
+  body=__text(__element('dialogBody'));
+  if(!body.includes('Renamed Dagger')||!body.includes('carried; not readied')||!body.includes('Represented carried weight'))throw Error('committed inventory did not refresh in character popup');
+  const playerSummary=body;
+  const inventoryButton=__findHandle(__element('dialogBody'),initialObject.handle);
+  if(!inventoryButton)throw Error('carried inventory item is not inspectable');
+  await inventoryButton.listeners.click();
+  body=__text(__element('dialogBody'));
+  if(!body.includes('State: carried')||!body.includes('Renamed Dagger'))throw Error('carried Object popup did not reflect committed state');
+  await __element('dialogClose').listeners.click();
+  if(dialog.open||!__element('characterButton').focused)throw Error('popup close or focus restoration failed');
+  globalThis.__result=JSON.stringify({calls:__calls,plan:__lastPlan,time:currentView.time_seconds,
+    status:__element('movementStatus').textContent,error:__element('error').textContent,
+    entityDetails:body,pickupStatus:'Pick up accepted',renameStatus:'renamed',finalEntity:currentView.selected_entity,
+    characterSummary:playerSummary,characterInventory:currentView.character.inventory.items.map(item=>`${item.name} · ${item.status}`),
+    entityLabels:__element('entities').children.map(e=>e.textContent)});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """#
+
 context.evaluateScript(scenario)
 let deadline = Date().addingTimeInterval(8)
 while context.globalObject?.forProperty("__done")?.toBool() != true && Date() < deadline {

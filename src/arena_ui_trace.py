@@ -20,6 +20,7 @@ _CLIENT_EVENTS = {
     "encounter_name_apply_clicked": frozenset(),
     "player_name_apply_clicked": frozenset(),
     "entity_selected": frozenset(),
+    "character_sheet_opened": frozenset(),
     "pickup_clicked": frozenset(),
     "rename_entity_clicked": frozenset(),
 }
