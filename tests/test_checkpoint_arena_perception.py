@@ -314,7 +314,7 @@ print(repr(roundtrip))
                    wraps=encode_arena_perception_ledger) as encode_ledger:
             checkpoint = capture_checkpoint_candidate(candidate.universe, encounter,
                 quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
-            # Capture and its explicit validation each inspect both observer ledgers.
+            # Inventory capture and receipt-closure preflight each inspect both ledgers.
             self.assertEqual(encode_ledger.call_count, 4)
         validation = validate_checkpoint_candidate(candidate.universe, encounter,
             checkpoint, quiescent=True)

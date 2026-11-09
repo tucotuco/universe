@@ -50,6 +50,12 @@ Commands ran from the repository root with Python 3.14.3 and `PYTHONPATH=src:tes
 | `python -m py_compile src/checkpoint_adapters.py tests/test_checkpoint_arena_perception.py tests/test_arena_checkpoint_activation.py tests/test_checkpoint_adapters.py` | Passed. |
 | `git diff --check` | Passed. |
 
+The first focused run exposed a stale test-instrumentation expectation of two
+ledger-encoder calls; the strict inventory and receipt-closure preflight each
+inspect both observer ledgers, producing four calls during capture. The
+assertion was corrected and the rerun passed. This was a test expectation issue,
+not an implementation or behavior failure.
+
 No loopback-dependent HTTP test was run, so no elevated execution was required. The adjacent suite had no failures. No full repository suite or fresh-process restore was run because the receipt closure still refuses the movement-only boundary.
 
 ## Next dependency
@@ -59,6 +65,6 @@ The next increment needs a narrowly reviewed receipt representation for the alre
 ## Commits
 
 - `7c7ed18` — `Preserve Arena movement activation in checkpoint inventory`
-- Report commit follows this verified implementation commit.
+- `7f493ad` — `Report Arena movement activation checkpoint boundary`
 
 No NPC Generator files were changed. Unrelated worktree changes were preserved. No push was made.
