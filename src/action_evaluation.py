@@ -869,7 +869,8 @@ def ready_weapon_eligibility(snapshot, action):
         return 'unavailable'
     if target.data.get('parent_container_id') != actor.id or target.position is not None:
         return 'unavailable'
-    if (action.target_id in actor.data.get('weapons', ())
+    if (action.target_id == actor.data.get('armor_id')
+            or action.target_id in actor.data.get('weapons', ())
             or action.target_id in tuple(body_parts.values())):
         return 'already_ready'
     for entity in snapshot.entities.values():

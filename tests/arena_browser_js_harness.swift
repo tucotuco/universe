@@ -40,7 +40,7 @@ function __element(id){
   }
   return __elements[id];
 }
-var document={getElementById:__element,createElement(tag){return {tagName:tag,id:'',value:'',maxLength:0,type:'',className:'',textContent:'',dataset:Object.create(null),listeners:Object.create(null),children:[],appendChild(e){this.children.push(e)},append(...items){this.children.push(...items)},replaceChildren(){this.children=[]},addEventListener(name,fn){this.listeners[name]=fn},focus(){this.focused=true}}}};
+var document={getElementById:__element,createElement(tag){return {tagName:tag,id:'',value:'',maxLength:0,type:'',className:'',textContent:'',dataset:Object.create(null),listeners:Object.create(null),children:[],appendChild(e){this.children.push(e);if(this.tagName==='select'&&this.children.length===1)this.value=e.value},append(...items){this.children.push(...items)},replaceChildren(){this.children=[]},addEventListener(name,fn){this.listeners[name]=fn},setAttribute(name,value){this[name]=value},focus(){this.focused=true}}}};
 function __find(root,id){if(root.id===id)return root;for(const child of root.children||[]){const found=__find(child,id);if(found)return found}return null}
 function __findHandle(root,handle){if(root.dataset&&root.dataset.handle===handle)return root;for(const child of root.children||[]){const found=__findHandle(child,handle);if(found)return found}return null}
 function __text(root){return [root.textContent||'',...(root.children||[]).map(__text)].join(' ')}
@@ -60,6 +60,7 @@ function __refreshActionCatalog(){
   if(run&&run.status!=='not_implemented'){run.status=__serverState.run_available?'available':'unavailable';run.reason=__serverState.run_available?'The native target-free Run Choice can activate this Arena.':'Run is only accepted as the first player Action; this Encounter is already activated.'}
   const pickup=entries.find(e=>e.name==='Pick up');
   if(pickup){const target=__serverState.selected_entity;pickup.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){pickup.status='unavailable';pickup.reason='A native Pick up Action is already resolving.'}else if(!target||target.category!=='object'||target.present_state!=='ground'){pickup.status='unavailable';pickup.reason='Select a currently perceived ground Object first.'}else if(!__serverState.run_available&&target.pickup_available){pickup.status='available';pickup.reason='Native one-second Pick up is currently available for this Object.'}else{pickup.status='unavailable';pickup.reason=target.pickup_unavailable_reason||'Move into the same hex as this Object before choosing Pick up.'}}
+  const ready=entries.find(e=>e.name.toLowerCase()==='ready weapon');if(ready){const target=__serverState.selected_entity,items=__serverState.character&&__serverState.character.inventory&&__serverState.character.inventory.items||[],item=target&&items.find(row=>row.handle===target.handle);ready.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;ready.hands=[];if(__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'){ready.status='unavailable';ready.reason='A native Ready weapon Action is already resolving.'}else if(target&&target.category==='object'&&target.present_state==='carried'&&item&&item.type==='Dagger'){ready.status='available';ready.hands=['right hand'];ready.reason='Choose a free native hand for this Dagger.'}else{ready.status='unavailable';ready.reason='Select a currently perceived, carried Weapon first.'}}
 }
 function __response(){return {ok:true,json:()=>Promise.resolve(JSON.parse(JSON.stringify(__serverState)))}}
 function __clickMap(clientX,clientY){
@@ -101,6 +102,9 @@ function fetch(path,options={}){
       const e=__serverState.entities.find(row=>row.handle===__serverState.selected_entity.handle);
       if(e){e.present_state='carried';e.position_meters=null;e.cell=null;e.pickup_available=false;}
       if(__serverState.character){__serverState.character.inventory=JSON.parse(JSON.stringify(__pickedUpView.character.inventory));__serverState.character.movement.position_meters=JSON.parse(JSON.stringify(__serverState.player.position_meters));__serverState.character.movement.cell=JSON.parse(JSON.stringify(__serverState.player.cell));}
+    }else if(__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'){
+      __serverState.ready_weapon_action={name:'Ready weapon',status:'completed',outcome:'success'};
+      const item=__serverState.character.inventory.items.find(row=>row.handle===__serverState.selected_entity.handle);if(item)item.status='readied in right hand';
     }else if(__serverState.player_action&&__serverState.player_action.status==='executing'){
       __serverState.player_action={name:'Run',status:'completed',outcome:'no_movement'};
     }
@@ -117,6 +121,8 @@ function fetch(path,options={}){
   } else if(path==='/api/generated/pickup'){
     __serverState.pickup_action={name:'Pick up',status:'executing',outcome:null};
     __refreshActionCatalog();
+  } else if(path==='/api/generated/ready-weapon'){
+    __serverState.ready_weapon_action={name:'Ready weapon',status:'executing',outcome:null};__serverState.advance_available=true;__serverState.ready_hand=body.hand;__refreshActionCatalog();
   } else if(path==='/api/generated/rename-entity'){
     const e=__serverState.entities.find(row=>row.handle===body.handle);
     if(e){e.name=body.name;__serverState.selected_entity=e;}
@@ -227,6 +233,13 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
   body=__text(__element('dialogBody'));
   if(!body.includes('Renamed Dagger')||!body.includes('carried; not readied')||!body.includes('Represented carried weight'))throw Error('committed inventory did not refresh in character popup');
+  const readyButton=__find(__element('dialogBody'),'actionReadyWeapon'),readyHand=__find(__element('dialogBody'),'readyWeaponHand');
+  if(!readyButton||readyButton.disabled||!readyHand||readyHand.value!=='right hand')throw Error('native Ready weapon prerequisites were not reflected: '+JSON.stringify(currentView.action_catalog.entries.find(e=>e.name.toLowerCase()==='ready weapon'))+' / '+body);
+  await readyButton.listeners.click();
+  if(!__find(__element('dialogBody'),'actionReadyWeapon').disabled)throw Error('pending Ready weapon was not disabled');
+  await __element('advance').onclick();
+  body=__text(__element('dialogBody'));
+  if(!body.includes('readied in right hand')||!body.includes('Represented carried weight'))throw Error('committed Ready weapon state did not refresh in character popup');
   const playerSummary=body;
   const inventoryButton=__findHandle(__element('dialogBody'),initialObject.handle);
   if(!inventoryButton)throw Error('carried inventory item is not inspectable');

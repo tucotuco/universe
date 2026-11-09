@@ -451,6 +451,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn('id="characterButton"', page)
         state = self.session.generate({
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        player = self.session.active_candidate.participants[0].native.being
+        player.current.body_parts["right hand"] = None
+        state = self.session.public_view()
         object_view = next(row for row in state["entities"]
                            if row["category"] == "object" and row["type"] == "Dagger")
         target = HexAddress(object_view["cell"]["column"], object_view["cell"]["row"])
@@ -498,7 +501,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "/api/generated/advance",
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination", "/api/generated/advance",
-            "/api/generated/advance", "/api/generated/destination",
+            "/api/generated/advance", "/api/generated/advance",
+            "/api/generated/destination",
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination",
             "/api/generated/advance", "/api/generated/destination",
@@ -512,6 +516,14 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("/api/generated/inspect", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/run", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/pickup", [call["path"] for call in result["calls"]])
+        self.assertIn("/api/generated/ready-weapon", [call["path"] for call in result["calls"]])
+        ready_call = next(call for call in result["calls"]
+                          if call["path"] == "/api/generated/ready-weapon")
+        self.assertEqual(ready_call["body"]["hand"], "right hand")
+        ready_call_index = result["calls"].index(ready_call)
+        ready_advance = next(index for index, call in enumerate(result["calls"])
+                             if index > ready_call_index and call["path"] == "/api/generated/advance")
+        self.assertGreater(ready_advance, ready_call_index)
         self.assertIn("/api/generated/rename-entity", [call["path"] for call in result["calls"]])
         rename_call = next(call for call in result["calls"] if call["path"] == "/api/generated/rename-entity")
         self.assertEqual(rename_call["body"]["name"], "Renamed Dagger")
@@ -520,11 +532,12 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(result["finalEntity"]["present_state"], "carried")
         self.assertIn("Renamed Dagger", result["entityDetails"])
         self.assertIn("carried", result["entityDetails"])
+        self.assertIn("readied in right hand", " ".join(result["characterInventory"]))
         self.assertEqual(result["refusalCategory"], "actor_unable_to_move")
         self.assertIn("cannot take voluntary movement", result["error"])
         inventory_output = " ".join(result["characterInventory"])
         self.assertIn("Renamed Dagger", inventory_output)
-        self.assertIn("carried; not readied", inventory_output)
+        self.assertIn("readied in right hand", inventory_output)
         character_text = json.dumps(result["characterSummary"])
         for label in ("Fitness", "Total native XP", "Hit points", "Skills and recorded practice",
                       "Position and movement", "Age is not represented", "Class XP"):
@@ -551,7 +564,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                         if call["path"] == "/api/generated/trace"]
         for event in ("page_script_ready", "canvas_click_received", "canvas_player_marker_hit",
                       "canvas_entity_marker_hit", "destination_request_queued",
-                      "destination_request_accepted"):
+                      "destination_request_accepted", "ready_weapon_clicked"):
             self.assertIn(event, trace_events)
         self.assertIn("cannot take voluntary movement", result["error"])
         self.assertTrue(any(label.lower().startswith("small shield · ground")
@@ -845,14 +858,17 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(action_entries["Spot"]["status"], "unavailable")
         self.assertEqual(action_entries["Pick up"]["status"], "unavailable")
         self.assertIn("perceived ground Object", action_entries["Pick up"]["reason"])
-        self.assertEqual(action_entries["ready weapon"]["status"], "not_implemented")
-        self.assertIn("not adopted", action_entries["ready weapon"]["reason"])
+        self.assertEqual(action_entries["ready weapon"]["status"], "unavailable")
+        self.assertIn("carried Weapon", action_entries["ready weapon"]["reason"])
         self.assertEqual(action_entries["grab object"]["status"], "not_implemented")
         target = next(row for row in state["entities"] if row["type"] == "Dagger")
         candidate = self.session.active_candidate
         placement = next(row for row in candidate.ground_objects if row.native_type_key == "Dagger")
         native = candidate.universe.get_object_by_id(placement.native_object_id)
         player = candidate.participants[0].native.being
+        # Explicit test-world native hand state; generated race templates do
+        # not currently define hands and Arena initialization does not add them.
+        player.current.body_parts["right hand"] = None
         character = state["character"]
         self.assertEqual(character["identity"]["display_name"], state["player"]["name"])
         self.assertEqual(character["identity"]["native_type"], player.current.obj_type)
@@ -952,8 +968,29 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(inventory["carried_weight_pounds"], native.current.weight)
         self.assertNotIn(native.id, json.dumps(inventory))
         self.assertIsNone(player.current.armor_id)
-        self.assertEqual(player.current.body_parts, {})
-        self.assertEqual(player.weapons, [])
+        ready_entry = next(row for row in settled["action_catalog"]["entries"]
+                           if row["name"] == "ready weapon")
+        self.assertEqual(ready_entry["status"], "available")
+        self.assertEqual(ready_entry["hands"], ["right hand"])
+        self.assertEqual(ready_entry["target"]["handle"], target["handle"])
+        self.request("/api/generated/trace", {"seq": 4, "event": "ready_weapon_clicked"})
+        status, accepted_ready = self.request("/api/generated/ready-weapon",
+            {"handle": target["handle"], "hand": "right hand"},
+            {"X-Arena-Client-Seq": "4"})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted_ready["ready_weapon_action"]["status"], "executing")
+        self.assertEqual(next(row for row in accepted_ready["action_catalog"]["entries"]
+                              if row["name"] == "ready weapon")["status"], "unavailable")
+        status, readied = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(readied["ready_weapon_action"]["outcome"], "success")
+        inventory = readied["character"]["inventory"]
+        self.assertEqual(len(inventory["items"]), 1)
+        self.assertEqual(inventory["items"][0]["status"], "readied in right hand")
+        self.assertEqual(inventory["carried_weight_pounds"], native.current.weight)
+        self.assertEqual(player.current.body_parts, {"right hand": native.id})
+        self.assertEqual(player.weapons, [native.id])
+        self.assertEqual(player.possessions, [native.id])
         carried = next(row for row in settled["entities"] if row["handle"] == target["handle"])
         self.assertEqual(carried["present_state"], "carried")
         self.assertIsNone(carried["position_meters"])
@@ -996,6 +1033,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         trace = trace_stream.getvalue()
         self.assertIn("action=inspect status=accepted", trace)
         self.assertIn("action=pickup status=accepted", trace)
+        self.assertIn("action=ready_weapon status=accepted", trace)
+        self.assertIn("event=ready_weapon_clicked", trace)
+        self.assertIn("action=ready_weapon outcome=success", trace)
         self.assertIn("action=rename_entity status=accepted", trace)
         self.assertIn("entity_type=object type=Dagger", trace)
         self.assertNotIn(native.id, trace)
