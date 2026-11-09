@@ -4,6 +4,7 @@ This is a developer/test adapter for already decoded wire data. It is not a
 load/restore API and never authenticates bytes or issues committed receipts.
 """
 from dataclasses import dataclass
+from copy import deepcopy
 import json
 import math
 import random
@@ -406,6 +407,8 @@ def reconstruct_initial_run_spot(decoded):
     registry_fields = graph.fields(registry_ref)[1]
     registry_data = graph.raw_mapping(registry_fields['object_instances'])
     _need(type(registry_data) is dict, 'ObjectRegistry must be a native ordered map')
+    _templates, template_refs, definition_kinds = _validate_being_definition_bindings(
+        graph, registry_data, graph.raw_mapping(bd_fields['objects']))
     _need(set(registry_data) == {row[0][1] for row in nodes
           if type(row[0]) is tuple and len(row[0]) == 2 and row[0][0] == 'object'},
           'ObjectRegistry keys and logical Object IDs disagree')
@@ -424,9 +427,9 @@ def reconstruct_initial_run_spot(decoded):
               'historical practice and skill-use records are unsupported')
         original_ref = ref_field(instance_ref, 'original', 'being.BeingDefinition')
         current_ref = ref_field(instance_ref, 'current', 'being.BeingDefinition')
-        original = graph.native(original_ref)
+        original = _materialize_being_original(
+            graph, object_id, fields, rebuilt_beings, template_refs, definition_kinds)
         current = graph.native(current_ref)
-        _need(original in rebuilt_beings.values(), 'Being original definition is not Library-owned')
         instance = BeingInstance(original, name=scalar_field(instance_ref, fields, 'name'))
         Identifiable.__init__(instance, scalar_field(instance_ref, fields, 'name'), id=object_id)
         instance.current = current
@@ -690,6 +693,111 @@ def _projection(value):
             tuple((key, _projection(item)) for key, item in sorted(data.items())))
 
 
+_INDIVIDUAL_BEING_FIELDS = (
+    'race', 'length', 'weight', 'hit_points', 'experience', 'abilities', 'skills')
+
+
+def _validate_being_definition_bindings(graph, registry, definition_rows):
+    """Validate canonical or exclusive template-derived originals in a closed graph."""
+    from being import BeingDefinition
+    from checkpoint_adapters import NativeInventory
+
+    templates = {}
+    template_refs = {}
+    for name, raw_ref in definition_rows.items():
+        _need(type(name) is str and name.strip(), 'Being definition key is invalid')
+        ref = graph.raw_ref(raw_ref)
+        definition = graph.native(ref)
+        _need(type(definition) is BeingDefinition and definition.obj_type == name,
+              'Being template key/type relationship is invalid')
+        templates[name] = definition
+        template_refs[name] = ref
+
+    inventory = object.__new__(NativeInventory)
+    mutable_owners = {}
+    for name, template in templates.items():
+        try:
+            inventory._validate_being_definition(template)
+            inventory._closed_definition_value(template, owner=('definition', name),
+                                               mutable_owners=mutable_owners)
+        except ValueError as exc:
+            raise ReconstructionRejected(f'Being type template is not closed native data: {exc}') from exc
+    definition_ids = {id(value): key for key, value in templates.items()}
+    individualized_ids = set()
+    kinds = {}
+    referenced_types = set()
+    for logical_id, raw_instance in registry.items():
+        _need(type(logical_id) is str and logical_id,
+              'Being definition owner identity is invalid')
+        instance_ref = graph.raw_ref(raw_instance)
+        fields = graph.fields(instance_ref, 'being.BeingInstance')[1]
+        _need(graph.data(fields['id']) == logical_id,
+              'Being definition owner differs from its ObjectRegistry identity')
+        original_ref = graph.raw_ref(fields['original'])
+        original_fields = graph.fields(original_ref, 'being.BeingDefinition')[1]
+        type_name = graph.data(original_fields['obj_type'])
+        _need(type(type_name) is str and type_name in templates,
+              'Being original has no matching registered type template')
+        referenced_types.add(type_name)
+        original = graph.native(original_ref)
+        try:
+            kinds[logical_id] = inventory._validate_being_original_definition(
+                original, entity_id=logical_id, definitions=templates,
+                definition_ids=definition_ids,
+                individualized_original_ids=individualized_ids,
+                mutable_owners=mutable_owners)
+        except ValueError as exc:
+            raise ReconstructionRejected(f'Being original/template binding refused: {exc}') from exc
+
+        current_ref = graph.raw_ref(fields['current'])
+        _need(current_ref != original_ref,
+              'Being current definition aliases its original definition')
+        current = graph.native(current_ref)
+        _need(type(current) is BeingDefinition and current.obj_type == type_name,
+              'Being current definition type differs from its original')
+        try:
+            inventory._closed_definition_value(
+                current, owner=('being-current', logical_id),
+                mutable_owners=mutable_owners)
+        except ValueError as exc:
+            raise ReconstructionRejected(f'Being current definition ownership refused: {exc}') from exc
+
+    _need(referenced_types == set(templates),
+          'BeingDictionary contains definitions outside the selected Being types')
+    return templates, template_refs, kinds
+
+
+def _materialize_being_original(graph, logical_id, instance_fields,
+                                templates, template_refs, definition_kinds):
+    """Rebuild one individualized original from its registered template and closed values."""
+    from being import BeingDefinition
+
+    original_ref = graph.raw_ref(instance_fields['original'])
+    original_fields = graph.fields(original_ref, 'being.BeingDefinition')[1]
+    type_name = graph.data(original_fields['obj_type'])
+    template = templates[type_name]
+    if definition_kinds[logical_id] == 'library-template':
+        _need(original_ref == template_refs[type_name],
+              'canonical Being original does not use its registered template identity')
+        return template
+
+    _need(definition_kinds[logical_id] == 'individualized-native-template',
+          'Being original has an unsupported materialization kind')
+    source = graph.native(original_ref)
+    _need(type(source) is BeingDefinition and source.obj_type == type_name,
+          'individualized Being original has an invalid native type')
+    result = template.copy()
+    for name in _INDIVIDUAL_BEING_FIELDS:
+        value = getattr(source, name)
+        setattr(result, name, deepcopy(value))
+    _need(_projection(result) == _projection(source),
+          'materialized Being original differs from its closed individualized definition')
+    _need(result is not template and result.abilities is not template.abilities
+          and result.skills is not template.skills,
+          'individualized Being original aliases mutable template values')
+    return result
+
+
 def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
     """Reject unsupported state before any native destination is allocated."""
     def fields(tag):
@@ -742,6 +850,11 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
     object_refs = {ref[1]: ref for ref in by_tag.get('being.BeingInstance', ())
                    if type(ref) is tuple and len(ref) == 2 and ref[0] == 'object'}
     _need(set(registry) == set(object_refs), 'ObjectRegistry contains unsupported entity families')
+    being_dictionary_ref = graph.raw_ref(library_fields['being_dictionary'])
+    being_dictionary_fields = graph.fields(being_dictionary_ref, 'being.BeingDictionary')[1]
+    definitions_encoded = graph.raw_mapping(being_dictionary_fields['objects'])
+    _templates, _template_refs, _definition_kinds = _validate_being_definition_bindings(
+        graph, registry, definitions_encoded)
     for logical_id, encoded_ref in registry.items():
         ref = graph.raw_ref(encoded_ref)
         _need(ref == object_refs[logical_id], 'ObjectRegistry logical identity mismatch')
@@ -782,12 +895,8 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
             _need(_unoccupied_template_hands(graph.data(definition_fields['body_parts'])) and
                   graph.data(definition_fields['armor_id']) is None,
                   'equipment ownership is outside the initial subset; only empty native hand slots are supported')
-        _need(graph.raw_ref(values['original']) in
-              {graph.raw_ref(item) for item in graph.raw_mapping(
-                  graph.fields(graph.raw_ref(graph.fields(library_ref)[1]['being_dictionary']))[1]['objects']).values()},
-              'Being original definition is not Library-owned')
         _need(graph.raw_ref(values['current']) != graph.raw_ref(values['original']),
-              'Being current state aliases its Library definition')
+              'Being current state aliases its original definition')
 
     encounter_fields = fields('encounter.Encounter')
     arena_enabled = graph.data(encounter_fields['arena_activation_enabled'])

@@ -16,7 +16,7 @@ from atomic_publication import RNGCursor
 from being import BeingDefinition, BeingDictionary
 from checkpoint_envelope import assemble_native_run_spot_envelope
 from checkpoint_reconstruction import (ReconstructionRejected,
-    reconstruct_initial_run_spot, _NATIVE_GRAPHS)
+    reconstruct_initial_run_spot, _NATIVE_GRAPHS, _projection)
 from checkpoint_wire import decode_run_spot_wire, encode_run_spot_envelope
 from encounter import Encounter
 from library import Library
@@ -88,6 +88,38 @@ def source_wire(future=False, facings=None):
 
 
 class TestInitialNativeReconstruction(unittest.TestCase):
+    def test_template_derived_originals_rebuild_without_library_aliases(self):
+        source_world, source_encounter, _, _, _ = build_source()
+        source_beings = [source_world.get_object_by_id(identity)
+                         for identity in source_encounter.being_list]
+        expected = {}
+        for index, being in enumerate(source_beings):
+            individualized = being.original.copy()
+            individualized.hit_points += 5 + index
+            individualized.experience = 700 + index
+            individualized.length += .25 + index
+            individualized.weight += 3 + index
+            individualized.abilities.set_ability('STR', 14 + index)
+            individualized.skills.skills['run'] = index + 1
+            being.original = individualized
+            expected[being.id] = _projection(individualized)
+
+        envelope = assemble_native_run_spot_envelope(
+            source_world, source_encounter, quiescent=True,
+            rng_scope='exclusive_encounter')
+        result = reconstruct_initial_run_spot(
+            decode_run_spot_wire(encode_run_spot_envelope(envelope)))
+        native_world, _, _ = _NATIVE_GRAPHS[result]
+        restored = [native_world.get_object_by_id(being.id) for being in source_beings]
+        for being in restored:
+            template = native_world.library.get_being_definition(being.original.obj_type)
+            self.assertEqual(_projection(being.original), expected[being.id])
+            self.assertIsNot(being.original, template)
+            self.assertIsNot(being.current, being.original)
+            self.assertIsNot(being.original.abilities, template.abilities)
+            self.assertIsNot(being.original.skills, template.skills)
+        self.assertIsNot(restored[0].original, restored[1].original)
+
     def test_inactive_encounter_and_both_facing_states_round_trip(self):
         source_world, source_encounter, _, envelope, _ = build_source(
             facings={'Observer': 11, 'Target': None})

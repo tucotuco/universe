@@ -297,7 +297,8 @@ def bind_quarantined_run_boundary(decoded, projection=None):
     _need(data[12:16] == (True, False, False, False),
           'envelope readiness flags are incompatible')
 
-    from checkpoint_reconstruction import _Graph, _sections, _rng_data
+    from checkpoint_reconstruction import (_Graph, _sections, _rng_data,
+        _materialize_being_original, _validate_being_definition_bindings)
     sections = _sections(data[5])
     _need(sections.get('readiness') == (False, False, False),
           'global checkpoint readiness flags must remain false')
@@ -461,19 +462,28 @@ def bind_quarantined_run_boundary(decoded, projection=None):
         instance_refs[logical_id] = (instance_ref, fields)
         _need(graph.data(fields['personal_history']) is None,
               'personal-history-bearing Beings are outside the identity subset')
-    referenced_definition_names = {
-        graph.data(instance_refs[logical_id][1]['name']) for logical_id in participants
-    }
+    referenced_definition_names = set()
+    for logical_id, original_ref in original_refs.items():
+        original_fields = graph.fields(original_ref, 'being.BeingDefinition')[1]
+        name = graph.data(original_fields['obj_type'])
+        _need(type(name) is str and name,
+              'Being original has an invalid native type-template key')
+        referenced_definition_names.add(name)
     _need(set(definitions_data) == referenced_definition_names,
           'BeingDictionary contains definitions outside the two-Being identity subset')
-    definition_refs = {graph.raw_ref(value) for value in definitions_data.values()}
-    _need(set(original_refs.values()) <= definition_refs,
-          'Being original definition is not owned by the captured BeingDictionary')
     for name, raw_ref in definitions_data.items():
         definition = graph.native(graph.raw_ref(raw_ref))
         _need(type(definition) is BeingDefinition and definition.obj_type == name,
               'Being definition key/type or native constructor is incompatible')
         definitions[name] = definition
+    try:
+        definition_kinds_data = _validate_being_definition_bindings(
+            graph, registry_data, definitions_data)
+    except (TypeError, ValueError) as exc:
+        raise IdentityBindingRejected(f'Being definition binding refused: {exc}') from exc
+    validated_templates, template_refs, definition_kinds = definition_kinds_data
+    _need(all(validated_templates[name] is definitions[name] for name in definitions),
+          'Being template reconstruction changed Library object identity')
 
     native_being_dictionary = BeingDictionary()
     native_being_dictionary.objects = definitions
@@ -549,8 +559,8 @@ def bind_quarantined_run_boundary(decoded, projection=None):
         _need(type(name) is str and name,
               'Being identity has no supported display name')
         original_ref = original_refs[logical_id]
-        definition = graph.native(original_ref)
-        _need(definition in definitions.values(), 'Being definition identity is not Library-owned')
+        definition = _materialize_being_original(
+            graph, logical_id, fields, definitions, template_refs, definition_kinds)
         native = BeingInstance(definition, name=name)
         Identifiable.__init__(native, name, id=logical_id)
         current_ref = graph.raw_ref(fields['current'])

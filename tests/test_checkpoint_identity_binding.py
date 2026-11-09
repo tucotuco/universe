@@ -93,6 +93,201 @@ def _assert_binding_receipt_isolation(test, before, binding_result):
 
 
 class TestQuarantinedRunIdentityBinding(unittest.TestCase):
+    def test_individualized_npcgen_originals_bind_in_fresh_process(self):
+        import json
+        import random
+        from atomic_publication import RNGCursor
+        from checkpoint_binding import _native_state_value
+        from checkpoint_envelope import assemble_native_run_spot_envelope
+        from checkpoint_wire import encode_detached_run_spot_data
+        from checkpoint_wire import _canonical_json, _sha
+        from encounter import Encounter
+        from library import Library
+        from npcgen_arena_adapter import generate_npcgen_arena_being
+        from spatial.geometry import Sphere
+        from spatial.state import CartesianPosition
+        from universe import Universe
+        from activities import RunAction
+
+        def json_state(value):
+            return json.loads(json.dumps(_native_state_value(value.__dict__), sort_keys=True))
+
+        def generated_wire(seeds):
+            library = Library(config_dir=str(ROOT / 'src' / 'config'))
+            world = Universe('individualized checkpoint binding', library=library)
+            beings = [generate_npcgen_arena_being(world, seed=seed,
+                starting_experience=10000, cost_modifiers='character').being
+                for seed in seeds]
+            for seed, being in zip(seeds, beings):
+                being.name = f'Generated {seed}'
+            type_names = {being.original.obj_type for being in beings}
+            templates = {name: library.being_dictionary.objects[name]
+                         for name in type_names}
+            template_state = {name: json_state(template)
+                              for name, template in templates.items()}
+
+            # Keep the native catalogs inside the already reviewed Run/Spot
+            # identity subset while retaining the actual generated type templates.
+            library.being_dictionary.objects = templates
+            library.being_dictionary.object_categories = {}
+            library.action_dictionary.actions = {}
+            library.armor_dictionary.objects = {}; library.armor_dictionary.object_categories = {}
+            library.object_dictionary.objects = {}; library.object_dictionary.object_categories = {}
+            library.weapon_dictionary.objects = {}; library.weapon_dictionary.object_categories = {}
+
+            beings[0].set_position(CartesianPosition(.125, 0, 0))
+            beings[1].set_position(CartesianPosition(1.25, 0, 0))
+            beings[1].set_geometry(Sphere(.75))
+            encounter = Encounter(world, 11, 0, initiated=True)
+            world.add_event(encounter)
+            for being in beings:
+                encounter.add_being(being.id)
+            cursor = RNGCursor(random.Random(2906).getstate())
+            encounter.enable_transactional_progression(quiescent=True, rng_owner=cursor)
+            action = RunAction(world, beings[0].id, 0, 1, .5, experience=4)
+            encounter.schedule_choice((action,))
+            encounter.step(1, velocities={beings[0].id: (1, 0, 0)})
+            envelope = assemble_native_run_spot_envelope(
+                world, encounter, quiescent=True, rng_scope='exclusive_encounter')
+            wire = encode_run_spot_envelope(envelope)
+            self.assertEqual(template_state, {name: json_state(template)
+                                               for name, template in templates.items()})
+            expected = {being.id: {
+                'original': json_state(being.original),
+                'current': json_state(being.current),
+                'name': being.name,
+                'type': being.original.obj_type,
+                'hit_points': being.original.hit_points,
+                'experience': being.original.experience,
+                'length': being.original.length,
+                'weight': being.original.weight,
+                'abilities': dict(being.original.abilities.abilities),
+                'skills': dict(being.original.skills.skills),
+                'weapon_skills': dict(being.original.skills.weapon_skills),
+            } for being in beings}
+            return wire, expected, template_state
+
+        wire, expected, _template_state = generated_wire((5, 10))
+        self.assertEqual({row['type'] for row in expected.values()}, {'Human'})
+        self.assertNotEqual(expected[next(iter(expected))]['abilities'],
+                            expected[next(reversed(expected))]['abilities'])
+
+        def rewrite_nodes(edit):
+            data = list(decode_run_spot_wire(wire).envelope_data)
+            state = list(data[5])
+            section_index = next(index for index, row in enumerate(state)
+                                 if type(row) is tuple and row and row[0] == 'nodes')
+            nodes = list(state[section_index][1])
+            edit(nodes)
+            state[section_index] = ('nodes', tuple(nodes))
+            data[5] = tuple(state)
+            data[-1] = _sha(_canonical_json(list(data[:-1])))
+            return decode_run_spot_wire(encode_detached_run_spot_data(tuple(data)))
+
+        def change_unmapped_alignment(nodes):
+            being_nodes = [row for row in nodes if row[1] == 'being.BeingInstance']
+            original_ref = dict(being_nodes[0][2])['original'][1]
+            for index, row in enumerate(nodes):
+                if row[0] == original_ref:
+                    fields = list(row[2])
+                    field_index = next(i for i, item in enumerate(fields)
+                                       if item[0] == 'alignment')
+                    fields[field_index] = ('alignment', ('string', 'Forged alignment'))
+                    nodes[index] = (row[0], row[1], tuple(fields))
+                    return
+            self.fail('original definition node was not present in the detached graph')
+
+        forged_alignment = rewrite_nodes(change_unmapped_alignment)
+        with self.assertRaisesRegex(IdentityBindingRejected,
+                                   'differs from its native type template'):
+            bind_quarantined_run_boundary(forged_alignment)
+
+        def alias_originals(nodes):
+            being_nodes = [row for row in nodes if row[1] == 'being.BeingInstance']
+            first_original = dict(being_nodes[0][2])['original']
+            for index, row in enumerate(nodes):
+                if row[0] == being_nodes[1][0]:
+                    fields = list(row[2])
+                    field_index = next(i for i, item in enumerate(fields)
+                                       if item[0] == 'original')
+                    fields[field_index] = ('original', first_original)
+                    nodes[index] = (row[0], row[1], tuple(fields))
+                    return
+
+        aliased_original = rewrite_nodes(alias_originals)
+        with self.assertRaisesRegex(IdentityBindingRejected,
+                                   'aliased by multiple Beings'):
+            bind_quarantined_run_boundary(aliased_original)
+
+        script = r'''import json,random,sys
+sys.path.insert(0,sys.argv[1])
+from checkpoint_wire import decode_run_spot_wire
+from checkpoint_binding import bind_quarantined_run_boundary,_NATIVE_BINDINGS,_native_state_value
+before=random.getstate()
+d=decode_run_spot_wire(sys.stdin.buffer.read())
+r=bind_quarantined_run_boundary(d)
+p=_NATIVE_BINDINGS[r]
+rows=[]
+for logical_id,being in sorted(p.beings):
+    template=p.universe.library.being_dictionary.objects[being.original.obj_type]
+    rows.append({'id':logical_id,'name':being.name,'type':being.original.obj_type,
+      'original':_native_state_value(being.original.__dict__),
+      'current':_native_state_value(being.current.__dict__),
+      'hit_points':being.original.hit_points,'experience':being.original.experience,
+      'length':being.original.length,'weight':being.original.weight,
+      'abilities':being.original.abilities.abilities,
+      'skills':being.original.skills.skills,
+      'weapon_skills':being.original.skills.weapon_skills,
+      'original_current_distinct':being.original is not being.current,
+      'original_template_distinct':being.original is not template,
+      'mutable_template_values_distinct':being.original.abilities is not template.abilities and being.original.skills is not template.skills})
+assert random.getstate()==before
+assert len({id(being.original) for _,being in p.beings})==2
+assert len({id(being.current) for _,being in p.beings})==2
+assert len({id(being.original.abilities) for _,being in p.beings})==2
+assert len({id(being.original.skills) for _,being in p.beings})==2
+print(json.dumps({'rows':rows,'rng_unchanged':random.getstate()==before}))
+'''
+        proc = subprocess.run([sys.executable, '-c', script, str(ROOT / 'src')],
+            input=wire, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=str(ROOT), check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode('utf-8', errors='replace'))
+        output = json.loads(proc.stdout)
+        self.assertTrue(output['rng_unchanged'])
+        self.assertEqual([row['id'] for row in output['rows']], sorted(expected))
+        for row in output['rows']:
+            source = expected[row['id']]
+            for field in ('name', 'type', 'hit_points', 'experience', 'length', 'weight',
+                          'abilities', 'skills', 'weapon_skills'):
+                self.assertEqual(row[field], source[field], field)
+            self.assertEqual(row['original'], source['original'])
+            self.assertEqual(row['current'], source['current'])
+            self.assertTrue(row['original_current_distinct'])
+            self.assertTrue(row['original_template_distinct'])
+            self.assertTrue(row['mutable_template_values_distinct'])
+        # A second native race/type is admitted through the same strict path.
+        control_wire, control_expected, _ = generated_wire((5, 7))
+        control = bind_quarantined_run_boundary(decode_run_spot_wire(control_wire))
+        control_beings = dict(_NATIVE_BINDINGS[control].beings)
+        self.assertEqual({being.original.obj_type for being in control_beings.values()},
+                         {'Human', 'Half-elf'})
+        self.assertEqual(set(control_beings), set(control_expected))
+
+        identical_wire, identical_expected, _ = generated_wire((5, 5))
+        self.assertEqual(identical_expected[next(iter(identical_expected))]['original'],
+                         identical_expected[next(reversed(identical_expected))]['original'])
+        identical = bind_quarantined_run_boundary(
+            decode_run_spot_wire(identical_wire))
+        identical_beings = dict(_NATIVE_BINDINGS[identical].beings)
+        identical_instances = tuple(identical_beings.values())
+        self.assertIsNot(identical_instances[0].original, identical_instances[1].original)
+        self.assertIsNot(identical_instances[0].original.abilities,
+                         identical_instances[1].original.abilities)
+        self.assertIsNot(identical_instances[0].original.skills,
+                         identical_instances[1].original.skills)
+        self.assertIsNot(identical_instances[0].original, identical_instances[0].current)
+        self.assertIsNot(identical_instances[1].original, identical_instances[1].current)
+
     def test_explicit_unknown_and_authored_hex_facing_survive_binding(self):
         from activities import RunAction
         from checkpoint_envelope import assemble_native_run_spot_envelope
