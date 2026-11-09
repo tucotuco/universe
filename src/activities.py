@@ -152,8 +152,16 @@ class ReadyWeaponAction(Action):
     def prepare_schedule(self, encounter):
         from being import BeingInstance
         from weapon import WeaponInstance, native_weapon_draw_location
+        from atomic_publication import publication_owned
+        first_choice_preparation = (publication_owned(encounter)
+            and encounter.arena_activation_enabled
+            and encounter.progression_mode == 'legacy'
+            and (not encounter.initiated
+                 or (encounter.arena_activation is not None
+                     and encounter.arena_activation.actor_id == self.actor_id)))
         if (encounter is not self.encounter or not encounter.arena_activation_enabled
-                or encounter.progression_mode != 'transactional'):
+                or (encounter.progression_mode != 'transactional'
+                    and not first_choice_preparation)):
             raise ValueError('Ready weapon requires the activated generated-Arena transaction path')
         actor = encounter.get_being(self.actor_id)
         target = encounter.universe.get_object_by_id(self.target_id)

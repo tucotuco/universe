@@ -16,17 +16,25 @@ activation, ChoiceBook, event-history, clock, or RNG state. A failure during
 publication restores the captured native scheduling metadata before the lease
 is released.
 
-This authority grants no Awareness, interpersonal intent, target, perception,
-Action-prerequisite exception, or alternate boundary protocol. Existing
-target-directed initiation remains Awareness-gated. The initial implementation
-is limited to a single positioned actor's native target-free `RunAction` on a
-generated Arena Encounter.
+This authority grants no Awareness, interpersonal intent, target information in
+the activation record, perception, Action-prerequisite exception, or alternate
+boundary protocol. Existing target-directed initiation remains Awareness-gated.
+The initial implementation
+supported a positioned actor's native target-free `RunAction`. The strictly
+opt-in authored Draw scenario also uses this contract for a `ReadyWeaponAction`
+that passes its full native prerequisite checks against the player's own
+possessed Weapon. This does not relax ordinary Awareness or Action validation,
+expose the target in the activation record, or grant Awareness; the Draw Choice
+still identifies the exact native Weapon and must validate its custody,
+drawable source-location evidence, and free hand.
 
 ## Supported first action
 
 The generated browser accepts a one-second Run Action with an explicit zero
-experience award. Native Run measures displacement produced by Encounter
-movement; it does not move the Being. The generated Arena has no authored
+experience award, and the strictly opt-in authored Draw fixture accepts an
+ordinary two-second Draw as the first player Choice. Native Run measures
+displacement produced by Encounter movement; it does not move the Being. The
+generated Arena has no authored
 velocities or movement controller, so the supported proof is a committed
 `no_movement` resolution at native time 1 with unchanged native position. The
 browser displays that authoritative result and position. This does not imply
@@ -34,6 +42,5 @@ that future Run choices succeed or that generated Being geometry exists.
 
 Spot remains unavailable for generated Beings because their geometry is not
 modeled. No Spot target, opponent identity, Awareness, or native activation
-record is returned in the player-facing projection. The browser slice supports
-one first Run Choice and one native second only; it adds no general scheduler,
-movement policy, AI, or persistence.
+record is returned in the player-facing projection. The browser adds no general
+scheduler, movement policy, AI, or persistence.

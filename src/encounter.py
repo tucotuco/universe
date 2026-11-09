@@ -766,8 +766,12 @@ class Encounter(Event):
         preparer = native_preparer(action)
         if _arena_activation_preparation:
             from atomic_publication import publication_owned
+            from activities import RunAction, ReadyWeaponAction
             arena_preparation = (publication_owned(self) and self.arena_activation_enabled
-                                 and not self.initiated and action.target_id is None)
+                                 and not self.initiated
+                                 and ((type(action) is RunAction and action.target_id is None)
+                                      or (type(action) is ReadyWeaponAction
+                                          and action.target_id is not None)))
         else:
             arena_preparation = False
         if not self.initiated and not arena_preparation:
@@ -909,21 +913,28 @@ class Encounter(Event):
         return self._choice_book.schedule_complete(actions)
 
     def activate_arena_for_player_action(self, actor_id, action, *, rng_owner):
-        """Atomically accept the first target-free Run Choice and select native time.
+        """Atomically accept the first Run or owned-weapon Draw Choice.
 
         This narrowly scoped authority exists only on generated Arena Encounters.
         Preparation is read-only. Invalid requests leave initiation, ChoiceBook,
         event history, clock, and RNG untouched.
         """
-        from activities import RunAction
+        from activities import RunAction, ReadyWeaponAction
         from action_choice import ChoiceRejected
 
         if not self.arena_activation_enabled:
             raise RuntimeError("target-free activation is unavailable for this Encounter")
         if self.initiated or self.arena_activation is not None or self.initiation is not None:
             raise RuntimeError("Arena Encounter is already activated")
-        if type(action) is not RunAction or action.actor_id != actor_id or action.target_id is not None:
-            raise ValueError("first Arena Choice must be this actor's native target-free RunAction")
+        valid_first_choice = (
+            type(action) is RunAction and action.actor_id == actor_id
+            and action.target_id is None)
+        valid_first_draw = (
+            type(action) is ReadyWeaponAction and action.actor_id == actor_id
+            and type(action.target_id) is str and bool(action.target_id))
+        if not (valid_first_choice or valid_first_draw):
+            raise ValueError(
+                "first Arena Choice must be this actor's native target-free Run or owned-weapon Draw")
         if self.get_being(actor_id) is None or action.start_time != self.time:
             raise ValueError("Run actor must participate and begin at native Encounter time")
 

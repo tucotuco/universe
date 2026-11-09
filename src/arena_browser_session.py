@@ -145,7 +145,8 @@ class GeneratedArenaSession:
     """A replace-on-success generated Arena session with no initial Encounter."""
 
     def __init__(self, *, root_seed_factory=None, trace_ui=False, trace_stream=None,
-                 ground_item_descriptions=None, ground_loadout_profile=None):
+                 ground_item_descriptions=None, ground_loadout_profile=None,
+                 authored_draw_scenario=None):
         self._root_seed_factory = root_seed_factory or (lambda: secrets.randbits(256))
         self._lock = threading.RLock()
         self._active = None
@@ -167,6 +168,17 @@ class GeneratedArenaSession:
         # only its existing three Generate fields and has no gear distribution.
         self._ground_item_descriptions = copy.deepcopy(ground_item_descriptions)
         self._ground_loadout_profile = copy.deepcopy(ground_loadout_profile)
+        if authored_draw_scenario is not None and (
+                ground_item_descriptions is not None or ground_loadout_profile is not None):
+            raise ArenaBrowserRequestError(
+                "authored Draw scenario cannot be combined with another initial equipment source")
+        if authored_draw_scenario is not None:
+            from arena_authored_draw_scenario import validate_scenario
+            try:
+                authored_draw_scenario = validate_scenario(authored_draw_scenario)
+            except ValueError as exc:
+                raise ArenaBrowserRequestError(str(exc)) from exc
+        self._authored_draw_scenario = copy.deepcopy(authored_draw_scenario)
         self._view_handles = {}
         self._selected_entity_handle = None
         self._display_names = {}
@@ -418,10 +430,11 @@ class GeneratedArenaSession:
             return None, (), "This Dagger is already held/readied."
         if player.current.hit_points <= 0 or player.is_helpless():
             return None, (), "The player Being cannot perform a voluntary Action in its current native condition."
-        if not candidate.encounter.initiated:
-            return None, (), "Activate the native Encounter with movement or Run before readying a weapon."
-        if (candidate.encounter.progression_mode != "transactional"
-                or not candidate.encounter.arena_activation_enabled):
+        if (not candidate.encounter.arena_activation_enabled
+                or (candidate.encounter.initiated
+                    and candidate.encounter.progression_mode != "transactional")
+                or (not candidate.encounter.initiated
+                    and candidate.encounter.progression_mode != "legacy")):
             return None, (), "The native Arena Action pathway is unavailable."
         if self._ready_weapon_action_id is not None and self._ready_weapon_action_outcome is None:
             return None, (), "A native Ready weapon Action is already resolving."
@@ -824,6 +837,9 @@ class GeneratedArenaSession:
                     starting_experience, width_cells, height_cells, root_seed,
                     ground_item_descriptions=self._ground_item_descriptions,
                     ground_loadout_profile=self._ground_loadout_profile)
+                if self._authored_draw_scenario is not None:
+                    from arena_authored_draw_scenario import author_scenario
+                    author_scenario(candidate, self._authored_draw_scenario)
                 encounter = candidate.encounter
                 encounter.set_name("Encounter")
                 candidate.participants[0].native.being.set_name(
@@ -1036,7 +1052,11 @@ class GeneratedArenaSession:
             action = ReadyWeaponAction(self._active.encounter, player.id, entity_id,
                 hand, self._active.encounter.time)
             try:
-                self._active.encounter.schedule_action(action)
+                if not self._active.encounter.initiated:
+                    self._active.encounter.activate_arena_for_player_action(
+                        player.id, action, rng_owner=self._rng_cursor)
+                else:
+                    self._active.encounter.schedule_action(action)
             except Exception as exc:
                 raise ArenaBrowserRequestError(
                     "native Ready weapon Choice was not accepted; Arena state is unchanged") from exc

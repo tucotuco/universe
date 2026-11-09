@@ -1,0 +1,13 @@
+{
+  "format": "universe-arena-authored-draw-scenario",
+  "schema_version": 1,
+  "scenario_id": "ordinary-dagger-draw",
+  "player_hand_slots": {
+    "right hand": null
+  },
+  "carried_weapon": {
+    "native_type_key": "Dagger",
+    "display_name": "Drawable Dagger",
+    "draw_location": "worn_sheath"
+  }
+}

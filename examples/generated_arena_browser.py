@@ -3,6 +3,7 @@
 From the repository root:
   PYTHONPATH=../npc-generator .venv/bin/python examples/generated_arena_browser.py
   ARENA_TRACE_UI=1 PYTHONPATH=../npc-generator .venv/bin/python examples/generated_arena_browser.py
+  PYTHONPATH=../npc-generator .venv/bin/python examples/generated_arena_browser.py --port 8001 --authored-draw-scenario
 """
 from pathlib import Path
 import argparse
@@ -21,8 +22,11 @@ from arena_web import serve_local
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--ground-loadout-profile",
+    equipment = parser.add_mutually_exclusive_group()
+    equipment.add_argument("--ground-loadout-profile",
                         help="opt in to a caller-authored local JSON ground-equipment profile")
+    equipment.add_argument("--authored-draw-scenario", action="store_true",
+                        help="opt in to the checked-in ordinary Dagger Draw scenario fixture")
     parser.add_argument("--trace-ui", action="store_true",
                         help="print bounded browser/server/native Arena action traces")
     args = parser.parse_args()
@@ -41,11 +45,19 @@ def main():
             profile = json.loads(profile_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             parser.error(f"ground-loadout profile is not readable JSON: {exc}")
+    draw_scenario = None
+    if args.authored_draw_scenario:
+        scenario_path = ROOT / "examples" / "arena_scenarios" / "ordinary-dagger-draw.json"
+        try:
+            draw_scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            parser.error(f"authored Draw scenario fixture is not readable JSON: {exc}")
     trace_ui = args.trace_ui or os.environ.get("ARENA_TRACE_UI") == "1"
     if trace_ui:
         print("Arena UI terminal tracing enabled.", flush=True)
     serve_local(args.port, session=GeneratedArenaSession(
-        trace_ui=trace_ui, ground_loadout_profile=profile))
+        trace_ui=trace_ui, ground_loadout_profile=profile,
+        authored_draw_scenario=draw_scenario))
 
 
 if __name__ == "__main__":

@@ -65,7 +65,123 @@ def select_draw(session, weapon):
     return entity["handle"], inspected
 
 
+def draw_scenario():
+    return json.loads((ROOT / "examples/arena_scenarios/ordinary-dagger-draw.json")
+                      .read_text(encoding="utf-8"))
+
+
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_opt_in_authored_scenario_draws_as_first_choice_and_regenerates_cleanly(self):
+        session = GeneratedArenaSession(root_seed_factory=iter((20261120, 20261121)).__next__,
+                                        authored_draw_scenario=draw_scenario())
+        first_view = session.generate(GENERATE)
+        candidate = session.active_candidate
+        player = candidate.participants[0].native.being
+        opponent = candidate.participants[1].native.being
+        self.assertEqual(candidate.encounter.time, 0)
+        self.assertFalse(candidate.encounter.initiated)
+        self.assertIsNone(candidate.encounter.initiation)
+        self.assertEqual(player.current.body_parts, {"right hand": None})
+        self.assertEqual(len(player.possessions), 1)
+        weapon = candidate.universe.get_object_by_id(player.possessions[0])
+        self.assertIs(type(weapon), WeaponInstance)
+        self.assertEqual(weapon.current.obj_type, "Dagger")
+        self.assertEqual(weapon.name, "Drawable Dagger")
+        self.assertEqual(weapon.parent_container_id, player.id)
+        self.assertEqual(player.weapons, [])
+        self.assertIsNone(player.current.armor_id)
+        self.assertEqual(native_weapon_draw_location(weapon),
+                         {"kind": "worn_sheath", "owner_id": player.id})
+        own_ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        opponent_ledger = object.__getattribute__(opponent, "__dict__")["_arena_perception_ledger"]
+        self.assertIn(weapon.id, {row.entity_id for row in own_ledger.current})
+        self.assertNotIn(weapon.id, {row.entity_id for row in opponent_ledger.current})
+        self.assertNotIn(weapon.id, opponent.possessions)
+        self.assertNotIn(weapon.id, json.dumps(first_view))
+        self.assertEqual(candidate.encounter.pending_action_list, [])
+        self.assertFalse(any(type(event) is ReadyWeaponAction
+                             for event in candidate.universe.event_history.values()))
+
+        entity = next(row for row in first_view["entities"]
+                      if row["name"] == "Drawable Dagger")
+        inspected = session.inspect_entity({"handle": entity["handle"]})
+        catalog = next(row for row in inspected["action_catalog"]["entries"]
+                       if row["name"] == "ready weapon")
+        self.assertEqual((catalog["status"], catalog["display_name"], catalog["hands"]),
+                         ("available", "Draw (2 s)", ["right hand"]))
+        weight = weapon.current.weight
+        activation_awareness = dict((key, set(value)) for key, value in candidate.encounter.awareness.items())
+        accepted = session.choose_ready_weapon({"handle": entity["handle"], "hand": "right hand"})
+        self.assertTrue(candidate.encounter.initiated)
+        self.assertIsNone(candidate.encounter.initiation)
+        self.assertEqual(candidate.encounter.awareness, activation_awareness)
+        self.assertIsNotNone(candidate.encounter.arena_activation)
+        self.assertEqual(candidate.encounter.arena_activation.activation_kind,
+                         "first_player_choice")
+        self.assertNotIn("target_id", candidate.encounter.arena_activation.to_dict())
+        self.assertEqual(accepted["ready_weapon_action"]["seconds_remaining"], 2)
+        self.assertEqual(accepted["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        one = session.advance_one_second()
+        self.assertEqual(one["time_seconds"], 1)
+        self.assertEqual(one["ready_weapon_action"]["seconds_remaining"], 1)
+        self.assertEqual(one["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        self.assertIsNone(player.current.body_parts["right hand"])
+        self.assertIsNotNone(native_weapon_draw_location(weapon))
+        two = session.advance_one_second()
+        self.assertEqual(two["time_seconds"], 2)
+        self.assertEqual(two["ready_weapon_action"]["outcome"], "success")
+        self.assertEqual(two["character"]["inventory"]["items"][0]["status"],
+                         "readied in right hand")
+        self.assertEqual(two["character"]["inventory"]["items"][0]["weight_pounds"], weight)
+        self.assertEqual(two["character"]["inventory"]["carried_weight_pounds"], weight)
+        self.assertEqual(player.current.body_parts["right hand"], weapon.id)
+        self.assertEqual(player.possessions, [weapon.id])
+        self.assertEqual(weapon.parent_container_id, player.id)
+        self.assertIsNone(native_weapon_draw_location(weapon))
+        self.assertNotIn(opponent.id, json.dumps(two["character"]))
+        old_id = weapon.id
+
+        session.generate(GENERATE)
+        replacement = session.active_candidate
+        replacement_player = replacement.participants[0].native.being
+        replacement_weapon = replacement.universe.get_object_by_id(replacement_player.possessions[0])
+        self.assertNotEqual(replacement_weapon.id, old_id)
+        self.assertEqual(replacement.encounter.time, 0)
+        self.assertEqual(replacement_player.current.body_parts, {"right hand": None})
+        self.assertEqual(replacement_player.weapons, [])
+        self.assertIsNotNone(native_weapon_draw_location(replacement_weapon))
+
+    def test_opt_in_scenario_is_strict_and_failed_replacement_preserves_active_candidate(self):
+        from arena_browser_session import ArenaBrowserRequestError
+
+        invalid = draw_scenario()
+        invalid["player_hand_slots"] = {"right hand": "forged-object-id"}
+        with self.assertRaisesRegex(ArenaBrowserRequestError, "exactly one free right hand"):
+            GeneratedArenaSession(authored_draw_scenario=invalid)
+
+        session = GeneratedArenaSession(root_seed_factory=iter((20261122, 20261123)).__next__,
+                                        authored_draw_scenario=draw_scenario())
+        session.generate(GENERATE)
+        original = session.active_candidate
+        original_view = session.public_view()
+        with patch("arena_authored_draw_scenario.author_scenario",
+                   side_effect=ValueError("fixture native preflight refusal")):
+            with self.assertRaisesRegex(ArenaBrowserRequestError, "candidate could not be activated"):
+                session.generate(GENERATE)
+        self.assertIs(session.active_candidate, original)
+        self.assertEqual(session.public_view(), original_view)
+
+    def test_normal_generated_arena_does_not_receive_authored_hand_or_weapon(self):
+        session, candidate, player = arena(seed=20261124)
+        self.assertEqual(player.current.body_parts, {})
+        self.assertEqual(player.possessions, [])
+        self.assertEqual(player.weapons, [])
+        self.assertFalse(candidate.ground_objects)
+        self.assertFalse(any(type(obj) is WeaponInstance and obj.parent_container_id == player.id
+                             for obj in candidate.universe.object_registry.object_instances.values()))
+
     def test_revision_61_re_ready_timing_uses_weapon_and_motion_table_values(self):
         _, candidate, _ = arena()
         weapons = candidate.universe.get_weapon_dictionary()

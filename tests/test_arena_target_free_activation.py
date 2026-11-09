@@ -28,6 +28,7 @@ class TestArenaTargetFreeActivation(unittest.TestCase):
 
     def test_first_run_choice_activates_and_commits_native_second(self):
         start = self.player.get_position()
+        awareness_before = {key: set(value) for key, value in self.encounter.awareness.items()}
         action = self.action()
         choice, activation = self.encounter.activate_arena_for_player_action(
             self.player.id, action, rng_owner=self.rng)
@@ -39,7 +40,7 @@ class TestArenaTargetFreeActivation(unittest.TestCase):
         self.assertFalse(hasattr(activation, "target_id"))
         self.assertTrue(self.encounter.initiated)
         self.assertIsNone(self.encounter.initiation)
-        self.assertEqual(self.encounter.aware_beings(self.player.id), [])
+        self.assertEqual(self.encounter.awareness, awareness_before)
         self.assertEqual(self.encounter.time, 0)
 
         self.encounter.step(1)
