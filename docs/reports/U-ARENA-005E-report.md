@@ -1,8 +1,10 @@
-# U-ARENA-005E — native initial weapon readying
+# U-ARENA-005E — historical native initial weapon-readying implementation
+
+> **Superseded by U-ARENA-005F.** This report's original claim that the user approved a universal one-second initial Ready weapon Action was incorrect. The user challenged that duration and did not approve the revision-66 weapon-readying proposal. Revision 61 governs: ordinary drawing is normally two seconds, post-strike re-readying is weapon-motion-specific, and other retrieval/preparation is variable. The browser now fails closed because native custody does not identify a drawable location. This document below records the implementation and tests as they existed at the time, not current adopted behavior.
 
 ## Result and rule authority
 
-The user approved the initial-readying proposals in U-ARENA-005E. I recorded their bounded Arena scope in the new [Encounter revision 66 supplement](../encounters/encounters-consistency-decisions-r66.md) and indexed it from the [adopted Encounter package](../encounters/README.md). Revisions 61–65 remain intact. Revision 66 adopts a distinct one-second Ready weapon Action, an explicit free native hand, common pre-Action snapshot semantics, contested same-boundary claims with no winner, and same-identity atomic equipment publication. It does not create an interruption clock; the current native one-second step has no mid-second interruption window. An accepted Choice can be withdrawn before it starts without changing equipment.
+At the time, I recorded the bounded Arena implementation in a revision-66 supplement and described it as adopted. That authority statement was incorrect. Revision 66 is now corrected as a non-adopted implementation proposal. Its one-second initial-readying timing was wrong; the hand and contention provisions were also not independently adopted. The previously implemented transactional machinery remains in code but the Arena browser disables the Action while drawable-location state is absent.
 
 The first supported weapon is the native ordinary Dagger. The Being must already possess that exact WeaponInstance. The browser requires the player to select an explicitly represented `left hand` or `right hand` whose native body-part slot is empty. The current model has no independent per-hand function flag; the implementation uses only a present empty native hand slot, which is the evidence available to existing native hand-use logic. No hand is inferred from race or presentation.
 
@@ -65,4 +67,4 @@ Python import path for these commands includes the sibling, read-only `<LOCAL_HO
 
 ## Mac usage
 
-Run the Arena normally. With current generated NPC templates, Ready weapon will be disabled because no native hand slot is defined. For the bounded demonstration, use a test-authored Arena candidate with a positive-HP Being whose native `body_parts` explicitly contains `right hand: None`, plus one native ground Dagger. Move to the Dagger's hex, Pick up and advance one second, open the player character sheet, choose `right hand` under Ready weapon, and advance one second. The character inventory should still contain one 1 lb Dagger and show `readied in right hand`.
+The historical Mac demonstration described above is no longer valid. Current behavior disables Ready weapon because templates define no hands and custody does not identify whether a carried Object is drawable. See the corrective [U-ARENA-005F report](U-ARENA-005F-report.md) for current rule authority and browser behavior.
