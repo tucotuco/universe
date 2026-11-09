@@ -10,6 +10,7 @@ from checkpoint_wire import (DecodedRunSpotWire, WIRE_SCHEMA, WireRejected,
 
 
 PROJECTION_SCHEMA = 'universe.quarantined-run-boundary-projection/1'
+MOVEMENT_PROJECTION_SCHEMA = 'universe.quarantined-movement-boundary-projection/1'
 
 
 class ProjectionRejected(ValueError):
@@ -182,6 +183,157 @@ class QuarantinedRunBoundaryProjection:
                 tuple(row.to_data() for row in self.effects),
                 tuple(row.to_data() for row in self.targets), self.committed_choices,
                 self.rng_after, self.quarantined)
+
+
+@dataclass(frozen=True)
+class QuarantinedMovementBoundaryProjection:
+    """Detached identity projection for the authentic initial movement receipt."""
+    schema: str
+    universe_id: str
+    encounter_id: str
+    boundary: int
+    start: tuple
+    participant_ids: tuple
+    movement_activation: tuple
+    target_records: tuple
+    start_fences: tuple
+    rng_after: tuple
+    committed_choices: tuple
+    observer_evidence: tuple
+    quarantined: bool = True
+
+    def to_data(self):
+        return (self.schema, self.universe_id, self.encounter_id, self.boundary,
+                self.start, self.participant_ids, self.movement_activation,
+                self.target_records, self.start_fences, self.rng_after, self.committed_choices,
+                self.observer_evidence, self.quarantined)
+
+
+def project_quarantined_movement_boundary(decoded):
+    """Validate and project the single authentic 0-to-1 movement-only record.
+
+    This projection carries existing Target-owned records and observer evidence
+    by their native logical identities; it does not issue or install history.
+    """
+    _need(type(decoded) is DecodedRunSpotWire and decoded.schema == WIRE_SCHEMA,
+          'strict DecodedRunSpotWire/1 input is required')
+    data = decoded.envelope_data
+    try:
+        encode_detached_run_spot_data(data)
+    except (WireRejected, TypeError, ValueError) as exc:
+        raise ProjectionRejected(f'invalid detached checkpoint data: {exc}') from exc
+    _need(type(data) is tuple and len(data) == 17
+          and data[0] == 'universe.native-run-spot-checkpoint-envelope/1',
+          'unsupported checkpoint envelope version')
+    _need(data[12:16] == (True, False, False, False),
+          'movement projection cannot promote checkpoint readiness flags')
+    _need(data[4] == (1,) and data[7] == (),
+          'movement projection requires only committed boundary 1 and no future Choices')
+    chain = data[8]
+    _need(type(chain) is tuple and len(chain) == 8
+          and chain[:3] == ('universe.committed-native-receipt-chain/1', data[1], data[2])
+          and chain[4] and len(chain[4]) == 1 and not chain[5],
+          'movement projection requires one native receipt and no committed Choices')
+    row = chain[4][0]
+    _need(type(row) is tuple and len(row) == 7
+          and row[0] == 'universe.committed-movement-only-boundary/1'
+          and row[1] == 1,
+          'receipt is not the authentic initial movement-only boundary')
+    _need(row[2] == ('integer', '0') and type(row[3]) is tuple
+          and len(row[3]) == 2 and len(set(row[3])) == len(row[3])
+          and all(type(value) is str and value for value in row[3]),
+          'movement receipt has invalid start or participant identities')
+    _need(type(row[4]) is tuple and len(row[4]) == 2
+          and tuple(target[0] for target in row[4]) == tuple(sorted(row[3]))
+          and all(type(target) is tuple and len(target) == 4
+                  and target[1] == 'being' for target in row[4]),
+          'movement receipt does not contain one Being Target per participant')
+    from checkpoint_reconstruction import _rng_data
+    def receipt_rng(value):
+        _need(type(value) is tuple and len(value) == 2
+              and value[0] == 'sequence' and type(value[1]) is tuple,
+              'movement receipt RNG state is not a closed sequence')
+        def convert(item):
+            if type(item) is tuple and len(item) == 2 and item[0] == 'sequence':
+                return ('tuple', tuple(convert(child) for child in item[1]))
+            return item
+        return ('tuple', tuple(convert(item) for item in value[1]))
+    _need(row[5] == () and chain[7] == ('caller-cursor', 'exclusive_encounter-asserted')
+          and data[9][:2] == ('caller_cursor', 'exclusive_encounter')
+          and _rng_data(data[9][2]) == _rng_data(receipt_rng(row[6])),
+          'movement receipt fences or committed RNG ownership are inconsistent')
+    from checkpoint_reconstruction import _sections
+    sections = _sections(data[5])
+    nodes = sections.get('nodes')
+    _need(type(nodes) is tuple and len(nodes) == 1,
+          'native graph nodes are missing')
+    from checkpoint_reconstruction import _Graph
+    graph = _Graph(nodes[0])
+    encounter_ref = ('encounter', data[2])
+    _need(encounter_ref in graph.nodes
+          and graph.nodes[encounter_ref][0] == 'encounter.Encounter',
+          'receipt Encounter identity is absent from native graph')
+    encounter_fields = graph.fields(encounter_ref)[1]
+    _need(graph.data(encounter_fields['time']) == 1
+          and graph.data(encounter_fields['last_processed_boundary']) == 1
+          and graph.data(encounter_fields['start_time']) == 0,
+          'native Encounter chronology differs from movement receipt')
+    _need(graph.data(encounter_fields['arena_activation_enabled']) is True
+          and encounter_fields['arena_activation'] == ('null',)
+          and graph.data(encounter_fields['initiated']) is True
+          and encounter_fields['initiation'] == ('null',),
+          'movement receipt has an unsupported activation phase')
+    activation_ref = graph.raw_ref(encounter_fields['arena_movement_activation'])
+    activation_fields = graph.fields(activation_ref,
+        'encounter.ArenaMovementActivation')[1]
+    activation = (graph.data(activation_fields['actor_id']),
+        graph.data(activation_fields['movement_decision_id']),
+        graph.data(activation_fields['time']),
+        graph.data(activation_fields['activation_kind']))
+    _need(graph.data(activation_fields['encounter_id']) == data[2]
+          and graph.data(activation_fields['time']) == 0
+          and graph.data(activation_fields['activation_kind']) == 'first_player_movement'
+          and graph.data(activation_fields['actor_id']) in row[3],
+          'native movement activation does not match the receipt')
+    _need(set(graph.data(encounter_fields['being_list'])) == set(row[3])
+          and len(graph.data(encounter_fields['being_list'])) == 2,
+          'movement participants differ from native Encounter membership')
+    awareness = graph.data(encounter_fields['awareness'])
+    _need(type(awareness) is dict and set(awareness) == set(row[3]),
+          'native observer awareness does not cover both participants')
+    observer_evidence = []
+    universe_fields = graph.fields(('universe', data[1]))[1]
+    registry_ref = graph.raw_ref(universe_fields['object_registry'])
+    registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
+    registry = graph.raw_mapping(registry_fields['object_instances'])
+    _need(set(registry) == set(row[3]),
+          'native ObjectRegistry differs from movement participants')
+    for observer_id in row[3]:
+        being_ref = graph.raw_ref(registry[observer_id])
+        being_fields = graph.fields(being_ref, 'being.BeingInstance')[1]
+        encoded = being_fields.get('_arena_perception_ledger')
+        _need(type(encoded) is tuple and len(encoded) == 2
+              and encoded[0] == 'arena-perception-ledger',
+              'observer-owned Arena evidence is missing or unsupported')
+        observer_evidence.append((observer_id, encoded[1]))
+    target_awareness = {}
+    for target in row[4]:
+        state = _record(target[3], 'target.candidate/1',
+            ('target_id', 'category', 'starting_hp', 'projected_hp', 'actual_damage',
+             'fatal_effect_ids', 'incoming', 'outgoing_effect_ids', 'aware_of',
+             'practice_state', 'observer_state'))
+        _need(_string(state['target_id'], 'Target ID') == target[0]
+              and _string(state['category'], 'Target category') == 'being',
+              'Target state identity/category differs from portable Target')
+        known = _tag(state['aware_of'], 'Target awareness', 'set')
+        _need(type(known[1]) is tuple, 'Target awareness set is malformed')
+        target_awareness[target[0]] = set(_string(value, 'aware Entity ID')
+                                          for value in known[1])
+    _need(target_awareness == awareness,
+          'observer-owned Target awareness differs from native Encounter state')
+    return QuarantinedMovementBoundaryProjection(
+        MOVEMENT_PROJECTION_SCHEMA, data[1], data[2], 1, row[2], row[3],
+        activation, row[4], row[5], row[6], chain[5], tuple(observer_evidence), True)
 
 
 def project_quarantined_run_boundary(decoded):

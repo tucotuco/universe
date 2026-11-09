@@ -341,7 +341,30 @@ def _validate_receipt_chain(chain, universe_id, encounter_id, participants,
     all_effects = set()
     lifecycle_choices = {}
     for index, row in enumerate(rows):
-        _need(type(row) is tuple and len(row) == 9 and row[0] == boundaries[index],
+        _need(type(row) is tuple, 'malformed receipt boundary row')
+        if (len(row) == 7
+                and row[0] == 'universe.committed-movement-only-boundary/1'):
+            _need(index == 0 and row[1] == boundaries[index],
+                  'movement-only receipt is not the initial committed boundary')
+            from checkpoint_receipts import (DESCRIPTOR_SCHEMA,
+                PortableMovementOnlyBoundaryReceipt, PortableReceiptChain,
+                PortableTargetRecord, validate_receipt_descriptor)
+            try:
+                movement = PortableMovementOnlyBoundaryReceipt(
+                    row[0], row[1], row[2], row[3],
+                    tuple(PortableTargetRecord(*target) for target in row[4]),
+                    row[5], row[6])
+                validate_receipt_descriptor(PortableReceiptChain(
+                    DESCRIPTOR_SCHEMA, universe_id, encounter_id, row[2],
+                    (movement,), (), (), chain[7]))
+            except (TypeError, ValueError) as exc:
+                raise WireRejected(f'invalid initial movement-only receipt: {exc}') from exc
+            _need(type(row[3]) is tuple and row[3]
+                  and len(set(row[3])) == len(row[3])
+                  and set(row[3]) == participants,
+                  'movement-only participant references are invalid')
+            continue
+        _need(len(row) == 9 and row[0] == boundaries[index],
               'malformed or unordered receipt boundary')
         action_ids, effect_ids = row[2], row[3]
         actions, effects, targets = row[4], row[5], row[6]
@@ -559,8 +582,16 @@ def _validate_descriptor_components(data):
           'committed boundary sequence is outside the bounded subset')
     if receipts:
         rows = receipts[4] if type(receipts) is tuple and len(receipts) == 8 else ()
+        def receipt_boundary(row):
+            if type(row) is tuple and len(row) == 9 and type(row[0]) is int:
+                return row[0]
+            if (type(row) is tuple and len(row) == 7
+                    and row[0] == 'universe.committed-movement-only-boundary/1'
+                    and type(row[1]) is int):
+                return row[1]
+            return None
         _need(type(rows) is tuple and len(rows) == len(boundaries)
-              and tuple(row[0] for row in rows) == boundaries,
+              and tuple(receipt_boundary(row) for row in rows) == boundaries,
               'receipt rows do not match committed boundary sequence')
         committed_action_ids = _validate_receipt_chain(
             receipts, universe_id, encounter_id, set(participant_ids), choices, boundaries)

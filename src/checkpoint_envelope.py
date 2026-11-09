@@ -189,9 +189,17 @@ def _components(candidate_envelope, diagnostics):
         receipt_rows = receipt_chain[4]
         _require(type(receipt_rows) is tuple and 1 <= len(receipt_rows) <= 2,
                  'committed receipt chain must contain one or two boundaries')
-        boundaries = tuple(row[0] for row in receipt_rows
-                           if type(row) is tuple and len(row) == 9 and type(row[0]) is int)
+        def receipt_boundary(row):
+            if type(row) is tuple and len(row) == 9 and type(row[0]) is int:
+                return row[0]
+            if (type(row) is tuple and len(row) == 7
+                    and row[0] == 'universe.committed-movement-only-boundary/1'
+                    and type(row[1]) is int):
+                return row[1]
+            return None
+        boundaries = tuple(receipt_boundary(row) for row in receipt_rows)
         _require(len(boundaries) == len(receipt_rows)
+                 and all(type(boundary) is int and boundary > 0 for boundary in boundaries)
                  and boundaries == tuple(range(boundaries[0], boundaries[0] + len(boundaries))),
                  'committed boundaries are missing, duplicate, or unordered')
         _require(receipt_chain[6] == choices,
