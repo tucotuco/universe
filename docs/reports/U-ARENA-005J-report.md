@@ -133,14 +133,16 @@ adjacent results are:
 | --- | --- |
 | `test_arena_checkpoint_activation test_arena_state_admission` | 11 tests passed in 24.428 s. Includes strict activation refusal, stale/tamper cases, exact posture/facing restoration, generated movement, and no-mutation-on-refusal. |
 | `test_arena_state_admission test_arena_state_candidate test_checkpoint_inventory test_checkpoint_adapters test_checkpoint_reconstruction test_checkpoint_restore_preparation test_checkpoint_restore_continuation test_checkpoint_receipt_descriptors test_checkpoint_identity_binding test_movement_intent` | 154 tests passed in 108.845 s. |
-| `test_arena_target_free_activation test_arena_state_activation test_atomic_publication test_perception test_checkpoint_envelope test_checkpoint_wire test_arena_local_checkpoint test_arena_s7_checkpoint` | 108 tests ran; 106 passed and the two loopback HTTP subprocess tests failed to start because this environment denies binding `127.0.0.1` (`PermissionError: [Errno 1] Operation not permitted`). The separate `test_perception` run from its expected `tests/` working directory passed all 7 tests in 0.044 s. |
+| `test_arena_target_free_activation test_arena_state_activation test_atomic_publication test_perception test_checkpoint_envelope test_checkpoint_wire test_arena_local_checkpoint test_arena_s7_checkpoint` | 108 tests ran; 106 passed and two loopback HTTP subprocess tests were blocked by sandbox `PermissionError` on `127.0.0.1`. The separate `test_perception` run from its expected `tests/` working directory passed all 7 tests in 0.044 s. |
+| Elevated rerun of the two affected HTTP tests, using `--port 0` and only `127.0.0.1` | 2 tests passed in 25.064 s. The earlier errors were environmental restrictions, not test failures. |
 | `python -m py_compile` on the six changed Python files | Passed. |
 | `git diff --check` | Passed before commit. |
 
-The two environment-blocked tests were
+The two initially environment-blocked tests were
 `test_arena_local_checkpoint.ArenaOperatorHTTPContinuationTests.test_two_process_browser_save_approved_reopen_run_and_native_commit` and
 `test_arena_s7_checkpoint.ArenaS7ThreeProcessHTTPContinuationTests.test_three_process_s6_s7_boundary8_matches_uninterrupted_native_run`.
-No live browser test or full repository suite was run.
+Both passed when rerun with loopback permission. No live browser test or full
+repository suite was run.
 
 ## Commit
 
