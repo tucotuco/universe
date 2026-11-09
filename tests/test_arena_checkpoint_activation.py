@@ -37,7 +37,7 @@ class GeneratedArenaCheckpointActivationTests(unittest.TestCase):
                   session._movement_plan, session._rng_cursor.state,
                   tuple(player_ledger.history), tuple(opponent_ledger.history))
         with self.assertRaisesRegex(CheckpointRejected,
-                                    "unknown native fields: being.BeingInstance: _arena_perception_ledger"):
+                                    "movement-activated Arena Encounter cannot be resumed"):
             capture_checkpoint_candidate(candidate.universe, encounter,
                 quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
         after = (encounter.time, player.get_position().as_tuple(),

@@ -74,6 +74,7 @@ _CATALOG = {
     'location_observation':'LocationEvidenceLedger BeingLocationObservation LastSeenLocation',
     'spatial.geometry':'Sphere AxisAlignedBox', 'spatial.occlusion':'VisualOcclusion',
     'physical_fatigue':'PhysicalFatigueState',
+    'arena_perception':'ArenaPerceptionLedger ArenaPerceptionEvidence',
     'physiology_registry':'PhysiologyRegistry PhysiologyDefinition ResolvedPhysiology',
     'universe_physical_fatigue_r4':'Profile',
     'encounter_fatigue_bridge':'FrozenFatigueFrame FrozenFatigueView',
@@ -117,6 +118,7 @@ def _compatibility():
         'checkpoint_choices.py',
         'objective_reality.py','observer_proposals.py','scheduling.py','interval_staging.py','atomic_publication.py','transactional_progression.py',
         'conditional_attributes.py','statistical_group.py','personal_history.py','experience.py',
+        'arena_perception.py','checkpoint_arena_perception.py',
         'field_interpretation.py','field_observation.py','location_observation.py',
         'group_observation.py','history_conversation.py')
     return ('compatibility-draft',SCHEMA,('implementation-source',_digest(implementation)),

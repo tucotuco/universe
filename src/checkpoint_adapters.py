@@ -20,6 +20,7 @@ from being import BeingDefinition, BeingInstance
 from frozen_practice import _copy_use, _capture_history
 
 ADAPTER_VERSION = 'native-closure-recipes/1'
+_ABSENT = object()
 _NATIVE_GROUP_RNG = StatisticalGroup._rng
 _NATIVE_COMPOSITION_RNG = statistical_group.composition_rng
 _NATIVE_GROUP_CONSTRAINT = StatisticalGroup._validate_composition_facts
@@ -180,6 +181,27 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if tag=='being.BeingInstance' and field=='_arena_perception_ledger':
+            if item is None:
+                _require(not self.encounter.arena_activation_enabled,
+                         'Arena-enabled Being has no observer-owned perception ledger')
+                return ('null-arena-perception-ledger',1)
+            _require(self.encounter.arena_activation_enabled,
+                     'Arena perception ledger is attached outside an enabled Arena Encounter')
+            from checkpoint_arena_perception import (
+                ArenaPerceptionCheckpointRejected, encode_arena_perception_ledger,
+            )
+            from being import BeingInstance
+            owner=self._objects_by_identity[self._owner_identity(ref)]
+            _require(type(owner) is BeingInstance,
+                     'Arena perception ledger field is not owned by a native Being')
+            try:
+                encoded=encode_arena_perception_ledger(item,observer=owner,
+                    encounter=self.encounter,registry=self.world.object_registry.object_instances)
+            except ArenaPerceptionCheckpointRejected as exc:
+                raise CheckpointRejected(str(exc)) from exc
+            self.dependencies.append(('arena-perception-ledger',id(item),owner.id,encoded[0]))
+            return ('arena-perception-ledger',encoded)
         if tag=='encounter.Encounter' and field=='arena_activation_enabled':
             _require(type(item) is bool,'Arena activation-enabled flag must be an explicit native Boolean')
         if tag=='encounter.Encounter' and field=='arena_activation' and item is not None:
@@ -661,6 +683,29 @@ class NativeInventory(_Inventory):
     def build(self,world,encounter,rng_role,rng_state,rng_scope):
         _require(rng_scope=='exclusive_encounter' and rng_role in ('caller_cursor','native_random'), 'native adapters require explicit private RNG authority')
         self._objects_by_identity={}
+        if encounter.arena_activation_enabled:
+            from being import BeingInstance
+            from checkpoint_arena_perception import (
+                ArenaPerceptionCheckpointRejected, encode_arena_perception_ledger,
+            )
+            observers=tuple(world.get_object_by_id(key) for key in encounter.being_list)
+            _require(all(type(observer) is BeingInstance for observer in observers),
+                     'Arena-enabled Encounter has a non-Being observer')
+            ledger_fields=tuple(_fields(observer).get('_arena_perception_ledger',_ABSENT)
+                                for observer in observers)
+            # Legacy activation tests and out-of-scope hand-authored Encounters
+            # have no revision-65 ledger at all. Preserve their existing
+            # activation refusal; once any native ledger is present, require and
+            # validate the complete observer-owned set before proceeding.
+            if any(value is not _ABSENT for value in ledger_fields):
+                for observer,ledger in zip(observers,ledger_fields):
+                    try:
+                        data=encode_arena_perception_ledger(ledger,observer=observer,
+                            encounter=encounter,registry=world.object_registry.object_instances)
+                    except ArenaPerceptionCheckpointRejected as exc:
+                        raise CheckpointRejected(str(exc)) from exc
+                    self.dependencies.append(('arena-perception-ledger',id(ledger),
+                                              observer.id,data[0]))
         body=super().build(world,encounter,rng_role,rng_state,rng_scope)
         try:
             bounded=self._bounded_run_spot_closure(world,encounter,rng_role)

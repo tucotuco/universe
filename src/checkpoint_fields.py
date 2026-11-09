@@ -127,7 +127,7 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'being.BeingInstance': {
-        "allowed": '_atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "allowed": '_arena_perception_ledger _atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
         "required": '_posture _skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry hex_facing name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
     },
     'conditional_attributes.ConditionalAttributes': {
@@ -498,6 +498,14 @@ FIELD_ADAPTERS = {
         "allowed": '_atomic_target_history current front_facing geometry id name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
         "required": 'current front_facing geometry name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
     },
+    'arena_perception.ArenaPerceptionLedger': {
+        "allowed": '_current _history environment observer_id'.split(),
+        "required": '_current _history environment observer_id'.split(),
+    },
+    'arena_perception.ArenaPerceptionEvidence': {
+        "allowed": 'basis boundary category entity_id name observer_id position present_state time type_key'.split(),
+        "required": 'basis boundary category entity_id name observer_id position present_state time type_key'.split(),
+    },
 }
 
 # Semantic scope certified by 5D2C3.  FIELD_ADAPTERS supplies the reviewed
@@ -552,7 +560,8 @@ RUN_SPOT_FIELD_CLOSURE = {
                           'physical_fatigue', 'physiology_id', 'fatigue_level',
                           'effective_fitness', 'exertion', 'skill_experience',
                           'skill_use_history', '_skill_practice_baselines',
-                          'personal_history', '_atomic_target_history'),
+                          'personal_history', '_atomic_target_history',
+                          '_arena_perception_ledger'),
         'derived': ('type',),
         'optional_values': {
             'spatial_state': ('null', 'spatial.SpatialState'),
@@ -563,6 +572,8 @@ RUN_SPOT_FIELD_CLOSURE = {
                                        'list-matching-receipts'),
             'physiology_id': ('null', 'registered PhysiologyRegistry ID'),
             'personal_history': ('null-only-in-this-subset',),
+            '_arena_perception_ledger': ('absent-for-non-Arena',
+                                         'arena_perception-ledger/1'),
         },
         'unsupported_optional': ('alignment', 'current_armor_class'),
     },
