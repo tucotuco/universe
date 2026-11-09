@@ -37,7 +37,15 @@ class TestArenaInitialization(unittest.TestCase):
                 self.assertEqual(candidate.encounter.time, 0)
                 self.assertEqual(candidate.encounter.last_processed_boundary, 0)
                 self.assertEqual(candidate.encounter.pending_action_list, [])
-                self.assertEqual(candidate.encounter.awareness, {})
+                player_id, opponent_id = candidate.encounter.being_list
+                self.assertEqual(candidate.encounter.awareness,
+                                 {player_id: {opponent_id}, opponent_id: {player_id}})
+                for observer_id, target_id in ((player_id, opponent_id),
+                                               (opponent_id, player_id)):
+                    observer = candidate.encounter.get_being(observer_id)
+                    ledger = observer._arena_perception_ledger
+                    self.assertEqual(ledger.observer_id, observer_id)
+                    self.assertEqual({row.entity_id for row in ledger.current}, {target_id})
                 self.assertEqual(candidate.encounter.being_list,
                                  [p.native.being.id for p in candidate.participants])
                 self.assertEqual(candidate.arena_map.width_cells, 5)
