@@ -10,8 +10,19 @@ import time
 _RATES = frozenset(("walk", "hustle", "jog", "run", "sprint"))
 _POLICIES = frozenset(("turn", "maintain"))
 _CLIENT_EVENTS = {
+    "page_script_ready": frozenset(),
+    "page_script_error": frozenset(),
     "generate_clicked": frozenset(),
+    "canvas_click_received": frozenset(),
+    "canvas_modal_blocked": frozenset(),
+    "canvas_player_marker_hit": frozenset(),
+    "canvas_entity_marker_hit": frozenset(("entity_category",)),
+    "canvas_marker_missed": frozenset(),
+    "canvas_hex_missed": frozenset(),
     "canvas_hex_selected": frozenset(("column", "row")),
+    "destination_request_queued": frozenset(("column", "row", "rate", "facing_policy")),
+    "destination_request_accepted": frozenset(("column", "row")),
+    "destination_request_refused": frozenset(),
     "rate_selected": frozenset(("rate",)),
     "facing_policy_selected": frozenset(("facing_policy",)),
     "advance_clicked": frozenset(),
@@ -125,12 +136,28 @@ class ArenaUITerminalTrace:
             raise ValueError("trace event has unknown or missing fields")
 
         details = []
-        if event == "canvas_hex_selected":
+        if event in ("canvas_hex_selected", "destination_request_accepted"):
             column, row = payload["column"], payload["row"]
             if (type(column) is not int or type(row) is not int
                     or not -10000 <= column <= 10000 or not -10000 <= row <= 10000):
                 raise ValueError("trace hex address is outside the accepted range")
             details.append(f"cell=({column},{row})")
+        elif event == "destination_request_queued":
+            column, row = payload["column"], payload["row"]
+            if (type(column) is not int or type(row) is not int
+                    or not -10000 <= column <= 10000 or not -10000 <= row <= 10000):
+                raise ValueError("trace hex address is outside the accepted range")
+            rate, policy = payload["rate"], payload["facing_policy"]
+            if type(rate) is not str or rate not in _RATES:
+                raise ValueError("trace rate is unsupported")
+            if type(policy) is not str or policy not in _POLICIES:
+                raise ValueError("trace facing policy is unsupported")
+            details.extend((f"cell=({column},{row})", f"rate={rate}", f"policy={policy}"))
+        elif event == "canvas_entity_marker_hit":
+            category = payload["entity_category"]
+            if type(category) is not str or category not in ("being", "object"):
+                raise ValueError("trace entity category is unsupported")
+            details.append(f"entity_category={category}")
         elif event == "rate_selected":
             if type(payload["rate"]) is not str or payload["rate"] not in _RATES:
                 raise ValueError("trace rate is unsupported")

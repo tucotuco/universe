@@ -43,7 +43,7 @@ var document={getElementById:__element,createElement(tag){return {tagName:tag,id
 function __find(root,id){if(root.id===id)return root;for(const child of root.children||[]){const found=__find(child,id);if(found)return found}return null}
 function __findHandle(root,handle){if(root.dataset&&root.dataset.handle===handle)return root;for(const child of root.children||[]){const found=__findHandle(child,handle);if(found)return found}return null}
 function __text(root){return [root.textContent||'',...(root.children||[]).map(__text)].join(' ')}
-var window={devicePixelRatio:1,addEventListener:function(){}};
+var window={devicePixelRatio:1,listeners:Object.create(null),addEventListener:function(name,fn){this.listeners[name]=fn}};
 var __serverState={state:'empty'};
 var __initialView=__INITIAL_VIEW__;
 var __targetCell=__TARGET_CELL__;
@@ -58,6 +58,12 @@ function __refreshActionCatalog(){
   if(pickup){const target=__serverState.selected_entity;pickup.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){pickup.status='unavailable';pickup.reason='A native Pick up Action is already resolving.'}else if(!target||target.category!=='object'||target.present_state!=='ground'){pickup.status='unavailable';pickup.reason='Select a currently perceived ground Object first.'}else if(!__serverState.run_available&&target.pickup_available){pickup.status='available';pickup.reason='Native one-second Pick up is currently available for this Object.'}else{pickup.status='unavailable';pickup.reason=target.pickup_unavailable_reason||'Move into the same hex as this Object before choosing Pick up.'}}
 }
 function __response(){return {ok:true,json:()=>Promise.resolve(JSON.parse(JSON.stringify(__serverState)))}}
+function __clickMap(clientX,clientY){
+  if(__element('entityDialog').open)return Promise.resolve(false);
+  const listener=__element('map').listeners.click;
+  if(typeof listener!=='function')throw Error('shipped canvas click listener was not initialized');
+  return Promise.resolve(listener({clientX,clientY})).then(()=>true);
+}
 function fetch(path,options={}){
   const body=options.body===undefined?null:JSON.parse(options.body);
   __calls.push({path,method:options.method||'GET',body,headers:options.headers||{}});
@@ -136,39 +142,50 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(__find(__element('dialogBody'),'actionRun').disabled)throw Error('native first-choice Run was unavailable');
   await __find(__element('dialogBody'),'actionRun').listeners.click();
   if(!__find(__element('dialogBody'),'actionRun').disabled)throw Error('Run remained available after native activation');
+  await __element('dialogClose').listeners.click();
   await __element('advance').onclick();
   if(currentView.time_seconds!==1||!currentView.player_action||currentView.player_action.status!=='completed')throw Error('Run did not resolve through native one-second advancement');
   __element('rate').value='sprint';await __element('rate').listeners.change();
   const movementCount=()=>__calls.filter(call=>call.path==='/api/generated/destination').length;
+  __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
   let before=movementCount(),p=currentView.player.position_meters;
-  await c.listeners.click({clientX:mapView.toX(p.x),clientY:mapView.toY(p.y)});
+  if(await __clickMap(mapView.toX(p.x),mapView.toY(p.y)))throw Error('open Character modal allowed a map click');
+  if(movementCount()!==before||__calls.some(call=>call.path==='/api/generated/trace'&&call.body.event==='canvas_click_received'))throw Error('modal-blocked click reached the canvas handler');
+  await __element('dialogClose').listeners.click();
+  await __clickMap(mapView.toX(p.x),mapView.toY(p.y));
   if(movementCount()!==before||__element('dialogTitle').textContent!=='Your Being — Character')throw Error('player marker changed destination or missed popup');
+  await __element('dialogClose').listeners.click();
   const opponent=currentView.entities.find(e=>e.category==='being');
   if(!opponent)throw Error('opponent evidence missing');
-  before=movementCount();await c.listeners.click({clientX:mapView.toX(opponent.position_meters.x),clientY:mapView.toY(opponent.position_meters.y)});
+  before=movementCount();await __clickMap(mapView.toX(opponent.position_meters.x),mapView.toY(opponent.position_meters.y));
   body=__text(__element('dialogBody'));
   if(movementCount()!==before||!body.includes(opponent.type)||!body.includes(opponent.present_state)||body.includes('Total native XP')||body.includes('inventory'))throw Error('opponent popup exceeded observer projection or changed movement');
+  await __element('dialogClose').listeners.click();
   const shield=currentView.entities.find(e=>e.category==='object'&&e.type.toLowerCase()==='small shield');
   if(!shield)throw Error('Small Shield evidence missing');
   const shieldRow=__element('entities').children.find(e=>e.dataset.handle===shield.handle);
   if(!shieldRow||shieldRow.textContent.includes('Small Shield · Small Shield'))throw Error('default duplicate name/type label remains');
-  before=movementCount();await c.listeners.click({clientX:mapView.toX(shield.position_meters.x),clientY:mapView.toY(shield.position_meters.y)});
+  before=movementCount();await __clickMap(mapView.toX(shield.position_meters.x),mapView.toY(shield.position_meters.y));
   if(movementCount()!==before||!__text(__element('dialogBody')).includes('Weight: Unavailable from observer evidence'))throw Error('Object popup did not preserve movement/authority boundary');
+  await __element('dialogClose').listeners.click();
   const daggers=currentView.entities.filter(e=>e.category==='object'&&e.type==='Dagger');
   if(daggers.length<2||daggers[0].handle===daggers[1].handle)throw Error('duplicate-type Objects lost separate handles');
   before=movementCount();await __element('entities').children.find(e=>e.dataset.handle===daggers[0].handle).listeners.click();
   if(movementCount()!==before)throw Error('Entity list inspection changed destination');
+  await __element('dialogClose').listeners.click();
   await __element('entities').children.find(e=>e.dataset.handle===daggers[1].handle).listeners.click();
   if(currentView.selected_entity.handle!==daggers[1].handle)throw Error('second same-type Object was not independently selectable');
+  await __element('dialogClose').listeners.click();
   const initialObject=daggers[0];
   if(!initialObject)throw Error('generated object was not visible on the map');
-  before=movementCount();await c.listeners.click({clientX:mapView.toX(initialObject.position_meters.x),clientY:mapView.toY(initialObject.position_meters.y)});
+  before=movementCount();await __clickMap(mapView.toX(initialObject.position_meters.x),mapView.toY(initialObject.position_meters.y));
   if(movementCount()!==before)throw Error('Object inspection changed destination');
   let pickupEntry=currentView.action_catalog.entries.find(e=>e.name==='Pick up');
   if(pickupEntry.status!=='unavailable'||!pickupEntry.reason.includes('same hex'))throw Error('remote Object incorrectly enabled Pick up');
   let input=__find(__element('dialogBody'),'entityName');input.value='Renamed Dagger';
   await __find(__element('dialogBody'),'renameEntity').listeners.click();
   if(!__text(__element('dialogBody')).includes('Renamed Dagger')||!__text(__element('dialogBody')).includes('Type: Dagger'))throw Error('renamed popup lost distinct native type');
+  before=movementCount();
   const m=currentView.map,cell=__targetCell;
   const minX=0,maxX=m.origin_offset_meters[0]+(m.width_cells-1)*m.column_step_meters+m.hex_vertex_offsets_meters[0][0];
   const minY=0,maxY=m.height_cells*m.row_step_meters+(m.width_cells>1?m.odd_column_offset_meters:0);
@@ -176,7 +193,11 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   const ox=(c.clientWidth-(maxX-minX)*scale)/2,oy=(c.clientHeight-(maxY-minY)*scale)/2;
   const cx=m.origin_offset_meters[0]+cell.column*m.column_step_meters;
   const cy=m.origin_offset_meters[1]+cell.row*m.row_step_meters+(cell.column%2)*m.odd_column_offset_meters;
-  await c.listeners.click({clientX:ox+(cx-minX)*scale+24,clientY:c.clientHeight-oy-(cy-minY)*scale});
+  if(await __clickMap(ox+(cx-minX)*scale+24,c.clientHeight-oy-(cy-minY)*scale))throw Error('Object modal allowed a destination click');
+  if(movementCount()!==before)throw Error('click behind an open Object dialog changed destination');
+  await __element('dialogClose').listeners.click();
+  before=movementCount();await __clickMap(ox+(cx-minX)*scale+24,c.clientHeight-oy-(cy-minY)*scale);
+  if(movementCount()!==before+1||!currentView.movement_plan)throw Error('blank hex click did not submit a destination plan');
   __element('rate').value='walk';await __element('rate').listeners.change();
   __element('rate').value='sprint';const optionRequest=__element('rate').listeners.change();
   const advanceRequest=__element('advance').onclick();await Promise.all([optionRequest,advanceRequest]);
@@ -184,10 +205,12 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(!visibleObject)throw Error('renamed object disappeared after movement');
   await visibleObject.listeners.click();
   if(__find(__element('dialogBody'),'pickup').disabled)throw Error('same-hex object was not pickup-eligible after arrival');
+  await __element('dialogClose').listeners.click();
   __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
   if(__find(__element('dialogBody'),'actionPickup').disabled)throw Error('selector disagrees with same-hex Object popup eligibility');
   await __find(__element('dialogBody'),'actionPickup').listeners.click();
   if(!__find(__element('dialogBody'),'actionPickup').disabled)throw Error('pending native Pick up was not disabled');
+  await __element('dialogClose').listeners.click();
   await __element('advance').onclick();
   if(!__find(__element('dialogBody'),'actionPickup').disabled)throw Error('Pick up stayed available after acquisition');
   const carried=__element('entities').children.find(e=>e.textContent.includes('Renamed Dagger'));
@@ -203,10 +226,42 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(!body.includes('State: carried')||!body.includes('Renamed Dagger'))throw Error('carried Object popup did not reflect committed state');
   await __element('dialogClose').listeners.click();
   if(dialog.open||!__element('characterButton').focused)throw Error('popup close or focus restoration failed');
+  const carriedEntity=currentView.selected_entity;
+  const carriedInventory=currentView.character.inventory.items.map(item=>`${item.name} · ${item.status}`);
+  const runCountBeforeMovement=__calls.filter(call=>call.path==='/api/generated/run').length;
+  await __element('generate').onclick();
+  const freshPosition=currentView.player.position_meters;
+  const freshMap=currentView.map,destination=__targetCell;
+  const freshMaxX=freshMap.origin_offset_meters[0]+(freshMap.width_cells-1)*freshMap.column_step_meters+freshMap.hex_vertex_offsets_meters[0][0];
+  const freshMaxY=freshMap.height_cells*freshMap.row_step_meters+(freshMap.width_cells>1?freshMap.odd_column_offset_meters:0);
+  const freshScale=Math.min((c.clientWidth-24)/(freshMaxX),(c.clientHeight-24)/(freshMaxY));
+  const freshOx=(c.clientWidth-(freshMaxX*freshScale))/2,freshOy=(c.clientHeight-(freshMaxY*freshScale))/2;
+  const destX=freshMap.origin_offset_meters[0]+destination.column*freshMap.column_step_meters;
+  const destY=freshMap.origin_offset_meters[1]+destination.row*freshMap.row_step_meters+(destination.column%2)*freshMap.odd_column_offset_meters;
+  __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
+  const freshActions=__find(__element('dialogBody'),'actionSelector');
+  if(!freshActions)throw Error('Character Actions did not reopen after fresh Generate');
+  freshActions.open=true;freshActions.listeners.toggle();
+  await __element('dialogClose').listeners.click();
+  const freshBefore=movementCount();
+  __element('rate').value='walk';
+  await __clickMap(freshOx+destX*freshScale+24,c.clientHeight-freshOy-destY*freshScale);
+  if(movementCount()!==freshBefore+1||currentView.time_seconds!==0||currentView.player_action)throw Error('fresh movement selection scheduled an Action or failed to accept its plan');
+  __element('facingPolicy').value='maintain';await __element('facingPolicy').listeners.change();
+  __element('facingPolicy').value='turn';const finalFacingUpdate=__element('facingPolicy').listeners.change();
+  __element('rate').value='sprint';const finalRateUpdate=__element('rate').listeners.change();
+  await Promise.all([finalFacingUpdate,finalRateUpdate]);
+  await __element('advance').onclick();
+  if(currentView.time_seconds!==1||currentView.player.position_meters.x===freshPosition.x&&currentView.player.position_meters.y===freshPosition.y)throw Error('fresh destination did not advance to a displaced native position');
+  if(__calls.filter(call=>call.path==='/api/generated/run').length!==runCountBeforeMovement)throw Error('movement activation submitted Run');
   globalThis.__result=JSON.stringify({calls:__calls,plan:__lastPlan,time:currentView.time_seconds,
+    freshMovement:{position:currentView.player.position_meters,start:freshPosition,
+      time:currentView.time_seconds,playerAction:currentView.player_action,
+      runCountBefore:runCountBeforeMovement,
+      runCount:__calls.filter(call=>call.path==='/api/generated/run').length},
     status:__element('movementStatus').textContent,error:__element('error').textContent,
-    entityDetails:body,pickupStatus:'Pick up accepted',renameStatus:'renamed',finalEntity:currentView.selected_entity,
-    characterSummary:playerSummary,characterInventory:currentView.character.inventory.items.map(item=>`${item.name} · ${item.status}`),
+    entityDetails:body,pickupStatus:'Pick up accepted',renameStatus:'renamed',finalEntity:carriedEntity,
+    characterSummary:playerSummary,characterInventory:carriedInventory,
     entityLabels:__element('entities').children.map(e=>e.textContent),actionCatalog:currentView.action_catalog});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """#

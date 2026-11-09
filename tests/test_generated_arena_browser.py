@@ -90,6 +90,22 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIsNone(self.session.active_candidate)
         self.assertEqual(self.request("/api/gm")[0], 404)
 
+    def test_generated_page_is_marked_and_not_reused_from_browser_cache(self):
+        handler_type = make_handler(self.session)
+        handler = object.__new__(handler_type)
+        handler.path = "/"
+        handler.server = type("FakeServer", (), {"server_port": 8000})()
+        handler.wfile = io.BytesIO()
+        response_headers = {}
+        handler.send_response = lambda status: response_headers.update(status=status)
+        handler.send_header = lambda name, value: response_headers.update({name.lower(): value})
+        handler.end_headers = lambda: None
+        handler.do_GET()
+        self.assertEqual(response_headers["cache-control"], "no-store")
+        self.assertEqual(response_headers["x-arena-ui-generation"], "005C")
+        page = handler.wfile.getvalue().decode("utf-8")
+        self.assertIn('<meta name="arena-ui-generation" content="005C">', page)
+
     def test_trace_off_is_quiet_and_diagnostic_route_is_unavailable(self):
         import io
         stream = io.StringIO()
@@ -110,10 +126,20 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         stream = self.enable_trace()
         status, page = self.request("/")
         self.assertEqual(status, 200)
+        self.assertIn('<meta name="arena-ui-generation" content="005C">', page)
+        self.assertIn("Close this dialog to return to the map and movement controls.", page)
         self.assertIn("const traceEnabled=true", page)
         # This source-level contract verifies that shipped handlers correlate a
         # fire-and-forget client event with the destination/advance request.
         self.assertIn("traceUI('canvas_hex_selected',cell)", page)
+        self.assertIn("traceUI('canvas_click_received')", page)
+        self.assertIn("traceUI('destination_request_queued'", page)
+        self.assertIn("traceUI('destination_request_accepted',cell)", page)
+        self.assertIn("traceUI('page_script_ready')", page)
+        self.assertIn("traceUI('page_script_error')", page)
+        self.assertNotIn("$('renameEntity').onclick", page)
+        self.assertNotIn("$('pickup').onclick", page)
+        self.assertIn("Close any open dialog to return to the map.", page)
         self.assertIn("req('/api/generated/destination'", page)
         self.assertIn("traceUI('advance_clicked')", page)
         self.assertIn("req('/api/generated/advance',{seconds:1},sequence)", page)
@@ -228,6 +254,37 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         for forbidden in (hidden.id, hidden.name, "source_record", "root_seed"):
             self.assertNotIn(forbidden, stream.getvalue())
 
+    def test_map_click_trace_is_fixed_schema_and_contains_no_entity_identity(self):
+        stream = self.enable_trace()
+        self.assertIn('<meta name="arena-ui-generation" content="005C">',
+                      self.request("/")[1])
+        events = [
+            {"event": "page_script_ready"},
+            {"event": "canvas_click_received"},
+            {"event": "canvas_modal_blocked"},
+            {"event": "canvas_entity_marker_hit", "entity_category": "object"},
+            {"event": "canvas_marker_missed"},
+            {"event": "canvas_hex_selected", "column": 3, "row": 2},
+            {"event": "destination_request_queued", "column": 3, "row": 2,
+             "rate": "walk", "facing_policy": "turn"},
+            {"event": "destination_request_accepted", "column": 3, "row": 2},
+            {"event": "page_script_error"},
+        ]
+        for sequence, details in enumerate(events, start=1):
+            self.assertEqual(self.request("/api/generated/trace", {
+                "seq": sequence, **details})[0], 200)
+        self.assertEqual(self.request("/api/generated/trace", {
+            "seq": len(events) + 1, "event": "canvas_entity_marker_hit",
+            "entity_category": "object", "handle": "private-handle"})[0], 409)
+        output = stream.getvalue()
+        for event in ("page_script_ready", "canvas_click_received", "canvas_modal_blocked",
+                      "canvas_entity_marker_hit entity_category=object", "canvas_marker_missed",
+                      "canvas_hex_selected cell=(3,2)",
+                      "destination_request_queued cell=(3,2) rate=walk policy=turn",
+                      "destination_request_accepted cell=(3,2)", "page_script_error"):
+            self.assertIn(event, output)
+        self.assertNotIn("private-handle", output)
+
     def test_shipped_option_handlers_replace_active_plan_and_serialize_advance(self):
         _, page = self.request("/")
         self.assertIn("function serializeMutation(operation)", page)
@@ -236,7 +293,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("server accepted ${plan.rate}/${plan.facing_policy}", page)
         self.assertIn("selected ${selectedRate}/${selectedPolicy}", page)
         self.assertIn("Movement plan accepted: ${state.movement_plan.rate}/${state.movement_plan.facing_policy}", page)
-        self.assertIn("await serializeMutation(async()=>{try{const state=await req('/api/generated/destination'", page)
+        self.assertIn("await serializeMutation(async()=>{\n    try{\n      const state=await req('/api/generated/destination'", page)
         self.assertIn("serializeMutation(async()=>{if(planUpdateFailure)", page)
         self.assertIn("req('/api/generated/advance',{seconds:1},sequence)", page)
 
@@ -287,7 +344,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             run = subprocess.run(
                 [shutil.which("swift"), "-module-cache-path", str(module_cache), str(harness),
                  str(page_path), str(state_path), str(cell_path), str(picked_up_path)],
-                check=True, capture_output=True, text=True, timeout=60)
+                check=False, capture_output=True, text=True, timeout=60)
+            self.assertEqual(run.returncode, 0, run.stderr)
         result = json.loads(run.stdout)
         movement_requests = [call for call in result["calls"]
                              if call["path"] in ("/api/generated/destination", "/api/generated/advance")]
@@ -295,11 +353,14 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "/api/generated/advance",
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination", "/api/generated/advance",
+            "/api/generated/advance", "/api/generated/destination",
+            "/api/generated/destination", "/api/generated/destination",
+            "/api/generated/destination",
             "/api/generated/advance"])
         destination_requests = [call for call in movement_requests
                                 if call["path"] == "/api/generated/destination"]
         self.assertEqual([call["body"]["rate"] for call in destination_requests],
-                         ["sprint", "walk", "sprint"])
+                         ["sprint", "walk", "sprint", "walk", "walk", "walk", "sprint"])
         self.assertIn("Dagger", result["entityDetails"])
         self.assertIn("Pick up", result["pickupStatus"])
         self.assertIn("/api/generated/inspect", [call["path"] for call in result["calls"]])
@@ -321,17 +382,29 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                       "Position and movement", "Age is not represented", "Class XP"):
             self.assertIn(label, character_text)
         self.assertIn("Represented carried weight", character_text)
+        self.assertEqual([call["body"]["facing_policy"] for call in destination_requests],
+                         ["turn", "turn", "turn", "turn", "maintain", "turn", "turn"])
         for call in destination_requests:
-            self.assertEqual(call["body"]["facing_policy"], "turn")
             self.assertEqual(call["body"]["column"], target.column)
             self.assertEqual(call["body"]["row"], target.row)
-        self.assertEqual(int(movement_requests[4]["headers"]["X-Arena-Client-Seq"]),
-                         int(destination_requests[2]["headers"]["X-Arena-Client-Seq"]) + 1)
+        self.assertGreater(int(movement_requests[4]["headers"]["X-Arena-Client-Seq"]),
+                           int(destination_requests[2]["headers"]["X-Arena-Client-Seq"]))
         self.assertLess(result["calls"].index(destination_requests[2]),
                         result["calls"].index(movement_requests[4]))
         self.assertEqual(result["plan"]["rate"], "sprint")
         self.assertIn("Destination reached", result["status"])
-        self.assertEqual(result["time"], 3)
+        self.assertEqual(result["time"], 1)
+        self.assertEqual(result["freshMovement"]["time"], 1)
+        self.assertIsNone(result["freshMovement"]["playerAction"])
+        self.assertNotEqual(result["freshMovement"]["position"], result["freshMovement"]["start"])
+        self.assertEqual(result["freshMovement"]["runCount"],
+                         result["freshMovement"]["runCountBefore"])
+        trace_events = [call["body"]["event"] for call in result["calls"]
+                        if call["path"] == "/api/generated/trace"]
+        for event in ("page_script_ready", "canvas_click_received", "canvas_player_marker_hit",
+                      "canvas_entity_marker_hit", "destination_request_queued",
+                      "destination_request_accepted"):
+            self.assertIn(event, trace_events)
         self.assertEqual(result["error"], "One native Encounter second committed.")
         self.assertTrue(any(label.lower().startswith("small shield · ground")
                             for label in result["entityLabels"]))
