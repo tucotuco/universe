@@ -20,7 +20,8 @@ from checkpoint_arena_perception import (
     ArenaPerceptionCheckpointRejected, decode_arena_perception_ledger,
     encode_arena_perception_ledger, encode_detached_arena_perception_ledger,
 )
-from checkpoint_inventory import CheckpointRejected, capture_checkpoint_candidate
+from checkpoint_inventory import (CheckpointRejected, capture_checkpoint_candidate,
+                                  validate_checkpoint_candidate)
 from test_arena_ground_pickup import fixture as ground_fixture, move_player_to
 
 
@@ -216,7 +217,69 @@ print(repr(roundtrip))
         finally:
             object.__delattr__(evidence, "unexpected")
 
-    def test_activated_capture_advances_to_movement_activation_blocker_without_mutation(self):
+    def test_movement_activation_record_validates_existing_references_without_mutation(self):
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
+        session.generate({"starting_experience": "10000",
+                          "width_cells": "5", "height_cells": "5"})
+        candidate = session.active_candidate
+        encounter = candidate.encounter
+        player = candidate.participants[0].native.being
+        origin = candidate.arena_map.layout.cell_at_position(player.get_position())
+        destination = next(a for a in candidate.arena_map.layout.addresses() if a != origin)
+        session.choose_destination({"column": destination.column, "row": destination.row,
+                                    "rate": "sprint", "facing_policy": "turn"})
+        session.advance_one_second()
+        original = encounter.arena_movement_activation
+        before = (encounter.time, encounter.last_processed_boundary,
+            tuple((row.native.being.id, row.native.being.get_position().as_tuple(),
+                   row.native.being.get_posture(), row.native.being.hex_facing)
+                  for row in candidate.participants), session._movement_plan,
+            session._rng_cursor.state, tuple(encounter._choice_book._choices.items()),
+            tuple((row.native.being._arena_perception_ledger.observer_id,
+                   dict(row.native.being._arena_perception_ledger._current),
+                   list(row.native.being._arena_perception_ledger._history))
+                  for row in candidate.participants))
+        variants = (
+            replace(original, encounter_id="foreign-encounter"),
+            replace(original, actor_id="foreign-being"),
+            replace(original, movement_decision_id=" "),
+            replace(original, time=encounter.time),
+            replace(original, activation_kind="first_player_choice"),
+        )
+        try:
+            for variant in variants:
+                with self.subTest(record=variant):
+                    encounter.arena_movement_activation = variant
+                    with self.assertRaisesRegex(CheckpointRejected,
+                            "Arena movement activation record is inconsistent"):
+                        capture_checkpoint_candidate(candidate.universe, encounter,
+                            quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+                    self.assertEqual((encounter.time, encounter.last_processed_boundary,
+                        tuple((row.native.being.id, row.native.being.get_position().as_tuple(),
+                               row.native.being.get_posture(), row.native.being.hex_facing)
+                              for row in candidate.participants), session._movement_plan,
+                        session._rng_cursor.state, tuple(encounter._choice_book._choices.items()),
+                        tuple((row.native.being._arena_perception_ledger.observer_id,
+                               dict(row.native.being._arena_perception_ledger._current),
+                               list(row.native.being._arena_perception_ledger._history))
+                              for row in candidate.participants)), before)
+            encounter.arena_movement_activation = original
+            encounter.arena_activation_enabled = False
+            with self.assertRaisesRegex(CheckpointRejected,
+                    "Arena movement activation phase conflicts"):
+                capture_checkpoint_candidate(candidate.universe, encounter,
+                    quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+            encounter.arena_activation_enabled = True
+            encounter.arena_movement_activation = None
+            with self.assertRaisesRegex(CheckpointRejected,
+                    "lacks its movement activation record"):
+                capture_checkpoint_candidate(candidate.universe, encounter,
+                    quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+        finally:
+            encounter.arena_activation_enabled = True
+            encounter.arena_movement_activation = original
+
+    def test_activated_capture_advances_to_receipt_blocker_without_mutation(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
@@ -233,8 +296,11 @@ print(repr(roundtrip))
         book = encounter._choice_book
         def source_state():
             return (encounter.time, encounter.last_processed_boundary,
-                 tuple((p.native.being.id, tuple(p.native.being.get_position().as_tuple()))
-                       for p in candidate.participants), session._movement_plan,
+                 tuple((p.native.being.id, tuple(p.native.being.get_position().as_tuple()),
+                        p.native.being.get_posture(), p.native.being.hex_facing)
+                       for p in candidate.participants), encounter.initiated,
+                 encounter.arena_activation_enabled, encounter.arena_activation,
+                 encounter.arena_movement_activation, session._movement_plan,
                  session._rng_cursor.state,
                  (book._counter, tuple(book._choices.items()), tuple(book._states.items()),
                   tuple(encounter.pending_action_list)),
@@ -246,11 +312,20 @@ print(repr(roundtrip))
         from checkpoint_arena_perception import encode_arena_perception_ledger
         with patch("checkpoint_arena_perception.encode_arena_perception_ledger",
                    wraps=encode_arena_perception_ledger) as encode_ledger:
-            with self.assertRaisesRegex(CheckpointRejected,
-                                        "movement-activated Arena Encounter cannot be resumed"):
-                capture_checkpoint_candidate(candidate.universe, encounter,
-                    quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
-            self.assertEqual(encode_ledger.call_count, 2)
+            checkpoint = capture_checkpoint_candidate(candidate.universe, encounter,
+                quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+            # Capture and its explicit validation each inspect both observer ledgers.
+            self.assertEqual(encode_ledger.call_count, 4)
+        validation = validate_checkpoint_candidate(candidate.universe, encounter,
+            checkpoint, quiescent=True)
+        blocker = next(row.reason for row in checkpoint.diagnostics
+                       if row.code == "bounded_run_spot_closure_refused")
+        self.assertEqual(blocker,
+            "Run/Spot receipt closure refused: missing, duplicate, or unreceipted committed Action")
+        self.assertTrue(validation.inventory_validated)
+        self.assertFalse(checkpoint.closure_validated)
+        self.assertFalse(checkpoint.portable_schema_defined)
+        self.assertFalse(checkpoint.restore_verified)
         self.assertEqual(source_state(), before)
 
 

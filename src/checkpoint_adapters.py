@@ -74,6 +74,37 @@ def _fields(value):
     return data
 
 
+def _movement_activation_state(encounter):
+    """Validate the existing movement-start record without adding authority."""
+    from encounter import ArenaMovementActivation
+
+    enabled = encounter.arena_activation_enabled
+    _require(type(enabled) is bool,
+             'Arena activation-enabled flag must be an explicit native Boolean')
+    record = encounter.arena_movement_activation
+    if record is None:
+        _require(not enabled,
+                 'Arena activation-enabled Encounter lacks its movement activation record')
+        return None
+    _require(enabled and encounter.initiated is True
+             and encounter.arena_activation is None and encounter.initiation is None,
+             'Arena movement activation phase conflicts with Encounter activation state')
+    _require(type(record) is ArenaMovementActivation,
+             'unsupported Arena movement activation record type')
+    data = _fields(record)
+    _require(type(data['encounter_id']) is str and data['encounter_id'] == encounter.id
+             and type(data['actor_id']) is str and data['actor_id'] in encounter.being_list
+             and type(data['movement_decision_id']) is str
+             and data['movement_decision_id'].strip()
+             and len(data['movement_decision_id']) <= 512
+             and type(data['time']) in (int, float) and math.isfinite(data['time'])
+             and data['time'] == encounter.start_time
+             and type(data['activation_kind']) is str
+             and data['activation_kind'] == 'first_player_movement',
+             'Arena movement activation record is inconsistent with its Encounter phase')
+    return record
+
+
 def _ledger_records(ledger):
     _require(type(ledger) is RealityLedger, 'unreviewed Reality ledger type')
     d=_fields(ledger); rev=d['_revision']; records=d['_records']
@@ -207,9 +238,9 @@ class NativeInventory(_Inventory):
         if tag=='encounter.Encounter' and field=='arena_activation' and item is not None:
             raise CheckpointRejected(
                 'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
-        if tag=='encounter.Encounter' and field=='arena_movement_activation' and item is not None:
-            raise CheckpointRejected(
-                'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+        if tag=='encounter.Encounter' and field=='arena_movement_activation':
+            _require(_movement_activation_state(self.encounter) is item,
+                     'Arena movement activation field differs from its owning Encounter state')
         if tag=='being.BeingInstance' and field=='_posture':
             _require(item is None or type(item) is str and item in ('standing', 'crouching', 'lying'),
                      'native Being posture must be unknown or a supported posture string')
@@ -369,10 +400,7 @@ class NativeInventory(_Inventory):
                  'Arena activation-enabled flag is malformed')
         _require(encounter.arena_activation is None,
                  'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
-        _require(encounter.arena_movement_activation is None,
-                 'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
-        _require(not encounter.arena_activation_enabled,
-                 'Arena activation-enabled Encounter is outside the initiated Run/Spot checkpoint subset')
+        movement_activation = _movement_activation_state(encounter)
         _require(encounter.initiation is None,
                  'target-directed Encounter initiation is outside the bounded checkpoint subset')
 
@@ -462,6 +490,9 @@ class NativeInventory(_Inventory):
         entity_ids=set(encounter.being_list)
         receipts=();receipt_descriptor_data=()
         history=encounter.__dict__.get('_atomic_interval_history',())
+        if movement_activation is not None:
+            _require(type(history) is list and history,
+                     'movement-activated Arena has no committed boundary history')
         if history:
             try:
                 receipt_descriptor=describe_committed_receipt_chain(world,encounter,

@@ -69,13 +69,15 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
 
     def test_movement_activated_arena_remains_outside_bounded_checkpoint(self):
         self.enable()
+        self.enc.initiated = True
         self.enc.arena_activation_enabled = True
         self.enc.arena_movement_activation = ArenaMovementActivation(
             self.enc.id, self.a.id, 'movement-decision-test', self.enc.time)
         before = self.raw()
-        with self.assertRaisesRegex(CheckpointRejected,
-                                    'movement-activated Arena Encounter cannot be resumed'):
-            self.capture()
+        candidate = self.capture()
+        self.assertTrue(any('movement-activated Arena has no committed boundary history'
+                            in row.reason for row in candidate.diagnostics))
+        self.assert_partial(candidate)
         self.assertEqual(before, self.raw())
 
     def test_target_directed_initiation_is_not_confused_with_arena_activation(self):

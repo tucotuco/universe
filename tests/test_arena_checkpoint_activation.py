@@ -1,7 +1,18 @@
 import unittest
 
 from arena_browser_session import GeneratedArenaSession
-from checkpoint_inventory import CheckpointRejected, capture_checkpoint_candidate
+from checkpoint_inventory import capture_checkpoint_candidate, validate_checkpoint_candidate
+
+
+def _find_activation_node(value):
+    if type(value) is tuple:
+        if len(value) == 3 and value[1] == "encounter.ArenaMovementActivation":
+            return value
+        for child in value:
+            found = _find_activation_node(child)
+            if found is not None:
+                return found
+    return None
 
 
 class GeneratedArenaCheckpointActivationTests(unittest.TestCase):
@@ -33,15 +44,52 @@ class GeneratedArenaCheckpointActivationTests(unittest.TestCase):
         self.assertIn(opponent.id, tuple(row.entity_id for row in player_ledger.current))
         self.assertIn(player.id, tuple(row.entity_id for row in opponent_ledger.current))
 
-        before = (encounter.time, player.get_position().as_tuple(),
+        book = encounter._choice_book
+        before = (encounter.time, encounter.last_processed_boundary,
+                  tuple((participant.native.being.id,
+                         participant.native.being.get_position().as_tuple(),
+                         participant.native.being.get_posture(),
+                         participant.native.being.hex_facing)
+                        for participant in candidate.participants),
+                  encounter.initiated, encounter.arena_activation_enabled,
+                  encounter.arena_activation, encounter.arena_movement_activation,
                   session._movement_plan, session._rng_cursor.state,
+                  (book._counter, tuple(book._choices.items()), tuple(book._states.items()),
+                   tuple(encounter.pending_action_list)),
                   tuple(player_ledger.history), tuple(opponent_ledger.history))
-        with self.assertRaisesRegex(CheckpointRejected,
-                                    "movement-activated Arena Encounter cannot be resumed"):
-            capture_checkpoint_candidate(candidate.universe, encounter,
-                quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
-        after = (encounter.time, player.get_position().as_tuple(),
+        captured = capture_checkpoint_candidate(candidate.universe, encounter,
+            quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
+        validation = validate_checkpoint_candidate(candidate.universe, encounter,
+            captured, quiescent=True)
+        self.assertTrue(validation.inventory_validated)
+        self.assertFalse(captured.closure_validated)
+        self.assertFalse(captured.portable_schema_defined)
+        self.assertFalse(captured.restore_verified)
+        receipt_blocker = next(row.reason for row in captured.diagnostics
+                               if row.code == "bounded_run_spot_closure_refused")
+        self.assertEqual(receipt_blocker,
+            "Run/Spot receipt closure refused: missing, duplicate, or unreceipted committed Action")
+        activation_node = _find_activation_node(captured.envelope)
+        self.assertIsNotNone(activation_node)
+        activation_fields = dict(activation_node[2])
+        self.assertEqual(activation_fields["encounter_id"], ("string", encounter.id))
+        self.assertEqual(activation_fields["actor_id"], ("string", player.id))
+        self.assertEqual(activation_fields["movement_decision_id"],
+                         ("string", encounter.arena_movement_activation.movement_decision_id))
+        self.assertEqual(activation_fields["time"], ("integer", "0"))
+        self.assertEqual(activation_fields["activation_kind"],
+                         ("string", "first_player_movement"))
+        after = (encounter.time, encounter.last_processed_boundary,
+                 tuple((participant.native.being.id,
+                        participant.native.being.get_position().as_tuple(),
+                        participant.native.being.get_posture(),
+                        participant.native.being.hex_facing)
+                       for participant in candidate.participants),
+                 encounter.initiated, encounter.arena_activation_enabled,
+                 encounter.arena_activation, encounter.arena_movement_activation,
                  session._movement_plan, session._rng_cursor.state,
+                 (book._counter, tuple(book._choices.items()), tuple(book._states.items()),
+                  tuple(encounter.pending_action_list)),
                  tuple(player_ledger.history), tuple(opponent_ledger.history))
         self.assertEqual(after, before)
 
