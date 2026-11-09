@@ -47,7 +47,9 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
         hidden.native.being.set_name("Hidden Target Sentinel")
         self.assertFalse(encounter.initiated)
         self.assertIsNone(encounter.initiation)
-        self.assertEqual(encounter.awareness, {})
+        self.assertEqual(set(encounter.awareness), {actor_id, target_id})
+        self.assertEqual(encounter.aware_beings(actor_id), [target_id])
+        self.assertEqual(encounter.aware_beings(target_id), [actor_id])
         self.assertIsNone(player.native.being.geometry)
         self.assertIsNone(hidden.native.being.geometry)
         self.assertFalse(session.public_view()["spot_available"])
@@ -57,8 +59,11 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
                   set(candidate.universe.event_history), tuple(encounter.pending_action_list),
                   tuple(encounter._choice_book._choices), tuple(encounter._choice_book._drafts),
                   encounter.progression_mode, random.getstate())
-        # Native target-directed initiation is explicitly Awareness-gated.
-        self.assertIsNone(encounter.decide_to_act(actor_id, target_id, "Spot"))
+        # r65 supplies Awareness, but the browser still exposes no target-free
+        # Spot operation. Awareness alone does not start this Encounter.
+        self.assertEqual(encounter.aware_beings(actor_id), [target_id])
+        self.assertFalse(session.public_view()["spot_available"])
+        self.assertFalse(encounter.initiated)
         with self.assertRaisesRegex(IntervalIntegrityError, "initiated"):
             encounter.enable_transactional_progression(
                 quiescent=True, rng_owner=RNGCursor(random.Random(5302).getstate()))

@@ -22,7 +22,7 @@ import io
 
 
 class TestArenaDestinationMovementBlocker(unittest.TestCase):
-    def test_spatial_state_remains_position_only_and_intent_requires_explicit_limits(self):
+    def test_native_movement_still_requires_explicit_limits_and_r65_awareness_is_seeded(self):
         candidate = initialize_two_being_arena(0, 5, 5, 20261107)
         encounter = candidate.encounter
         player = candidate.participants[0].native.being
@@ -45,21 +45,22 @@ class TestArenaDestinationMovementBlocker(unittest.TestCase):
         self.assertEqual(encounter.time, 1)
         self.assertEqual(result.facts.outcome, "no_movement")
         self.assertEqual(player.get_position(), start)
-        self.assertEqual(encounter.aware_beings(player.id), [])
+        self.assertEqual(encounter.aware_beings(player.id), [candidate.participants[1].native.being.id])
 
-    def test_generated_browser_has_no_destination_route_or_partial_mutation(self):
+    def test_generated_browser_rejects_invalid_destination_without_partial_mutation(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
         handler_type = make_handler(session)
         handler = object.__new__(handler_type)
         handler.path = "/api/generated/destination"
         handler.wfile = io.BytesIO()
-        handler.rfile = io.BytesIO(json.dumps({"column": "4", "row": "4"}).encode())
+        handler.rfile = io.BytesIO(json.dumps({"column": "4", "row": 4,
+                                               "rate": "walk", "facing_policy": "turn"}).encode())
         handler.headers = {"Content-Length": str(handler.rfile.getbuffer().nbytes)}
         response = {}
         handler._send = lambda status, body, content_type="application/json; charset=utf-8": response.update(
             status=status, body=body, content_type=content_type)
         handler.do_POST()
-        self.assertEqual(response["status"], 404)
+        self.assertEqual(response["status"], 409)
         self.assertEqual(session.active_candidate, None)
         self.assertEqual(session.public_view()["state"], "empty")
 
