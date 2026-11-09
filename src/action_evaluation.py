@@ -882,7 +882,10 @@ def ready_weapon_eligibility(snapshot, action):
                 or action.target_id in tuple(data.get('body_parts', {}).values())
                 or action.target_id == data.get('armor_id')):
             return 'unavailable'
-    return None
+    # Native possession and parent custody do not represent whether a weapon
+    # is in a drawable location or buried in another carried container. Until
+    # that state exists, an initial draw cannot be admitted safely.
+    return 'unavailable'
 
 
 def _activity(snapshot, action, rng):

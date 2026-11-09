@@ -10,6 +10,7 @@ __version__ = "weapon.py 2024-03-15T22:52-03:00"
 # TODO: Make ''' comments on classes and methods
 
 import json
+import math
 from object import ObjectInstance, ObjectDefinition, ObjectDictionary
 from utils import convert_to_numeric
 
@@ -211,3 +212,24 @@ class WeaponDictionary(ObjectDictionary):
                     weapon_dict["length"] = float(weapon_dict["length"]) * FEET_TO_INCHES
                 weapon = WeaponDefinition(**weapon_dict)
                 self.objects[weapon.obj_type] = weapon
+
+
+def re_ready_time_after_strike(weapon, motion):
+    """Return revision-61 post-strike re-ready time for a native weapon motion.
+
+    This derives only from the weapon table's unmodified timing. It does not
+    compute ordinary draw time or model whether a carried Object is drawable.
+    A result of zero is retained as a timing value; it is not a zero-duration
+    Action declaration.
+    """
+    if type(weapon) not in (WeaponDefinition, WeaponInstance):
+        raise TypeError('post-strike re-ready timing requires a native Weapon definition or instance')
+    motion_keys = {'range': 'R', 'swing': 'S', 'thrust': 'T'}
+    if type(motion) is not str or motion not in motion_keys:
+        raise ValueError('weapon motion must be range, swing, or thrust')
+    timing = weapon.current.attacks[motion_keys[motion]]['t'] if type(weapon) is WeaponInstance \
+        else weapon.attacks[motion_keys[motion]]['t']
+    if (type(timing) not in (int, float) or not math.isfinite(timing)
+            or timing <= 0 or not float(timing).is_integer()):
+        raise ValueError('selected weapon motion has no supported positive whole-second timing')
+    return int(timing) // 3

@@ -290,9 +290,9 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or type(action.end_time) not in (int, float)
                 or not math.isfinite(action.start_time) or not math.isfinite(action.end_time)
                 or action.event_type != 'ready weapon'
-                or action.end_time - action.start_time != 1
+                or action.end_time - action.start_time != ReadyWeaponAction.DRAW_DURATION_SECONDS
                 or action.hand not in ReadyWeaponAction.HANDS):
-            raise TransactionalProgressionError('Ready weapon must retain the approved one-second hand declaration')
+            raise TransactionalProgressionError('weapon draw must retain its two-second native hand declaration')
     if not _force and mode_of(encounter)!='transactional':return
     from interval_staging import _guard_methods
     _guard_methods()

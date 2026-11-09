@@ -270,9 +270,15 @@ class GeneratedArenaSession:
                              "outcome": self._pickup_action_outcome}
         ready_weapon_action = None
         if self._ready_weapon_action_id is not None:
+            ready_event = candidate.universe.get_event_by_id(self._ready_weapon_action_id)
+            duration = (None if ready_event is None else
+                        int(ready_event.end_time - ready_event.start_time))
+            remaining = (None if ready_event is None else
+                         max(0, int(ready_event.end_time - candidate.encounter.time)))
             ready_weapon_action = {"name": "Ready weapon",
                 "status": "completed" if self._ready_weapon_action_outcome is not None else "executing",
-                "outcome": self._ready_weapon_action_outcome}
+                "outcome": self._ready_weapon_action_outcome,
+                "duration_seconds": duration, "seconds_remaining": remaining}
         movement_plan = None
         movement_available = player.native.being.posture in ("standing", "crouching", "lying")
         movement_available = movement_available and player.native.being.hex_facing is not None
@@ -424,8 +430,18 @@ class GeneratedArenaSession:
         hands = tuple(sorted(slot for slot, held in body_parts.items()
                              if slot in ReadyWeaponAction.HANDS and held is None))
         if not hands:
-            return None, (), "No explicitly modeled, free native left or right hand is available."
-        return obj, hands, "Choose a free native hand for this Dagger."
+            return None, (), (
+                "No explicitly modeled, free native left or right hand is available. Native custody "
+                "also does not record whether this Dagger is in a drawable location or stored inside "
+                "another carried Object, so its timing is undetermined. Ordinary drawing is 2 seconds; "
+                "variable retrieval and post-strike re-readying follow different rules."
+            )
+        return None, (), (
+            "Native custody does not record whether this Dagger is in a drawable location "
+            "or stored inside another carried Object, so the Ready weapon timing is undetermined. "
+            "An ordinary draw takes 2 seconds; variable retrieval and post-strike re-readying "
+            "use different rules."
+        )
 
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction
@@ -1087,11 +1103,14 @@ class GeneratedArenaSession:
                     self._pickup_action_outcome = result.facts.outcome
                 if (self._ready_weapon_action_id is not None
                         and self._ready_weapon_action_outcome is None):
-                    result = candidate.encounter.inspect_committed(
-                        int(candidate.encounter.time)).action(self._ready_weapon_action_id)
-                    self._ready_weapon_action_outcome = result.facts.outcome
-                    self._trace.native_advance(trace_request_id, trace_client_sequence,
-                        f"action=ready_weapon outcome={self._ready_weapon_action_outcome}")
+                    ready_event = candidate.universe.get_event_by_id(self._ready_weapon_action_id)
+                    if (ready_event is not None
+                            and candidate.encounter.time >= ready_event.end_time):
+                        result = candidate.encounter.inspect_committed(
+                            int(candidate.encounter.time)).action(self._ready_weapon_action_id)
+                        self._ready_weapon_action_outcome = result.facts.outcome
+                        self._trace.native_advance(trace_request_id, trace_client_sequence,
+                            f"action=ready_weapon outcome={self._ready_weapon_action_outcome}")
             except Exception as exc:
                 after_time = candidate.encounter.time
                 after_position = player.get_position()

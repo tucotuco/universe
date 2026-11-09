@@ -120,9 +120,10 @@ class PickUpAction(Action):
 
 
 class ReadyWeaponAction(Action):
-    """Bounded one-second initial readying of a carried ordinary Dagger."""
+    """Candidate ordinary weapon draw; resolution follows the native boundary."""
 
     HANDS = frozenset(('left hand', 'right hand'))
+    DRAW_DURATION_SECONDS = 2
 
     def __init__(self, encounter, actor_id, weapon_id, hand, start_time, *, id=None):
         if (type(actor_id) is not str or not actor_id or type(weapon_id) is not str
@@ -130,13 +131,22 @@ class ReadyWeaponAction(Action):
             raise ValueError('Ready weapon requires distinct native Being and Weapon identities')
         if type(hand) is not str or hand not in self.HANDS:
             raise ValueError('Ready weapon requires an explicitly selected native hand')
+        actor = encounter.get_being(actor_id)
+        weapon = encounter.universe.get_object_by_id(weapon_id)
+        if (actor is not None and weapon is not None
+                and actor.get_skill_level('quick-draw')
+                and (actor.get_weapon_skill_level(weapon.current.obj_type) or 0) > 1):
+            raise ValueError(
+                'Quick-draw with advanced weapon skill is essentially no-time and is not '
+                'represented by the integer-second draw Action')
         if (type(start_time) not in (int, float) or not math.isfinite(start_time)
                 or start_time < 0 or not float(start_time).is_integer()):
             raise ValueError('Ready weapon must begin at an integer Encounter second')
-        super().__init__(encounter.universe, start_time, start_time + 1, 'ready weapon',
+        super().__init__(encounter.universe, start_time,
+                         start_time + self.DRAW_DURATION_SECONDS, 'ready weapon',
                          actor_id, weapon_id, instrument_id=None, id=id)
         self.encounter = encounter
-        self.end_time = start_time + 1
+        self.end_time = start_time + self.DRAW_DURATION_SECONDS
         self.hand = hand
 
     def prepare_schedule(self, encounter):
@@ -149,8 +159,8 @@ class ReadyWeaponAction(Action):
         target = encounter.universe.get_object_by_id(self.target_id)
         if actor is None or type(target) is not WeaponInstance:
             raise ValueError('Ready weapon requires a participating Being and registered WeaponInstance')
-        if self.end_time - self.start_time != 1:
-            raise ValueError('initial Ready weapon lasts exactly one second')
+        if self.end_time - self.start_time != self.DRAW_DURATION_SECONDS:
+            raise ValueError('ordinary weapon drawing uses the adopted two-second duration')
         return PreparedSchedule.from_action(self)
 
     def resolve(self, difficulty_class):
