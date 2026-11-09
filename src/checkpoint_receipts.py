@@ -17,6 +17,7 @@ from checkpoint_choices import (ChoiceDescriptorRejected, describe_accepted_choi
 
 DESCRIPTOR_SCHEMA = 'universe.committed-native-receipt-chain/1'
 REBINDING_SCHEMA = 'universe.committed-native-rebinding-plan/1'
+MOVEMENT_ONLY_BOUNDARY_SCHEMA = 'universe.committed-movement-only-boundary/1'
 
 
 class ReceiptDescriptorRejected(ValueError):
@@ -69,6 +70,28 @@ class PortableBoundaryReceipt:
         return (self.boundary, self.start, self.action_ids, self.effect_ids,
             tuple(row.to_data() for row in self.actions),
             self.effects,
+            tuple(row.to_data() for row in self.targets), self.start_fences,
+            self.rng_after)
+
+
+@dataclass(frozen=True)
+class PortableMovementOnlyBoundaryReceipt:
+    """Closed Target/RNG receipt for the initial target-free Arena movement."""
+
+    schema: str
+    boundary: int
+    start: tuple
+    participant_ids: tuple
+    targets: tuple
+    start_fences: tuple
+    rng_after: tuple
+
+    @property
+    def action_ids(self):
+        return ()
+
+    def to_data(self):
+        return (self.schema, self.boundary, self.start, self.participant_ids,
             tuple(row.to_data() for row in self.targets), self.start_fences,
             self.rng_after)
 
@@ -550,6 +573,16 @@ def _rng_descriptor(encounter, history, rng_scope):
     return ('caller-cursor','exclusive_encounter-asserted'),_value(state)
 
 
+def _movement_activation_for_receipt(encounter):
+    """Return the already-admitted native activation record, if present."""
+    from checkpoint_inventory import CheckpointRejected
+    try:
+        from checkpoint_adapters import _movement_activation_state
+        return _movement_activation_state(encounter)
+    except CheckpointRejected as exc:
+        raise ReceiptDescriptorRejected('Arena movement activation is inconsistent') from exc
+
+
 def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                                      rng_scope=None):
     """Capture 1–2 authentic consecutive Run/Spot receipt boundaries read-only."""
@@ -579,8 +612,18 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
         if type(world_data.get('id')) is not str or type(encounter.id) is not str:
             raise ReceiptDescriptorRejected('Universe/Encounter requires stable logical IDs')
         action_ids=tuple(aid for row in view.timeline for aid in row.action_ids)
-        if not action_ids or len(set(action_ids))!=len(action_ids) or set(action_ids)!=set(view.actions):
+        if len(set(action_ids))!=len(action_ids) or set(action_ids)!=set(view.actions):
             raise ReceiptDescriptorRejected('missing, duplicate, or unreceipted committed Action')
+        movement_activation=None
+        movement_only_boundaries=tuple(index for index,row in enumerate(history)
+                                       if not row.action_ids)
+        if movement_only_boundaries:
+            movement_activation=_movement_activation_for_receipt(encounter)
+            if movement_activation is None:
+                raise ReceiptDescriptorRejected('Action-free boundary lacks native movement activation')
+            if movement_only_boundaries!=(0,):
+                raise ReceiptDescriptorRejected(
+                    'only the initial movement-activated boundary may be Action-free')
         live_actions={}
         action_actors={}
         effects_by_boundary={};actions_by_boundary={};targets_by_boundary={}
@@ -644,13 +687,24 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
         rng_owner,rng_final=_rng_descriptor(encounter,history,rng_scope)
         boundary_rows=[]
         timeline={row.boundary:row for row in view.timeline}
-        for receipt in history:
+        for receipt_index,receipt in enumerate(history):
             br=timeline.get(receipt.boundary)
             if br is None or br.start!=receipt.inspection.start:
                 raise ReceiptDescriptorRejected('missing boundary chronology record')
             aids=tuple(receipt.action_ids);eids=tuple(receipt.effect_ids)
             if tuple(br.action_ids)!=aids or tuple(br.effect_ids)!=eids:
                 raise ReceiptDescriptorRejected('boundary ordered identity coverage mismatch')
+            if not aids:
+                meta=receipt.inspection
+                if (receipt_index!=0 or movement_activation is None or eids
+                        or meta.actions or meta.action_anchors or meta.effects
+                        or type(meta.participants) is not tuple or not meta.participants
+                        or len(set(meta.participants))!=len(meta.participants)
+                        or set(meta.participants)!=set(encounter.being_list)
+                        or set(meta.target_anchors)!=set(meta.participants)
+                        or set(meta.entities)!=set(meta.participants)):
+                    raise ReceiptDescriptorRejected(
+                        'initial movement-only boundary has inconsistent Action, effect, or participant coverage')
             portable_actions=[]
             for aid in aids:
                 item=view.actions[aid]
@@ -668,11 +722,21 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                     targets_by_boundary[receipt.boundary].append(_portable_target(target_views[0],target_id,receipt.boundary,effect_lookup,action_actors))
             if not targets_by_boundary[receipt.boundary]:raise ReceiptDescriptorRejected('missing Target-owned receipt history')
             start_fences=tuple(_portable_fence(f,encounter,live_actions,future_action_ids) for f in receipt.inspection.starts)
-            boundary_rows.append(PortableBoundaryReceipt(receipt.boundary,_finite(receipt.inspection.start,'receipt.start'),
-                aids,tuple(_value(eid) for eid in eids),
-                tuple(replace(action,effect_ids=tuple(_value(eid) for eid in action.effect_ids)) for action in portable_actions),portable_effects,
-                tuple(sorted(targets_by_boundary[receipt.boundary],key=lambda x:x.target_id)),
-                start_fences,_value(receipt.rng_state)))
+            portable_targets=tuple(sorted(targets_by_boundary[receipt.boundary],key=lambda x:x.target_id))
+            if not aids:
+                participant_ids=tuple(receipt.inspection.participants)
+                if tuple(row.target_id for row in portable_targets)!=tuple(sorted(participant_ids)):
+                    raise ReceiptDescriptorRejected(
+                        'initial movement-only boundary lacks complete participant Target history')
+                boundary_rows.append(PortableMovementOnlyBoundaryReceipt(
+                    MOVEMENT_ONLY_BOUNDARY_SCHEMA,receipt.boundary,
+                    _finite(receipt.inspection.start,'receipt.start'),participant_ids,
+                    portable_targets,start_fences,_value(receipt.rng_state)))
+            else:
+                boundary_rows.append(PortableBoundaryReceipt(receipt.boundary,_finite(receipt.inspection.start,'receipt.start'),
+                    aids,tuple(_value(eid) for eid in eids),
+                    tuple(replace(action,effect_ids=tuple(_value(eid) for eid in action.effect_ids)) for action in portable_actions),portable_effects,
+                    portable_targets,start_fences,_value(receipt.rng_state)))
         descriptor=PortableReceiptChain(DESCRIPTOR_SCHEMA,world.id,encounter.id,
             _finite(encounter.start_time,'Encounter.start_time'),tuple(boundary_rows),committed,future_choices,rng_owner)
         validate_receipt_descriptor(descriptor)
@@ -689,7 +753,58 @@ def validate_receipt_descriptor(value):
     if d['rng_ownership']!=('caller-cursor','exclusive_encounter-asserted'):
         raise ReceiptDescriptorRejected('ambiguous or unsupported RNG ownership descriptor')
     prior=None;all_actions=set();all_choices=set();lifecycle_choices={}
-    for receipt in d['receipts']:
+    for receipt_index,receipt in enumerate(d['receipts']):
+        if type(receipt) is PortableMovementOnlyBoundaryReceipt:
+            _closed(receipt,PortableMovementOnlyBoundaryReceipt)
+            if receipt.schema!=MOVEMENT_ONLY_BOUNDARY_SCHEMA:
+                raise ReceiptDescriptorRejected('unknown movement-only boundary version')
+            if receipt_index!=0:
+                raise ReceiptDescriptorRejected('movement-only receipt is not the initial boundary')
+            if type(receipt.boundary) is not int or receipt.boundary<1:
+                raise ReceiptDescriptorRejected('invalid movement-only boundary')
+            if _decoded_number(receipt.start,'movement-only receipt start')!=start_time:
+                raise ReceiptDescriptorRejected('movement-only receipt start does not match Encounter chronology')
+            if receipt.boundary!=math.floor(start_time)+1:
+                raise ReceiptDescriptorRejected('movement-only receipt is not the initial committed boundary')
+            if (type(receipt.participant_ids) is not tuple or not receipt.participant_ids
+                    or any(type(entity_id) is not str or not entity_id for entity_id in receipt.participant_ids)
+                    or len(set(receipt.participant_ids))!=len(receipt.participant_ids)):
+                raise ReceiptDescriptorRejected('movement-only participant identity set is invalid')
+            _id_set=set(receipt.participant_ids)
+            if type(receipt.targets) is not tuple or not receipt.targets:
+                raise ReceiptDescriptorRejected('movement-only boundary lacks Target-owned history')
+            target_ids=tuple(row.target_id for row in receipt.targets
+                             if type(row) is PortableTargetRecord)
+            if len(target_ids)!=len(receipt.targets) or target_ids!=tuple(sorted(_id_set)):
+                raise ReceiptDescriptorRejected('movement-only Target history does not cover participants exactly')
+            for target in receipt.targets:
+                _closed(target,PortableTargetRecord);_id(target.target_id,'Target')
+                if target.category!='being':
+                    raise ReceiptDescriptorRejected('movement-only Target category is not a Being')
+                if type(target.state) is not tuple or not target.state or target.state[0]!='target.candidate/1':
+                    raise ReceiptDescriptorRejected('unknown movement-only Target state descriptor')
+                state_fields=target.state[1]
+                if (type(state_fields) is not tuple or
+                        ('target_id',('string',target.target_id)) not in state_fields or
+                        ('category',('string','being')) not in state_fields):
+                    raise ReceiptDescriptorRejected('movement-only Target identity/category link is invalid')
+                _validate_encoded(target.state)
+                if target.position==('null',):pass
+                elif type(target.position) is tuple and len(target.position)==2 and target.position[0]=='cartesian':
+                    if type(target.position[1]) is not tuple or len(target.position[1])!=3:
+                        raise ReceiptDescriptorRejected('invalid movement-only Target position')
+                    for number in target.position[1]:_validate_encoded(number)
+                else:raise ReceiptDescriptorRejected('unknown movement-only Target position version')
+                _check_target_effect_links(target,(),{})
+            for fence in receipt.start_fences:
+                if (type(fence) is not tuple or len(fence)!=5 or type(fence[1]) is not str
+                        or any(type(seq) is not tuple or any(type(x) is not str for x in seq)
+                               for seq in fence[2:])):
+                    raise ReceiptDescriptorRejected('unknown movement-only start-fence descriptor fields')
+                _validate_encoded(fence[0])
+            _validate_encoded(receipt.rng_after)
+            prior=receipt.boundary
+            continue
         _closed(receipt,PortableBoundaryReceipt)
         if type(receipt.boundary) is not int or receipt.boundary<1:raise ReceiptDescriptorRejected('invalid receipt boundary')
         if prior is not None and receipt.boundary!=prior+1:raise ReceiptDescriptorRejected('receipt boundaries are missing, duplicate, or out of order')
@@ -848,9 +963,12 @@ def plan_receipt_rebinding(descriptor):
     entity_ids=set();action_ids=[];choice_ids=[];boundaries=[]
     for receipt in descriptor.receipts:
         boundaries.append(receipt.boundary)
-        for action in receipt.actions:
-            action_ids.append(action.action_id);entity_ids.add(action.actor_id)
-            if action.target_id is not None:entity_ids.add(action.target_id)
+        if type(receipt) is PortableMovementOnlyBoundaryReceipt:
+            entity_ids.update(receipt.participant_ids)
+        if type(receipt) is PortableBoundaryReceipt:
+            for action in receipt.actions:
+                action_ids.append(action.action_id);entity_ids.add(action.actor_id)
+                if action.target_id is not None:entity_ids.add(action.target_id)
         for row in receipt.targets:
             entity_ids.add(row.target_id)
             state=_tagged_fields(row.state,'target.candidate/1')

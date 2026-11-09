@@ -16,7 +16,7 @@ def _find_activation_node(value):
 
 
 class GeneratedArenaCheckpointActivationTests(unittest.TestCase):
-    def test_first_movement_boundary_remains_live_when_strict_checkpoint_refuses(self):
+    def test_first_movement_boundary_closes_receipt_before_next_strict_checkpoint_refusal(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
@@ -68,7 +68,7 @@ class GeneratedArenaCheckpointActivationTests(unittest.TestCase):
         receipt_blocker = next(row.reason for row in captured.diagnostics
                                if row.code == "bounded_run_spot_closure_refused")
         self.assertEqual(receipt_blocker,
-            "Run/Spot receipt closure refused: missing, duplicate, or unreceipted committed Action")
+            "Being original definition is not the matching registered Library definition")
         activation_node = _find_activation_node(captured.envelope)
         self.assertIsNotNone(activation_node)
         activation_fields = dict(activation_node[2])

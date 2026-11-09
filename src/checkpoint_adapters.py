@@ -382,7 +382,9 @@ class NativeInventory(_Inventory):
         from activities import RunAction,SpotAction
         from atomic_publication import RNGCursor
         from checkpoint_choices import describe_accepted_choice,ChoiceDescriptorRejected
-        from checkpoint_receipts import describe_committed_receipt_chain,ReceiptDescriptorRejected
+        from checkpoint_receipts import (describe_committed_receipt_chain,
+            ReceiptDescriptorRejected,PortableBoundaryReceipt,
+            PortableMovementOnlyBoundaryReceipt)
         from physiology_registry import PhysiologyRegistry,PhysiologyDefinition
         from physical_fatigue import PhysicalFatigueState
         from action_choice import ChoiceBook
@@ -502,11 +504,16 @@ class NativeInventory(_Inventory):
             receipts=receipt_descriptor.receipts
             receipt_descriptor_data=(receipt_descriptor.to_data(),)
             for receipt in receipts:
-                for action in receipt.actions:
-                    _require(action.adapter in ('native.run-action/1','native.spot-action/1'),
-                             'committed receipt contains an unsupported Action family')
-                    entity_ids.add(action.actor_id)
-                    if action.target_id is not None:entity_ids.add(action.target_id)
+                if type(receipt) is PortableBoundaryReceipt:
+                    for action in receipt.actions:
+                        _require(action.adapter in ('native.run-action/1','native.spot-action/1'),
+                                 'committed receipt contains an unsupported Action family')
+                        entity_ids.add(action.actor_id)
+                        if action.target_id is not None:entity_ids.add(action.target_id)
+                elif type(receipt) is PortableMovementOnlyBoundaryReceipt:
+                    entity_ids.update(receipt.participant_ids)
+                else:
+                    raise CheckpointRejected('receipt chain contains an unsupported boundary type')
 
         accepted=[];committed_ids={aid for receipt in receipts for aid in receipt.action_ids}
         book=encounter._choice_book

@@ -279,7 +279,7 @@ print(repr(roundtrip))
             encounter.arena_activation_enabled = True
             encounter.arena_movement_activation = original
 
-    def test_activated_capture_advances_to_receipt_blocker_without_mutation(self):
+    def test_activated_capture_closes_action_free_receipt_and_reaches_next_blocker(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
@@ -303,12 +303,73 @@ print(repr(roundtrip))
                  encounter.arena_movement_activation, session._movement_plan,
                  session._rng_cursor.state,
                  (book._counter, tuple(book._choices.items()), tuple(book._states.items()),
-                  tuple(encounter.pending_action_list)),
+                  tuple(book._drafts.items()), tuple(book._registered.items()), book.revision,
+                  tuple(encounter.pending_action_list), tuple(encounter.finished_action_list),
+                  tuple(encounter.cancelled_action_list)),
+                 tuple(encounter.__dict__["_atomic_interval_history"]),
+                 tuple((observer_id, tuple(sorted(aware_ids)))
+                       for observer_id, aware_ids in sorted(encounter.awareness.items())),
                  tuple((p.native.being._arena_perception_ledger.observer_id,
                          dict(p.native.being._arena_perception_ledger._current),
                          list(p.native.being._arena_perception_ledger._history))
                        for p in candidate.participants))
         before = source_state()
+        from checkpoint_receipts import (MOVEMENT_ONLY_BOUNDARY_SCHEMA,
+            PortableMovementOnlyBoundaryReceipt, ReceiptDescriptorRejected,
+            describe_committed_receipt_chain, plan_receipt_rebinding,
+            validate_receipt_descriptor)
+        descriptor = describe_committed_receipt_chain(candidate.universe, encounter,
+            quiescent=True, rng_scope="exclusive_encounter")
+        movement_receipt, = descriptor.receipts
+        self.assertIs(type(movement_receipt), PortableMovementOnlyBoundaryReceipt)
+        self.assertEqual(movement_receipt.schema, MOVEMENT_ONLY_BOUNDARY_SCHEMA)
+        self.assertEqual(movement_receipt.boundary, 1)
+        self.assertEqual(set(movement_receipt.participant_ids),
+                         {row.native.being.id for row in candidate.participants})
+        self.assertEqual(tuple(row.target_id for row in movement_receipt.targets),
+                         tuple(sorted(movement_receipt.participant_ids)))
+        self.assertEqual(movement_receipt.action_ids, ())
+        self.assertTrue(validate_receipt_descriptor(descriptor))
+        rebind_plan = plan_receipt_rebinding(descriptor)
+        self.assertEqual(rebind_plan.boundaries, (1,))
+        self.assertTrue(set(movement_receipt.participant_ids).issubset(rebind_plan.entity_ids))
+        invalid_receipts = (
+            replace(movement_receipt, schema="universe.committed-movement-only-boundary/99"),
+            replace(movement_receipt, boundary=2),
+            replace(movement_receipt, participant_ids=()),
+            replace(movement_receipt, targets=movement_receipt.targets[:-1]),
+            replace(movement_receipt,
+                    targets=(movement_receipt.targets[0], movement_receipt.targets[0])),
+        )
+        for malformed in invalid_receipts:
+            with self.subTest(receipt=malformed):
+                with self.assertRaises(ReceiptDescriptorRejected):
+                    validate_receipt_descriptor(replace(descriptor, receipts=(malformed,)))
+        repeated_empty = replace(movement_receipt, boundary=2,
+                                 start=("integer", "1"))
+        with self.assertRaisesRegex(ReceiptDescriptorRejected,
+                                   "movement-only receipt is not the initial boundary"):
+            validate_receipt_descriptor(replace(descriptor,
+                receipts=(movement_receipt, repeated_empty)))
+        committed_history = encounter.__dict__["_atomic_interval_history"]
+        authentic_receipt = committed_history[0]
+        try:
+            committed_history[0] = replace(authentic_receipt)
+            with self.assertRaisesRegex(ReceiptDescriptorRejected,
+                                       "live receipt authentication/anchor validation failed"):
+                describe_committed_receipt_chain(candidate.universe, encounter,
+                    quiescent=True, rng_scope="exclusive_encounter")
+        finally:
+            committed_history[0] = authentic_receipt
+        activation_enabled = encounter.arena_activation_enabled
+        try:
+            encounter.arena_activation_enabled = False
+            with self.assertRaisesRegex(ReceiptDescriptorRejected,
+                                       "Arena movement activation is inconsistent"):
+                describe_committed_receipt_chain(candidate.universe, encounter,
+                    quiescent=True, rng_scope="exclusive_encounter")
+        finally:
+            encounter.arena_activation_enabled = activation_enabled
         from checkpoint_arena_perception import encode_arena_perception_ledger
         with patch("checkpoint_arena_perception.encode_arena_perception_ledger",
                    wraps=encode_arena_perception_ledger) as encode_ledger:
@@ -321,7 +382,7 @@ print(repr(roundtrip))
         blocker = next(row.reason for row in checkpoint.diagnostics
                        if row.code == "bounded_run_spot_closure_refused")
         self.assertEqual(blocker,
-            "Run/Spot receipt closure refused: missing, duplicate, or unreceipted committed Action")
+            "Being original definition is not the matching registered Library definition")
         self.assertTrue(validation.inventory_validated)
         self.assertFalse(checkpoint.closure_validated)
         self.assertFalse(checkpoint.portable_schema_defined)
