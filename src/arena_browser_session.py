@@ -634,6 +634,7 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("native player fatigue cannot be projected safely")
 
             inventory = self._native_inventory_projection(candidate, being)
+            anatomy = self._native_hand_projection(being, inventory)
             movement = {
                 "position_meters": {"x": position.x, "y": position.y, "z": position.z},
                 "cell": cell,
@@ -681,9 +682,43 @@ class GeneratedArenaSession:
                     "posture": being.posture,
                     "states": dict(sorted(states.items())),
                 },
+                "anatomy": anatomy,
                 "movement": movement,
                 "inventory": inventory,
             }
+
+    @staticmethod
+    def _native_hand_projection(being, inventory):
+        """Project represented native hand locations without exposing IDs."""
+        body_parts = being.current.body_parts
+        if type(body_parts) is not dict or any(
+                type(key) is not str or not key
+                or value is not None and type(value) is not str
+                for key, value in body_parts.items()):
+            return {"status": "unavailable", "hands": []}
+        represented = [name for name in ("left hand", "right hand") if name in body_parts]
+        if not represented:
+            return {"status": "unrepresented", "hands": []}
+        if inventory.get("status") != "available":
+            if any(body_parts[name] is not None for name in represented):
+                return {"status": "unavailable", "hands": []}
+            return {"status": "available", "hands": [
+                {"name": name, "occupancy": "empty"} for name in represented]}
+
+        hands = []
+        for name in represented:
+            object_id = body_parts[name]
+            if object_id is None:
+                hands.append({"name": name, "occupancy": "empty"})
+                continue
+            item = next((row for row in inventory["items"]
+                         if row.get("body_part") == name), None)
+            if item is None:
+                return {"status": "unavailable", "hands": []}
+            hands.append({"name": name, "occupancy": "occupied",
+                          "object": {"handle": item["handle"], "name": item["name"],
+                                     "type": item["type"]}})
+        return {"status": "available", "hands": hands}
 
     def _native_inventory_projection(self, candidate, being):
         """Resolve every native ownership/equipment reference or expose failure."""
@@ -790,8 +825,11 @@ class GeneratedArenaSession:
                 handle = self._view_handles.get(object_id)
                 if handle is None:
                     raise ValueError("native inventory Object has no observer-authorized handle")
-                rows.append({"handle": handle, "name": display_name, "type": type_key,
-                             "kind": kind, "weight_pounds": float(weight), "status": status})
+                row = {"handle": handle, "name": display_name, "type": type_key,
+                       "kind": kind, "weight_pounds": float(weight), "status": status}
+                if object_id in body_slots:
+                    row["body_part"] = body_slots[object_id]
+                rows.append(row)
                 total_weight += float(weight)
                 if not math.isfinite(total_weight):
                     raise ValueError("native carried weight is not finite")

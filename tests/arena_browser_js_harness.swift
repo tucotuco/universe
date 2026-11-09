@@ -101,7 +101,7 @@ function fetch(path,options={}){
       for(const e of __serverState.entities||[])if(e.category==='object'&&e.cell&&e.cell.column===__serverState.player.cell.column&&e.cell.row===__serverState.player.cell.row)e.pickup_available=true;
     }else if(__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'){
       __serverState.ready_weapon_action.seconds_remaining-=1;
-      if(__serverState.ready_weapon_action.seconds_remaining===0){__serverState.ready_weapon_action={name:'Draw',status:'completed',outcome:'success',duration_seconds:2,seconds_remaining:0};if(__serverState.character&&__serverState.character.inventory.items.length)__serverState.character.inventory.items[0].status='readied in right hand';}
+      if(__serverState.ready_weapon_action.seconds_remaining===0){__serverState.ready_weapon_action={name:'Draw',status:'completed',outcome:'success',duration_seconds:2,seconds_remaining:0};if(__serverState.character&&__serverState.character.inventory.items.length){const item=__serverState.character.inventory.items[0];item.status='readied in right hand';const hand=__serverState.character.anatomy.hands.find(row=>row.name==='right hand');if(hand){hand.occupancy='occupied';hand.object={handle:item.handle,name:item.name,type:item.type};}}}
     }else if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){
       __serverState.pickup_action={name:'Pick up',status:'completed',outcome:'success'};
       const e=__serverState.entities.find(row=>row.handle===__serverState.selected_entity.handle);
@@ -167,7 +167,8 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(currentView.time_seconds!==2||currentView.ready_weapon_action.status!=='completed'||currentView.ready_weapon_action.outcome!=='success'||currentView.character.inventory.items[0].status!=='readied in right hand')throw Error('browser did not display readiness after the second boundary');
   globalThis.__result=JSON.stringify({calls:__calls,time:currentView.time_seconds,inventory:currentView.character.inventory.items,
     activationRunCalls:__calls.filter(call=>call.path==='/api/generated/run').length,
-    drawCall:__calls.find(call=>call.path==='/api/generated/ready-weapon'),actionResult:__element('actionResult').textContent});
+    drawCall:__calls.find(call=>call.path==='/api/generated/ready-weapon'),
+    characterText:__text(__element('dialogBody')),actionResult:__element('actionResult').textContent});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """# : #"""
 globalThis.__done=false;globalThis.__failure='';globalThis.__result='';

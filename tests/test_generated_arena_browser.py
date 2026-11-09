@@ -983,7 +983,12 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(len(inventory["items"]), 1)
         self.assertEqual(inventory["items"][0]["status"], "carried; not readied")
         self.assertEqual(inventory["carried_weight_pounds"], native.current.weight)
-        self.assertEqual(player.current.body_parts, {"right hand": None})
+        self.assertEqual(player.current.body_parts, player.original.body_parts)
+        hand_state = settled["character"]["anatomy"]
+        self.assertEqual(hand_state["status"], "available")
+        self.assertEqual({row["name"] for row in hand_state["hands"]},
+                         set(player.current.body_parts) & {"left hand", "right hand"})
+        self.assertTrue(all(row["occupancy"] == "empty" for row in hand_state["hands"]))
         self.assertEqual(player.weapons, [])
         self.assertEqual(player.possessions, [native.id])
         carried = next(row for row in self.session.public_view()["entities"]
@@ -1071,7 +1076,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         draw = next(row for row in inspected["action_catalog"]["entries"]
                     if row["name"] == "ready weapon")
         self.assertEqual((draw["status"], draw["display_name"], draw["hands"]),
-                         ("available", "Draw (2 s)", ["right hand"]))
+                         ("available", "Draw (2 s)", ["left hand", "right hand"]))
         status, accepted = self.request("/api/generated/ready-weapon",
             {"handle": handle, "hand": "right hand"})
         self.assertEqual(status, 200)
@@ -1132,7 +1137,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         action = next(item for item in inspected["action_catalog"]["entries"]
                       if item["name"] == "ready weapon")
         self.assertEqual((action["status"], action["display_name"], action["hands"]),
-                         ("available", "Draw (2 s)", ["right hand"]))
+                         ("available", "Draw (2 s)", ["left hand", "right hand"]))
         self.assertEqual(inspected["character"]["inventory"]["items"][0]["status"],
                          "carried; not readied")
         weight = weapon.current.weight
@@ -1212,6 +1217,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(result["activationRunCalls"], 0)
         self.assertEqual(result["inventory"][0]["status"], "readied in right hand")
         self.assertEqual(result["drawCall"]["body"]["hand"], "right hand")
+        self.assertIn("left hand: empty", result["characterText"])
+        self.assertIn("right hand: Drawable Dagger — Dagger", result["characterText"])
         self.assertNotIn("native_id", json.dumps(result["drawCall"]["body"]))
         self.assertEqual([call["path"] for call in result["calls"] if call["path"] in (
             "/api/generated/ready-weapon", "/api/generated/advance")], [
