@@ -21,8 +21,14 @@ import hashlib, json, sys
 assert 'npcgen' not in sys.modules
 from checkpoint_wire import decode_run_spot_wire
 from checkpoint_binding import bind_quarantined_movement_boundary
+from checkpoint_reconstruction import reconstruct_initial_run_spot, ReconstructionRejected
 decoded = decode_run_spot_wire(sys.stdin.buffer.read())
 bound = bind_quarantined_movement_boundary(decoded)
+try:
+  reconstruct_initial_run_spot(decoded)
+  native_restore = 'unexpectedly-accepted'
+except ReconstructionRejected as exc:
+  native_restore = str(exc)
 sidecar = bound.sidecar
 digest = lambda value: hashlib.sha256(repr(value).encode()).hexdigest()
 print(json.dumps({
@@ -41,6 +47,7 @@ print(json.dumps({
   'actions': sidecar.action_ids,
   'choices': sidecar.choice_ids,
   'effects': sidecar.effect_ids,
+  'native_restore': native_restore,
   'quarantined': bound.quarantined
 }))
 '''
@@ -118,6 +125,10 @@ class MovementOnlyIdentityBindingTests(unittest.TestCase):
         self.assertEqual(child['actions'], [])
         self.assertEqual(child['choices'], [])
         self.assertEqual(child['effects'], [])
+        self.assertEqual(child['native_restore'],
+            'committed boundaries are refused: no reviewed quarantine-only native Action/Target '
+            'projection exists; native receipt authenticity depends on process-local issuance, '
+            'which checkpoint reconstruction must not recreate')
         self.assertTrue(child['quarantined'])
         self.assertEqual(envelope.to_data()[12:16], (True, False, False, False))
 
