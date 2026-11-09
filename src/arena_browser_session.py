@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import copy
+import csv
+import inspect
 import re
 import random
 import secrets
 import threading
 import math
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
 from activities import RunAction
@@ -28,6 +32,50 @@ _MOVEMENT_DISABLED = (
 )
 _RATES = frozenset(("walk", "hustle", "jog", "run", "sprint"))
 _CLIENT_SEQUENCE = re.compile(r"[1-9][0-9]{0,9}\Z")
+
+
+@lru_cache(maxsize=1)
+def _native_action_catalog():
+    """Read the checked-in native Action catalog; labels are not support claims."""
+    path = Path(__file__).resolve().parent / "config" / "actions.tsv"
+    try:
+        with path.open(encoding="utf-8", newline="") as stream:
+            reader = csv.DictReader(stream, delimiter="\t")
+            expected = ("name", "target_type", "required_skill", "is_melee")
+            if tuple(reader.fieldnames or ()) != expected:
+                raise ValueError("native Action catalog schema is not supported")
+            rows = []
+            names = set()
+            for row in reader:
+                name = row["name"]
+                if (type(name) is not str or not name or name in names
+                        or row["target_type"] not in ("none", "being", "object", "weapon", "attack")
+                        or type(row["required_skill"]) is not str
+                        or row["is_melee"] not in ("True", "False")):
+                    raise ValueError("native Action catalog row is malformed")
+                names.add(name)
+                rows.append({"name": name, "target_type": row["target_type"],
+                             "required_skill": row["required_skill"],
+                             "is_melee": row["is_melee"] == "True"})
+            if not rows:
+                raise ValueError("native Action catalog is empty")
+            return tuple(rows)
+    except (OSError, csv.Error, KeyError, ValueError) as exc:
+        raise ArenaBrowserRequestError("native Action catalog is unavailable") from exc
+
+
+@lru_cache(maxsize=None)
+def _has_native_transactional_action_contract(action_type):
+    """Confirm exact scheduler-preparer and resolver registrations read-only."""
+    try:
+        from scheduling import native_preparer
+        from observer_proposals import _NATIVE_RESOLVERS
+        resolver = inspect.getattr_static(action_type, "resolve", None)
+        preparer = inspect.getattr_static(action_type, "prepare_schedule", None)
+        return (_NATIVE_RESOLVERS.get(action_type) is resolver
+                and native_preparer(object.__new__(action_type)) is preparer)
+    except (AttributeError, TypeError, ValueError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -195,6 +243,11 @@ class GeneratedArenaSession:
                 "facing_policy": self._movement_plan.facing_policy,
                 "remaining_distance_meters": remaining,
             }
+        from activities import PickUpAction, RunAction, SpotAction
+        supported_actions = {
+            action_type: _has_native_transactional_action_contract(action_type)
+            for action_type in (RunAction, SpotAction, PickUpAction)
+        }
         perceived = []
         for evidence in ledger.current:
             handle = self._view_handles.get(evidence.entity_id)
@@ -203,6 +256,8 @@ class GeneratedArenaSession:
                 self._view_handles[evidence.entity_id] = handle
             p = evidence.position
             address = None if p is None else candidate.arena_map.layout.cell_at_position(p)
+            pickup_available, pickup_unavailable_reason = self._pickup_status_unlocked(
+                candidate, player.native.being, evidence.entity_id, evidence)
             perceived.append({
                 "handle": handle, "category": evidence.category,
                 "name": self._display_names.get(evidence.entity_id, evidence.name),
@@ -210,14 +265,15 @@ class GeneratedArenaSession:
                 "present_state": evidence.present_state,
                 "position_meters": None if p is None else {"x": p.x, "y": p.y, "z": p.z},
                 "cell": None if address is None else {"column": address.column, "row": address.row},
-                "pickup_available": (evidence.category == "object" and evidence.present_state == "ground"
-                    and p is not None and candidate.encounter.initiated
-                    and address == candidate.arena_map.layout.cell_at_position(position)),
+                "pickup_available": pickup_available,
+                "pickup_unavailable_reason": pickup_unavailable_reason,
             })
         selected = next((row for row in perceived
                          if row["handle"] == self._selected_entity_handle), None)
         character = self._player_character_sheet_unlocked(
             candidate, player, position, cell, movement_plan)
+        action_catalog = self._action_catalog_unlocked(
+            candidate, player.native.being, selected, supported_actions)
         return {
             "state": "active",
             "load_available": False,
@@ -239,6 +295,7 @@ class GeneratedArenaSession:
             "pickup_action": pickup_action,
             "entities": perceived,
             "selected_entity": selected,
+            "action_catalog": action_catalog,
             "run_available": self._player_action_id is None and not candidate.encounter.initiated,
             "advance_available": ((self._player_action_id is not None
                                     and self._player_action_outcome is None)
@@ -252,6 +309,123 @@ class GeneratedArenaSession:
             "spot_available": False,
             "spot_reason": _SPOT_DISABLED,
         }
+
+    @staticmethod
+    def _pickup_target_unlocked(candidate, player, entity_id, evidence):
+        """Share the exact read-only Pick up preflight between UI projection and submit."""
+        if evidence is None or evidence.category != "object":
+            raise ArenaBrowserRequestError("Select a currently perceived ground Object first.")
+        if evidence.present_state != "ground":
+            raise ArenaBrowserRequestError("Pick up is available only for a free ground Object.")
+        obj = candidate.universe.get_object_by_id(entity_id)
+        if (obj is None or obj.parent_container_id is not None or obj.get_position() is None
+                or obj.geometry is not None or obj.visual_occlusion is not None):
+            raise ArenaBrowserRequestError(
+                "This Object is not a supported free ground target for generated-Arena Pick up.")
+        if obj.get_position() != evidence.position:
+            raise ArenaBrowserRequestError(
+                "Visible Object evidence is stale against current native position; inspect it again.")
+        layout = candidate.arena_map.layout
+        player_cell = layout.cell_at_position(player.get_position())
+        object_cell = layout.cell_at_position(obj.get_position())
+        if player_cell is None or player_cell != object_cell:
+            raise ArenaBrowserRequestError(
+                "Move into the same hex as this Object before choosing Pick up.")
+        encounter = candidate.encounter
+        if not encounter.initiated:
+            raise ArenaBrowserRequestError(
+                "Activate the native Encounter with Run or movement before choosing Pick up.")
+        if encounter.progression_mode != "transactional" or not encounter.arena_activation_enabled:
+            raise ArenaBrowserRequestError("The native Arena Action pathway is unavailable.")
+        return obj
+
+    def _pickup_status_unlocked(self, candidate, player, entity_id, evidence):
+        from activities import PickUpAction
+        if not _has_native_transactional_action_contract(PickUpAction):
+            return False, "The native Pick up scheduler or resolver contract is unavailable."
+        if self._pickup_action_id is not None and self._pickup_action_outcome is None:
+            return False, "A native Pick up Action is already resolving."
+        try:
+            self._pickup_target_unlocked(candidate, player, entity_id, evidence)
+        except ArenaBrowserRequestError as exc:
+            return False, str(exc)
+        return True, "Native one-second Pick up is currently available for this Object."
+
+    def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
+        from activities import PickUpAction, RunAction, SpotAction
+
+        catalog_rows = []
+        for source_row in _native_action_catalog():
+            name = source_row["name"]
+            if name.casefold() == "grab object":
+                reason = ("The legacy Grab object catalog Action is not admitted for this use. "
+                          "Revision 64 defines Pick up as a separate native Action for a free ground Object.")
+            elif name.casefold() == "ready weapon":
+                reason = ("Initial weapon-readying timing and native ready-state rules are not adopted; "
+                          "this catalog Action has no supported transactional Arena submission path.")
+            elif name.casefold() == "ready object":
+                reason = "No native transactional ready-object Action is implemented for the generated Arena."
+            elif name.casefold() == "throw":
+                reason = ("The native Throw resolver has a narrow authored parameter bracket, but the Arena "
+                          "has no supported control for its load and trajectory inputs.")
+            else:
+                reason = ("No reviewed native generated-Arena submission and resolution contract is "
+                          "connected to this catalog Action.")
+            target_type = source_row["target_type"]
+            group = {"being": "Being targets", "object": "Object targets",
+                     "weapon": "Weapon targets", "attack": "Attack responses",
+                     "none": "Other Actions"}[target_type]
+            catalog_rows.append({
+                "name": name, "group": group, "target_type": target_type,
+                "required_skill": source_row["required_skill"],
+                "is_melee": source_row["is_melee"],
+                "status": "not_implemented", "reason": reason,
+            })
+
+        if supported_actions.get(RunAction):
+            run_available = (self._player_action_id is None and not candidate.encounter.initiated)
+            run_reason = ("The native target-free Run Choice can activate this Arena."
+                          if run_available else
+                          "Run is only accepted as the first player Action; this Encounter is already activated.")
+            run_status = "available" if run_available else "unavailable"
+        else:
+            run_status = "not_implemented"
+            run_reason = "The native Run scheduler or resolver contract is unavailable."
+        arena_rows = [{"name": "Run", "group": "Arena Actions", "status": run_status,
+                       "reason": run_reason}]
+
+        if supported_actions.get(SpotAction):
+            spot_status, spot_reason = "unavailable", _SPOT_DISABLED
+        else:
+            spot_status = "not_implemented"
+            spot_reason = "The native Spot scheduler or resolver contract is unavailable."
+        arena_rows.append({"name": "Spot", "group": "Arena Actions",
+                           "status": spot_status, "reason": spot_reason})
+
+        handle = None if selected is None else selected.get("handle")
+        entity_id = (None if type(handle) is not str else
+                     next((key for key, value in self._view_handles.items() if value == handle), None))
+        evidence = None
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        if entity_id is not None:
+            evidence = next((row for row in ledger.current
+                             if row.entity_id == entity_id), None)
+        if supported_actions.get(PickUpAction):
+            pickup_available, pickup_reason = self._pickup_status_unlocked(
+                candidate, player, entity_id, evidence)
+            pickup_status = "available" if pickup_available else "unavailable"
+        else:
+            pickup_status = "not_implemented"
+            pickup_reason = "The native Pick up scheduler or resolver contract is unavailable."
+        arena_rows.append({
+            "name": "Pick up", "group": "Arena Actions", "status": pickup_status,
+            "reason": pickup_reason,
+            "target": (None if selected is None else {
+                "handle": handle, "name": selected["name"], "type": selected["type"],
+                "present_state": selected["present_state"],
+            }),
+        })
+        return {"catalog_source": "native Action catalog", "entries": catalog_rows + arena_rows}
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
                                          movement_plan):
@@ -696,7 +870,7 @@ class GeneratedArenaSession:
             if self._active is None or type(handle) is not str:
                 raise ArenaBrowserRequestError("visible ground Object handle is unavailable")
             if self._pickup_action_id is not None and self._pickup_action_outcome is None:
-                raise ArenaBrowserRequestError("a Pick up Action is already resolving")
+                raise ArenaBrowserRequestError("A native Pick up Action is already resolving.")
             entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
             player = self._active.participants[0].native.being
             ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
@@ -705,20 +879,7 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("player perception evidence is unavailable")
             evidence = None if entity_id is None else next(
                 (row for row in ledger.current if row.entity_id == entity_id), None)
-            if evidence is None or evidence.category != "object" or evidence.present_state != "ground":
-                raise ArenaBrowserRequestError("Pick up requires a currently perceived ground Object")
-            obj = self._active.universe.get_object_by_id(entity_id)
-            if (obj is None or obj.parent_container_id is not None or obj.get_position() is None
-                    or obj.geometry is not None or obj.visual_occlusion is not None):
-                raise ArenaBrowserRequestError("current native Object state does not support this visible ground target")
-            if obj.get_position() != evidence.position:
-                raise ArenaBrowserRequestError("visible Object evidence is stale against current native position")
-            layout = self._active.arena_map.layout
-            player_cell, object_cell = layout.cell_at_position(player.get_position()), layout.cell_at_position(obj.get_position())
-            if player_cell is None or player_cell != object_cell:
-                raise ArenaBrowserRequestError("Pick up requires the player and free ground Object in the same hex")
-            if not self._active.encounter.initiated:
-                raise ArenaBrowserRequestError("activate the native Encounter before choosing Pick up")
+            obj = self._pickup_target_unlocked(self._active, player, entity_id, evidence)
             action = PickUpAction(self._active.encounter, player.id, entity_id,
                 self._active.encounter.time, map_width_cells=self._active.arena_map.width_cells,
                 map_height_cells=self._active.arena_map.height_cells)

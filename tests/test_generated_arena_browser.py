@@ -292,14 +292,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         movement_requests = [call for call in result["calls"]
                              if call["path"] in ("/api/generated/destination", "/api/generated/advance")]
         self.assertEqual([call["path"] for call in movement_requests], [
+            "/api/generated/advance",
             "/api/generated/destination", "/api/generated/destination",
             "/api/generated/destination", "/api/generated/advance",
             "/api/generated/advance"])
-        self.assertEqual([call["body"]["rate"] for call in movement_requests[:3]],
+        destination_requests = [call for call in movement_requests
+                                if call["path"] == "/api/generated/destination"]
+        self.assertEqual([call["body"]["rate"] for call in destination_requests],
                          ["sprint", "walk", "sprint"])
         self.assertIn("Dagger", result["entityDetails"])
         self.assertIn("Pick up", result["pickupStatus"])
         self.assertIn("/api/generated/inspect", [call["path"] for call in result["calls"]])
+        self.assertIn("/api/generated/run", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/pickup", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/rename-entity", [call["path"] for call in result["calls"]])
         rename_call = next(call for call in result["calls"] if call["path"] == "/api/generated/rename-entity")
@@ -317,17 +321,17 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                       "Position and movement", "Age is not represented", "Class XP"):
             self.assertIn(label, character_text)
         self.assertIn("Represented carried weight", character_text)
-        for call in movement_requests[:3]:
+        for call in destination_requests:
             self.assertEqual(call["body"]["facing_policy"], "turn")
             self.assertEqual(call["body"]["column"], target.column)
             self.assertEqual(call["body"]["row"], target.row)
-        self.assertEqual(int(movement_requests[3]["headers"]["X-Arena-Client-Seq"]),
-                         int(movement_requests[2]["headers"]["X-Arena-Client-Seq"]) + 1)
-        self.assertLess(result["calls"].index(movement_requests[2]),
-                        result["calls"].index(movement_requests[3]))
+        self.assertEqual(int(movement_requests[4]["headers"]["X-Arena-Client-Seq"]),
+                         int(destination_requests[2]["headers"]["X-Arena-Client-Seq"]) + 1)
+        self.assertLess(result["calls"].index(destination_requests[2]),
+                        result["calls"].index(movement_requests[4]))
         self.assertEqual(result["plan"]["rate"], "sprint")
         self.assertIn("Destination reached", result["status"])
-        self.assertEqual(result["time"], 2)
+        self.assertEqual(result["time"], 3)
         self.assertEqual(result["error"], "One native Encounter second committed.")
         self.assertTrue(any(label.lower().startswith("small shield · ground")
                             for label in result["entityLabels"]))
@@ -611,6 +615,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         status, state = self.request("/api/generated/generate", {
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
         self.assertEqual(status, 200)
+        catalog = state["action_catalog"]
+        action_entries = {row["name"]: row for row in catalog["entries"]}
+        with (ROOT / "src/config/actions.tsv").open(encoding="utf-8") as source:
+            source_names = {line.split("\t", 1)[0] for line in source.read().splitlines()[1:]}
+        self.assertTrue(source_names.issubset(action_entries))
+        self.assertEqual(action_entries["Run"]["status"], "available")
+        self.assertEqual(action_entries["Spot"]["status"], "unavailable")
+        self.assertEqual(action_entries["Pick up"]["status"], "unavailable")
+        self.assertIn("perceived ground Object", action_entries["Pick up"]["reason"])
+        self.assertEqual(action_entries["ready weapon"]["status"], "not_implemented")
+        self.assertIn("not adopted", action_entries["ready weapon"]["reason"])
+        self.assertEqual(action_entries["grab object"]["status"], "not_implemented")
         target = next(row for row in state["entities"] if row["type"] == "Dagger")
         candidate = self.session.active_candidate
         placement = next(row for row in candidate.ground_objects if row.native_type_key == "Dagger")
@@ -635,14 +651,24 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                         for participant in candidate.participants)
         evidence_before = tuple((dict(ledger._current), tuple(ledger.history)) for ledger in ledgers)
         rng_before, time_before = self.session._rng_cursor.state, candidate.encounter.time
+        before_choices = dict(candidate.encounter._choice_book._choices)
         native_name, native_id = native.name, native.id
         self.assertNotIn(native.id, json.dumps(state))
+        self.assertEqual(self.session.public_view(), state)
+        self.assertEqual((candidate.encounter.time, self.session._rng_cursor.state),
+                         (time_before, rng_before))
+        self.assertEqual(candidate.encounter._choice_book._choices, before_choices)
+        self.assertEqual(self.request("/api/generated/action", {"action": "ready weapon"})[0], 404)
+        self.assertEqual(self.session.public_view(), state)
         self.assertEqual(self.request("/api/generated/pickup", {"handle": target["handle"]})[0], 409)
+        self.assertEqual(self.session.public_view(), state)
         self.request("/api/generated/trace", {"seq": 1, "event": "entity_selected"})
         status, inspected = self.request("/api/generated/inspect", {"handle": target["handle"]},
                                          {"X-Arena-Client-Seq": "1"})
         self.assertEqual(status, 200)
         self.assertEqual(inspected["selected_entity"]["name"], "Dagger")
+        self.assertEqual(next(row for row in inspected["action_catalog"]["entries"]
+                              if row["name"] == "Pick up")["status"], "unavailable")
         self.request("/api/generated/trace", {"seq": 2, "event": "rename_entity_clicked"})
         status, renamed = self.request("/api/generated/rename-entity",
             {"handle": target["handle"], "name": "My Dagger"}, {"X-Arena-Client-Seq": "2"})
@@ -676,11 +702,21 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         if not self.session.active_candidate.encounter.initiated:
             self.assertEqual(self.request("/api/generated/run", {})[0], 200)
             self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        available_pickup = self.session.public_view()["action_catalog"]["entries"]
+        self.assertEqual(next(row for row in available_pickup if row["name"] == "Pick up")["status"],
+                         "available")
+        self.assertTrue(next(row for row in self.session.public_view()["entities"]
+                             if row["handle"] == target["handle"])["pickup_available"])
         self.request("/api/generated/trace", {"seq": 3, "event": "pickup_clicked"})
         status, pickup = self.request("/api/generated/pickup", {"handle": target["handle"]},
                                       {"X-Arena-Client-Seq": "3"})
         self.assertEqual(status, 200)
         self.assertEqual(pickup["pickup_action"]["status"], "executing")
+        pending_catalog = pickup["action_catalog"]["entries"]
+        self.assertEqual(next(row for row in pending_catalog if row["name"] == "Pick up")["status"],
+                         "unavailable")
+        self.assertIn("already resolving", next(row for row in pending_catalog
+                                                 if row["name"] == "Pick up")["reason"])
         status, settled = self.request("/api/generated/advance", {"seconds": 1})
         self.assertEqual(status, 200)
         self.assertEqual(settled["pickup_action"]["outcome"], "success")
@@ -702,6 +738,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIsNone(carried["position_meters"])
         self.assertNotIn(native.id, json.dumps(settled))
         self.assertEqual(carried["name"], "My Dagger")
+        settled_pickup = next(row for row in settled["action_catalog"]["entries"]
+                              if row["name"] == "Pick up")
+        self.assertEqual(settled_pickup["status"], "unavailable")
+        self.assertIn("free ground Object", settled_pickup["reason"])
         status, renamed_carried = self.request("/api/generated/rename-entity",
             {"handle": target["handle"], "name": "Carried Dagger"})
         self.assertEqual(status, 200)

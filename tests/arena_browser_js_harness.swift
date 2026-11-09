@@ -50,6 +50,13 @@ var __targetCell=__TARGET_CELL__;
 var __pickedUpView=__PICKED_UP_VIEW__;
 var __calls=[];
 var __lastPlan=null;
+function __refreshActionCatalog(){
+  const entries=__serverState.action_catalog&&__serverState.action_catalog.entries||[];
+  const run=entries.find(e=>e.name==='Run');
+  if(run&&run.status!=='not_implemented'){run.status=__serverState.run_available?'available':'unavailable';run.reason=__serverState.run_available?'The native target-free Run Choice can activate this Arena.':'Run is only accepted as the first player Action; this Encounter is already activated.'}
+  const pickup=entries.find(e=>e.name==='Pick up');
+  if(pickup){const target=__serverState.selected_entity;pickup.target=target?{handle:target.handle,name:target.name,type:target.type,present_state:target.present_state}:null;if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){pickup.status='unavailable';pickup.reason='A native Pick up Action is already resolving.'}else if(!target||target.category!=='object'||target.present_state!=='ground'){pickup.status='unavailable';pickup.reason='Select a currently perceived ground Object first.'}else if(!__serverState.run_available&&target.pickup_available){pickup.status='available';pickup.reason='Native one-second Pick up is currently available for this Object.'}else{pickup.status='unavailable';pickup.reason=target.pickup_unavailable_reason||'Move into the same hex as this Object before choosing Pick up.'}}
+}
 function __response(){return {ok:true,json:()=>Promise.resolve(JSON.parse(JSON.stringify(__serverState)))}}
 function fetch(path,options={}){
   const body=options.body===undefined?null:JSON.parse(options.body);
@@ -64,6 +71,9 @@ function fetch(path,options={}){
       rate:b.rate,facing_policy:b.facing_policy,remaining_distance_meters:1};
     __lastPlan=JSON.parse(JSON.stringify(__serverState.movement_plan));
     __serverState.advance_available=true;__serverState.movement_outcome='destination_selected';
+  } else if(path==='/api/generated/run'){
+    __serverState.run_available=false;__serverState.advance_available=true;
+    __serverState.player_action={name:'Run',status:'executing',outcome:null};__refreshActionCatalog();
   } else if(path==='/api/generated/advance'){
     __serverState.time_seconds+=1;
     if(__serverState.movement_plan){
@@ -77,13 +87,22 @@ function fetch(path,options={}){
       const e=__serverState.entities.find(row=>row.handle===__serverState.selected_entity.handle);
       if(e){e.present_state='carried';e.position_meters=null;e.cell=null;e.pickup_available=false;}
       if(__serverState.character){__serverState.character.inventory=JSON.parse(JSON.stringify(__pickedUpView.character.inventory));__serverState.character.movement.position_meters=JSON.parse(JSON.stringify(__serverState.player.position_meters));__serverState.character.movement.cell=JSON.parse(JSON.stringify(__serverState.player.cell));}
+    }else if(__serverState.player_action&&__serverState.player_action.status==='executing'){
+      __serverState.player_action={name:'Run',status:'completed',outcome:'no_movement'};
     }
+    __serverState.advance_available=false;__refreshActionCatalog();
     __serverState.movement_outcome=__serverState.movement_outcome||'progressed';
   } else if(path==='/api/generated/inspect'){
     __serverState.selected_entity=__serverState.entities.find(e=>e.handle===body.handle)||null;
-    if(__serverState.selected_entity&&__serverState.selected_entity.category==='object')__serverState.selected_entity.pickup_available=true;
+    if(__serverState.selected_entity&&__serverState.selected_entity.category==='object'){
+      const e=__serverState.selected_entity,p=__serverState.player.cell;
+      e.pickup_available=!__serverState.run_available&&e.present_state==='ground'&&e.cell&&p&&e.cell.column===p.column&&e.cell.row===p.row;
+      e.pickup_unavailable_reason=e.pickup_available?'':'Move into the same hex as this Object before choosing Pick up.';
+    }
+    __refreshActionCatalog();
   } else if(path==='/api/generated/pickup'){
     __serverState.pickup_action={name:'Pick up',status:'executing',outcome:null};
+    __refreshActionCatalog();
   } else if(path==='/api/generated/rename-entity'){
     const e=__serverState.entities.find(row=>row.handle===body.handle);
     if(e){e.name=body.name;__serverState.selected_entity=e;}
@@ -109,6 +128,16 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   let body=__text(__element('dialogBody'));
   if(!body.includes('Identity and experience')||!body.includes('Skills and recorded practice')||!body.includes('No items carried'))throw Error('native character projection missing from player popup');
   if(!body.includes('Age is not represented')||!body.includes('Class XP'))throw Error('unsupported native fields are not labeled');
+  const actionDisclosure=__find(__element('dialogBody'),'actionSelector');
+  if(!actionDisclosure||!__text(actionDisclosure).includes('56 potential'))throw Error('native Action catalog is not displayed in the player popup');
+  actionDisclosure.open=true;actionDisclosure.listeners.toggle();
+  if(!__find(__element('dialogBody'),'actionReadyWeapon').disabled)throw Error('unsupported Ready weapon was enabled');
+  if(!__find(__element('dialogBody'),'actionPickup').disabled)throw Error('Pick up was enabled without an authorized target');
+  if(__find(__element('dialogBody'),'actionRun').disabled)throw Error('native first-choice Run was unavailable');
+  await __find(__element('dialogBody'),'actionRun').listeners.click();
+  if(!__find(__element('dialogBody'),'actionRun').disabled)throw Error('Run remained available after native activation');
+  await __element('advance').onclick();
+  if(currentView.time_seconds!==1||!currentView.player_action||currentView.player_action.status!=='completed')throw Error('Run did not resolve through native one-second advancement');
   __element('rate').value='sprint';await __element('rate').listeners.change();
   const movementCount=()=>__calls.filter(call=>call.path==='/api/generated/destination').length;
   let before=movementCount(),p=currentView.player.position_meters;
@@ -135,6 +164,8 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(!initialObject)throw Error('generated object was not visible on the map');
   before=movementCount();await c.listeners.click({clientX:mapView.toX(initialObject.position_meters.x),clientY:mapView.toY(initialObject.position_meters.y)});
   if(movementCount()!==before)throw Error('Object inspection changed destination');
+  let pickupEntry=currentView.action_catalog.entries.find(e=>e.name==='Pick up');
+  if(pickupEntry.status!=='unavailable'||!pickupEntry.reason.includes('same hex'))throw Error('remote Object incorrectly enabled Pick up');
   let input=__find(__element('dialogBody'),'entityName');input.value='Renamed Dagger';
   await __find(__element('dialogBody'),'renameEntity').listeners.click();
   if(!__text(__element('dialogBody')).includes('Renamed Dagger')||!__text(__element('dialogBody')).includes('Type: Dagger'))throw Error('renamed popup lost distinct native type');
@@ -153,7 +184,12 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(!visibleObject)throw Error('renamed object disappeared after movement');
   await visibleObject.listeners.click();
   if(__find(__element('dialogBody'),'pickup').disabled)throw Error('same-hex object was not pickup-eligible after arrival');
-  await __find(__element('dialogBody'),'pickup').listeners.click();await __element('advance').onclick();
+  __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
+  if(__find(__element('dialogBody'),'actionPickup').disabled)throw Error('selector disagrees with same-hex Object popup eligibility');
+  await __find(__element('dialogBody'),'actionPickup').listeners.click();
+  if(!__find(__element('dialogBody'),'actionPickup').disabled)throw Error('pending native Pick up was not disabled');
+  await __element('advance').onclick();
+  if(!__find(__element('dialogBody'),'actionPickup').disabled)throw Error('Pick up stayed available after acquisition');
   const carried=__element('entities').children.find(e=>e.textContent.includes('Renamed Dagger'));
   if(!carried)throw Error('carried display name was not retained');
   __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
@@ -171,7 +207,7 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
     status:__element('movementStatus').textContent,error:__element('error').textContent,
     entityDetails:body,pickupStatus:'Pick up accepted',renameStatus:'renamed',finalEntity:currentView.selected_entity,
     characterSummary:playerSummary,characterInventory:currentView.character.inventory.items.map(item=>`${item.name} · ${item.status}`),
-    entityLabels:__element('entities').children.map(e=>e.textContent)});
+    entityLabels:__element('entities').children.map(e=>e.textContent),actionCatalog:currentView.action_catalog});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """#
 

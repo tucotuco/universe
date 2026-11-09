@@ -40,12 +40,13 @@ class TestArenaAcquisitionBoundary(unittest.TestCase):
         self.assertEqual(player.weapons, [])
         self.assertIsNone(player.current.armor_id)
 
-        # The test harness knows the hidden fixture ID. The ordinary player view
-        # does not; no browser route or perception result is created here.
+        # Revision 65 makes this ordinary ground Object perceptible; the private
+        # test-known native/source IDs are not part of the player projection.
         visible = json.dumps(initial, sort_keys=True)
+        self.assertTrue(any(row["category"] == "object" and row["type"] == "Dagger"
+                            for row in initial["entities"]))
         self.assertNotIn(ground.native_object_id, visible)
         self.assertNotIn(ground.source_item_id, visible)
-        self.assertNotIn("Dagger", visible)
 
         start = player.get_position()
         destination_address = max(candidate.arena_map.layout.addresses(), key=lambda address: math.dist(
