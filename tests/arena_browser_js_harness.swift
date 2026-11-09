@@ -1,7 +1,7 @@
 import Foundation
 import JavaScriptCore
 
-guard CommandLine.arguments.count == 5 || CommandLine.arguments.count == 6 else {
+guard CommandLine.arguments.count == 5 || CommandLine.arguments.count == 6 || CommandLine.arguments.count == 7 else {
     fputs("usage: arena_browser_js_harness.swift PAGE_HTML INITIAL_VIEW_JSON TARGET_CELL_JSON PICKED_UP_VIEW_JSON\n", stderr)
     exit(2)
 }
@@ -15,6 +15,7 @@ let initialView = read(CommandLine.arguments[2])
 let targetCell = read(CommandLine.arguments[3])
 let pickedUpView = read(CommandLine.arguments[4])
 let movementRefusal = CommandLine.arguments.count == 6 ? read(CommandLine.arguments[5]) : "null"
+let drawOnly = CommandLine.arguments.count == 7 && CommandLine.arguments[6] == "draw-only"
 guard let start = html.range(of: "<script>"),
       let end = html.range(of: "</script>", range: start.upperBound..<html.endIndex) else {
     fputs("generated page has no inline script\n", stderr)
@@ -52,7 +53,7 @@ var __pickedUpView=__PICKED_UP_VIEW__;
 var __movementRefusal=__MOVEMENT_REFUSAL__;
 var __movementRefusalUsed=false;
 var __enableMovementRefusal=false;
-var __enableDrawableDraw=false;
+var __enableDrawableDraw=__DRAW_ONLY__;
 var __calls=[];
 var __lastPlan=null;
 function __refreshActionCatalog(){
@@ -137,9 +138,38 @@ let preparedPrelude = prelude
     .replacingOccurrences(of: "__TARGET_CELL__", with: targetCell)
     .replacingOccurrences(of: "__PICKED_UP_VIEW__", with: pickedUpView)
     .replacingOccurrences(of: "__MOVEMENT_REFUSAL__", with: movementRefusal)
+    .replacingOccurrences(of: "__DRAW_ONLY__", with: drawOnly ? "true" : "false")
 context.evaluateScript(preparedPrelude)
 context.evaluateScript(pageScript)
-let scenario = #"""
+let scenario = drawOnly ? #"""
+globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
+(async()=>{
+  await Promise.resolve();
+  await __element('generate').onclick();
+  const dagger=currentView.entities.find(e=>e.category==='object'&&e.type==='Dagger'&&e.present_state==='carried');
+  if(!dagger)throw Error('fresh authored scenario did not project its carried Dagger');
+  const row=__element('entities').children.find(e=>e.dataset.handle===dagger.handle);
+  await row.listeners.click();
+  if(!__element('entityDialog').open||currentView.selected_entity.handle!==dagger.handle)throw Error('carried Dagger could not be inspected in its Entity popup');
+  if(!__find(__element('dialogBody'),'pickup').disabled)throw Error('carried scenario Dagger incorrectly exposed ground Pick up');
+  await __element('dialogClose').listeners.click();
+  __element('characterButton').listeners.click({currentTarget:__element('characterButton')});
+  const actions=__find(__element('dialogBody'),'actionSelector');
+  if(!actions)throw Error('Character popup omitted native Actions');actions.open=true;actions.listeners.toggle();
+  const button=__find(__element('dialogBody'),'actionReadyWeapon'),hand=__find(__element('dialogBody'),'readyWeaponHand');
+  if(!button||button.disabled||button.textContent!=='Draw (2 s)'||!hand||hand.value!=='right hand')throw Error('eligible native Draw or authored free hand was not available');
+  await button.listeners.click();
+  if(currentView.time_seconds!==0||currentView.ready_weapon_action.status!=='executing'||currentView.ready_weapon_action.seconds_remaining!==2)throw Error('Draw did not submit as the first player Choice at native time zero');
+  if(!__element('actionResult').textContent.includes('awaiting two seconds'))throw Error('browser did not explain the pending Draw boundary');
+  await __element('advance').onclick();
+  if(currentView.time_seconds!==1||currentView.ready_weapon_action.status!=='executing'||currentView.ready_weapon_action.seconds_remaining!==1||currentView.character.inventory.items[0].status!=='carried; not readied')throw Error('browser displayed readiness at the first boundary');
+  await __element('advance').onclick();
+  if(currentView.time_seconds!==2||currentView.ready_weapon_action.status!=='completed'||currentView.ready_weapon_action.outcome!=='success'||currentView.character.inventory.items[0].status!=='readied in right hand')throw Error('browser did not display readiness after the second boundary');
+  globalThis.__result=JSON.stringify({calls:__calls,time:currentView.time_seconds,inventory:currentView.character.inventory.items,
+    activationRunCalls:__calls.filter(call=>call.path==='/api/generated/run').length,
+    drawCall:__calls.find(call=>call.path==='/api/generated/ready-weapon'),actionResult:__element('actionResult').textContent});
+})().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
+"""# : #"""
 globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
 (async()=>{
   await Promise.resolve();

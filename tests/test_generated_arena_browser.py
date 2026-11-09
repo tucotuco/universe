@@ -1097,6 +1097,126 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(weapon.parent_container_id, player.id)
         self.assertNotIn(weapon.id, json.dumps(second))
 
+    def test_opt_in_draw_scenario_http_first_choice_and_forged_stale_refusal(self):
+        from arena_authored_draw_scenario import validate_scenario
+
+        scenario = validate_scenario(json.loads(
+            (ROOT / "examples/arena_scenarios/ordinary-dagger-draw.json")
+            .read_text(encoding="utf-8")))
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261125,
+                                             authored_draw_scenario=scenario)
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("button.textContent=action.display_name||action.name", page)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        opponent = candidate.participants[1].native.being
+        weapon = candidate.universe.get_object_by_id(player.possessions[0])
+        original_awareness = {key: set(value) for key, value in candidate.encounter.awareness.items()}
+        time_before = candidate.encounter.time
+        choices_before = dict(candidate.encounter._choice_book._choices)
+        status, refused = self.request("/api/generated/ready-weapon",
+                                       {"handle": "forged-handle", "hand": "right hand"})
+        self.assertEqual(status, 409)
+        self.assertEqual(candidate.encounter.time, time_before)
+        self.assertEqual(candidate.encounter._choice_book._choices, choices_before)
+        self.assertFalse(candidate.encounter.initiated)
+        self.assertIn("carried Weapon", refused["error"])
+
+        row = next(item for item in generated["entities"] if item["name"] == "Drawable Dagger")
+        status, inspected = self.request("/api/generated/inspect", {"handle": row["handle"]})
+        self.assertEqual(status, 200)
+        action = next(item for item in inspected["action_catalog"]["entries"]
+                      if item["name"] == "ready weapon")
+        self.assertEqual((action["status"], action["display_name"], action["hands"]),
+                         ("available", "Draw (2 s)", ["right hand"]))
+        self.assertEqual(inspected["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        weight = weapon.current.weight
+        status, accepted = self.request("/api/generated/ready-weapon",
+                                        {"handle": row["handle"], "hand": "right hand"})
+        self.assertEqual(status, 200)
+        self.assertEqual(candidate.encounter.arena_activation.activation_kind,
+                         "first_player_choice")
+        self.assertIsNone(candidate.encounter.initiation)
+        self.assertEqual(candidate.encounter.awareness, original_awareness)
+        self.assertEqual(accepted["ready_weapon_action"]["seconds_remaining"], 2)
+        status, one = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual((one["time_seconds"], one["ready_weapon_action"]["status"],
+                          one["ready_weapon_action"]["seconds_remaining"]), (1, "executing", 1))
+        self.assertEqual(one["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        self.assertIsNone(player.current.body_parts["right hand"])
+        status, two = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual((two["time_seconds"], two["ready_weapon_action"]["status"],
+                          two["ready_weapon_action"]["outcome"]), (2, "completed", "success"))
+        inventory = two["character"]["inventory"]
+        self.assertEqual(inventory["items"][0]["status"], "readied in right hand")
+        self.assertEqual(inventory["items"][0]["weight_pounds"], weight)
+        self.assertEqual(inventory["carried_weight_pounds"], weight)
+        self.assertEqual(player.current.body_parts["right hand"], weapon.id)
+        self.assertEqual(player.possessions, [weapon.id])
+        self.assertEqual(player.weapons, [weapon.id])
+        self.assertEqual(weapon.parent_container_id, player.id)
+        self.assertNotIn(opponent.id, json.dumps(two["character"]))
+        self.assertNotIn(weapon.id, json.dumps(two))
+        stale_handle = row["handle"]
+
+        status, invalid_generate = self.request("/api/generated/generate", {
+            "starting_experience": "not-an-integer", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 409)
+        self.assertIs(self.session.active_candidate, candidate)
+        self.assertEqual(self.session.public_view(), two)
+        self.session.generate({"starting_experience": "10000", "width_cells": "10",
+                               "height_cells": "5"})
+        status, stale = self.request("/api/generated/ready-weapon",
+                                     {"handle": stale_handle, "hand": "right hand"})
+        self.assertEqual(status, 409)
+        self.assertIn("carried Weapon", stale["error"])
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("swift"),
+                         "JavaScriptCore via Swift is available on macOS only")
+    def test_actual_shipped_javascript_runs_fresh_authored_draw_scenario(self):
+        import tempfile
+
+        scenario = json.loads((ROOT / "examples/arena_scenarios/ordinary-dagger-draw.json")
+                              .read_text(encoding="utf-8"))
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261126,
+                                             authored_draw_scenario=scenario)
+        state = self.session.generate({
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        _, page = self.request("/")
+        with tempfile.TemporaryDirectory(prefix="arena-authored-draw-js-") as temp:
+            page_path = Path(temp) / "page.html"
+            state_path = Path(temp) / "initial-state.json"
+            cell_path = Path(temp) / "target-cell.json"
+            pickup_path = Path(temp) / "pickup-view.json"
+            page_path.write_text(page, encoding="utf-8")
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            cell_path.write_text(json.dumps({"column": 0, "row": 0}), encoding="utf-8")
+            pickup_path.write_text(json.dumps(state), encoding="utf-8")
+            module_cache = Path(tempfile.gettempdir()) / "universe-arena-jsc-module-cache"
+            module_cache.mkdir(parents=True, exist_ok=True)
+            harness = ROOT / "tests" / "arena_browser_js_harness.swift"
+            run = subprocess.run([shutil.which("swift"), "-module-cache-path", str(module_cache),
+                str(harness), str(page_path), str(state_path), str(cell_path), str(pickup_path),
+                "null", "draw-only"], check=False, capture_output=True, text=True, timeout=60)
+            self.assertEqual(run.returncode, 0, run.stderr)
+        result = json.loads(run.stdout)
+        self.assertEqual(result["time"], 2)
+        self.assertEqual(result["activationRunCalls"], 0)
+        self.assertEqual(result["inventory"][0]["status"], "readied in right hand")
+        self.assertEqual(result["drawCall"]["body"]["hand"], "right hand")
+        self.assertNotIn("native_id", json.dumps(result["drawCall"]["body"]))
+        self.assertEqual([call["path"] for call in result["calls"] if call["path"] in (
+            "/api/generated/ready-weapon", "/api/generated/advance")], [
+            "/api/generated/ready-weapon", "/api/generated/advance", "/api/generated/advance"])
+
     def test_display_name_overlay_is_safe_observer_scoped_and_replacement_atomic(self):
         original_history = None
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
