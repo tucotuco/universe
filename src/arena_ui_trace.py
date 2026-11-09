@@ -21,6 +21,7 @@ _CLIENT_EVENTS = {
     "player_name_apply_clicked": frozenset(),
     "entity_selected": frozenset(),
     "pickup_clicked": frozenset(),
+    "rename_entity_clicked": frozenset(),
 }
 
 

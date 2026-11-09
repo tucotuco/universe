@@ -81,6 +81,7 @@ class GeneratedArenaSession:
         self._ground_loadout_profile = copy.deepcopy(ground_loadout_profile)
         self._view_handles = {}
         self._selected_entity_handle = None
+        self._display_names = {}
 
     @property
     def trace_ui_enabled(self):
@@ -204,7 +205,8 @@ class GeneratedArenaSession:
             address = None if p is None else candidate.arena_map.layout.cell_at_position(p)
             perceived.append({
                 "handle": handle, "category": evidence.category,
-                "name": evidence.name, "type": evidence.type_key,
+                "name": self._display_names.get(evidence.entity_id, evidence.name),
+                "type": evidence.type_key,
                 "present_state": evidence.present_state,
                 "position_meters": None if p is None else {"x": p.x, "y": p.y, "z": p.z},
                 "cell": None if address is None else {"column": address.column, "row": address.row},
@@ -301,6 +303,7 @@ class GeneratedArenaSession:
             self._movement_outcome = None
             self._view_handles = {}
             self._selected_entity_handle = None
+            self._display_names = {}
             return self._view_unlocked()
 
     def choose_destination(self, payload):
@@ -393,6 +396,29 @@ class GeneratedArenaSession:
                     or entity_id is None
                     or entity_id not in {row.entity_id for row in ledger.current}):
                 raise ArenaBrowserRequestError("entity is not supported by current observer evidence")
+            self._selected_entity_handle = handle
+            return self._view_unlocked()
+
+    def rename_entity(self, payload):
+        """Edit only the player's session-local display name for a perceived Entity."""
+        from arena_perception import ArenaPerceptionLedger
+        if type(payload) is not dict or set(payload) != {"handle", "name"}:
+            raise ArenaBrowserRequestError("entity rename requires exactly handle and name")
+        handle = payload["handle"]
+        name = self._validate_name(payload["name"])
+        with self._lock:
+            if self._active is None or type(handle) is not str:
+                raise ArenaBrowserRequestError("visible entity handle is unavailable")
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            player = self._active.participants[0].native.being
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if (type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.id
+                    or entity_id is None):
+                raise ArenaBrowserRequestError("entity is not supported by current observer evidence")
+            evidence = next((row for row in ledger.current if row.entity_id == entity_id), None)
+            if evidence is None:
+                raise ArenaBrowserRequestError("entity is no longer perceived by this observer")
+            self._display_names[entity_id] = name
             self._selected_entity_handle = handle
             return self._view_unlocked()
 

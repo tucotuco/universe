@@ -117,6 +117,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("req('/api/generated/destination'", page)
         self.assertIn("traceUI('advance_clicked')", page)
         self.assertIn("req('/api/generated/advance',{seconds:1},sequence)", page)
+        self.assertIn("/api/generated/rename-entity", page)
+        self.assertIn("const sequence=traceUI('rename_entity_clicked')", page)
+        self.assertIn("b.textContent=", page)
+        self.assertNotIn("innerHTML", page)
         self.assertIn("Already at that hex center", page)
 
         trace_empty = self.session.public_view()
@@ -240,23 +244,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                          "JavaScriptCore via Swift is available on macOS only")
     def test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance(self):
         stream = self.enable_trace()
+        loadout_profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
-            trace_ui=True, trace_stream=stream, ground_item_descriptions=[{
-                "source_item_id": "js-test-dagger", "category": "weapon",
-                "native_type_key": "Dagger", "quantity": 1, "ordinary": True,
-                "magical": False, "mechanics": None, "origin": "js-test.v1"}])
+            trace_ui=True, trace_stream=stream, ground_loadout_profile=loadout_profile)
         _, page = self.request("/")
         state = self.session.generate({
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
-        player_position = state["player"]["position_meters"]
-        layout = self.session.active_candidate.arena_map.layout
-        target = max(
-            (HexAddress(column, row)
-             for column in range(state["map"]["width_cells"])
-             for row in range(state["map"]["height_cells"])),
-            key=lambda cell: math.dist(
-                tuple(player_position.values()),
-                layout.center_position(cell, z=player_position["z"]).as_tuple()))
+        object_view = next(row for row in state["entities"]
+                           if row["category"] == "object" and row["type"] == "Dagger")
+        target = HexAddress(object_view["cell"]["column"], object_view["cell"]["row"])
 
         with tempfile.TemporaryDirectory(prefix="arena-browser-js-") as temp:
             page_path = Path(temp) / "page.html"
@@ -278,7 +274,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                              if call["path"] in ("/api/generated/destination", "/api/generated/advance")]
         self.assertEqual([call["path"] for call in movement_requests], [
             "/api/generated/destination", "/api/generated/destination",
-            "/api/generated/destination", "/api/generated/advance"])
+            "/api/generated/destination", "/api/generated/advance",
+            "/api/generated/advance"])
         preselection = next(call for call in result["calls"]
                             if call["path"] == "/api/generated/trace"
                             and call["body"].get("event") == "rate_selected"
@@ -291,6 +288,14 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("Pick up", result["pickupStatus"])
         self.assertIn("/api/generated/inspect", [call["path"] for call in result["calls"]])
         self.assertIn("/api/generated/pickup", [call["path"] for call in result["calls"]])
+        self.assertIn("/api/generated/rename-entity", [call["path"] for call in result["calls"]])
+        rename_call = next(call for call in result["calls"] if call["path"] == "/api/generated/rename-entity")
+        self.assertEqual(rename_call["body"]["name"], "Renamed Dagger")
+        self.assertNotIn("native_id", json.dumps(rename_call["body"]))
+        self.assertEqual(result["finalEntity"]["name"], "Renamed Dagger")
+        self.assertEqual(result["finalEntity"]["present_state"], "carried")
+        self.assertIn("Renamed Dagger", result["entityDetails"])
+        self.assertIn("carried", result["entityDetails"])
         for call in movement_requests[:3]:
             self.assertEqual(call["body"]["facing_policy"], "turn")
             self.assertEqual(call["body"]["column"], target.column)
@@ -300,8 +305,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertLess(result["calls"].index(movement_requests[2]),
                         result["calls"].index(movement_requests[3]))
         self.assertEqual(result["plan"]["rate"], "sprint")
-        self.assertIn("server accepted sprint/turn", result["status"])
-        self.assertEqual(result["time"], 1)
+        self.assertIn("Destination reached", result["status"])
+        self.assertEqual(result["time"], 2)
         self.assertEqual(result["error"], "One native Encounter second committed.")
 
     def test_destination_then_sprint_updates_accepted_plan_before_native_step(self):
@@ -570,8 +575,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
         self.assertEqual(status, 200)
         target = next(row for row in state["entities"] if row["type"] == "Dagger")
-        native = self.session.active_candidate.universe.get_object_by_id(
-            self.session.active_candidate.ground_objects[0].native_object_id)
+        candidate = self.session.active_candidate
+        placement = next(row for row in candidate.ground_objects if row.native_type_key == "Dagger")
+        native = candidate.universe.get_object_by_id(placement.native_object_id)
+        player = candidate.participants[0].native.being
+        ledgers = tuple(participant.native.being._arena_perception_ledger
+                        for participant in candidate.participants)
+        evidence_before = tuple((dict(ledger._current), tuple(ledger.history)) for ledger in ledgers)
+        rng_before, time_before = self.session._rng_cursor.state, candidate.encounter.time
+        native_name, native_id = native.name, native.id
         self.assertNotIn(native.id, json.dumps(state))
         self.assertEqual(self.request("/api/generated/pickup", {"handle": target["handle"]})[0], 409)
         self.request("/api/generated/trace", {"seq": 1, "event": "entity_selected"})
@@ -579,8 +591,20 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                                          {"X-Arena-Client-Seq": "1"})
         self.assertEqual(status, 200)
         self.assertEqual(inspected["selected_entity"]["name"], "Dagger")
+        self.request("/api/generated/trace", {"seq": 2, "event": "rename_entity_clicked"})
+        status, renamed = self.request("/api/generated/rename-entity",
+            {"handle": target["handle"], "name": "My Dagger"}, {"X-Arena-Client-Seq": "2"})
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed["selected_entity"]["name"], "My Dagger")
+        self.assertEqual(native.id, native_id)
+        self.assertEqual(native.name, native_name)
+        self.assertEqual(candidate.encounter.time, time_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
+        for ledger, before in zip(ledgers, evidence_before):
+            self.assertEqual(ledger._current, before[0])
+            self.assertEqual(tuple(ledger.history), before[1])
+        self.assertEqual(candidate.encounter._choice_book._choices, {})
         cell = target["cell"]
-        player = self.session.active_candidate.participants[0].native.being
         if player.get_position() != self.session.active_candidate.arena_map.layout.center_position(
                 HexAddress(cell["column"], cell["row"])):
             status, moving = self.request("/api/generated/destination", {
@@ -591,12 +615,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                     break
                 status, moving = self.request("/api/generated/advance", {"seconds": 1})
                 self.assertEqual(status, 200)
+        expected_destination = self.session.active_candidate.arena_map.layout.center_position(
+            HexAddress(cell["column"], cell["row"]))
+        self.assertEqual(player.get_position(), expected_destination)
         if not self.session.active_candidate.encounter.initiated:
             self.assertEqual(self.request("/api/generated/run", {})[0], 200)
             self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
-        self.request("/api/generated/trace", {"seq": 2, "event": "pickup_clicked"})
+        self.request("/api/generated/trace", {"seq": 3, "event": "pickup_clicked"})
         status, pickup = self.request("/api/generated/pickup", {"handle": target["handle"]},
-                                      {"X-Arena-Client-Seq": "2"})
+                                      {"X-Arena-Client-Seq": "3"})
         self.assertEqual(status, 200)
         self.assertEqual(pickup["pickup_action"]["status"], "executing")
         status, settled = self.request("/api/generated/advance", {"seconds": 1})
@@ -607,12 +634,81 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(carried["present_state"], "carried")
         self.assertIsNone(carried["position_meters"])
         self.assertNotIn(native.id, json.dumps(settled))
+        self.assertEqual(carried["name"], "My Dagger")
+        status, renamed_carried = self.request("/api/generated/rename-entity",
+            {"handle": target["handle"], "name": "Carried Dagger"})
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed_carried["selected_entity"]["present_state"], "carried")
+        self.assertEqual(renamed_carried["selected_entity"]["name"], "Carried Dagger")
+        self.assertEqual(native.name, "Dagger")
+        self.assertIsNone(native.spatial_state)
+        self.assertEqual(native.parent_container_id, self.session.active_candidate.participants[0].native.being.id)
         trace = trace_stream.getvalue()
         self.assertIn("action=inspect status=accepted", trace)
         self.assertIn("action=pickup status=accepted", trace)
-        self.assertIn("entity=Dagger type=Dagger", trace)
+        self.assertIn("action=rename_entity status=accepted", trace)
+        self.assertIn("entity_type=object type=Dagger", trace)
         self.assertNotIn(native.id, trace)
         self.assertNotIn("http-dagger", trace)
+        self.assertNotIn("My Dagger", trace)
+        self.assertNotIn("Carried Dagger", trace)
+
+    def test_display_name_overlay_is_safe_observer_scoped_and_replacement_atomic(self):
+        original_history = None
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
+        initial = self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        candidate_identity = candidate
+        self.assertEqual(candidate.ground_objects, ())
+        player, opponent = (row.native.being for row in candidate.participants)
+        opponent_view = next(row for row in initial["entities"] if row["category"] == "being")
+        native_name, native_id = opponent.name, opponent.id
+        ledger = player._arena_perception_ledger
+        original_history = tuple(ledger.history)
+        original_current = dict(ledger._current)
+        awareness = candidate.encounter.aware_beings(player.id)
+        choices = dict(candidate.encounter._choice_book._choices)
+        time_before = candidate.encounter.time
+        rng_before = self.session._rng_cursor.state
+        status, renamed = self.request("/api/generated/rename-entity", {
+            "handle": opponent_view["handle"], "name": "Mira <b>"})
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed["selected_entity"]["name"], "Mira <b>")
+        self.assertEqual(opponent.id, native_id)
+        self.assertEqual(opponent.name, native_name)
+        self.assertEqual(tuple(ledger.history), original_history)
+        self.assertEqual(ledger._current, original_current)
+        self.assertEqual(candidate.encounter.aware_beings(player.id), awareness)
+        self.assertEqual(candidate.encounter._choice_book._choices, choices)
+        self.assertEqual(candidate.encounter.time, time_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
+        self.assertNotIn(native_id, json.dumps(renamed))
+        self.assertNotIn("source_record", json.dumps(renamed))
+        before_refusal = self.session.public_view()
+        for invalid_name in ("", " " * 2, "x" * 41):
+            status, _ = self.request("/api/generated/rename-entity", {
+                "handle": opponent_view["handle"], "name": invalid_name})
+            self.assertEqual(status, 409)
+            self.assertEqual(self.session.public_view(), before_refusal)
+        status, _ = self.request("/api/generated/rename-entity", {
+            "handle": "forged-handle", "name": "Nope"})
+        self.assertEqual(status, 409)
+        status, _ = self.request("/api/generated/rename-entity", {
+            "handle": opponent_view["handle"], "name": "Nope", "extra": 1})
+        self.assertEqual(status, 409)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "not-an-integer", "width_cells": "5", "height_cells": "5"})
+        self.assertEqual(status, 409)
+        self.assertEqual(next(row for row in self.session.public_view()["entities"]
+                              if row["handle"] == opponent_view["handle"])["name"], "Mira <b>")
+        self.assertIs(self.session.active_candidate, candidate_identity)
+        self.session.generate({"starting_experience": "0", "width_cells": "5", "height_cells": "5"})
+        fresh = self.session.public_view()
+        self.assertTrue(all(row["name"] != "Mira <b>" for row in fresh["entities"]))
+        status, _ = self.request("/api/generated/rename-entity", {
+            "handle": opponent_view["handle"], "name": "Stale"})
+        self.assertEqual(status, 409)
+        self.assertEqual(self.session.active_candidate.encounter.time, 0)
 
     def test_strict_server_inputs_and_failed_regeneration_leave_active_session_unchanged(self):
         for payload in (

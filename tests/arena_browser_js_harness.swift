@@ -44,6 +44,7 @@ var __serverState={state:'empty'};
 var __initialView=__INITIAL_VIEW__;
 var __targetCell=__TARGET_CELL__;
 var __calls=[];
+var __lastPlan=null;
 function __response(){return {ok:true,json:()=>Promise.resolve(JSON.parse(JSON.stringify(__serverState)))}}
 function fetch(path,options={}){
   const body=options.body===undefined?null:JSON.parse(options.body);
@@ -56,14 +57,29 @@ function fetch(path,options={}){
     __serverState.movement_plan={destination_cell:{column:b.column,row:b.row},
       destination_position_meters:{x,y,z:__serverState.player.position_meters.z},
       rate:b.rate,facing_policy:b.facing_policy,remaining_distance_meters:1};
+    __lastPlan=JSON.parse(JSON.stringify(__serverState.movement_plan));
     __serverState.advance_available=true;__serverState.movement_outcome='destination_selected';
   } else if(path==='/api/generated/advance'){
-    __serverState.time_seconds+=1;__serverState.movement_outcome='progressed';
+    __serverState.time_seconds+=1;
+    if(__serverState.movement_plan){
+      __serverState.player.position_meters=JSON.parse(JSON.stringify(__serverState.movement_plan.destination_position_meters));
+      __serverState.player.cell=JSON.parse(JSON.stringify(__serverState.movement_plan.destination_cell));
+      __serverState.movement_plan=null;__serverState.movement_outcome='arrived';
+      for(const e of __serverState.entities||[])if(e.category==='object'&&e.cell&&e.cell.column===__serverState.player.cell.column&&e.cell.row===__serverState.player.cell.row)e.pickup_available=true;
+    }else if(__serverState.pickup_action&&__serverState.pickup_action.status==='executing'){
+      __serverState.pickup_action={name:'Pick up',status:'completed',outcome:'success'};
+      const e=__serverState.entities.find(row=>row.handle===__serverState.selected_entity.handle);
+      if(e){e.present_state='carried';e.position_meters=null;e.cell=null;e.pickup_available=false;}
+    }
+    __serverState.movement_outcome=__serverState.movement_outcome||'progressed';
   } else if(path==='/api/generated/inspect'){
     __serverState.selected_entity=__serverState.entities.find(e=>e.handle===body.handle)||null;
     if(__serverState.selected_entity&&__serverState.selected_entity.category==='object')__serverState.selected_entity.pickup_available=true;
   } else if(path==='/api/generated/pickup'){
     __serverState.pickup_action={name:'Pick up',status:'executing',outcome:null};
+  } else if(path==='/api/generated/rename-entity'){
+    const e=__serverState.entities.find(row=>row.handle===body.handle);
+    if(e){e.name=body.name;__serverState.selected_entity=e;}
   }
   return Promise.resolve(__response());
 }
@@ -80,25 +96,40 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   await __element('generate').onclick();
   __element('rate').value='sprint';
   await __element('rate').listeners.change();
-  const m=currentView.map,c=__element('map'),cell=__targetCell;
+  const initialObject=currentView.entities.find(e=>e.type==='Dagger'&&e.category==='object');
+  if(!initialObject)throw Error('generated object was not visible on the map');
+  const c=__element('map');
+  await c.listeners.click({clientX:mapView.toX(initialObject.position_meters.x),
+    clientY:mapView.toY(initialObject.position_meters.y)});
+  __element('entityName').value='Renamed Dagger';
+  await __element('renameEntity').onclick();
+  const m=currentView.map,cell=__targetCell;
   const minX=0,maxX=m.origin_offset_meters[0]+(m.width_cells-1)*m.column_step_meters+m.hex_vertex_offsets_meters[0][0];
   const minY=0,maxY=m.height_cells*m.row_step_meters+(m.width_cells>1?m.odd_column_offset_meters:0);
   const scale=Math.min((c.clientWidth-24)/(maxX-minX),(c.clientHeight-24)/(maxY-minY));
   const ox=(c.clientWidth-(maxX-minX)*scale)/2,oy=(c.clientHeight-(maxY-minY)*scale)/2;
   const cx=m.origin_offset_meters[0]+cell.column*m.column_step_meters;
   const cy=m.origin_offset_meters[1]+cell.row*m.row_step_meters+(cell.column%2)*m.odd_column_offset_meters;
-  await c.listeners.click({clientX:ox+(cx-minX)*scale,clientY:c.clientHeight-oy-(cy-minY)*scale});
+  await c.listeners.click({clientX:ox+(cx-minX)*scale+24,clientY:c.clientHeight-oy-(cy-minY)*scale});
   __element('rate').value='walk';
   await __element('rate').listeners.change();
   __element('rate').value='sprint';
   const optionRequest=__element('rate').listeners.change();
   const advanceRequest=__element('advance').onclick();
   await Promise.all([optionRequest,advanceRequest]);
-  const visibleObject=__element('entities').children.find(e=>e.textContent.includes('Dagger'));
-  if(visibleObject){await visibleObject.listeners.click();await __element('pickup').onclick();}
-  globalThis.__result=JSON.stringify({calls:__calls,plan:currentView.movement_plan,
+  const visibleObject=__element('entities').children.find(e=>e.textContent.includes('Renamed Dagger'));
+  if(!visibleObject)throw Error('renamed object disappeared after movement');
+  await visibleObject.listeners.click();
+  if(__element('pickup').disabled)throw Error('same-hex object was not pickup-eligible after arrival');
+  await __element('pickup').onclick();
+  await __element('advance').onclick();
+  const carried=__element('entities').children.find(e=>e.textContent.includes('Renamed Dagger'));
+  if(!carried)throw Error('carried display name was not retained');
+  await carried.listeners.click();
+  globalThis.__result=JSON.stringify({calls:__calls,plan:__lastPlan,
     time:currentView.time_seconds,status:__element('movementStatus').textContent,error:__element('error').textContent,
-    entityDetails:__element('entityDetails').textContent,pickupStatus:__element('pickupStatus').textContent});
+    entityDetails:__element('entityDetails').textContent,pickupStatus:__element('pickupStatus').textContent,
+    renameStatus:__element('renameStatus').textContent,finalEntity:currentView.selected_entity});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """#
 context.evaluateScript(scenario)
