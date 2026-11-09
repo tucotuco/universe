@@ -66,8 +66,9 @@ class BeingDefinition(ObjectDefinition):
         self.states = states or States()
         self.actions = actions or {}
         self.reactions = reactions or {}
-        # body_parts are expected to include a body location and the object or natural 
-        # weapon in that location
+        # A template may explicitly declare an anatomical location with None
+        # occupancy. The BeingInstance current copy then carries the mutable
+        # object/natural-weapon occupancy for that declared location.
         self.body_parts = body_parts or {}
         self.armor_id = armor_id
         if physiology_id is not None and (not isinstance(physiology_id, str) or not physiology_id.strip()):
@@ -355,6 +356,8 @@ class BeingInstance(ObjectInstance):
         # replacing identity during detached transactional construction.
         ObjectInstance.__init__(self, being_definition, name, id=id)
         self.original = being_definition
+        # Copy explicit template locations into current occupancy. Missing
+        # locations stay unrepresented; no anatomy is inferred here.
         self.current = being_definition.copy()
         # Unknown until native world setup explicitly establishes the adopted
         # twelve-way hex orientation. Legacy front_facing/top_facing retain
@@ -1443,6 +1446,8 @@ class BeingDictionary(ObjectDictionary):
         '''
         Get predefined BeingDefinitions from a TSV file. The native beings.tsv
         schema names stature as length_inches; native Being weight is pounds.
+        ``body_parts`` is an optional JSON object of declared locations and
+        their template occupancy (null means a represented empty location).
         '''
         p = True
         with open(filename, 'r') as f:
@@ -1457,5 +1462,20 @@ class BeingDictionary(ObjectDictionary):
                     being_dict[headers[i]] = fields[i]
                 if 'length_inches' in being_dict:
                     being_dict['length'] = being_dict.pop('length_inches')
+                if 'body_parts' in being_dict:
+                    raw_body_parts = being_dict['body_parts']
+                    try:
+                        body_parts = json.loads(raw_body_parts) if raw_body_parts else {}
+                    except (TypeError, json.JSONDecodeError) as exc:
+                        raise ValueError(
+                            f"invalid body_parts JSON for Being template {being_dict.get('obj_type')!r}") from exc
+                    if (type(body_parts) is not dict
+                            or any(type(key) is not str or not key.strip()
+                                   or value is not None and type(value) is not str
+                                   for key, value in body_parts.items())):
+                        raise ValueError(
+                            f"body_parts must map named native locations to an Object reference or null "
+                            f"for Being template {being_dict.get('obj_type')!r}")
+                    being_dict['body_parts'] = body_parts
                 being = BeingDefinition(**being_dict)
                 self.objects[being.obj_type] = being

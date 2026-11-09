@@ -157,6 +157,17 @@ class TestBeingInstance(unittest.TestCase):
         self.universe.add_object(self.being_inst)
         self.assertEqual(self.being_inst.possessions, [])
 
+    def test_instance_preserves_template_body_part_state_without_aliasing(self):
+        definition = BeingDefinition(
+            'Authored anatomy', 69, 170, 10, '1d8', 'Neutral', 11, 1,
+            body_parts={'left hand': 'authored-native-reference', 'right hand': None})
+        instance = BeingInstance(definition, name='Authored anatomy instance')
+        expected = {'left hand': 'authored-native-reference', 'right hand': None}
+        self.assertEqual(instance.current.body_parts, expected)
+        instance.current.body_parts['right hand'] = 'second-authored-reference'
+        self.assertEqual(instance.original.body_parts, expected)
+        self.assertEqual(definition.body_parts, expected)
+
         current_being_state = self.being_inst.current
         original_being_state = self.being_inst.original
 
@@ -476,6 +487,19 @@ class TestBeingDictionary(unittest.TestCase):
         self.object_dict.load_object_categories(self.categories_file)
         self.assertEqual(len(self.object_dict.object_categories), 6)
         self.assertDictEqual(self.object_dict.object_categories, self.expected_categories)
+
+    def test_humanoid_templates_declare_hands_and_instances_copy_the_state(self):
+        expected_hands = {'left hand': None, 'right hand': None}
+        self.assertEqual(self.object_dict.objects['Human'].body_parts, expected_hands)
+        self.assertEqual(self.object_dict.objects['High elf'].body_parts, expected_hands)
+        self.assertEqual(self.object_dict.objects['Skeleton'].body_parts, {})
+        for native_type in ('Human', 'High elf'):
+            instance = BeingInstance(self.object_dict.objects[native_type],
+                                     native_type + ' instance')
+            self.assertEqual(instance.original.body_parts, expected_hands)
+            self.assertEqual(instance.current.body_parts, expected_hands)
+            instance.current.body_parts['right hand'] = 'test-object-reference'
+            self.assertEqual(instance.original.body_parts, expected_hands)
 
     def test_all_objects_in_categories(self):
         self.object_dict.load_object_categories(self.categories_file)

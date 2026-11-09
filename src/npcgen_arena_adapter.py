@@ -193,7 +193,13 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
     if not isinstance(template, BeingDefinition):
         _refuse("unsupported_native_race", "matched native definition is not a BeingDefinition",
                 source_race=race_name, native_type=native_names[0])
-    if template.armor_id is not None or template.body_parts:
+    if (template.armor_id is not None
+            or type(template.body_parts) is not dict
+            or any(type(slot) is not str or not slot.strip()
+                   or occupant is not None and type(occupant) is not str
+                   for slot, occupant in template.body_parts.items())):
+        _refuse("unsupported_native_template", "native race template anatomy or equipment is malformed")
+    if any(occupant is not None for occupant in template.body_parts.values()):
         _refuse("unsupported_native_template", "native race template has equipment that cannot be mapped")
 
     return {

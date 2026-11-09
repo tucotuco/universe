@@ -64,6 +64,13 @@ def _need(test, message):
         raise ReconstructionRejected(message)
 
 
+def _unoccupied_template_hands(body_parts):
+    """Allow only explicit empty native hand slots in the closed initial subset."""
+    return (type(body_parts) is dict
+            and set(body_parts) <= {'left hand', 'right hand'}
+            and all(value is None for value in body_parts.values()))
+
+
 def _sections(state):
     _need(type(state) is tuple and state and state[0] == 'checkpoint-inventory',
           'unsupported inventory body')
@@ -772,9 +779,9 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
             definition_fields = graph.fields(definition_ref, 'being.BeingDefinition')[1]
             _need(graph.data(definition_fields['physiology_id']) is None,
                   'Being definition has an unsupported physiology/profile binding')
-            _need(graph.data(definition_fields['body_parts']) == {} and
+            _need(_unoccupied_template_hands(graph.data(definition_fields['body_parts'])) and
                   graph.data(definition_fields['armor_id']) is None,
-                  'equipment and body-part ownership is outside the initial subset')
+                  'equipment ownership is outside the initial subset; only empty native hand slots are supported')
         _need(graph.raw_ref(values['original']) in
               {graph.raw_ref(item) for item in graph.raw_mapping(
                   graph.fields(graph.raw_ref(graph.fields(library_ref)[1]['being_dictionary']))[1]['objects']).values()},

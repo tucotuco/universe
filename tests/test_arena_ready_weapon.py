@@ -81,7 +81,8 @@ class TestArenaReadyWeapon(unittest.TestCase):
         self.assertEqual(candidate.encounter.time, 0)
         self.assertFalse(candidate.encounter.initiated)
         self.assertIsNone(candidate.encounter.initiation)
-        self.assertEqual(player.current.body_parts, {"right hand": None})
+        self.assertEqual(player.current.body_parts,
+                         {"left hand": None, "right hand": None})
         self.assertEqual(len(player.possessions), 1)
         weapon = candidate.universe.get_object_by_id(player.possessions[0])
         self.assertIs(type(weapon), WeaponInstance)
@@ -108,7 +109,7 @@ class TestArenaReadyWeapon(unittest.TestCase):
         catalog = next(row for row in inspected["action_catalog"]["entries"]
                        if row["name"] == "ready weapon")
         self.assertEqual((catalog["status"], catalog["display_name"], catalog["hands"]),
-                         ("available", "Draw (2 s)", ["right hand"]))
+                         ("available", "Draw (2 s)", ["left hand", "right hand"]))
         weight = weapon.current.weight
         activation_awareness = dict((key, set(value)) for key, value in candidate.encounter.awareness.items())
         accepted = session.choose_ready_weapon({"handle": entity["handle"], "hand": "right hand"})
@@ -149,7 +150,8 @@ class TestArenaReadyWeapon(unittest.TestCase):
         replacement_weapon = replacement.universe.get_object_by_id(replacement_player.possessions[0])
         self.assertNotEqual(replacement_weapon.id, old_id)
         self.assertEqual(replacement.encounter.time, 0)
-        self.assertEqual(replacement_player.current.body_parts, {"right hand": None})
+        self.assertEqual(replacement_player.current.body_parts,
+                         {"left hand": None, "right hand": None})
         self.assertEqual(replacement_player.weapons, [])
         self.assertIsNotNone(native_weapon_draw_location(replacement_weapon))
 
@@ -175,12 +177,61 @@ class TestArenaReadyWeapon(unittest.TestCase):
 
     def test_normal_generated_arena_does_not_receive_authored_hand_or_weapon(self):
         session, candidate, player = arena(seed=20261124)
-        self.assertEqual(player.current.body_parts, {})
+        self.assertEqual(player.current.body_parts, player.original.body_parts)
+        self.assertEqual(player.current.body_parts,
+                         {"left hand": None, "right hand": None})
         self.assertEqual(player.possessions, [])
         self.assertEqual(player.weapons, [])
         self.assertFalse(candidate.ground_objects)
         self.assertFalse(any(type(obj) is WeaponInstance and obj.parent_container_id == player.id
                              for obj in candidate.universe.object_registry.object_instances.values()))
+
+    def test_ordinary_generated_human_and_high_elf_use_native_hand_templates(self):
+        expected = {"left hand": None, "right hand": None}
+        for seed, native_type in ((20261120, "Human"), (20261121, "High elf")):
+            with self.subTest(native_type=native_type):
+                session = GeneratedArenaSession(root_seed_factory=lambda seed=seed: seed)
+                view = session.generate(GENERATE)
+                candidate = session.active_candidate
+                player = candidate.participants[0].native.being
+                opponent = candidate.participants[1].native.being
+                self.assertEqual(player.original.obj_type, native_type)
+                self.assertEqual(player.current.body_parts, expected)
+                self.assertEqual(player.current.body_parts, player.original.body_parts)
+                self.assertEqual(view["character"]["anatomy"], {
+                    "status": "available", "hands": [
+                        {"name": "left hand", "occupancy": "empty"},
+                        {"name": "right hand", "occupancy": "empty"}]})
+                opponent_projection = next(row for row in view["entities"]
+                                           if row["category"] == "being"
+                                           and row["name"] == opponent.name)
+                self.assertNotIn("anatomy", opponent_projection)
+                self.assertNotIn("body_parts", opponent_projection)
+                source = json.loads(candidate.participants[0].native.source_record_bytes)
+                scores = source["state"]["scores"]
+                self.assertEqual(player.get_abilities(), {
+                    "STR": scores[0], "INT": scores[1], "WIS": scores[2],
+                    "DEX": scores[3], "CON": scores[4], "CHA": scores[5],
+                    "FIT": scores[4]})
+                self.assertEqual(player.get_hit_points(), source["state"]["hps"])
+                self.assertEqual(player.get_experience(), 10000)
+                self.assertEqual(player.current.length, source["state"]["height"])
+                self.assertEqual(player.current.weight, source["state"]["weight"])
+                self.assertEqual(player.possessions, [])
+                self.assertEqual(player.weapons, [])
+                self.assertEqual(opponent.possessions, [])
+
+    def test_native_hand_projection_marks_unsupported_template_unrepresented(self):
+        from arena_browser_session import GeneratedArenaSession
+        from being import BeingInstance
+        from library import Library
+
+        library = Library(config_dir=str(ROOT / "src" / "config"))
+        skeleton = BeingInstance(library.get_being_definition("Skeleton"), "Skeleton")
+        self.assertEqual(skeleton.current.body_parts, {})
+        self.assertEqual(GeneratedArenaSession._native_hand_projection(
+            skeleton, {"status": "available", "items": []}),
+            {"status": "unrepresented", "hands": []})
 
     def test_revision_61_re_ready_timing_uses_weapon_and_motion_table_values(self):
         _, candidate, _ = arena()
@@ -208,7 +259,7 @@ class TestArenaReadyWeapon(unittest.TestCase):
                      if row["name"] == "ready weapon")
         self.assertEqual(entry["status"], "available")
         self.assertEqual(entry["display_name"], "Draw (2 s)")
-        self.assertEqual(entry["hands"], ["right hand"])
+        self.assertEqual(entry["hands"], ["left hand", "right hand"])
         self.assertIn("worn sheath", entry["reason"])
         weight = view["character"]["inventory"]["carried_weight_pounds"]
         accepted = session.choose_ready_weapon({"handle": handle, "hand": "right hand"})
@@ -231,11 +282,18 @@ class TestArenaReadyWeapon(unittest.TestCase):
         self.assertEqual(second["ready_weapon_action"]["outcome"], "success")
         self.assertEqual(second["character"]["inventory"]["items"][0]["status"],
                          "readied in right hand")
+        self.assertEqual(second["character"]["anatomy"]["hands"], [
+            {"name": "left hand", "occupancy": "empty"},
+            {"name": "right hand", "occupancy": "occupied",
+             "object": {"handle": second["character"]["inventory"]["items"][0]["handle"],
+                        "name": "Test Dagger", "type": "Dagger"}}])
         self.assertEqual(second["character"]["inventory"]["carried_weight_pounds"], weight)
         self.assertEqual(player.possessions, [weapon.id])
         self.assertEqual(weapon.parent_container_id, player.id)
         self.assertEqual(player.weapons, [weapon.id])
-        self.assertEqual(player.current.body_parts, {"right hand": weapon.id})
+        expected_parts = dict(player.original.body_parts)
+        expected_parts["right hand"] = weapon.id
+        self.assertEqual(player.current.body_parts, expected_parts)
         self.assertIsNone(native_weapon_draw_location(weapon))
         self.assertEqual(candidate.encounter.inspect_committed(start + 2)
                          .action(action_id).facts.outcome, "success")
@@ -264,6 +322,10 @@ class TestArenaReadyWeapon(unittest.TestCase):
         self.assertEqual(ground.parent_container_id, player.id)
         self.assertIn(ground.id, player.possessions)
         self.assertEqual(player.current.body_parts["right hand"], None)
+        self.assertEqual(
+            [(row["name"], row["occupancy"]) for row in picked["character"]["anatomy"]["hands"]],
+            [(name, "empty") for name in ("left hand", "right hand")
+             if name in player.current.body_parts])
         self.assertEqual(player.weapons, [])
         self.assertIsNone(native_weapon_draw_location(ground))
         draw = next(row for row in picked["action_catalog"]["entries"]

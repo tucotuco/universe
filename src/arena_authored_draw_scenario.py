@@ -49,8 +49,17 @@ def author_scenario(candidate, value):
     player = players[0]
     if (player.current.hit_points <= 0 or player.is_helpless()
             or player.possessions or player.weapons or player.current.armor_id
-            or player.current.body_parts):
+            or type(player.current.body_parts) is not dict
+            or any(type(slot) is not str or not slot.strip()
+                   or occupant is not None and type(occupant) is not str
+                   for slot, occupant in player.current.body_parts.items())):
         raise ArenaDrawScenarioRefusal("generated player state cannot accept the authored Draw fixture")
+    requested_slots = scenario["player_hand_slots"]
+    if any(slot not in player.current.body_parts
+           or player.current.body_parts[slot] is not None
+           for slot in requested_slots):
+        raise ArenaDrawScenarioRefusal(
+            "authored Draw hand must be explicitly declared free by the native Being template")
     ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
     if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.id:
         raise ArenaDrawScenarioRefusal("player-owned Arena perception ledger is unavailable")
@@ -65,7 +74,6 @@ def author_scenario(candidate, value):
             or object_id in player.possessions or object_id in player.weapons):
         raise ArenaDrawScenarioRefusal("new native Dagger already has conflicting custody")
 
-    player.current.body_parts = copy.deepcopy(scenario["player_hand_slots"])
     player.possessions.append(object_id)
     weapon.parent_container_id = player.id
     author_worn_sheath_draw_location(weapon, player.id)
