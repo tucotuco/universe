@@ -29,7 +29,7 @@ Generated the opt-in authored Draw scenario with its explicitly drawable carried
 
 ### Mixed movement and Action history; repeated Save/Load
 
-The integration regression compares uninterrupted play with save/load branches after native movement and completed Pick up. Both branches accept a further movement plan, commit it, save/load again, and advance another boundary. Positions, RNG state, receipt counts, Dagger custody/identity, and Target history match. Pending Pick up is separately saved/restored and completed at its exact one-second boundary. Pending Draw is separately restored with one second remaining and completes only at its native two-second boundary. Completed Draw and Run histories also round-trip.
+The integration regression compares uninterrupted play with save/load branches after native movement and completed Pick up. Both branches accept a further movement plan, commit it, save/load again, and advance another boundary. Positions, RNG state, receipt counts, Dagger custody/identity, and Target history match. Pending Pick up is separately saved/restored and completed at its exact one-second boundary. Pending Run is restored before its first boundary, then its result and position match uninterrupted execution. Pending Draw is separately restored with one second remaining and completes only at its native two-second boundary. Completed Draw and Run histories also round-trip.
 
 ## Verification
 
