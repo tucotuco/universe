@@ -16,6 +16,11 @@ P = CartesianPosition
 
 
 class TestSphere(unittest.TestCase):
+    def test_radius_is_truncated_at_authoritative_geometry_creation(self):
+        self.assertEqual(Sphere(1.239).radius, 1.23)
+        with self.assertRaises(ValueError):
+            Sphere(0.009)
+
     def test_containment_and_bounds_are_continuous(self):
         shape = Sphere(2)
         center = P(100, 20, -30)
@@ -53,6 +58,10 @@ class TestSphere(unittest.TestCase):
 
 
 class TestBox(unittest.TestCase):
+    def test_axis_lengths_are_truncated_at_authoritative_geometry_creation(self):
+        self.assertEqual(AxisAlignedBox(1.239, 2.349, 3.459),
+                         AxisAlignedBox(1.23, 2.34, 3.45))
+
     def test_containment_bounds_and_segment(self):
         shape, center = AxisAlignedBox(4, 2, 6), P(50, 10, 20)
         self.assertEqual(shape.bounds(center),

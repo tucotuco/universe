@@ -28,6 +28,10 @@ def _positive_finite(value, name):
         raise TypeError(f"{name} must be numeric") from exc
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
+    from measured_values import truncate_measurement
+    value = truncate_measurement(value)
+    if value <= 0.0:
+        raise ValueError(f"{name} is too small for authoritative hundredth-unit precision")
     return value
 
 
@@ -88,6 +92,7 @@ class Sphere(Geometry3D):
     """Sphere centered on its Entity's position, with radius in world units."""
 
     radius: float
+    _MEASURED_ATTRIBUTES = frozenset(("radius",))
 
     def __post_init__(self):
         object.__setattr__(self, "radius", _positive_finite(self.radius, "radius"))
@@ -138,6 +143,7 @@ class AxisAlignedBox(Geometry3D):
     size_x: float
     size_y: float
     size_z: float
+    _MEASURED_ATTRIBUTES = frozenset(("size_x", "size_y", "size_z"))
 
     def __post_init__(self):
         for name in ("size_x", "size_y", "size_z"):

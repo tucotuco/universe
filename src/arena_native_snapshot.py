@@ -13,7 +13,7 @@ import math
 import threading
 from types import MappingProxyType
 
-SCHEMA = 'universe.generated-arena-native-state/1'
+SCHEMA = 'universe.generated-arena-native-state/2'
 _FIELDS = frozenset(('schema', 'compatibility', 'inventory', 'sha256'))
 MAX_BYTES = 64 * 1024 * 1024
 
@@ -314,6 +314,29 @@ def restore(envelope):
         elif tag == 'list': cache[ref].extend(scalar(v) for v in content)
         elif tag == 'set': cache[ref].update(scalar(v) for v in content)
         elif tag == 'frozenset': cache[ref] = frozenset(scalar(v) for v in content)
+
+    # Restore is an authoritative admission boundary: never normalize a file
+    # whose saved measured state was written with a different precision rule.
+    from object import ObjectDefinition
+    from spatial.state import SpatialState
+    from spatial.geometry import AxisAlignedBox, Sphere
+    from measured_values import is_truncated_measurement
+    for obj in cache.values():
+        if isinstance(obj, ObjectDefinition):
+            for name in ObjectDefinition._MEASURED_ATTRIBUTES:
+                if not is_truncated_measurement(getattr(obj, name, None)):
+                    raise ArenaNativeSnapshotRejected(
+                        f'native {name} measurement is not canonically truncated')
+        if type(obj) is SpatialState:
+            if any(not is_truncated_measurement(value)
+                   for value in obj.position.as_tuple()):
+                raise ArenaNativeSnapshotRejected(
+                    'native Cartesian position is not canonically truncated')
+        if type(obj) in (Sphere, AxisAlignedBox):
+            if any(not is_truncated_measurement(getattr(obj, name))
+                   for name in obj._MEASURED_ATTRIBUTES):
+                raise ArenaNativeSnapshotRejected(
+                    'native geometry measurement is not canonically truncated')
 
     world = next(cache[ref] for ref, tag, _ in nodes if tag == 'universe.Universe')
     encounter = next(cache[ref] for ref, tag, _ in nodes if tag == 'encounter.Encounter')

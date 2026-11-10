@@ -20,6 +20,7 @@ from arena_initialization import (
 from arena_hex_map import HexAddress
 from library import Library
 from npcgen_arena_adapter import ArenaNPCRefusal, prepare_npcgen_arena_being
+from measured_values import truncate_measurement
 from spatial.state import CartesianPosition
 from universe import Universe
 
@@ -60,8 +61,9 @@ class TestArenaInitialization(unittest.TestCase):
                     self.assertEqual(p.native.being.get_experience(), xp)
                     self.assertEqual(p.native.being.get_position(), p.placement.position)
                     self.assertEqual(p.placement.position, CartesianPosition(
-                        *candidate.arena_map.layout.center_position(
-                            HexAddress(p.placement.column, p.placement.row)).as_tuple()))
+                        *(truncate_measurement(value) for value in
+                          candidate.arena_map.layout.center_position(
+                            HexAddress(p.placement.column, p.placement.row)).as_tuple())))
                     self.assertAlmostEqual(candidate.arena_map.cell_size_meters, 0.9144)
                     self.assertEqual(p.native.skills_status["cost_modifiers"], "character")
                     source = json.loads(p.native.source_record_bytes)

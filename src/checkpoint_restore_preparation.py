@@ -305,7 +305,8 @@ def _admit_trusted_movement_arena(decoded, plan_wire):
         destination = CartesianPosition(*plan.destination)
     except (TypeError, ValueError, RuntimeError) as exc:
         raise RestorePreparationRejected(f'movement Arena admission inputs are invalid: {exc}') from exc
-    expected = layout.center_position(address, z=destination.z)
+    from measured_values import truncate_position
+    expected = truncate_position(layout.center_position(address, z=destination.z))
     if (not is_quarantined(world) or not is_quarantined(encounter)
             or encounter.progression_mode != 'quarantined_inspection'
             or boundary < 1 or inspection.boundary != boundary
@@ -497,7 +498,8 @@ def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *
         layout = ArenaHexLayout.rectangle(*plan.layout)
         address = HexAddress(*plan.cell)
         destination = CartesianPosition(*plan.destination)
-        expected_destination = layout.center_position(address, z=destination.z)
+        from measured_values import truncate_position
+        expected_destination = truncate_position(layout.center_position(address, z=destination.z))
     except (TypeError, ValueError) as exc:
         raise RestorePreparationRejected(f'movement-plan destination cannot be reconstructed: {exc}') from exc
     if destination != expected_destination:

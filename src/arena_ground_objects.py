@@ -208,6 +208,7 @@ def realize_arena_ground_objects(universe, item_descriptions, initial_layout,
         provisional_ids.add(instance.id)
         position = layout.center_position(address)
         instance.set_position(position)
+        position = instance.get_position()
         if (instance.parent_container_id is not None or instance.get_position() != position
                 or instance.geometry is not None):
             _refuse("invalid_native_ground_state", "constructed Object is not in supported uncontained ground state",

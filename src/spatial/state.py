@@ -124,6 +124,12 @@ class SpatialState:
 
     position: CartesianPosition
 
+    def __setattr__(self, name, value) -> None:
+        if name == "position":
+            from measured_values import truncate_position
+            value = truncate_position(value)
+        object.__setattr__(self, name, value)
+
     def __post_init__(self) -> None:
         if not isinstance(self.position, CartesianPosition):
             raise TypeError("position must be a CartesianPosition")

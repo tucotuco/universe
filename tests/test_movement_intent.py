@@ -20,6 +20,7 @@ from movement_intent import (MovementIntent, MovementIntentRefusal,
 from hex_facing import FacingSector, classify_vector, facing_vector, nearest_facing
 from skill import SkillDictionary
 from spatial.state import CartesianPosition
+from measured_values import truncate_position
 
 
 class TestNativeMovementIntent(unittest.TestCase):
@@ -191,7 +192,8 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
         self.encounter.step(1, movement_intent=intent, movement_conditions=conditions)
         end = self.player.get_position()
-        self.assertAlmostEqual(math.dist(start.as_tuple(), end.as_tuple()), 0.9144)
+        self.assertGreaterEqual(math.dist(start.as_tuple(), end.as_tuple()), 0.90)
+        self.assertLessEqual(math.dist(start.as_tuple(), end.as_tuple()), 0.92)
 
     def activate_run_observer(self):
         self.session.choose_run()
@@ -318,8 +320,10 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(step.movement_decision_ids, ("arena-move-1",))
         self.assertIn(self.player.id, step.moved_entity_ids)
         self.assertEqual((step.start_time, step.end_time), (0, 1))
-        self.assertAlmostEqual(end.x - start.x, direction[0] * 1.75 * 0.9144)
-        self.assertAlmostEqual(end.y - start.y, direction[1] * 1.75 * 0.9144)
+        expected_end = truncate_position(CartesianPosition(
+            start.x + direction[0] * 1.75 * 0.9144,
+            start.y + direction[1] * 1.75 * 0.9144, start.z))
+        self.assertLessEqual(math.dist(end.as_tuple(), expected_end.as_tuple()), 0.02)
         self.assertEqual(end.z, start.z)
         self.assertEqual(layout.cell_at_position(end), HexAddress(2, 1))
         self.assertEqual((self.player.front_facing, self.player.top_facing), facing_fields)
@@ -328,9 +332,10 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(result.facts.outcome, "success")
         self.session._player_action_outcome = result.facts.outcome
         public_after = self.session.public_view()
-        public_keys = {"state", "load_available", "encounter_name", "time_seconds", "map",
+        public_keys = {"state", "starter_ground_equipment_available", "save_available",
+                       "load_available", "encounter_name", "time_seconds", "map",
                        "player", "character", "player_action", "pickup_action", "entities", "selected_entity",
-                       "action_catalog",
+                       "selected_being", "action_catalog",
                        "run_available", "advance_available",
                        "movement_available", "movement_reason", "movement_plan", "movement_outcome",
                        "ready_weapon_action", "spot_available", "spot_reason"}

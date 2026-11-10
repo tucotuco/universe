@@ -7,9 +7,11 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.abspath('../src'))
+sys.path.insert(0, os.path.abspath('src'))
 
 from object import ObjectDefinition, ObjectInstance
 from spatial import CartesianPosition, ISEAGrid, SpatialState
+from measured_values import truncate_position
 
 
 class TestCartesianPosition(unittest.TestCase):
@@ -64,7 +66,7 @@ class TestObjectSpatialState(unittest.TestCase):
     def test_object_position_is_continuous_and_cell_is_derived(self):
         position = CartesianPosition.from_lat_lon(12.0, -45.0, 1.25)
         self.obj.set_position(position)
-        self.assertIs(self.obj.get_position(), position)
+        self.assertEqual(self.obj.get_position(), truncate_position(position))
         self.assertEqual(
             self.obj.spatial_cell(self.grid, 5),
             self.grid.cell_at(12.0, -45.0, 5),
@@ -87,7 +89,7 @@ class TestObjectSpatialState(unittest.TestCase):
         self.obj.set_position(second)
         second_cell = self.obj.spatial_cell(self.grid, 4)
         self.assertNotEqual(first_cell, second_cell)
-        self.assertEqual(self.obj.get_position(), second)
+        self.assertEqual(self.obj.get_position(), truncate_position(second))
         self.assertFalse(hasattr(self.obj.spatial_state, 'cell_address'))
 
 

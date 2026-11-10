@@ -687,6 +687,12 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                                              MappingProxyType(old),MappingProxyType(new)))
             now=dest
             if now<next_boundary:start(now,'before_boundary')
+        # The staged final positions become authoritative at this committed
+        # native boundary. Keep intermediate integration arithmetic precise,
+        # then truncate every persisted Cartesian coordinate toward zero.
+        from measured_values import truncate_position
+        positions={key:None if value is None else truncate_position(value)
+                   for key,value in positions.items()}
         fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),MappingProxyType(events),
             MappingProxyType(initialization),MappingProxyType(registered),MappingProxyType(states),MappingProxyType(positions),
             MappingProxyType(facing_updates))

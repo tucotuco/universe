@@ -199,7 +199,7 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
             normalized_loadout_profile = api.validate_loadout_profile(ground_loadout_profile)
         except Exception as exc:
             _reject("invalid_ground_loadout_profile", "caller-supplied npcgen profile was refused",
-                    error=type(exc).__name__, message=str(exc)[:256])
+                    error=type(exc).__name__, reason=str(exc)[:256])
 
     if library is None:
         library = Library(config_dir=str(Path(__file__).resolve().parent / "config"))
@@ -252,6 +252,7 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         column, row = address.column, address.row
         position = layout.center_position(address)
         native.being.set_position(position)
+        position = native.being.get_position()
         placements.append(ArenaPlacement(role, native.being.id, column, row, position))
 
     encounter = Encounter(world, difficulty_class=0, start_time=0, name="Arena",

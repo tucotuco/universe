@@ -19,6 +19,7 @@ from arena_initialization import initialize_two_being_arena
 from armor import ArmorInstance
 from object import ObjectInstance
 from weapon import WeaponInstance
+from measured_values import truncate_position
 
 
 PROFILE = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
@@ -94,8 +95,8 @@ class TestArenaGroundObjects(unittest.TestCase):
             self.assertIsNone(instance.visual_occlusion)
             self.assertEqual(instance.get_position(), placement.position)
             self.assertEqual(placement.position,
-                             candidate.ground_layout.center_position(HexAddress(placement.column,
-                                                                                placement.row)))
+                             truncate_position(candidate.ground_layout.center_position(
+                                 HexAddress(placement.column, placement.row))))
             self.assertFalse(instance.current.is_magical)
             self.assertGreater(instance.current.weight, 0)
         self.assertEqual(candidate.ground_loadout_provenance[0]["profile"]["profile_id"],
@@ -245,9 +246,11 @@ class TestArenaGroundObjects(unittest.TestCase):
             self.assertNotIn(hidden.id, json.dumps(state))
             self.assertLessEqual(steps, 100)
         final = session.public_view()
-        self.assertEqual(being.get_position(), target)
+        self.assertEqual(being.get_position(), truncate_position(target))
         self.assertEqual(final["player"]["position_meters"],
-                         {"x": target.x, "y": target.y, "z": target.z})
+                         {"x": truncate_position(target).x,
+                          "y": truncate_position(target).y,
+                          "z": truncate_position(target).z})
         self.assertEqual(final["movement_outcome"], "arrived")
         self.assertNotIn(hidden.id, json.dumps(final))
         self.assertNotIn("ground_objects", final)

@@ -85,6 +85,8 @@ def capture_accepted_plan(session):
                 or plan.decision_id != f"arena-movement-{session._movement_sequence}"):
             raise MovementPlanRejected("movement decision sequence does not bind to the accepted plan")
         expected = layout.center_position(plan.address, z=plan.destination.z)
+        from measured_values import truncate_position
+        expected = truncate_position(expected)
         if expected != plan.destination:
             raise MovementPlanRejected("accepted destination differs from its native hex-cell center")
         row = ArenaMovementPlanCheckpoint(
@@ -172,6 +174,9 @@ def _validate(row):
             or any(type(value) not in (int, float) or not math.isfinite(value)
                    for value in row.destination)):
         raise MovementPlanRejected("movement destination coordinates are malformed")
+    from measured_values import is_truncated_measurement, truncate_position
+    if any(not is_truncated_measurement(value) for value in row.destination):
+        raise MovementPlanRejected("movement destination is not truncated to native precision")
     if (type(row.cell) is not tuple or len(row.cell) != 2
             or any(type(value) is not int for value in row.cell)
             or type(row.layout) is not tuple or len(row.layout) != 2
@@ -181,6 +186,11 @@ def _validate(row):
         raise MovementPlanRejected("movement cell/layout is malformed")
     if (row.rate not in _RATES or row.facing_policy not in ("turn", "maintain")):
         raise MovementPlanRejected("movement rate or facing policy is unsupported")
+    from arena_hex_map import ArenaHexLayout, HexAddress
+    layout = ArenaHexLayout.rectangle(*row.layout)
+    expected = truncate_position(layout.center_position(HexAddress(*row.cell), z=row.destination[2]))
+    if tuple(expected.as_tuple()) != row.destination:
+        raise MovementPlanRejected("movement destination is not its canonical native hex center")
     if (type(row.world_premise) is not tuple or len(row.world_premise) != 6
             or row.world_premise != ("Plains", "Road", 1.0, 1.0, True, False)):
         raise MovementPlanRejected("movement premise is outside the initial Arena contract")

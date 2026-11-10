@@ -19,6 +19,14 @@ class ObjectDefinition:
     '''
     A template for characteristics of Objects.
     '''
+    _MEASURED_ATTRIBUTES = frozenset(("length", "width", "height", "weight"))
+
+    def __setattr__(self, name, value):
+        if name in self._MEASURED_ATTRIBUTES and value is not None:
+            from measured_values import truncate_measurement
+            value = truncate_measurement(value)
+        object.__setattr__(self, name, value)
+
     def __init__(self, obj_type, length, width, height, weight, cost, hardness, 
                  hit_points, is_magical=False, tags=None, weapon_categories=None,
                  discovery_dc=None):
