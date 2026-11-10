@@ -42,7 +42,7 @@ The strategy enum now accepts `defense_only` in the existing strict Arena save f
 
 The new session tests save and restore the player's preparing Dodge, a ready-but-waiting Dodge, and the completed result. They compare committed Action and Choice identities, pending/completed membership, native Being and skill state, observer evidence, and RNG against uninterrupted execution. They also load and advance preparing Dodge checkpoints in fresh OS processes with NPC generation patched to fail. Defense-only checkpoints are similarly restored and compared across impact. No Dodge is regenerated or replayed.
 
-The tests cover no observed threat, an already planned player Action, duplicate/ongoing defenses, and a too-late Dodge. Refused choices leave Encounter time, pending Actions, event history, Choice state, and RNG unchanged. Native practice is preserved: the resolver's `SkillExercise` applies only for `evaded` or `failed`, not `no_threat` or `unable_to_defend`. A ready Dodge waits for its designated strike's impact; time advancing to `ready_at` does not resolve it early.
+The tests cover no observed threat, an already planned player Action, duplicate/ongoing defenses, and a too-late Dodge. A live trace initially exposed that the Defense-only policy could propose a second Dodge while the first was waiting for impact; the policy now refuses another proposal while its native defense is pending. A repeated Chrome smoke and a regression assertion confirm one Dodge is scheduled. Refused choices leave Encounter time, pending Actions, event history, Choice state, and RNG unchanged. Native practice is preserved: the resolver's `SkillExercise` applies only for `evaded` or `failed`, not `no_threat` or `unable_to_defend`. A ready Dodge waits for its designated strike's impact; time advancing to `ready_at` does not resolve it early.
 
 ## Validation
 
@@ -50,6 +50,7 @@ Passed:
 
 - `python -m py_compile examples/arena_web.py src/arena_browser_session.py src/arena_native_snapshot.py src/arena_persistence.py tests/test_arena_opponent_attack.py tests/test_generated_arena_browser.py`
 - Focused Dodge, HTTP route, and shipped JavaScript tests: 5 tests passed in 13.390 s.
+- After the duplicate-defense guard: player and Defense-only save/resume tests passed, 2 tests in 11.726 s; the Defense-only assertion confirms exactly one native Dodge remains scheduled through continuation.
 - `python -m unittest test_attack_specific_defense test_arena_opponent_attack test_arena_persistence test_generated_arena_browser test_transactional_progression -v`: 125 tests passed in 87.424 s.
 - From `tests/`: `PYTHONPATH=../src:../examples:.:../../npc-generator python -m unittest test_melee_combat -v`: 11 tests passed in 0.121 s.
 - Real Chrome browser walkthroughs for player Dodge and the Defense-only opponent described above.
@@ -72,6 +73,6 @@ The browser exposes an attack-specific Dodge, not a general defense stance. Each
 - `tests/test_generated_arena_browser.py`
 - `docs/reports/U-ARENA-014-report.md`
 
-Implementation commit: `c13b836` (`Add native Dodge to generated Arena`).
+Implementation commits: `c13b836` (`Add native Dodge to generated Arena`) and `ad8a092` (`Prevent duplicate Arena opponent Dodges`).
 
 No changes were made to the sibling NPC Generator repository. No push was performed.
