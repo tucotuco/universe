@@ -9,7 +9,8 @@ import math
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/4'
+SCHEMA = 'universe.generated-arena-save/5'
+_PREVIOUS_SCHEMA = 'universe.generated-arena-save/4'
 MAX_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 
@@ -60,6 +61,8 @@ def _session_record(session, native_wire):
     candidate=session._active
     if type(candidate) is not ArenaInitializationCandidate:
         raise ArenaSaveRejected('Generate an Arena before saving')
+    if session._opponent_strategy not in ('none', 'attack_only'):
+        raise ArenaSaveRejected('Arena opponent strategy is unsupported')
     players=candidate.participants
     sources=[]
     for participant in players:
@@ -99,6 +102,7 @@ def _session_record(session, native_wire):
         'ground_loadout_provenance':list(candidate.ground_loadout_provenance),
         'initial_equipment_provenance':list(candidate.initial_equipment_provenance),
         'equipment_mode':candidate.equipment_mode,
+        'opponent_strategy':session._opponent_strategy,
     }
 
 
@@ -124,7 +128,8 @@ def decode(wire):
     except ArenaSaveRejected:raise
     except (UnicodeDecodeError,json.JSONDecodeError,RecursionError) as exc:
         raise ArenaSaveRejected(f'Arena save is not valid UTF-8 JSON: {exc}') from exc
-    if type(data) is not dict or set(data)!=_FIELDS or data['schema']!=SCHEMA:
+    if (type(data) is not dict or set(data)!=_FIELDS
+            or data['schema'] not in (SCHEMA, _PREVIOUS_SCHEMA)):
         raise ArenaSaveRejected('unknown Arena save schema or field set')
     payload={key:data[key] for key in data if key!='sha256'}
     if type(data['sha256']) is not str or hashlib.sha256(_canonical(payload)).hexdigest()!=data['sha256']:
@@ -141,6 +146,8 @@ def decode(wire):
         'map','world_premise','display_names','movement_plan_base64','movement_sequence',
         'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
         'initial_equipment_provenance','equipment_mode'}
+    if data['schema'] == SCHEMA:
+        required.add('opponent_strategy')
     if type(s) is not dict or set(s)!=required:
         raise ArenaSaveRejected('Arena session metadata has unknown or missing fields')
     for key in ('encounter_name','player_name','player_id','opponent_id'):
@@ -165,6 +172,10 @@ def decode(wire):
             or type(s['initial_equipment_provenance']) is not list
             or s['equipment_mode'] not in ('equipped','unequipped')):
         raise ArenaSaveRejected('Arena starting equipment provenance is malformed')
+    if data['schema'] == _PREVIOUS_SCHEMA:
+        s['opponent_strategy'] = 'none'
+    if s['opponent_strategy'] not in ('none', 'attack_only'):
+        raise ArenaSaveRejected('Arena opponent strategy is unsupported')
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)
         except (TypeError,ValueError) as exc:raise ArenaSaveRejected('movement plan encoding is invalid') from exc

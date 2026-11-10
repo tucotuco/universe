@@ -164,6 +164,8 @@ class GeneratedArenaSession:
         self._ready_weapon_action_id = None
         self._ready_weapon_action_outcome = None
         self._ready_weapon_end_time = None
+        self._opponent_strategy = "none"
+        self._opponent_attack_refusal = "strategy_disabled"
         self._movement_plan = None
         self._movement_sequence = 0
         self._movement_outcome = None
@@ -454,12 +456,15 @@ class GeneratedArenaSession:
             old=(self._active,self._encounter_name,self._player_name,self._rng_cursor,
                  self._movement_plan,self._movement_sequence,self._display_names,
                  self._view_handles,self._selected_entity_handle,self._movement_outcome,
+                 self._opponent_strategy,self._opponent_attack_refusal,
                  self._player_action_id,self._player_action_outcome,self._pickup_action_id,
                  self._pickup_action_outcome,self._ready_weapon_action_id,
                  self._ready_weapon_action_outcome,self._ready_weapon_end_time)
             try:
                 self._active=candidate;self._encounter_name=meta['encounter_name']
                 self._player_name=meta['player_name'];self._rng_cursor=rng_owner
+                self._opponent_strategy=meta['opponent_strategy']
+                self._opponent_attack_refusal="restored"
                 self._movement_plan=plan;self._movement_sequence=meta['movement_sequence']
                 self._display_names=dict(meta['display_names']);self._view_handles={}
                 self._selected_entity_handle=None;self._movement_outcome=None
@@ -506,6 +511,7 @@ class GeneratedArenaSession:
                 (self._active,self._encounter_name,self._player_name,self._rng_cursor,
                  self._movement_plan,self._movement_sequence,self._display_names,
                  self._view_handles,self._selected_entity_handle,self._movement_outcome,
+                 self._opponent_strategy,self._opponent_attack_refusal,
                  self._player_action_id,self._player_action_outcome,self._pickup_action_id,
                  self._pickup_action_outcome,self._ready_weapon_action_id,
                  self._ready_weapon_action_outcome,self._ready_weapon_end_time)=old
@@ -555,6 +561,12 @@ class GeneratedArenaSession:
                 "duration_seconds": duration, "seconds_remaining": remaining}
         melee_action = self._melee_action_view(candidate, player.native.being)
         melee_pending = (melee_action is not None and melee_action["status"] == "executing")
+        opponent = candidate.participants[1].native.being
+        opponent_melee_action = self._opponent_melee_action_view(
+            candidate, opponent, player.native.being)
+        opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
+        opponent_can_act, opponent_reason = self._opponent_attack_preflight(candidate)
+        self._opponent_attack_refusal = opponent_reason
         movement_plan = None
         movement_available = player.native.being.posture in ("standing", "crouching", "lying")
         movement_available = movement_available and player.native.being.hex_facing is not None
@@ -628,6 +640,8 @@ class GeneratedArenaSession:
             "pickup_action": pickup_action,
             "ready_weapon_action": ready_weapon_action,
             "melee_action": melee_action,
+            "opponent_melee_action": opponent_melee_action,
+            "opponent_strategy": self._opponent_strategy,
             "entities": perceived,
             "selected_entity": selected,
             "action_catalog": action_catalog,
@@ -639,6 +653,8 @@ class GeneratedArenaSession:
                                    or (self._ready_weapon_action_id is not None
                                        and self._ready_weapon_action_outcome is None)
                                    or melee_pending
+                                   or opponent_melee_pending
+                                   or opponent_can_act
                                    or movement_plan is not None),
             "movement_available": movement_available,
             "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
@@ -823,6 +839,151 @@ class GeneratedArenaSession:
                 "duration_seconds": action.end_time - action.start_time,
                 "seconds_remaining": 0, "target_name": target_name,
                 "impact_distance_meters": distance}
+
+    @staticmethod
+    def _opponent_melee_action(candidate, opponent):
+        return GeneratedArenaSession._latest_melee_action(candidate, opponent)
+
+    @staticmethod
+    def _all_melee_actions(candidate):
+        event_by_id = dict(candidate.universe.event_history)
+        committed_ids = set(candidate.encounter.pending_action_list)
+        committed_ids.update(candidate.encounter.finished_action_list)
+        committed_ids.update(candidate.encounter.cancelled_action_list)
+        choice_ids = set()
+        for accepted in candidate.encounter._choice_book._choices.values():
+            choice_ids.update(accepted.view.action_ids)
+            for member in accepted.members:
+                if type(member.action) is MeleeStrike:
+                    event_by_id[member.action.id] = member.action
+        for action_id in committed_ids:
+            action = candidate.universe.get_event_by_id(action_id)
+            if type(action) is MeleeStrike:
+                event_by_id[action.id] = action
+        return [action for action in event_by_id.values()
+                if type(action) is MeleeStrike
+                and action.id in committed_ids | choice_ids]
+
+    @staticmethod
+    def _latest_melee_action(candidate, actor):
+        actions = [action for action in GeneratedArenaSession._all_melee_actions(candidate)
+                   if action.actor_id == actor.id]
+        return max(actions, key=lambda action: (action.start_time, action.id), default=None)
+
+    def _opponent_melee_pending(self, candidate, opponent):
+        return self._melee_action_pending(
+            candidate, self._opponent_melee_action(candidate, opponent))
+
+    def _opponent_attack_preflight(self, candidate):
+        """Read-only attack-only eligibility from opponent-owned current state."""
+        if self._opponent_strategy != "attack_only":
+            return False, "strategy_disabled"
+        encounter = candidate.encounter
+        if (not encounter.initiated or encounter.progression_mode != "transactional"
+                or not encounter.arena_activation_enabled):
+            return False, "encounter_not_activated"
+        opponent = candidate.participants[1].native.being
+        player = candidate.participants[0].native.being
+        if self._opponent_melee_pending(candidate, opponent):
+            return False, "opponent_melee_already_pending"
+        if any(action.actor_id == opponent.id
+               for action in (candidate.universe.event_history.get(action_id)
+                              for action_id in encounter.pending_action_list)
+               if action is not None):
+            return False, "opponent_action_already_pending"
+        ledger = object.__getattribute__(opponent, "__dict__").get("_arena_perception_ledger")
+        evidence = (None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id == player.id), None))
+        if (evidence is None or evidence.category != "being"
+                or evidence.present_state != "present"
+                or not encounter.is_aware(opponent.id, player.id)):
+            return False, "opponent_has_no_current_awareness_evidence"
+        if opponent.get_hit_points() <= 0 or opponent.is_helpless():
+            return False, "opponent_unable_to_act"
+        if opponent.get_fatigue_level() >= 5:
+            return False, "opponent_unable_to_attack_at_current_fatigue"
+        weapon_id = self._initial_ready_dagger_id(candidate, opponent)
+        from weapon import WeaponInstance
+        weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
+        if (type(weapon) is not WeaponInstance or weapon.id not in opponent.weapons
+                or weapon.id not in opponent.armed_with(candidate.universe).values()
+                or weapon.parent_container_id != opponent.id or weapon.get_position() is not None
+                or weapon.current.obj_type != "Dagger"
+                or "thrust" not in weapon.get_melee_types()):
+            return False, "opponent_has_no_ready_native_thrust_dagger"
+        if encounter._choice_book.actor_planned_now(opponent.id):
+            return False, "opponent_action_already_pending"
+        if not _has_native_transactional_action_contract(MeleeStrike):
+            return False, "native_melee_contract_unavailable"
+        return True, "eligible"
+
+    def _schedule_opponent_attack(self, candidate):
+        eligible, reason = self._opponent_attack_preflight(candidate)
+        self._opponent_attack_refusal = reason
+        if not eligible:
+            return None
+        encounter = candidate.encounter
+        opponent = candidate.participants[1].native.being
+        player = candidate.participants[0].native.being
+        weapon_id = self._initial_ready_dagger_id(candidate, opponent)
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        reach = effective_melee_reach_meters(opponent.current, weapon.current)
+        action = MeleeStrike(encounter, opponent.id, player.id, weapon.id,
+                             motion="thrust", reach=reach)
+        # Event IDs are part of native Choice history. A stable encounter-local
+        # name keeps a future AI declaration reproducible after save/restore.
+        sequence = 1 + sum(action.actor_id == opponent.id
+                           for action in self._all_melee_actions(candidate))
+        action.id = f"{encounter.id}/arena-opponent-thrust/{sequence}"
+        try:
+            encounter.prepare_action(action)
+            encounter.schedule_action(action)
+        except Exception as exc:
+            self._opponent_attack_refusal = "native_scheduler_refused"
+            raise ArenaBrowserRequestError(
+                "native opponent Dagger strike was not accepted; Arena state is unchanged") from exc
+        self._opponent_attack_refusal = "scheduled"
+        self._trace.native_advance(None, None,
+            f"action=opponent_melee_strike motion=thrust duration={action.end_time-action.start_time:g}s")
+        return action
+
+    def _opponent_melee_action_view(self, candidate, opponent, player):
+        action = self._opponent_melee_action(candidate, opponent)
+        if action is None:
+            return None
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        actor_evidence = (None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id == opponent.id), None))
+        # Revision 61 timing: an Action declaration is not knowable in its
+        # declaration second. Revision 65's current observer evidence supports
+        # presentation beginning at the next native second.
+        if (actor_evidence is None or actor_evidence.category != "being"
+                or actor_evidence.present_state != "present"
+                or actor_evidence.time < action.start_time + 1
+                or not candidate.encounter.is_aware(player.id, opponent.id)):
+            return None
+        if self._melee_action_pending(candidate, action):
+            return {"name": action.event_type.title(), "status": "executing",
+                    "outcome": None,
+                    "duration_seconds": action.end_time-action.start_time,
+                    "seconds_remaining": max(0, math.ceil(action.end_time-candidate.encounter.time))}
+        if action.id in candidate.encounter.cancelled_action_list:
+            return {"name": action.event_type.title(), "status": "cancelled",
+                    "outcome": None,
+                    "duration_seconds": action.end_time-action.start_time,
+                    "seconds_remaining": 0}
+        try:
+            result = candidate.encounter.inspect_committed(
+                int(math.ceil(action.end_time))).action(action.id)
+        except (ValueError, KeyError, AttributeError):
+            return {"name": action.event_type.title(), "status": "completed",
+                    "outcome": "unavailable",
+                    "duration_seconds": action.end_time-action.start_time,
+                    "seconds_remaining": 0}
+        return {"name": action.event_type.title(), "status": "completed",
+                "outcome": result.facts.outcome,
+                "duration_seconds": action.end_time-action.start_time,
+                "seconds_remaining": 0}
 
     def _melee_strike_preflight(self, candidate, player, entity_id, evidence, motion,
                                 supported=True):
@@ -1506,10 +1667,13 @@ class GeneratedArenaSession:
 
     def generate(self, payload):
         expected = {"starting_experience", "width_cells", "height_cells"}
-        if (type(payload) is not dict or set(payload) not in
-                (expected, expected | {"ground_equipment"},
-                 expected | {"equipment_mode"}, expected | {"equipment_mode", "ground_equipment"})):
-            raise ArenaBrowserRequestError("Generate requires XP, dimensions, and optional equipment settings")
+        allowed_keys = expected | {"ground_equipment", "equipment_mode", "opponent_strategy"}
+        if (type(payload) is not dict or not expected <= set(payload)
+                or set(payload) - allowed_keys):
+            raise ArenaBrowserRequestError("Generate requires XP, dimensions, and supported Arena options")
+        opponent_strategy = payload.get("opponent_strategy", "none")
+        if opponent_strategy not in ("none", "attack_only"):
+            raise ArenaBrowserRequestError("opponent_strategy must be none or attack_only")
         starting_experience = _parse_decimal(payload, "starting_experience", 0)
         width_cells = _parse_decimal(payload, "width_cells", 5)
         height_cells = _parse_decimal(payload, "height_cells", 5)
@@ -1528,6 +1692,9 @@ class GeneratedArenaSession:
         equipment_mode = payload.get("equipment_mode", self._default_equipment_mode)
         if equipment_mode not in ("equipped", "unequipped"):
             raise ArenaBrowserRequestError("equipment_mode must be equipped or unequipped")
+        if opponent_strategy == "attack_only" and equipment_mode != "equipped":
+            raise ArenaBrowserRequestError(
+                "Attack only requires the Arena's native equipped Being kit; choose equipped protagonists.")
 
         # Serialize generation with all session edits/reads. The prior candidate
         # stays active until a complete new candidate and native RNG owner exist.
@@ -1575,6 +1742,8 @@ class GeneratedArenaSession:
             self._ready_weapon_action_id = None
             self._ready_weapon_action_outcome = None
             self._ready_weapon_end_time = None
+            self._opponent_strategy = opponent_strategy
+            self._opponent_attack_refusal = "strategy_disabled" if opponent_strategy == "none" else "not_yet_activated"
             self._movement_plan = None
             self._movement_sequence = 0
             self._movement_outcome = None
@@ -1596,6 +1765,8 @@ class GeneratedArenaSession:
             self._active = None
             self._encounter_name = self._player_name = None
             self._rng_cursor = None
+            self._opponent_strategy = "none"
+            self._opponent_attack_refusal = "strategy_disabled"
             self._player_action_id = self._player_action_outcome = None
             self._pickup_action_id = self._pickup_action_outcome = None
             self._ready_weapon_action_id = self._ready_weapon_action_outcome = None
@@ -1814,8 +1985,13 @@ class GeneratedArenaSession:
             accepted_plan = self._movement_plan
             melee_action = self._player_melee_action(candidate, player)
             melee_pending = self._melee_action_pending(candidate, melee_action)
+            opponent = candidate.participants[1].native.being
+            opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
+            opponent_can_act, opponent_reason = self._opponent_attack_preflight(candidate)
+            self._opponent_attack_refusal = opponent_reason
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
+                    and not opponent_melee_pending and not opponent_can_act
                     and self._movement_plan is None):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
@@ -1825,7 +2001,7 @@ class GeneratedArenaSession:
                     and self._player_action_outcome is not None
                     and not (self._ready_weapon_action_id is not None
                              and self._ready_weapon_action_outcome is None)
-                    and not melee_pending):
+                    and not melee_pending and not opponent_melee_pending and not opponent_can_act):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
                                           "refused", reason="run_choice_resolved")
@@ -1834,12 +2010,15 @@ class GeneratedArenaSession:
                     and self._pickup_action_outcome is not None
                     and not (self._ready_weapon_action_id is not None
                              and self._ready_weapon_action_outcome is None)
-                    and not melee_pending):
+                    and not melee_pending and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             if (self._movement_plan is None and self._ready_weapon_action_id is not None
-                    and self._ready_weapon_action_outcome is not None and not melee_pending):
+                    and self._ready_weapon_action_outcome is not None and not melee_pending
+                    and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
+                if opponent_can_act:
+                    self._schedule_opponent_attack(candidate)
                 if self._movement_plan is not None:
                     plan = self._movement_plan
                     conditions = self._movement_conditions(candidate)
@@ -1905,11 +2084,19 @@ class GeneratedArenaSession:
     @staticmethod
     def _movement_conditions(candidate):
         from activities import RunAction
+        from melee_combat import MeleeStrike
         from movement_intent import MovementIntentRefusal
-
+        player_id = candidate.participants[0].native.being.id
+        demanding = False
         for action_id in candidate.encounter.pending_action_list:
             action = candidate.universe.event_history.get(action_id)
-            if type(action) is not RunAction:
+            if action is None or getattr(action, "actor_id", None) != player_id:
+                continue
+            if type(action) is MeleeStrike:
+                demanding = True
+            elif type(action) is RunAction:
+                continue
+            else:
                 raise MovementIntentRefusal(
                     "unknown_action_demand", "movement cannot classify another active Action's demand")
         premise = candidate.world_premise
@@ -1917,7 +2104,7 @@ class GeneratedArenaSession:
             terrain_multiplier=premise.terrain_multiplier,
             hampered_multiplier=premise.hampered_multiplier,
             direction=None,
-            concurrent_demanding_action=False)
+            concurrent_demanding_action=demanding)
 
     def rename_encounter(self, payload):
         if type(payload) is not dict or set(payload) != {"name"}:
