@@ -201,16 +201,17 @@ class QuarantinedMovementBoundaryProjection:
     committed_choices: tuple
     observer_evidence: tuple
     quarantined: bool = True
+    receipt_rows: tuple = ()
 
     def to_data(self):
         return (self.schema, self.universe_id, self.encounter_id, self.boundary,
                 self.start, self.participant_ids, self.movement_activation,
                 self.target_records, self.start_fences, self.rng_after, self.committed_choices,
-                self.observer_evidence, self.quarantined)
+                self.observer_evidence, self.quarantined, self.receipt_rows)
 
 
 def project_quarantined_movement_boundary(decoded):
-    """Validate and project the single authentic 0-to-1 movement-only record.
+    """Validate and project the initial movement record and optional boundary 2.
 
     This projection carries existing Target-owned records and observer evidence
     by their native logical identities; it does not issue or install history.
@@ -227,18 +228,25 @@ def project_quarantined_movement_boundary(decoded):
           'unsupported checkpoint envelope version')
     _need(data[12:16] == (True, False, False, False),
           'movement projection cannot promote checkpoint readiness flags')
-    _need(data[4] == (1,) and data[7] == (),
-          'movement projection requires only committed boundary 1 and no future Choices')
+    _need(data[4] in ((1,), (1, 2)) and data[7] == (),
+          'movement projection requires boundary 1, optional boundary 2, and no Choices')
     chain = data[8]
     _need(type(chain) is tuple and len(chain) == 8
           and chain[:3] == ('universe.committed-native-receipt-chain/1', data[1], data[2])
-          and chain[4] and len(chain[4]) == 1 and not chain[5],
-          'movement projection requires one native receipt and no committed Choices')
-    row = chain[4][0]
+          and chain[4] and len(chain[4]) == len(data[4]) and not chain[5],
+          'movement projection requires the bounded native movement receipt prefix')
+    rows = chain[4]
+    row = rows[0]
     _need(type(row) is tuple and len(row) == 7
           and row[0] == 'universe.committed-movement-only-boundary/1'
           and row[1] == 1,
           'receipt is not the authentic initial movement-only boundary')
+    _need(row[2] == ('integer', '0') and
+          (len(rows) == 1 or (type(rows[1]) is tuple and len(rows[1]) == 7
+           and rows[1][0] == 'universe.committed-movement-only-boundary/2'
+           and rows[1][1] == 2 and rows[1][2] == ('integer', '1')
+           and rows[1][3] == row[3] and rows[1][6] == row[6])),
+          'continuing movement receipt is not consecutive or participant-bound')
     _need(row[2] == ('integer', '0') and type(row[3]) is tuple
           and len(row[3]) == 2 and len(set(row[3])) == len(row[3])
           and all(type(value) is str and value for value in row[3]),
@@ -258,9 +266,10 @@ def project_quarantined_movement_boundary(decoded):
                 return ('tuple', tuple(convert(child) for child in item[1]))
             return item
         return ('tuple', tuple(convert(item) for item in value[1]))
-    _need(row[5] == () and chain[7] == ('caller-cursor', 'exclusive_encounter-asserted')
+    _need(all(item[5] == () for item in rows)
+          and chain[7] == ('caller-cursor', 'exclusive_encounter-asserted')
           and data[9][:2] == ('caller_cursor', 'exclusive_encounter')
-          and _rng_data(data[9][2]) == _rng_data(receipt_rng(row[6])),
+          and _rng_data(data[9][2]) == _rng_data(receipt_rng(rows[-1][6])),
           'movement receipt fences or committed RNG ownership are inconsistent')
     from checkpoint_reconstruction import _sections
     sections = _sections(data[5])
@@ -274,8 +283,9 @@ def project_quarantined_movement_boundary(decoded):
           and graph.nodes[encounter_ref][0] == 'encounter.Encounter',
           'receipt Encounter identity is absent from native graph')
     encounter_fields = graph.fields(encounter_ref)[1]
-    _need(graph.data(encounter_fields['time']) == 1
-          and graph.data(encounter_fields['last_processed_boundary']) == 1
+    latest_boundary = rows[-1][1]
+    _need(graph.data(encounter_fields['time']) == latest_boundary
+          and graph.data(encounter_fields['last_processed_boundary']) == latest_boundary
           and graph.data(encounter_fields['start_time']) == 0,
           'native Encounter chronology differs from movement receipt')
     _need(graph.data(encounter_fields['arena_activation_enabled']) is True
@@ -317,7 +327,7 @@ def project_quarantined_movement_boundary(decoded):
               'observer-owned Arena evidence is missing or unsupported')
         observer_evidence.append((observer_id, encoded[1]))
     target_awareness = {}
-    for target in row[4]:
+    for target in rows[-1][4]:
         state = _record(target[3], 'target.candidate/1',
             ('target_id', 'category', 'starting_hp', 'projected_hp', 'actual_damage',
              'fatal_effect_ids', 'incoming', 'outgoing_effect_ids', 'aware_of',
@@ -332,8 +342,9 @@ def project_quarantined_movement_boundary(decoded):
     _need(target_awareness == awareness,
           'observer-owned Target awareness differs from native Encounter state')
     return QuarantinedMovementBoundaryProjection(
-        MOVEMENT_PROJECTION_SCHEMA, data[1], data[2], 1, row[2], row[3],
-        activation, row[4], row[5], row[6], chain[5], tuple(observer_evidence), True)
+        MOVEMENT_PROJECTION_SCHEMA, data[1], data[2], latest_boundary, row[2], row[3],
+        activation, rows[-1][4], rows[-1][5], rows[-1][6], chain[5],
+        tuple(observer_evidence), True, rows)
 
 
 def project_quarantined_run_boundary(decoded):

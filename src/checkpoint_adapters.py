@@ -415,7 +415,8 @@ class NativeInventory(_Inventory):
         from checkpoint_choices import describe_accepted_choice,ChoiceDescriptorRejected
         from checkpoint_receipts import (describe_committed_receipt_chain,
             ReceiptDescriptorRejected,PortableBoundaryReceipt,
-            PortableMovementOnlyBoundaryReceipt)
+            PortableMovementOnlyBoundaryReceipt,
+            PortableContinuingMovementBoundaryReceipt)
         from physiology_registry import PhysiologyRegistry,PhysiologyDefinition
         from physical_fatigue import PhysicalFatigueState
         from action_choice import ChoiceBook
@@ -541,7 +542,8 @@ class NativeInventory(_Inventory):
                                  'committed receipt contains an unsupported Action family')
                         entity_ids.add(action.actor_id)
                         if action.target_id is not None:entity_ids.add(action.target_id)
-                elif type(receipt) is PortableMovementOnlyBoundaryReceipt:
+                elif type(receipt) in (PortableMovementOnlyBoundaryReceipt,
+                                       PortableContinuingMovementBoundaryReceipt):
                     entity_ids.update(receipt.participant_ids)
                 else:
                     raise CheckpointRejected('receipt chain contains an unsupported boundary type')

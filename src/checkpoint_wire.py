@@ -342,23 +342,33 @@ def _validate_receipt_chain(chain, universe_id, encounter_id, participants,
     lifecycle_choices = {}
     for index, row in enumerate(rows):
         _need(type(row) is tuple, 'malformed receipt boundary row')
-        if (len(row) == 7
-                and row[0] == 'universe.committed-movement-only-boundary/1'):
-            _need(index == 0 and row[1] == boundaries[index],
-                  'movement-only receipt is not the initial committed boundary')
-            from checkpoint_receipts import (DESCRIPTOR_SCHEMA,
+        if (len(row) == 7 and row[0] in (
+                'universe.committed-movement-only-boundary/1',
+                'universe.committed-movement-only-boundary/2')):
+            initial = row[0] == 'universe.committed-movement-only-boundary/1'
+            _need((initial and index == 0 or not initial and index == 1
+                   and rows[0][0] == 'universe.committed-movement-only-boundary/1')
+                  and row[1] == boundaries[index],
+                  'movement-only receipt has the wrong initial/continuing position')
+            from checkpoint_receipts import (CONTINUING_MOVEMENT_BOUNDARY_SCHEMA,
+                DESCRIPTOR_SCHEMA, MOVEMENT_ONLY_BOUNDARY_SCHEMA,
+                PortableContinuingMovementBoundaryReceipt,
                 PortableMovementOnlyBoundaryReceipt, PortableReceiptChain,
                 PortableTargetRecord, validate_receipt_descriptor)
             try:
-                movement = PortableMovementOnlyBoundaryReceipt(
-                    row[0], row[1], row[2], row[3],
-                    tuple(PortableTargetRecord(*target) for target in row[4]),
-                    row[5], row[6])
+                def movement_row(source):
+                    cls = (PortableMovementOnlyBoundaryReceipt
+                           if source[0] == MOVEMENT_ONLY_BOUNDARY_SCHEMA
+                           else PortableContinuingMovementBoundaryReceipt)
+                    return cls(source[0], source[1], source[2], source[3],
+                        tuple(PortableTargetRecord(*target) for target in source[4]),
+                        source[5], source[6])
+                movement_rows = tuple(movement_row(item) for item in rows[:index+1])
                 validate_receipt_descriptor(PortableReceiptChain(
-                    DESCRIPTOR_SCHEMA, universe_id, encounter_id, row[2],
-                    (movement,), (), (), chain[7]))
+                    DESCRIPTOR_SCHEMA, universe_id, encounter_id, chain[3],
+                    movement_rows, (), (), chain[7]))
             except (TypeError, ValueError) as exc:
-                raise WireRejected(f'invalid initial movement-only receipt: {exc}') from exc
+                raise WireRejected(f'invalid movement-only receipt: {exc}') from exc
             _need(type(row[3]) is tuple and row[3]
                   and len(set(row[3])) == len(row[3])
                   and set(row[3]) == participants,
@@ -586,7 +596,8 @@ def _validate_descriptor_components(data):
             if type(row) is tuple and len(row) == 9 and type(row[0]) is int:
                 return row[0]
             if (type(row) is tuple and len(row) == 7
-                    and row[0] == 'universe.committed-movement-only-boundary/1'
+                    and row[0] in ('universe.committed-movement-only-boundary/1',
+                                   'universe.committed-movement-only-boundary/2')
                     and type(row[1]) is int):
                 return row[1]
             return None

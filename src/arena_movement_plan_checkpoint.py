@@ -163,7 +163,7 @@ def _validate(row):
         raise MovementPlanRejected("movement-plan identity is malformed")
     if (type(row.accepted_at) not in (int, float) or not math.isfinite(row.accepted_at)
             or row.accepted_at != 0 or type(row.checkpoint_boundary) is not int
-            or row.checkpoint_boundary != 1 or type(row.movement_sequence) is not int
+            or row.checkpoint_boundary not in (1, 2) or type(row.movement_sequence) is not int
             or row.movement_sequence < 1):
         raise MovementPlanRejected("movement-plan chronology is unsupported")
     if (type(row.destination) is not tuple or len(row.destination) != 3

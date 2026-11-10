@@ -169,7 +169,7 @@ class Encounter(Event):
         if self.time != start_time:
             if (_post_boundary_token is not _QUARANTINED_POST_BOUNDARY_TOKEN
                     or type(start_time) is not int or start_time != 0
-                    or type(self.time) is not int or self.time != 1):
+                    or type(self.time) is not int or self.time not in (1, 2)):
                 raise BoundaryInvariantError('Restoring an advanced Encounter requires an unsupported checkpoint migration')
         elif _post_boundary_token is not None:
             raise BoundaryInvariantError('Quarantined advanced-time constructor token requires the supported 0-to-1 boundary')
@@ -246,8 +246,8 @@ class Encounter(Event):
         need(type(plan.universe) is Universe and not is_quarantined(plan.universe),
              'construction requires a private, unquarantined Universe shell')
         need(type(plan.start_time) is int and plan.start_time == 0
-             and type(plan.time) is int and plan.time == 1,
-             'only the validated 0-to-1 committed boundary is supported')
+             and type(plan.time) is int and plan.time in (1, 2),
+             'only the validated initial or one continuing movement boundary is supported')
         need(type(plan.encounter_id) is str and plan.encounter_id
              and plan.encounter_id != '0', 'Encounter logical identity is invalid')
         need(type(plan.being_ids) is tuple and len(plan.being_ids) == 2
@@ -317,10 +317,10 @@ class Encounter(Event):
             book = encounter._choice_book
             need(encounter.id == plan.encounter_id
                  and encounter.universe is world
-                 and encounter.start_time == 0 and encounter.time == 1
-                 and encounter.last_processed_boundary == 1
-                 and encounter._coordinator_time == 1
-                 and encounter._interval_start == 1
+                 and encounter.start_time == 0 and encounter.time == plan.time
+                 and encounter.last_processed_boundary == plan.time
+                 and encounter._coordinator_time == plan.time
+                 and encounter._interval_start == plan.time
                  and encounter.active_boundary is None
                  and encounter.boundary_fault is None
                  and not encounter._advancing and not encounter._dispatching

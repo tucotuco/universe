@@ -814,10 +814,10 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
           'movement checkpoint roots are missing')
     universe_fields = graph.fields(universe_ref, 'universe.Universe')[1]
     encounter_fields = graph.fields(encounter_ref, 'encounter.Encounter')[1]
-    _need(graph.data(encounter_fields['time']) == 1
-          and graph.data(encounter_fields['last_processed_boundary']) == 1
-          and graph.data(encounter_fields['_coordinator_time']) == 1
-          and graph.data(encounter_fields['_interval_start']) == 1,
+    _need(graph.data(encounter_fields['time']) == projection.boundary
+          and graph.data(encounter_fields['last_processed_boundary']) == projection.boundary
+          and graph.data(encounter_fields['_coordinator_time']) == projection.boundary
+          and graph.data(encounter_fields['_interval_start']) == projection.boundary,
           'committed native chronology differs from movement Target boundary')
     _need(graph.data(encounter_fields['pending_action_list']) == []
           and graph.data(encounter_fields['finished_action_list']) == []
@@ -859,9 +859,13 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
     from checkpoint_receipts import _value
     record_identity_ids = []
     definition_values = []
-    targets_by_id = {row[0]: row for row in projection.target_records}
-    _need(set(targets_by_id) == set(participants),
-          'portable Target identities do not cover the participant set')
+    target_rows_by_boundary = {}
+    for receipt_row in projection.receipt_rows:
+        target_rows_by_boundary[receipt_row[1]] = {row[0]: row for row in receipt_row[4]}
+    _need(tuple(sorted(target_rows_by_boundary)) == data[4],
+          'movement receipt Target chronology differs from checkpoint boundaries')
+    _need(all(set(rows) == set(participants) for rows in target_rows_by_boundary.values()),
+          'portable Target identities do not cover every participant boundary')
     for target_id in participants:
         instance_ref = graph.raw_ref(registry[target_id])
         instance_tag, instance_fields = graph.fields(instance_ref, 'being.BeingInstance')
@@ -873,21 +877,29 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
                                   _projection(graph.native(current_ref))))
         history_ref = graph.raw_ref(instance_fields['_atomic_target_history'])
         history_tag, history_values = graph.nodes[history_ref]
-        _need(history_tag == 'list' and len(history_values) == 1,
-              'each movement participant must own exactly one Target interval record')
-        target_ref = graph.raw_ref(history_values[0])
-        record_fields = graph.fields(target_ref, 'atomic_publication.TargetIntervalRecord')[1]
-        _need(set(record_fields) == {'boundary', 'encounter_id', 'state'}
-              and graph.data(record_fields['encounter_id']) == projection.encounter_id
-              and graph.data(record_fields['boundary']) == projection.boundary,
-              'Target interval record has a wrong or duplicate committed identity')
-        state_ref = graph.raw_ref(record_fields['state'])
-        state_fields = graph.fields(state_ref, 'action_settlement.TargetCandidate')[1]
-        candidate = TargetCandidate(**{key: graph.value(value)
-                                       for key, value in state_fields.items()})
-        _need(_value(candidate) == targets_by_id[target_id][3],
-              'Target-owned native state differs from its committed portable receipt')
-        record_identity_ids.append((target_id, target_ref))
+        _need(history_tag == 'list' and len(history_values) == projection.boundary,
+              'each movement participant must own every committed Target interval record')
+        observed_boundaries = []
+        for index, source_ref in enumerate(history_values):
+            target_ref = graph.raw_ref(source_ref)
+            record_fields = graph.fields(target_ref, 'atomic_publication.TargetIntervalRecord')[1]
+            expected_boundary = index + 1
+            _need(set(record_fields) == {'boundary', 'encounter_id', 'state'}
+                  and graph.data(record_fields['encounter_id']) == projection.encounter_id
+                  and graph.data(record_fields['boundary']) == expected_boundary
+                  and expected_boundary in target_rows_by_boundary,
+                  'Target interval record has a wrong, missing, or duplicate committed identity')
+            state_ref = graph.raw_ref(record_fields['state'])
+            state_fields = graph.fields(state_ref, 'action_settlement.TargetCandidate')[1]
+            candidate = TargetCandidate(**{key: graph.value(value)
+                                           for key, value in state_fields.items()})
+            _need(target_id in target_rows_by_boundary[expected_boundary]
+                  and _value(candidate) == target_rows_by_boundary[expected_boundary][target_id][3],
+                  'Target-owned native state differs from its boundary receipt')
+            observed_boundaries.append(expected_boundary)
+            record_identity_ids.append((target_id, target_ref))
+        _need(tuple(observed_boundaries) == data[4],
+              'Target-owned records are not in consecutive receipt order')
 
     entity_ids = tuple(sorted(registry))
     observer_rows = []
@@ -898,7 +910,8 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
         try:
             ledger = decode_arena_perception_ledger(encoded,
                 observer_id=observer_id, entity_ids=entity_ids,
-                visible_entity_ids=visible_ids, boundary=1, time=1)
+                visible_entity_ids=visible_ids, boundary=projection.boundary,
+                time=projection.boundary)
         except (TypeError, ValueError) as exc:
             raise IdentityBindingRejected(f'observer-owned evidence refused: {exc}') from exc
         observer_rows.append((observer_id, ledger.observer_id,
@@ -921,14 +934,15 @@ class _QuarantinedMovementNativeGraph:
     beings: tuple
     targets: tuple
     source_receipt_fields: tuple
-    source_inspection: object
+    source_inspections: tuple
     rng_owner: object
     projection: QuarantinedMovementBoundaryProjection
 
 
 def _materialize_quarantined_movement_native(decoded, projection=None):
-    """Build a private boundary-1 Arena graph; receipt import is owned elsewhere."""
+    """Build a private boundary-1/2 Arena graph; receipt import is owned elsewhere."""
     binding = bind_quarantined_movement_boundary(decoded, projection)
+    projection = binding.sidecar.projection
     data = decoded.envelope_data
     from checkpoint_reconstruction import (_Graph, _sections, _rng_data,
         _materialize_being_original, _validate_being_definition_bindings)
@@ -1055,7 +1069,8 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
         visible_ids = tuple(row[0] for row in encoded[3])
         being._arena_perception_ledger = decode_arena_perception_ledger(
             encoded, observer_id=being_id, entity_ids=entity_ids,
-            visible_entity_ids=visible_ids, boundary=1, time=1)
+            visible_entity_ids=visible_ids, boundary=projection.boundary,
+            time=projection.boundary)
         being._atomic_target_history = []
         native_universe.add_object(being)
         native_beings[being_id] = being
@@ -1063,30 +1078,36 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
     from action_settlement import TargetCandidate
     from atomic_publication import RNGCursor, TargetIntervalRecord
     from checkpoint_receipts import _value
-    target_data = {row[0]: row for row in binding.sidecar.projection.target_records}
+    target_data = {receipt_row[1]: {row[0]: row for row in receipt_row[4]}
+                   for receipt_row in binding.sidecar.projection.receipt_rows}
     native_targets = {}
     for target_id in participants:
         fields = instance_fields_by_id[target_id]
         source_history_ref = graph.raw_ref(fields['_atomic_target_history'])
         source_history = graph.nodes[source_history_ref][1]
-        _need(len(source_history) == 1,
-              'source Being does not have exactly one committed Target record')
-        source_target_ref = graph.raw_ref(source_history[0])
-        source_record = graph.fields(source_target_ref,
-            'atomic_publication.TargetIntervalRecord')[1]
-        _need(graph.data(source_record['encounter_id']) == data[2]
-              and graph.data(source_record['boundary']) == 1,
-              'source Target record identity differs from imported boundary')
-        target_ref = graph.raw_ref(source_record['state'])
-        target_fields = graph.fields(target_ref, 'action_settlement.TargetCandidate')[1]
-        target = TargetCandidate(**{key: graph.value(value)
-                                    for key, value in target_fields.items()})
-        _need(_value(target) == target_data[target_id][3]
-              and target.target_id == target_id and target.category == 'being',
-              'materialized native Target differs from its exact committed record')
-        record = TargetIntervalRecord(data[2], 1, target)
-        native_beings[target_id]._atomic_target_history = [record]
-        native_targets[target_id] = record
+        _need(len(source_history) == projection.boundary,
+              'source Being does not own every committed Target record')
+        records = []
+        for index, source_target in enumerate(source_history):
+            expected_boundary = index + 1
+            source_target_ref = graph.raw_ref(source_target)
+            source_record = graph.fields(source_target_ref,
+                'atomic_publication.TargetIntervalRecord')[1]
+            _need(graph.data(source_record['encounter_id']) == data[2]
+                  and graph.data(source_record['boundary']) == expected_boundary
+                  and expected_boundary in target_data,
+                  'source Target record identity differs from imported receipt sequence')
+            target_ref = graph.raw_ref(source_record['state'])
+            target_fields = graph.fields(target_ref, 'action_settlement.TargetCandidate')[1]
+            target = TargetCandidate(**{key: graph.value(value)
+                                        for key, value in target_fields.items()})
+            _need(target_id in target_data[expected_boundary]
+                  and _value(target) == target_data[expected_boundary][target_id][3]
+                  and target.target_id == target_id and target.category == 'being',
+                  'materialized native Target differs from its committed receipt')
+            records.append(TargetIntervalRecord(data[2], expected_boundary, target))
+        native_beings[target_id]._atomic_target_history = records
+        native_targets[target_id] = tuple(records)
 
     module_rng_before = random.getstate()
     rng_owner = RNGCursor(rng_state)
@@ -1096,7 +1117,7 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
     awareness = graph.data(encounter_fields['awareness'])
     awareness_rows = tuple((key, tuple(sorted(value)))
                            for key, value in sorted(awareness.items()))
-    plan = _QuarantinedPostBoundaryPlan(native_universe, data[2], 0, 1,
+    plan = _QuarantinedPostBoundaryPlan(native_universe, data[2], 0, projection.boundary,
         graph.data(encounter_fields['difficulty_class']),
         graph.data(encounter_fields['name']), graph.data(encounter_fields['event_type']),
         graph.data(encounter_fields['location']),
@@ -1118,48 +1139,54 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
 
     source_history_ref = graph.raw_ref(encounter_fields['_atomic_interval_history'])
     source_history = graph.nodes[source_history_ref][1]
-    _need(len(source_history) == 1,
-          'native movement import requires one recorded PublishedInterval')
-    source_receipt_ref = graph.raw_ref(source_history[0])
-    source_receipt_fields = graph.fields(source_receipt_ref,
-        'atomic_publication.PublishedInterval')[1]
-    _need(graph.data(source_receipt_fields['encounter_id']) == data[2]
-          and graph.data(source_receipt_fields['boundary']) == 1
-          and not graph.data(source_receipt_fields['action_ids'])
-          and not graph.data(source_receipt_fields['effect_ids'])
-          and graph.data(source_receipt_fields['committed']) is True
-          and not graph.data(source_receipt_fields['notification_intents']),
-          'source receipt is outside the exact Action-free movement contract')
-    source_inspection_ref = graph.raw_ref(source_receipt_fields['inspection'])
-    meta_fields = graph.fields(source_inspection_ref,
-        'encounter_inspection.CommittedBoundaryRecord')[1]
-    _need(set(meta_fields) == {'start', 'end', 'entities', 'target_anchors', 'actions',
-          'action_anchors', 'effects', 'objective', 'objective_use', 'recipients',
-          'starts', 'participants', 'schedule', 'projectile_states'}
-          and meta_fields['target_anchors'] == ('derived-rebuild-required', 'target_anchors')
-          and meta_fields['action_anchors'] == ('derived-rebuild-required', 'action_anchors'),
-          'source receipt does not use the strict native anchor-rebuild markers')
+    _need(len(source_history) == projection.boundary,
+          'native movement import requires the complete committed receipt prefix')
+    source_receipt_fields = []
+    source_inspections = []
     from encounter_inspection import CommittedBoundaryRecord
-    source_inspection = CommittedBoundaryRecord(
-        graph.data(meta_fields['start']), graph.data(meta_fields['end']),
-        graph.mapping(meta_fields['entities'], native_values=True), {},
-        graph.mapping(meta_fields['actions']), {}, graph.mapping(meta_fields['effects']),
-        graph.mapping(meta_fields['objective']), graph.data(meta_fields['objective_use']),
-        graph.mapping(meta_fields['recipients']), graph.data(meta_fields['starts']),
-        graph.data(meta_fields['participants']), graph.value(meta_fields['schedule']),
-        graph.mapping(meta_fields['projectile_states']))
-    _need(set(source_inspection.participants) == set(participants)
-          and set(source_inspection.entities) == set(participants)
-          and not source_inspection.actions and not source_inspection.effects
-          and not source_inspection.objective and not source_inspection.recipients
-          and not source_inspection.target_anchors
-          and not source_inspection.action_anchors,
-          'stored committed inspection data has unsupported Action/Target coverage')
+    for index, source_receipt in enumerate(source_history):
+        expected_boundary = index + 1
+        source_receipt_ref = graph.raw_ref(source_receipt)
+        receipt_fields = graph.fields(source_receipt_ref,
+            'atomic_publication.PublishedInterval')[1]
+        _need(graph.data(receipt_fields['encounter_id']) == data[2]
+              and graph.data(receipt_fields['boundary']) == expected_boundary
+              and not graph.data(receipt_fields['action_ids'])
+              and not graph.data(receipt_fields['effect_ids'])
+              and graph.data(receipt_fields['committed']) is True
+              and not graph.data(receipt_fields['notification_intents']),
+              'source receipt is outside the exact consecutive movement contract')
+        source_inspection_ref = graph.raw_ref(receipt_fields['inspection'])
+        meta_fields = graph.fields(source_inspection_ref,
+            'encounter_inspection.CommittedBoundaryRecord')[1]
+        _need(set(meta_fields) == {'start', 'end', 'entities', 'target_anchors', 'actions',
+              'action_anchors', 'effects', 'objective', 'objective_use', 'recipients',
+              'starts', 'participants', 'schedule', 'projectile_states'}
+              and meta_fields['target_anchors'] == ('derived-rebuild-required', 'target_anchors')
+              and meta_fields['action_anchors'] == ('derived-rebuild-required', 'action_anchors'),
+              'source receipt does not use the strict native anchor-rebuild markers')
+        source_inspection = CommittedBoundaryRecord(
+            graph.data(meta_fields['start']), graph.data(meta_fields['end']),
+            graph.mapping(meta_fields['entities'], native_values=True), {},
+            graph.mapping(meta_fields['actions']), {}, graph.mapping(meta_fields['effects']),
+            graph.mapping(meta_fields['objective']), graph.data(meta_fields['objective_use']),
+            graph.mapping(meta_fields['recipients']), graph.data(meta_fields['starts']),
+            graph.data(meta_fields['participants']), graph.value(meta_fields['schedule']),
+            graph.mapping(meta_fields['projectile_states']))
+        _need(set(source_inspection.participants) == set(participants)
+              and set(source_inspection.entities) == set(participants)
+              and not source_inspection.actions and not source_inspection.effects
+              and not source_inspection.objective and not source_inspection.recipients
+              and not source_inspection.target_anchors
+              and not source_inspection.action_anchors,
+              'stored committed inspection data has unsupported Action/Target coverage')
+        source_inspections.append(source_inspection)
+        source_receipt_fields.append(tuple((key, graph.data(value))
+            for key, value in receipt_fields.items() if key != 'inspection'))
     return _QuarantinedMovementNativeGraph(
         native_universe, native_encounter, tuple(sorted(native_beings.items())),
         tuple(sorted(native_targets.items())),
-        tuple(sorted((key, graph.data(value)) for key, value in source_receipt_fields.items()
-                     if key != 'inspection')), source_inspection,
+        tuple(source_receipt_fields), tuple(source_inspections),
         rng_owner, binding.sidecar.projection)
 
 

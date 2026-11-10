@@ -60,6 +60,7 @@ _CONTEXT_REVISIONS = count(1)
 _MOVEMENT_IMPORT_AUTHORITY = object()
 _QUARANTINED_MOVEMENT_IMPORTS = WeakKeyDictionary()
 _MOVEMENT_CONTINUATION_APPROVALS = WeakKeyDictionary()
+_ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE = None
 
 
 @dataclass(frozen=True, eq=False)
@@ -87,11 +88,13 @@ class TrustedMovementContinuationInspection:
     quarantined_after_step: bool
 
 
-@dataclass(frozen=True)
+@dataclass
 class _PrivateMovementNativeInspection:
     native: object
     receipt: object
     fingerprint: str
+    accepted_plan: object = None
+    receipts: tuple = ()
 
 
 class _HostMovementContinuationApproval:
@@ -133,57 +136,75 @@ def _import_quarantined_movement_boundary(decoded):
     beings = dict(native.beings)
     targets = dict(native.targets)
     target_anchors = {}
+    receipts = []
+    imported_metas = []
     for target_id in encounter.being_list:
         being = beings[target_id]
         storage = being.__dict__.get('_atomic_target_history')
-        if type(storage) is not list or len(storage) != 1 or storage[0] is not targets[target_id]:
+        target_records = targets[target_id]
+        if (type(storage) is not list or len(storage) != native.projection.boundary
+                or tuple(storage) != target_records):
             raise RestorePreparationRejected('native Target record ownership changed during staging')
-        record = storage[0]
-        target_anchors[target_id] = (
-            id(being), id(being.current), id(being.spatial_state), id(storage),
-            id(record), fingerprint(record))
     from dataclasses import replace
     from types import MappingProxyType
     from encounter_inspection import CommittedBoundaryRecord
-    source_meta = native.source_inspection
-    if type(source_meta) is not CommittedBoundaryRecord:
-        raise RestorePreparationRejected('source committed inspection record is unsupported')
-    imported_meta = replace(source_meta,
-        target_anchors=MappingProxyType(dict(target_anchors)),
-        action_anchors=MappingProxyType({}))
-    source_receipt_fields = dict(native.source_receipt_fields)
+    for index, source_meta in enumerate(native.source_inspections):
+        if type(source_meta) is not CommittedBoundaryRecord:
+            raise RestorePreparationRejected('source committed inspection record is unsupported')
+        target_anchors = {}
+        for target_id in encounter.being_list:
+            being = beings[target_id]
+            storage = being.__dict__['_atomic_target_history']
+            record = storage[index]
+            target_anchors[target_id] = (
+                id(being), id(being.current), id(being.spatial_state), id(storage),
+                id(record), fingerprint(record))
+        imported_metas.append(replace(source_meta,
+            target_anchors=MappingProxyType(dict(target_anchors)),
+            action_anchors=MappingProxyType({})))
     try:
-        receipt = PublishedInterval(
-            source_receipt_fields['encounter_id'], source_receipt_fields['boundary'],
-            source_receipt_fields['action_ids'], source_receipt_fields['effect_ids'],
-            source_receipt_fields['rng_state'], source_receipt_fields['notification_intents'],
-            source_receipt_fields['committed'], imported_meta)
+        for index, source_fields in enumerate(native.source_receipt_fields):
+            fields = dict(source_fields)
+            receipts.append(PublishedInterval(
+                fields['encounter_id'], fields['boundary'], fields['action_ids'],
+                fields['effect_ids'], fields['rng_state'], fields['notification_intents'],
+                fields['committed'], imported_metas[index]))
     except (KeyError, TypeError, ValueError) as exc:
         raise RestorePreparationRejected(f'stored movement receipt is incomplete: {exc}') from exc
-    if (receipt.encounter_id != encounter.id or receipt.boundary != 1
-            or receipt.rng_state != native.rng_owner.state or receipt.action_ids
-            or receipt.effect_ids or receipt.notification_intents or not receipt.committed):
-        raise RestorePreparationRejected('stored receipt differs from the authentic movement-only interval')
+    receipts = tuple(receipts)
+    if (len(receipts) != native.projection.boundary
+            or any(receipt.encounter_id != encounter.id or receipt.boundary != index + 1
+                or receipt.action_ids or receipt.effect_ids or receipt.notification_intents
+                or not receipt.committed for index, receipt in enumerate(receipts))
+            or receipts[-1].rng_state != native.rng_owner.state):
+        raise RestorePreparationRejected('stored receipts differ from the authentic movement-only prefix')
+    receipt = receipts[-1]
 
     registered = False
     bound_mode = False
     try:
-        encounter.__dict__['_atomic_interval_history'] = [receipt]
-        _register_quarantined_movement_import(encounter, receipt, native.rng_owner,
-            authority=_MOVEMENT_IMPORT_AUTHORITY)
+        encounter.__dict__['_atomic_interval_history'] = list(receipts)
+        if len(receipts) == 1:
+            _register_quarantined_movement_import(encounter, receipt, native.rng_owner,
+                authority=_MOVEMENT_IMPORT_AUTHORITY)
+            receipt_fingerprints = (fingerprint(receipt),)
+        else:
+            from atomic_publication import _register_quarantined_movement_chain_import
+            receipt_fingerprints = _register_quarantined_movement_chain_import(
+                encounter, receipts, native.rng_owner, authority=_MOVEMENT_IMPORT_AUTHORITY)
         registered = True
-        _bind_quarantined_movement_inspection(encounter, native.rng_owner, receipt,
+        _bind_quarantined_movement_inspection(encounter, native.rng_owner, receipts,
             authority=_MOVEMENT_IMPORT_AUTHORITY)
         bound_mode = True
         if not is_quarantined(encounter) or mode_of(encounter) != 'quarantined_inspection':
             raise RestorePreparationRejected('imported native Encounter lost inspection quarantine')
         inspection = inspect_encounter(encounter)
-        if (inspection.boundary != 1 or inspection.latest_boundary != 1
+        if (inspection.boundary != native.projection.boundary
+                or inspection.latest_boundary != native.projection.boundary
                 or set(inspection.targets) != set(encounter.being_list)
-                or len(inspection.timeline) != 1
-                or inspection.timeline[0].action_ids
-                or inspection.timeline[0].effect_ids
-                or any(len(inspection.histories[being_id]) != 1
+                or len(inspection.timeline) != len(receipts)
+                or any(row.action_ids or row.effect_ids for row in inspection.timeline)
+                or any(len(inspection.histories[being_id]) != len(receipts)
                        for being_id in encounter.being_list)):
             raise RestorePreparationRejected('native inspector disagrees with imported boundary')
         before = (encounter.time, encounter.last_processed_boundary,
@@ -224,17 +245,17 @@ def _import_quarantined_movement_boundary(decoded):
         handle = QuarantinedMovementNativeInspection(
             'universe.quarantined-movement-native-inspection/1',
             bind_quarantined_movement_boundary(decoded),
-            fingerprint(receipt), inspection, tuple(native_being_rows),
+            receipt_fingerprints[-1], inspection, tuple(native_being_rows),
             tuple(observer_rows), refusal, True)
         _QUARANTINED_MOVEMENT_IMPORTS[handle] = _PrivateMovementNativeInspection(
-            native, receipt, fingerprint(receipt))
+            native, receipt, receipt_fingerprints[-1], None, receipts)
         return handle
     except BaseException as exc:
         if bound_mode:
             _unbind_quarantined_movement_inspection(encounter,
                 authority=_MOVEMENT_IMPORT_AUTHORITY)
         if registered:
-            _unregister_quarantined_movement_import(encounter, receipt,
+            _unregister_quarantined_movement_import(encounter, receipts,
                 authority=_MOVEMENT_IMPORT_AUTHORITY)
         encounter.__dict__.pop('_atomic_interval_history', None)
         for being in beings.values():
@@ -258,6 +279,78 @@ def _host_authorize_movement_continuation(import_handle, movement_plan):
     approval = _HostMovementContinuationApproval()
     _MOVEMENT_CONTINUATION_APPROVALS[approval] = (import_handle, movement_plan)
     return approval
+
+
+def _movement_checkpoint_capture_is_authorized(world, encounter):
+    from transactional_progression import is_quarantined
+    active = _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE
+    if active is None:
+        return False
+    handle, thread_id = active
+    private = _QUARANTINED_MOVEMENT_IMPORTS.get(handle)
+    return (thread_id == __import__('threading').get_ident() and private is not None
+            and private.native.universe is world and private.native.encounter is encounter
+            and is_quarantined(encounter) and encounter.time in (1, 2)
+            and private.accepted_plan is not None)
+
+
+def _capture_trusted_movement_checkpoint(import_handle):
+    """Capture the exact next checkpoint only from an owner-restored movement graph."""
+    global _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE
+    from dataclasses import replace
+    from arena_movement_plan_checkpoint import encode as encode_plan, decode as decode_plan
+    from checkpoint_envelope import assemble_native_run_spot_envelope
+    from checkpoint_wire import encode_run_spot_envelope
+    from encounter_inspection import inspect_encounter
+    from transactional_progression import is_quarantined
+    private = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
+    if (private is None or private.accepted_plan is None
+            or private.native.encounter.time != len(private.receipts or (private.receipt,))):
+        raise RestorePreparationRejected('only a just-continued native movement graph can be checkpointed')
+    encounter = private.native.encounter
+    boundary = encounter.time
+    if boundary not in (2,) or not is_quarantined(encounter):
+        raise RestorePreparationRejected('repeatable capture is bounded to restored movement boundary 2')
+    plan = replace(private.accepted_plan, checkpoint_boundary=boundary)
+    plan_wire = encode_plan(plan)
+    if decode_plan(plan_wire) != plan:
+        raise RestorePreparationRejected('continuing movement plan failed its closed checkpoint round trip')
+    inspection = inspect_encounter(encounter)
+    actor = private.native.universe.get_object_by_id(plan.actor_id)
+    if (inspection.boundary != boundary or inspection.latest_boundary != boundary
+            or actor is None or actor.get_position() is None
+            or tuple(actor.get_position().as_tuple()) == plan.destination):
+        raise RestorePreparationRejected('boundary 2 is terminal or its native inspection is inconsistent')
+    if _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE is not None:
+        raise RestorePreparationRejected('another owner-controlled movement capture is active')
+    _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE = (import_handle, __import__('threading').get_ident())
+    quarantined_beings = [being for _being_id, being in private.native.beings
+                          if being.__dict__.get('_checkpoint_quarantined') is True]
+    universe_quarantined = private.native.universe.__dict__.get('_checkpoint_quarantined') is True
+    encounter_quarantined = encounter.__dict__.get('_checkpoint_quarantined') is True
+    try:
+        # Per-object quarantine markers are runtime guards, not checkpoint
+        # state. The Encounter marker remains present to enforce this scope.
+        for being in quarantined_beings:
+            being.__dict__.pop('_checkpoint_quarantined', None)
+        private.native.universe.__dict__.pop('_checkpoint_quarantined', None)
+        encounter.__dict__.pop('_checkpoint_quarantined', None)
+        try:
+            envelope = assemble_native_run_spot_envelope(private.native.universe,
+                encounter, quiescent=True, rng_scope='exclusive_encounter')
+            checkpoint_wire = encode_run_spot_envelope(envelope)
+        finally:
+            for being in quarantined_beings:
+                being.__dict__['_checkpoint_quarantined'] = True
+            if universe_quarantined:
+                private.native.universe.__dict__['_checkpoint_quarantined'] = True
+            if encounter_quarantined:
+                encounter.__dict__['_checkpoint_quarantined'] = True
+    except BaseException as exc:
+        raise RestorePreparationRejected(f'owner-controlled boundary-2 checkpoint capture failed: {exc}') from exc
+    finally:
+        _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE = None
+    return checkpoint_wire, plan_wire
 
 
 def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *, approval):
@@ -296,6 +389,8 @@ def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *
     universe = native.universe
     beings = dict(native.beings)
     plan = movement_plan
+    receipts = private.receipts or (private.receipt,)
+    base_boundary = len(receipts)
     try:
         activation = _movement_activation_state(encounter)
     except (TypeError, ValueError, CheckpointRejected) as exc:
@@ -306,7 +401,7 @@ def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *
             or plan.universe_id != universe.id or plan.encounter_id != encounter.id
             or plan.actor_id != activation.actor_id
             or plan.decision_id != activation.movement_decision_id
-            or plan.accepted_at != activation.time or plan.checkpoint_boundary != 1
+            or plan.accepted_at != activation.time or plan.checkpoint_boundary != base_boundary
             or activation.activation_kind != 'first_player_movement'
             or tuple(encounter.being_list) != tuple(private.native.encounter.being_list)
             or set(universe.object_registry.object_instances) != set(encounter.being_list)
@@ -345,21 +440,20 @@ def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *
         before_inspection = inspect_encounter(encounter)
     except Exception as exc:
         raise RestorePreparationRejected(f'imported boundary failed native inspection: {exc}') from exc
-    if (before_inspection.boundary != 1 or before_inspection.latest_boundary != 1
+    if (before_inspection.boundary != base_boundary
+            or before_inspection.latest_boundary != base_boundary
             or set(before_inspection.targets) != set(encounter.being_list)
-            or len(before_inspection.timeline) != 1
-            or before_inspection.timeline[0].action_ids
-            or before_inspection.timeline[0].effect_ids
-            or len(encounter._atomic_interval_history) != 1
-            or encounter._atomic_interval_history[0] is not private.receipt):
-        raise RestorePreparationRejected('imported native receipt chain is outside boundary-1 movement scope')
+            or len(before_inspection.timeline) != base_boundary
+            or any(row.action_ids or row.effect_ids for row in before_inspection.timeline)
+            or tuple(encounter._atomic_interval_history) != receipts):
+        raise RestorePreparationRejected('imported native receipt chain is outside the bounded movement scope')
     if (type(plan.world_premise) is not tuple or len(plan.world_premise) != 6
             or plan.world_premise != ('Plains', 'Road', 1.0, 1.0, True, False)):
         raise RestorePreparationRejected('movement plan premise differs from supported generated Arena world')
     conditions = MovementRateConditions(terrain_multiplier=plan.world_premise[2],
         hampered_multiplier=plan.world_premise[3], direction=None,
         concurrent_demanding_action=False)
-    next_boundary = encounter.last_processed_boundary + 1
+    next_boundary = base_boundary + 1
     intent = MovementIntent(plan.actor_id, destination, plan.rate,
         f'{plan.decision_id}:boundary:{next_boundary}', next_boundary,
         facing_policy=plan.facing_policy)
@@ -379,25 +473,27 @@ def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *
         with _trusted_imported_movement_scope(encounter, import_handle,
                 authority=_MOVEMENT_IMPORT_AUTHORITY) as context:
             _bind_trusted_imported_movement_progression(encounter, import_handle,
-                native.rng_owner, private.receipt, context,
+                native.rng_owner, receipts[-1], context,
                 authority=_MOVEMENT_IMPORT_AUTHORITY)
             encounter.step(1, movement_intent=intent, movement_conditions=conditions)
         after = inspect_encounter(encounter)
-        if (after.boundary != 2 or after.latest_boundary != 2
-                or tuple(record.boundary for record in encounter._atomic_interval_history) != (1, 2)
-                or len(after.timeline) != 2
+        if (after.boundary != base_boundary + 1 or after.latest_boundary != base_boundary + 1
+                or tuple(record.boundary for record in encounter._atomic_interval_history)
+                    != tuple(range(1, base_boundary + 2))
+                or len(after.timeline) != base_boundary + 1
                 or any(row.action_ids or row.effect_ids for row in after.timeline)
-                or any(len(after.histories[being_id]) != 2 for being_id in encounter.being_list)):
-            raise RestorePreparationRejected('native continuation did not produce an inspected boundary 2')
+                or any(len(after.histories[being_id]) != base_boundary + 1
+                       for being_id in encounter.being_list)):
+            raise RestorePreparationRejected('native continuation did not produce the next inspected movement boundary')
     except BaseException as exc:
-        if encounter.time == 1 and tuple(encounter._atomic_interval_history) == old_receipts:
+        if encounter.time == base_boundary and tuple(encounter._atomic_interval_history) == old_receipts:
             native.rng_owner.state = old_rng
             if actor.get_position() != old_position:
                 raise RestorePreparationRejected('failed native publication did not restore movement state') from exc
             from transactional_progression import _restore_quarantined_movement_inspection
             try:
                 _restore_quarantined_movement_inspection(encounter,
-                    import_handle, private.receipt,
+                    import_handle, receipts,
                     authority=_MOVEMENT_IMPORT_AUTHORITY)
             except TransactionalProgressionError:
                 pass
@@ -420,6 +516,10 @@ def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *
         observer_rows.append((being_id, encode_arena_perception_ledger(
             being._arena_perception_ledger, observer=being, encounter=encounter,
             registry=registry)))
+    private.accepted_plan = movement_plan
+    private.receipts = tuple(encounter._atomic_interval_history)
+    private.receipt = private.receipts[-1]
+    private.fingerprint = fingerprint(private.receipt)
     return TrustedMovementContinuationInspection(
         'universe.trusted-movement-continuation-inspection/1', plan, after,
         tuple(native_rows), tuple(observer_rows), native.rng_owner.state,

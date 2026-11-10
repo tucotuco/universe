@@ -193,7 +193,8 @@ def _components(candidate_envelope, diagnostics):
             if type(row) is tuple and len(row) == 9 and type(row[0]) is int:
                 return row[0]
             if (type(row) is tuple and len(row) == 7
-                    and row[0] == 'universe.committed-movement-only-boundary/1'
+                    and row[0] in ('universe.committed-movement-only-boundary/1',
+                                   'universe.committed-movement-only-boundary/2')
                     and type(row[1]) is int):
                 return row[1]
             return None

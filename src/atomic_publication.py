@@ -993,14 +993,101 @@ def _register_quarantined_movement_import(encounter, receipt, rng_owner, *, auth
     return receipt_fingerprint
 
 
+def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, *, authority):
+    """Register only the validated 1→2 Action-free movement receipt prefix."""
+    from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
+    from encounter_inspection import CommittedBoundaryRecord, fingerprint
+    from transactional_progression import is_quarantined
+    from encounter import Encounter
+    from being import BeingInstance
+    from action_settlement import TargetCandidate
+    from checkpoint_adapters import _movement_activation_state, CheckpointRejected
+    from atomic_publication import RNGCursor, TargetIntervalRecord, PublishedInterval
+
+    def need(value, message):
+        if not value:
+            raise PublicationRejected(message)
+
+    need(authority is _MOVEMENT_IMPORT_AUTHORITY,
+         'movement receipt-chain import is restoration-owner controlled')
+    need(type(encounter) is Encounter and is_quarantined(encounter)
+         and type(receipts) is tuple and len(receipts) == 2
+         and all(type(row) is PublishedInterval for row in receipts)
+         and type(rng_owner) is RNGCursor,
+         'quarantined Encounter, two receipts and exclusive RNG cursor are required')
+    need(encounter.start_time == 0 and encounter.time == 2
+         and encounter.last_processed_boundary == 2
+         and encounter._coordinator_time == 2 and encounter._interval_start == 2
+         and tuple(encounter.__dict__.get('_atomic_interval_history', ())) == receipts,
+         'movement receipt chain differs from Encounter committed chronology')
+    try:
+        activation = _movement_activation_state(encounter)
+    except CheckpointRejected as exc:
+        raise PublicationRejected(f'inconsistent Arena movement activation: {exc}') from exc
+    need(activation is encounter.arena_movement_activation
+         and activation.time == 0 and activation.movement_decision_id,
+         'initial movement activation is missing or inconsistent')
+    metas = []
+    for index, receipt in enumerate(receipts):
+        boundary = index + 1
+        meta = receipt.inspection
+        need(receipt.encounter_id == encounter.id and receipt.boundary == boundary
+             and receipt.committed is True and not receipt.action_ids
+             and not receipt.effect_ids and not receipt.notification_intents
+             and type(meta) is CommittedBoundaryRecord and meta.start == boundary - 1
+             and meta.end == boundary and not meta.actions and not meta.action_anchors
+             and not meta.effects and not meta.objective and not meta.objective_use
+             and not meta.recipients and not meta.starts
+             and set(meta.participants) == set(encounter.being_list)
+             and set(meta.entities) == set(encounter.being_list)
+             and set(meta.target_anchors) == set(encounter.being_list),
+             'movement receipt or its committed inspection record is invalid')
+        if boundary == 2:
+            need(tuple(receipt.rng_state) == tuple(rng_owner.state),
+                 'latest movement receipt RNG differs from the exclusive cursor')
+        metas.append(meta)
+    need(len(encounter.being_list) == 2, 'exactly two movement participants are required')
+    registry = encounter.universe.object_registry.object_instances
+    for being_id in encounter.being_list:
+        being = registry.get(being_id)
+        need(type(being) is BeingInstance and being.id == being_id,
+             'movement Target owner is not the registered native Being')
+        storage = being.__dict__.get('_atomic_target_history')
+        need(type(storage) is list and len(storage) == 2,
+             'movement Target history must contain exactly two owned records')
+        for index, record in enumerate(storage):
+            boundary = index + 1
+            need(type(record) is TargetIntervalRecord and record.encounter_id == encounter.id
+                 and record.boundary == boundary and type(record.state) is TargetCandidate
+                 and record.state.target_id == being_id,
+                 'movement Target record is missing, duplicated or misowned')
+            anchor = metas[index].target_anchors.get(being_id)
+            expected = (id(being), id(being.current), id(being.spatial_state),
+                        id(storage), id(record), fingerprint(record))
+            need(type(anchor) is tuple and anchor == expected,
+                 'movement Target anchor differs from the reconstructed native record')
+    keys = tuple(id(row) for row in receipts)
+    need(len(set(keys)) == 2 and not set(keys).intersection(_COMMITTED_RECEIPTS),
+         'movement receipt identity collides with an existing process-local receipt')
+    fingerprints = tuple(fingerprint(row) for row in receipts)
+    for receipt, receipt_fingerprint in zip(receipts, fingerprints):
+        key = id(receipt)
+        _COMMITTED_RECEIPTS[key] = (
+            weakref.ref(receipt, lambda ref, key=key: _COMMITTED_RECEIPTS.pop(key, None)),
+            weakref.ref(encounter), receipt_fingerprint)
+    return fingerprints
+
+
 def _unregister_quarantined_movement_import(encounter, receipt, *, authority):
     """Rollback an unexposed restoration graph after a later private bind fails."""
     from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
     if authority is not _MOVEMENT_IMPORT_AUTHORITY:
         raise PublicationRejected('quarantined movement rollback is restoration-owner controlled')
-    entry = _COMMITTED_RECEIPTS.get(id(receipt))
-    if entry is not None and entry[0]() is receipt and entry[1]() is encounter:
-        _COMMITTED_RECEIPTS.pop(id(receipt), None)
+    receipts = receipt if type(receipt) is tuple else (receipt,)
+    for row in receipts:
+        entry = _COMMITTED_RECEIPTS.get(id(row))
+        if entry is not None and entry[0]() is row and entry[1]() is encounter:
+            _COMMITTED_RECEIPTS.pop(id(row), None)
 
 
 def recover_interval_publication(encounter,recovery_token,*,ownership=None,rng_state=None,rng_owner=None):

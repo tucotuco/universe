@@ -278,6 +278,11 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
     from encounter_inspection import _idle
     from atomic_publication import coordinated_access
     from interval_staging import _preflight,_rng_input,_read_set
+    from transactional_progression import is_quarantined
+    if is_quarantined(encounter):
+        from checkpoint_restore_preparation import _movement_checkpoint_capture_is_authorized
+        _require(_movement_checkpoint_capture_is_authorized(world, encounter),
+                 'quarantined movement checkpoint capture is restoration-owner controlled')
     _require(type(native_adapters) is bool, 'native_adapters must be a bool')
     _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
     _require(native_adapters or bindings == (), 'bindings require explicit native adapter mode')

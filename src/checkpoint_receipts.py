@@ -18,6 +18,7 @@ from checkpoint_choices import (ChoiceDescriptorRejected, describe_accepted_choi
 DESCRIPTOR_SCHEMA = 'universe.committed-native-receipt-chain/1'
 REBINDING_SCHEMA = 'universe.committed-native-rebinding-plan/1'
 MOVEMENT_ONLY_BOUNDARY_SCHEMA = 'universe.committed-movement-only-boundary/1'
+CONTINUING_MOVEMENT_BOUNDARY_SCHEMA = 'universe.committed-movement-only-boundary/2'
 
 
 class ReceiptDescriptorRejected(ValueError):
@@ -77,6 +78,28 @@ class PortableBoundaryReceipt:
 @dataclass(frozen=True)
 class PortableMovementOnlyBoundaryReceipt:
     """Closed Target/RNG receipt for the initial target-free Arena movement."""
+
+    schema: str
+    boundary: int
+    start: tuple
+    participant_ids: tuple
+    targets: tuple
+    start_fences: tuple
+    rng_after: tuple
+
+    @property
+    def action_ids(self):
+        return ()
+
+    def to_data(self):
+        return (self.schema, self.boundary, self.start, self.participant_ids,
+            tuple(row.to_data() for row in self.targets), self.start_fences,
+            self.rng_after)
+
+
+@dataclass(frozen=True)
+class PortableContinuingMovementBoundaryReceipt:
+    """A later Action-free movement boundary following the initial activation."""
 
     schema: str
     boundary: int
@@ -621,9 +644,14 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
             movement_activation=_movement_activation_for_receipt(encounter)
             if movement_activation is None:
                 raise ReceiptDescriptorRejected('Action-free boundary lacks native movement activation')
-            if movement_only_boundaries!=(0,):
+            if movement_only_boundaries not in ((0,), (0, 1)):
                 raise ReceiptDescriptorRejected(
-                    'only the initial movement-activated boundary may be Action-free')
+                    'Action-free movement must be the initial boundary or its immediate continuation')
+            if len(movement_only_boundaries)==2 and (
+                    len(history)!=2 or history[0].boundary+1!=history[1].boundary
+                    or history[0].boundary!=math.floor(encounter.start_time)+1):
+                raise ReceiptDescriptorRejected(
+                    'continuing movement-only boundary must immediately follow the initial activation')
         live_actions={}
         action_actors={}
         effects_by_boundary={};actions_by_boundary={};targets_by_boundary={}
@@ -696,7 +724,12 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                 raise ReceiptDescriptorRejected('boundary ordered identity coverage mismatch')
             if not aids:
                 meta=receipt.inspection
-                if (receipt_index!=0 or movement_activation is None or eids
+                expected_start_only = (receipt_index == 0 and
+                                       movement_activation is not None)
+                expected_continuation = (receipt_index == 1 and len(history) == 2
+                    and not history[0].action_ids
+                    and history[0].boundary + 1 == receipt.boundary)
+                if (not (expected_start_only or expected_continuation) or eids
                         or meta.actions or meta.action_anchors or meta.effects
                         or type(meta.participants) is not tuple or not meta.participants
                         or len(set(meta.participants))!=len(meta.participants)
@@ -728,8 +761,11 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                 if tuple(row.target_id for row in portable_targets)!=tuple(sorted(participant_ids)):
                     raise ReceiptDescriptorRejected(
                         'initial movement-only boundary lacks complete participant Target history')
-                boundary_rows.append(PortableMovementOnlyBoundaryReceipt(
-                    MOVEMENT_ONLY_BOUNDARY_SCHEMA,receipt.boundary,
+                receipt_type = (PortableMovementOnlyBoundaryReceipt
+                    if receipt_index == 0 else PortableContinuingMovementBoundaryReceipt)
+                schema = (MOVEMENT_ONLY_BOUNDARY_SCHEMA
+                    if receipt_index == 0 else CONTINUING_MOVEMENT_BOUNDARY_SCHEMA)
+                boundary_rows.append(receipt_type(schema,receipt.boundary,
                     _finite(receipt.inspection.start,'receipt.start'),participant_ids,
                     portable_targets,start_fences,_value(receipt.rng_state)))
             else:
@@ -754,18 +790,31 @@ def validate_receipt_descriptor(value):
         raise ReceiptDescriptorRejected('ambiguous or unsupported RNG ownership descriptor')
     prior=None;all_actions=set();all_choices=set();lifecycle_choices={}
     for receipt_index,receipt in enumerate(d['receipts']):
-        if type(receipt) is PortableMovementOnlyBoundaryReceipt:
-            _closed(receipt,PortableMovementOnlyBoundaryReceipt)
-            if receipt.schema!=MOVEMENT_ONLY_BOUNDARY_SCHEMA:
+        movement_receipt = type(receipt) in (
+            PortableMovementOnlyBoundaryReceipt, PortableContinuingMovementBoundaryReceipt)
+        if movement_receipt:
+            _closed(receipt,type(receipt))
+            initial = type(receipt) is PortableMovementOnlyBoundaryReceipt
+            expected_schema = (MOVEMENT_ONLY_BOUNDARY_SCHEMA if initial
+                               else CONTINUING_MOVEMENT_BOUNDARY_SCHEMA)
+            if receipt.schema!=expected_schema:
                 raise ReceiptDescriptorRejected('unknown movement-only boundary version')
-            if receipt_index!=0:
-                raise ReceiptDescriptorRejected('movement-only receipt is not the initial boundary')
+            if initial != (receipt_index == 0):
+                raise ReceiptDescriptorRejected('initial and continuing movement receipt order is invalid')
             if type(receipt.boundary) is not int or receipt.boundary<1:
                 raise ReceiptDescriptorRejected('invalid movement-only boundary')
-            if _decoded_number(receipt.start,'movement-only receipt start')!=start_time:
-                raise ReceiptDescriptorRejected('movement-only receipt start does not match Encounter chronology')
-            if receipt.boundary!=math.floor(start_time)+1:
-                raise ReceiptDescriptorRejected('movement-only receipt is not the initial committed boundary')
+            expected_start = (start_time if initial else prior)
+            if _decoded_number(receipt.start,'movement-only receipt start')!=expected_start:
+                raise ReceiptDescriptorRejected('movement-only receipt start does not continue Encounter chronology')
+            expected_boundary = (math.floor(start_time)+1 if initial else
+                                 (prior+1 if prior is not None else None))
+            if receipt.boundary!=expected_boundary:
+                raise ReceiptDescriptorRejected('movement-only receipt is not chronologically consecutive')
+            if not initial and (not d['receipts'] or
+                    type(d['receipts'][0]) is not PortableMovementOnlyBoundaryReceipt):
+                raise ReceiptDescriptorRejected('continuing movement receipt lacks its initial activation receipt')
+            if not initial and _decoded_number(receipt.start,'continuing movement receipt start') != prior:
+                raise ReceiptDescriptorRejected('continuing movement receipt does not start at prior boundary')
             if (type(receipt.participant_ids) is not tuple or not receipt.participant_ids
                     or any(type(entity_id) is not str or not entity_id for entity_id in receipt.participant_ids)
                     or len(set(receipt.participant_ids))!=len(receipt.participant_ids)):
@@ -777,6 +826,11 @@ def validate_receipt_descriptor(value):
                              if type(row) is PortableTargetRecord)
             if len(target_ids)!=len(receipt.targets) or target_ids!=tuple(sorted(_id_set)):
                 raise ReceiptDescriptorRejected('movement-only Target history does not cover participants exactly')
+            if not initial and (receipt.participant_ids != d['receipts'][0].participant_ids
+                    or target_ids != tuple(row.target_id for row in d['receipts'][0].targets)):
+                raise ReceiptDescriptorRejected('continuing movement participant/Target coverage changed')
+            if not initial and receipt.rng_after != d['receipts'][0].rng_after:
+                raise ReceiptDescriptorRejected('movement-only boundary unexpectedly changed RNG state')
             for target in receipt.targets:
                 _closed(target,PortableTargetRecord);_id(target.target_id,'Target')
                 if target.category!='being':
@@ -963,7 +1017,8 @@ def plan_receipt_rebinding(descriptor):
     entity_ids=set();action_ids=[];choice_ids=[];boundaries=[]
     for receipt in descriptor.receipts:
         boundaries.append(receipt.boundary)
-        if type(receipt) is PortableMovementOnlyBoundaryReceipt:
+        if type(receipt) in (PortableMovementOnlyBoundaryReceipt,
+                             PortableContinuingMovementBoundaryReceipt):
             entity_ids.update(receipt.participant_ids)
         if type(receipt) is PortableBoundaryReceipt:
             for action in receipt.actions:

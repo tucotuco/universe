@@ -208,13 +208,17 @@ def _bind_quarantined_movement_inspection(encounter, rng_owner, receipt, *, auth
             or type(rng_owner) is not RNGCursor or receipt is None):
         raise TransactionalProgressionError(
             'quarantined native movement graph and exclusive RNG cursor are required')
+    receipts = receipt if type(receipt) is tuple else (receipt,)
     history = encounter.__dict__.get('_atomic_interval_history')
-    issued = _COMMITTED_RECEIPTS.get(id(receipt))
-    if (type(history) is not list or history != [receipt]
-            or issued is None or issued[0]() is not receipt
-            or issued[1]() is not encounter or receipt.boundary != 1
-            or tuple(receipt.rng_state) != tuple(rng_owner.state)
-            or encounter.time != 1 or encounter.last_processed_boundary != 1):
+    latest = receipts[-1] if receipts else None
+    if (type(history) is not list or tuple(history) != receipts or not receipts
+            or any((lambda issued, row: issued is None or issued[0]() is not row
+                    or issued[1]() is not encounter)(_COMMITTED_RECEIPTS.get(id(row)), row)
+                   for row in receipts)
+            or latest.boundary not in (1, 2)
+            or tuple(latest.rng_state) != tuple(rng_owner.state)
+            or encounter.time != latest.boundary
+            or encounter.last_processed_boundary != latest.boundary):
         raise TransactionalProgressionError(
             'native imported receipt, RNG or boundary is not consistently registered')
     key = id(encounter)
@@ -282,16 +286,19 @@ def _bind_trusted_imported_movement_progression(encounter, import_handle, rng_ow
     active = _ACTIVE_RESTORED_EXECUTION
     entry = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
     issued = _COMMITTED_RECEIPTS.get(id(receipt))
+    receipts = entry.receipts or (entry.receipt,)
+    base_boundary = len(receipts)
     if (active is None or active[0]() is not encounter
             or active[1] != threading.get_ident() or active[2] is not context
             or context[0] is not import_handle or entry is None
             or entry.native.encounter is not encounter or type(encounter) is not Encounter
             or not is_quarantined(encounter) or mode_of(encounter) != 'quarantined_inspection'
             or type(rng_owner) is not RNGCursor or entry.native.rng_owner is not rng_owner
-            or entry.receipt is not receipt or type(issued) is not tuple
+            or receipts[-1] is not receipt or type(issued) is not tuple
             or issued[0]() is not receipt or issued[1]() is not encounter
-            or encounter.time != 1 or encounter.last_processed_boundary != 1
-            or encounter._coordinator_time != 1 or encounter._interval_start != 1
+            or encounter.time != base_boundary or encounter.last_processed_boundary != base_boundary
+            or encounter._coordinator_time != base_boundary or encounter._interval_start != base_boundary
+            or tuple(encounter._atomic_interval_history) != receipts
             or encounter.pending_action_list or encounter.finished_action_list
             or encounter.cancelled_action_list or encounter._choice_book._counter != 0
             or encounter._choice_book._choices or encounter._choice_book._drafts
@@ -301,7 +308,7 @@ def _bind_trusted_imported_movement_progression(encounter, import_handle, rng_ow
     if old is None or old.encounter() is not encounter or old.mode.name != 'quarantined_inspection':
         raise TransactionalProgressionError('quarantined inspection binding is missing')
     mode = ProgressionMode('transactional', id(encounter), 'caller_cursor', id(rng_owner),
-        'trusted_imported_movement_boundary_1_to_2')
+        f'trusted_imported_movement_boundary_{base_boundary}_to_{base_boundary + 1}')
     _BINDINGS[id(encounter)] = _Binding(old.encounter, mode, rng_owner, old.running)
     encounter.__dict__['_transactional_mode'] = mode
     return mode
@@ -316,16 +323,19 @@ def _restore_quarantined_movement_inspection(encounter, import_handle, receipt, 
         raise TransactionalProgressionError('quarantined movement rollback is restoration-owner controlled')
     private = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
     binding = _BINDINGS.get(id(encounter))
-    receipt_entry = _COMMITTED_RECEIPTS.get(id(receipt))
+    receipts = receipt if type(receipt) is tuple else (receipt,)
+    current_receipts = (private.receipts or (private.receipt,)) if private is not None else ()
+    latest = receipts[-1] if receipts else None
+    receipt_entry = _COMMITTED_RECEIPTS.get(id(latest)) if latest is not None else None
     if (private is None or private.native.encounter is not encounter
-            or private.receipt is not receipt or binding is None
+            or current_receipts != receipts or binding is None
             or binding.encounter() is not encounter
             or binding.mode.name != 'transactional'
-            or binding.mode.authority_contract != 'trusted_imported_movement_boundary_1_to_2'
+            or not binding.mode.authority_contract.startswith('trusted_imported_movement_boundary_')
             or not is_quarantined(encounter)
-            or encounter.time != 1 or encounter.last_processed_boundary != 1
-            or encounter.__dict__.get('_atomic_interval_history') != [receipt]
-            or receipt_entry is None or receipt_entry[0]() is not receipt
+            or encounter.time != len(receipts) or encounter.last_processed_boundary != len(receipts)
+            or tuple(encounter.__dict__.get('_atomic_interval_history', ())) != receipts
+            or receipt_entry is None or receipt_entry[0]() is not latest
             or receipt_entry[1]() is not encounter):
         raise TransactionalProgressionError('failed movement continuation is outside exact pre-boundary rollback')
     mode = ProgressionMode('quarantined_inspection', id(encounter), 'caller_cursor',
