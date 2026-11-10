@@ -34,11 +34,37 @@ class TestBoundedClosureBlockers(unittest.TestCase):
         candidate=self.candidate();result=validate_checkpoint_candidate(self.world,self.enc,candidate,quiescent=True)
         self.assertTrue(result.inventory_validated)
         self.assertIn('bounded_run_spot_closure_verified',{d.code for d in result.diagnostics})
-        self.assertIn('native.run-spot-field-closure/4',tuple(strings(candidate.envelope)))
+        self.assertIn('native.run-spot-field-closure/5',tuple(strings(candidate.envelope)))
         self.assertFalse(result.closure_validated)
         self.assertFalse(result.portable_schema_defined)
         self.assertFalse(result.restore_verified)
         self.assertIn('semantic_closure_adapter_incomplete',{d.code for d in result.diagnostics})
+
+    def test_generated_arena_ground_objects_are_closed_by_native_identity_and_state(self):
+        import json
+        from arena_browser_session import GeneratedArenaSession
+        from checkpoint_envelope import assemble_native_run_spot_envelope
+        from checkpoint_wire import encode_run_spot_envelope, decode_run_spot_wire
+        profile=json.loads((ROOT/'tests/fixtures/arena/test_ground_loadout_profile.json').read_text())
+        session=GeneratedArenaSession(root_seed_factory=lambda: 20261109,
+                                      ground_loadout_profile=profile)
+        session.generate({'starting_experience':'10000','width_cells':'5','height_cells':'5'})
+        candidate=session.active_candidate
+        address=candidate.arena_map.layout.address_for_index(0)
+        session.choose_destination({'column':address.column,'row':address.row,
+                                    'rate':'walk','facing_policy':'turn'})
+        session.advance_one_second()
+        envelope=assemble_native_run_spot_envelope(candidate.universe,candidate.encounter,
+            quiescent=True,rng_scope='exclusive_encounter')
+        raw=encode_run_spot_envelope(envelope)
+        decoded=decode_run_spot_wire(raw)
+        certificate=envelope.field_closure
+        sections=dict(certificate[1:])
+        self.assertEqual(len(sections['objects']),len(candidate.ground_objects))
+        self.assertEqual({row[0] for row in sections['objects']},
+                         set(candidate.encounter.non_being_object_list))
+        self.assertEqual({row[3] for row in sections['objects']},{None})
+        self.assertEqual(decoded.to_data(),envelope.to_data())
 
     def test_committed_batch_and_future_choice_use_portable_choice_descriptor(self):
         first=RunAction(self.world,self.f.a.id,0,1,.5,experience=3)
@@ -81,7 +107,7 @@ class TestBoundedClosureBlockers(unittest.TestCase):
         candidate=self.candidate()
         codes={d.code for d in candidate.diagnostics}
         self.assertIn('bounded_run_spot_closure_verified',codes)
-        self.assertIn('native.run-spot-field-closure/4',tuple(strings(candidate.envelope)))
+        self.assertIn('native.run-spot-field-closure/5',tuple(strings(candidate.envelope)))
         self.assertFalse(candidate.closure_validated);self.assertFalse(candidate.portable_schema_defined)
         self.assertEqual(self.enc.time,1)
         self.assertEqual(_read_set(self.enc),before);self.assertEqual(self.rng.state,rng_before)

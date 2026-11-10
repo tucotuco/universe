@@ -134,6 +134,14 @@ def _canonical_number(value):
               'noncanonical or nonfinite tagged binary64 value')
 
 
+def _valid_hex_float(value):
+    try:
+        parsed = float.fromhex(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(parsed) and parsed.hex() == value
+
+
 def _walk_tags(value):
     if type(value) is tuple:
         _canonical_number(value)
@@ -552,14 +560,14 @@ def _validate_descriptor_components(data):
           'envelope content digest mismatch')
     sections, node_by_ref = _validate_inventory(state)
     _need(type(certificate) is tuple and certificate
-          and certificate[0] == 'native.run-spot-field-closure/4',
+          and certificate[0] == 'native.run-spot-field-closure/5',
           'unknown Run/Spot field-closure schema')
     cert_rows = certificate[1:]
     _need(all(type(row) is tuple and len(row) == 2 and type(row[0]) is str for row in cert_rows),
           'malformed field-closure certificate')
     cert = dict(cert_rows)
     _need(len(cert) == len(cert_rows)
-          and tuple(sorted(cert)) == tuple(sorted(('participants', 'being-definitions',
+          and tuple(sorted(cert)) == tuple(sorted(('participants', 'objects', 'being-definitions',
               'required-practice-skills', 'participant-state', 'receipt-descriptors',
               'accepted-choice-descriptors', 'field-policy', 'ownership-policy'))),
           'field-closure certificate fields are incomplete or unknown')
@@ -574,6 +582,28 @@ def _validate_descriptor_components(data):
     _need(participant_ids == tuple(sorted(set(participant_ids)))
           and all(type(item) is str and item for item in participant_ids),
           'duplicate or noncanonical participant logical IDs')
+    object_rows = cert['objects']
+    _need(type(object_rows) is tuple,
+          'native Object state closure is malformed')
+    object_ids = []
+    for row in object_rows:
+        _need(type(row) is tuple and len(row) == 5
+              and type(row[0]) is str and row[0]
+              and type(row[1]) is str and row[1]
+              and row[2] in ('ObjectInstance', 'WeaponInstance', 'ArmorInstance')
+              and (row[3] is None or type(row[3]) is str and row[3] in participant_ids),
+              'native Object identity or custody closure is malformed')
+        object_ids.append(row[0])
+        position = row[4]
+        _need((row[3] is None and type(position) is tuple and len(position) == 3
+               and all(type(value) is str and _valid_hex_float(value) for value in position)
+               and (row[2] == 'WeaponInstance' or row[2] == 'ArmorInstance'
+                    or row[1] != ''))
+              or (row[3] is not None and position is None),
+              'native Object position/custody state is malformed')
+    _need(len(object_ids) == len(set(object_ids))
+          and not set(object_ids).intersection(participant_ids),
+          'native Object logical identities are duplicate or alias Being IDs')
     receipt_rows = cert['receipt-descriptors']
     _need(type(receipt_rows) is tuple and len(receipt_rows) <= 1,
           'receipt descriptor multiplicity is invalid')
@@ -605,7 +635,8 @@ def _validate_descriptor_components(data):
               and tuple(receipt_boundary(row) for row in rows) == boundaries,
               'receipt rows do not match committed boundary sequence')
         committed_action_ids = _validate_receipt_chain(
-            receipts, universe_id, encounter_id, set(participant_ids), choices, boundaries)
+            receipts, universe_id, encounter_id,
+            set(participant_ids) | set(object_ids), choices, boundaries)
     else:
         _need(boundaries == (), 'boundary sequence has no committed receipts')
         committed_action_ids = set()

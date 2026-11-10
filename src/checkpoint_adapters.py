@@ -406,9 +406,12 @@ class NativeInventory(_Inventory):
                 _require(any(type(v)is type(value) and v==value for cdf in cdfs for v,_ in cdf),'impossible committed conditional value')
 
     def _bounded_run_spot_closure(self,world,encounter,rng_role):
-        """Prove only the native Run/Spot field, definition and alias subset."""
+        """Prove the native Arena Being and ground/carried Object subset."""
         from library import Library
         from being import BeingDictionary
+        from object import ObjectDefinition, ObjectInstance
+        from weapon import WeaponInstance, WeaponDefinition
+        from armor import ArmorInstance, ArmorDefinition
         from skill import SkillDictionary
         from activities import RunAction,SpotAction
         from atomic_publication import RNGCursor
@@ -461,8 +464,9 @@ class NativeInventory(_Inventory):
         _require(not self.bindings,'external recipient bindings are outside the Run/Spot subset')
         _require(type(encounter.being_list) is list and encounter.being_list
                  and len(encounter.being_list)==len(set(encounter.being_list))
-                 and encounter.non_being_object_list==[],
-                 'bounded Encounter must contain unique native Being participants only')
+                 and type(encounter.non_being_object_list) is list
+                 and len(encounter.non_being_object_list)==len(set(encounter.non_being_object_list)),
+                 'bounded Encounter entity lists must contain unique native IDs')
 
         being_dictionary=world.library.being_dictionary
         bd=_fields(being_dictionary);definitions=bd['objects']
@@ -521,7 +525,8 @@ class NativeInventory(_Inventory):
                     cursor=rows.get(cursor.parent_id)
                     _require(type(cursor) is PhysiologyDefinition,'missing physiology parent definition')
 
-        entity_ids=set(encounter.being_list)
+        being_ids=set(encounter.being_list)
+        object_ids=set(encounter.non_being_object_list)
         receipts=();receipt_descriptor_data=()
         history=encounter.__dict__.get('_atomic_interval_history',())
         if movement_activation is not None:
@@ -540,11 +545,12 @@ class NativeInventory(_Inventory):
                     for action in receipt.actions:
                         _require(action.adapter in ('native.run-action/1','native.spot-action/1'),
                                  'committed receipt contains an unsupported Action family')
-                        entity_ids.add(action.actor_id)
-                        if action.target_id is not None:entity_ids.add(action.target_id)
+                        being_ids.add(action.actor_id)
+                        if action.target_id is not None:being_ids.add(action.target_id)
                 elif type(receipt) in (PortableMovementOnlyBoundaryReceipt,
                                        PortableContinuingMovementBoundaryReceipt):
-                    entity_ids.update(receipt.participant_ids)
+                    _require(set(receipt.participant_ids)==being_ids|object_ids,
+                             'movement receipt Entity set disagrees with native Encounter registry')
                 else:
                     raise CheckpointRejected('receipt chain contains an unsupported boundary type')
 
@@ -566,8 +572,8 @@ class NativeInventory(_Inventory):
                         action=member.action
                         _require(type(action) in (RunAction,SpotAction),
                                  'accepted choice contains an unsupported Action')
-                        entity_ids.add(action.actor_id)
-                        if action.target_id is not None:entity_ids.add(action.target_id)
+                        being_ids.add(action.actor_id)
+                        if action.target_id is not None:being_ids.add(action.target_id)
                 elif record.view.state=='finished':
                     _require(set(record.view.action_ids)<=committed_ids,
                              'finished ChoiceBook record lacks matching committed receipt')
@@ -583,10 +589,62 @@ class NativeInventory(_Inventory):
                  'Event registry contains data outside the bounded origin/Encounter/Run/Spot graph')
 
         registry=world.object_registry.object_instances
-        _require(set(registry)==entity_ids and all(type(value) is BeingInstance for value in registry.values()),
-                 'bounded Universe registry contains unrelated objects or Beings outside the selected Encounter')
+        expected_ids=being_ids|object_ids
+        _require(set(registry)==expected_ids,
+                 'bounded Universe registry contains unrelated entities outside the selected Encounter')
+        _require(all(type(registry.get(entity_id)) is BeingInstance
+                     and encounter.get_being(entity_id) is registry[entity_id]
+                     for entity_id in being_ids),
+                 'Encounter Being participant is missing or has an unsupported native type')
+        _require(all(type(registry.get(entity_id)) in (ObjectInstance,WeaponInstance,ArmorInstance)
+                     and encounter.get_entity(entity_id) is registry[entity_id]
+                     for entity_id in object_ids),
+                 'Encounter Object registry contains an unsupported or unresolved native entity')
+        object_rows=[]
+        possession_owners={}
+        for being_id in sorted(being_ids):
+            possessions=_fields(registry[being_id]).get('possessions')
+            _require(type(possessions) is list and all(type(item) is str for item in possessions)
+                     and len(possessions)==len(set(possessions)),
+                     'Being possession references are malformed')
+            for object_id in possessions:
+                _require(object_id in object_ids and object_id not in possession_owners,
+                         'Object possession is missing, duplicated, or owned outside this Encounter')
+                possession_owners[object_id]=being_id
+        for object_id in sorted(object_ids):
+            obj=registry[object_id];data=_fields(obj)
+            original=data['original'];current=data['current']
+            _require(data['id']==object_id and data['type']==type(obj).__name__
+                     and type(original) in (ObjectDefinition,WeaponDefinition,ArmorDefinition)
+                     and type(current) is type(original) and current is not original
+                     and original.obj_type==current.obj_type,
+                     'Object identity or original/current definition state is unsupported')
+            definition_dictionary=(world.library.weapon_dictionary if type(original) is WeaponDefinition
+                else world.library.armor_dictionary if type(original) is ArmorDefinition
+                else world.library.object_dictionary)
+            _require(definition_dictionary.objects.get(original.obj_type) is original,
+                     'Object original definition is not the exact registered native Library definition')
+            self._closed_definition_value(original,
+                owner=('object-definition',type(original).__name__,original.obj_type),
+                mutable_owners=definition_mutables)
+            self._closed_definition_value(current,
+                owner=('object-current',object_id),mutable_owners=definition_mutables)
+            parent=data['parent_container_id'];position=obj.get_position()
+            _require(parent is None or type(parent) is str and parent in being_ids,
+                     'Object custody parent is outside the Encounter Being set')
+            if parent is None:
+                _require(object_id not in possession_owners and position is not None,
+                         'free Object must have a native position and no Being possession reference')
+            else:
+                _require(possession_owners.get(object_id)==parent and position is None,
+                         'carried Object custody disagrees with native Being possession state')
+            history=data.get('_atomic_target_history')
+            _require(history is None or type(history) is list,
+                     'Object Target history has an unsupported representation')
+            object_rows.append((object_id,original.obj_type,type(obj).__name__,parent,
+                None if position is None else tuple(float(value).hex() for value in position.as_tuple())))
         current_owned=dict(definition_mutables);covered=[];individualized_original_ids=set()
-        for entity_id in sorted(entity_ids):
+        for entity_id in sorted(being_ids):
             being=registry.get(entity_id)
             _require(type(entity_id) is str and type(being) is BeingInstance
                      and being.id==entity_id and encounter.get_being(entity_id) is being,
@@ -664,8 +722,9 @@ class NativeInventory(_Inventory):
                             tuple(sorted(skill_state['weapon_skills'])),
                             ('binary64',fatigue.q.hex()),('binary64',fatigue.b.hex()),
                             physiology_id,geometry is not None,occlusion is not None,facing,effective_posture))
-        return ('native.run-spot-field-closure/4',
-            ('participants',tuple(sorted(entity_ids))),
+        return ('native.run-spot-field-closure/5',
+            ('participants',tuple(sorted(being_ids))),
+            ('objects',tuple(object_rows)),
             ('being-definitions',tuple(sorted({row[1] for row in covered}))),
             ('required-practice-skills',('run','spot')),
             ('participant-state',tuple(covered)),

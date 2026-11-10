@@ -323,12 +323,16 @@ def _check_target_effect_links(target, effects, action_by_id):
         action=action_by_id.get(identity[3])
         if identity not in effect_payloads or action is None or action.actor_id!=tid:
             raise ReceiptDescriptorRejected('Target outgoing effect source Action is unresolved')
-    practice=_tagged_fields(state.get('practice_state'),'practice.projection/1')
-    if practice.get('being_id')!=('string',tid):raise ReceiptDescriptorRejected('Target practice projection belongs to another Being')
-    for exercise in _sequence(practice.get('exercises'),'Target practice exercises'):
-        fields=_tagged_fields(exercise,'practice.exercise/1')
-        if _effect_key(fields.get('effect_identity')) not in expected:
-            raise ReceiptDescriptorRejected('Target practice exercise has a broken causal reference')
+    category=_tagged_string(state.get('category'),'Target category')
+    if category=='being':
+        practice=_tagged_fields(state.get('practice_state'),'practice.projection/1')
+        if practice.get('being_id')!=('string',tid):raise ReceiptDescriptorRejected('Target practice projection belongs to another Being')
+        for exercise in _sequence(practice.get('exercises'),'Target practice exercises'):
+            fields=_tagged_fields(exercise,'practice.exercise/1')
+            if _effect_key(fields.get('effect_identity')) not in expected:
+                raise ReceiptDescriptorRejected('Target practice exercise has a broken causal reference')
+    elif state.get('practice_state')!=('null',):
+        raise ReceiptDescriptorRejected('Object Target has an unsupported practice projection')
 
 
 def _id(value, label):
@@ -512,13 +516,17 @@ def _portable_target(view, target_id, boundary, effect_lookup, action_actors):
     from action_settlement import TargetCandidate
     from observer_proposals import ObserverProjection
     state=view.state
-    if type(state) is not TargetCandidate or state.target_id!=target_id or state.category!='being':
-        raise ReceiptDescriptorRejected('only native Being-owned Target records are supported')
-    if type(state.observer_state) is not ObserverProjection:
-        raise ReceiptDescriptorRejected('unknown Target observer state')
-    od=native_data(state.observer_state,(ObserverProjection,))
-    if (od['observations'] or od['interpretations'] or od['heard_accounts'] or od['belief_recipient_ids']):
-        raise ReceiptDescriptorRejected('observer evidence/Belief records are outside this receipt subset')
+    if (type(state) is not TargetCandidate or state.target_id!=target_id
+            or state.category not in ('being','weapon','armor')):
+        raise ReceiptDescriptorRejected('Target record is not owned by a supported native Being or Object')
+    if state.category=='being':
+        if type(state.observer_state) is not ObserverProjection:
+            raise ReceiptDescriptorRejected('unknown Being Target observer state')
+        od=native_data(state.observer_state,(ObserverProjection,))
+        if (od['observations'] or od['interpretations'] or od['heard_accounts'] or od['belief_recipient_ids']):
+            raise ReceiptDescriptorRejected('observer evidence/Belief records are outside this receipt subset')
+    elif state.observer_state is not None:
+        raise ReceiptDescriptorRejected('Object Target contains an unsupported observer projection')
     incoming=[]
     for row in state.incoming:
         if type(row) is not IdentifiedEffect or row.identity not in effect_lookup or effect_lookup[row.identity]!=row:
@@ -543,7 +551,7 @@ def _portable_target(view, target_id, boundary, effect_lookup, action_actors):
                     or effect.effect.experience!=exercise.experience
                     or exercise.action_id!=exercise.effect_identity.source_action_id):
                 raise ReceiptDescriptorRejected('practice exercise is not causally linked to Target effect')
-    return PortableTargetRecord(target_id,'being',_position(view.position),
+    return PortableTargetRecord(target_id,state.category,_position(view.position),
         _value(state))
 
 
@@ -733,11 +741,12 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                         or meta.actions or meta.action_anchors or meta.effects
                         or type(meta.participants) is not tuple or not meta.participants
                         or len(set(meta.participants))!=len(meta.participants)
-                        or set(meta.participants)!=set(encounter.being_list)
+                        or set(meta.participants)!=(set(encounter.being_list)
+                            |set(encounter.non_being_object_list))
                         or set(meta.target_anchors)!=set(meta.participants)
                         or set(meta.entities)!=set(meta.participants)):
                     raise ReceiptDescriptorRejected(
-                        'initial movement-only boundary has inconsistent Action, effect, or participant coverage')
+                        'initial movement-only boundary has inconsistent Action, effect, or Entity coverage')
             portable_actions=[]
             for aid in aids:
                 item=view.actions[aid]
@@ -834,14 +843,14 @@ def validate_receipt_descriptor(value):
                 raise ReceiptDescriptorRejected('movement-only boundary unexpectedly changed RNG state')
             for target in receipt.targets:
                 _closed(target,PortableTargetRecord);_id(target.target_id,'Target')
-                if target.category!='being':
-                    raise ReceiptDescriptorRejected('movement-only Target category is not a Being')
+                if target.category not in ('being','weapon','armor'):
+                    raise ReceiptDescriptorRejected('movement-only Target category is not a supported Entity')
                 if type(target.state) is not tuple or not target.state or target.state[0]!='target.candidate/1':
                     raise ReceiptDescriptorRejected('unknown movement-only Target state descriptor')
                 state_fields=target.state[1]
                 if (type(state_fields) is not tuple or
                         ('target_id',('string',target.target_id)) not in state_fields or
-                        ('category',('string','being')) not in state_fields):
+                        ('category',('string',target.category)) not in state_fields):
                     raise ReceiptDescriptorRejected('movement-only Target identity/category link is invalid')
                 _validate_encoded(target.state)
                 if target.position==('null',):pass
@@ -965,7 +974,8 @@ def validate_receipt_descriptor(value):
             state_fields=target.state[1]
             if (type(state_fields) is not tuple or
                     ('target_id',('string',target.target_id)) not in state_fields or
-                    ('category',('string','being')) not in state_fields):
+                    ('category',('string',target.category)) not in state_fields or
+                    target.category not in ('being','weapon','armor')):
                 raise ReceiptDescriptorRejected('Target state identity/category link is invalid')
             _validate_encoded(target.state)
             _check_target_effect_links(target,receipt.effects,action_by_id)
