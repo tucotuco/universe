@@ -551,6 +551,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             {"event": "canvas_entity_marker_hit", "entity_category": "object"},
             {"event": "canvas_marker_missed"},
             {"event": "canvas_hex_selected", "column": 3, "row": 2},
+            {"event": "melee_strike_clicked"},
             {"event": "destination_request_queued", "column": 3, "row": 2,
              "rate": "walk", "facing_policy": "turn"},
             {"event": "destination_request_accepted", "column": 3, "row": 2},
@@ -565,6 +566,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         output = stream.getvalue()
         for event in ("page_script_ready", "canvas_click_received", "canvas_modal_blocked",
                       "canvas_entity_marker_hit entity_category=object", "canvas_marker_missed",
+                      "melee_strike_clicked",
                       "canvas_hex_selected cell=(3,2)",
                       "destination_request_queued cell=(3,2) rate=walk policy=turn",
                       "destination_request_accepted cell=(3,2)", "page_script_error"):

@@ -1,7 +1,7 @@
 import Foundation
 import JavaScriptCore
 
-guard CommandLine.arguments.count == 5 || CommandLine.arguments.count == 6 || CommandLine.arguments.count == 7 else {
+guard CommandLine.arguments.count == 5 || CommandLine.arguments.count == 6 || CommandLine.arguments.count == 7 || CommandLine.arguments.count == 8 else {
     fputs("usage: arena_browser_js_harness.swift PAGE_HTML INITIAL_VIEW_JSON TARGET_CELL_JSON PICKED_UP_VIEW_JSON\n", stderr)
     exit(2)
 }
@@ -16,6 +16,7 @@ let targetCell = read(CommandLine.arguments[3])
 let pickedUpView = read(CommandLine.arguments[4])
 let movementRefusal = CommandLine.arguments.count == 6 ? read(CommandLine.arguments[5]) : "null"
 let drawOnly = CommandLine.arguments.count == 7 && CommandLine.arguments[6] == "draw-only"
+let meleeOnly = CommandLine.arguments.count == 8 && CommandLine.arguments[7] == "melee-only"
 guard let start = html.range(of: "<script>"),
       let end = html.range(of: "</script>", range: start.upperBound..<html.endIndex) else {
     fputs("generated page has no inline script\n", stderr)
@@ -54,6 +55,7 @@ var __movementRefusal=__MOVEMENT_REFUSAL__;
 var __movementRefusalUsed=false;
 var __enableMovementRefusal=false;
 var __enableDrawableDraw=__DRAW_ONLY__;
+var __enableMelee=__MELEE_ONLY__;
 var __calls=[];
 var __lastPlan=null;
 function __refreshActionCatalog(){
@@ -100,6 +102,9 @@ function fetch(path,options={}){
       if(__serverState.character){__serverState.character.movement.position_meters=JSON.parse(JSON.stringify(__serverState.player.position_meters));__serverState.character.movement.cell=JSON.parse(JSON.stringify(__serverState.player.cell));__serverState.character.movement.selected_plan=null;}
       __serverState.movement_plan=null;__serverState.movement_outcome='arrived';
       for(const e of __serverState.entities||[])if(e.category==='object'&&e.cell&&e.cell.column===__serverState.player.cell.column&&e.cell.row===__serverState.player.cell.row)e.pickup_available=true;
+    }else if(__serverState.melee_action&&__serverState.melee_action.status==='executing'){
+      __serverState.melee_action.seconds_remaining-=1;
+      if(__serverState.melee_action.seconds_remaining===0)__serverState.melee_action={name:__serverState.melee_action.name,status:'completed',outcome:'uncertain_path',duration_seconds:4,seconds_remaining:0,target_name:__serverState.melee_action.target_name};
     }else if(__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'){
       __serverState.ready_weapon_action.seconds_remaining-=1;
       if(__serverState.ready_weapon_action.seconds_remaining===0){__serverState.ready_weapon_action={name:'Draw',status:'completed',outcome:'success',duration_seconds:2,seconds_remaining:0};if(__serverState.character&&__serverState.character.inventory.items.length){const item=__serverState.character.inventory.items[0];item.status='readied in right hand';const hand=__serverState.character.anatomy.hands.find(row=>row.name==='right hand');if(hand){hand.occupancy='occupied';hand.object={handle:item.handle,name:item.name,type:item.type};}}}
@@ -111,7 +116,7 @@ function fetch(path,options={}){
     }else if(__serverState.player_action&&__serverState.player_action.status==='executing'){
       __serverState.player_action={name:'Run',status:'completed',outcome:'no_movement'};
     }
-    __serverState.advance_available=false;__refreshActionCatalog();
+    __serverState.advance_available=Boolean(__serverState.melee_action&&__serverState.melee_action.status==='executing'||__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'||__serverState.pickup_action&&__serverState.pickup_action.status==='executing');__refreshActionCatalog();
     __serverState.movement_outcome=__serverState.movement_outcome||'progressed';
   } else if(path==='/api/generated/inspect'){
     __serverState.selected_entity=__serverState.entities.find(e=>e.handle===body.handle)||null;
@@ -127,6 +132,10 @@ function fetch(path,options={}){
   } else if(path==='/api/generated/ready-weapon'){
     __serverState.ready_weapon_action={name:'Draw',status:'executing',outcome:null,duration_seconds:2,seconds_remaining:2};
     __serverState.advance_available=true;__refreshActionCatalog();
+  } else if(path==='/api/generated/melee-strike'){
+    if(!__enableMelee)throw Error('melee test scenario is not enabled');
+    __serverState.melee_action={name:body.motion==='thrust'?'Thrust':'Swing',status:'executing',outcome:null,duration_seconds:4,seconds_remaining:4,target_name:__serverState.selected_entity.name};
+    __serverState.advance_available=true;
   } else if(path==='/api/generated/rename-entity'){
     const e=__serverState.entities.find(row=>row.handle===body.handle);
     if(e){e.name=body.name;__serverState.selected_entity=e;}
@@ -140,9 +149,30 @@ let preparedPrelude = prelude
     .replacingOccurrences(of: "__PICKED_UP_VIEW__", with: pickedUpView)
     .replacingOccurrences(of: "__MOVEMENT_REFUSAL__", with: movementRefusal)
     .replacingOccurrences(of: "__DRAW_ONLY__", with: drawOnly ? "true" : "false")
+    .replacingOccurrences(of: "__MELEE_ONLY__", with: meleeOnly ? "true" : "false")
 context.evaluateScript(preparedPrelude)
 context.evaluateScript(pageScript)
-let scenario = drawOnly ? #"""
+let scenario = meleeOnly ? #"""
+globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
+(async()=>{
+  await Promise.resolve();
+  await __element('generate').onclick();
+  const opponent=currentView.entities.find(e=>e.category==='being'&&currentView.action_catalog.entries.some(a=>(a.name==='thrust at being'||a.name==='swing at being')&&a.target&&a.target.handle===e.handle));
+  if(!opponent||currentView.selected_entity.handle!==opponent.handle)throw Error('native perceived target was not selected for the player');
+  const startTime=currentView.time_seconds;
+  await __clickPlayer();
+  const selector=__find(__element('dialogBody'),'actionSelector');if(!selector)throw Error('player popup omitted native Action selector');selector.open=true;selector.listeners.toggle();
+  const button=__find(__element('dialogBody'),'actionMeleeThrust');
+  if(!button||button.disabled||button.textContent!=='Dagger Thrust (4 s)')throw Error('native Dagger Thrust was not available in the player popup');
+  await button.listeners.click();
+  const request=__calls.find(call=>call.path==='/api/generated/melee-strike');
+  if(!request||request.body.handle!==opponent.handle||request.body.motion!=='thrust'||'native_id' in request.body)throw Error('browser did not submit only the visible target handle and native motion');
+  if(currentView.melee_action.status!=='executing'||!currentView.advance_available)throw Error('browser did not expose pending native strike progression');
+  for(let i=0;i<4;i++)await __element('advance').onclick();
+  if(currentView.melee_action.status!=='completed'||currentView.melee_action.outcome!=='uncertain_path'||currentView.time_seconds!==startTime+4)throw Error('browser did not display the native four-second resolution result: '+JSON.stringify({action:currentView.melee_action,time:currentView.time_seconds,advance:currentView.advance_available}));
+  globalThis.__result=JSON.stringify({calls:__calls,actionResult:__element('actionResult').textContent,time:currentView.time_seconds,melee_action:currentView.melee_action});
+})().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
+"""# : drawOnly ? #"""
 globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
 (async()=>{
   await Promise.resolve();

@@ -60,7 +60,7 @@ class CheckpointValidation:
 _ISSUED = {}  # Same-process validation only; excluded from the candidate.
 _CATALOG = {
     'universe':'Universe', 'encounter':'Encounter EncounterInitiation ArenaActionActivation ArenaMovementActivation', 'event':'Event',
-    'action':'Action', 'activities':'RunAction SpotAction PickUpAction ReadyWeaponAction', 'melee_combat':'MeleeStrike',
+    'action':'Action', 'activities':'RunAction SpotAction PickUpAction ReadyWeaponAction', 'melee_combat':'MeleeStrike MeleeResult',
     'melee_defense':'MeleeDefense', 'group_observation':'ObserveGroupAction SampledGroupObservation',
     'history_conversation':'AskAboutPastAction HeardAccount',
     'being':'BeingInstance BeingDefinition BeingDictionary',

@@ -18,7 +18,7 @@ _FIELDS = frozenset(('schema', 'compatibility', 'inventory', 'sha256'))
 MAX_BYTES = 64 * 1024 * 1024
 
 # Exact native type closure exercised by the current Arena UI: generated
-# Beings, typed ground/carry Objects, Run, Pick up, Draw, their Choice and
+# Beings, typed ground/carry Objects, Run, Pick up, Draw, Dagger strikes, their Choice and
 # committed inspection records, and observer-owned Arena evidence.
 _ARENA_TAGS = frozenset({
     'universe.Universe','library.Library','event.Event','encounter.Encounter',
@@ -35,7 +35,8 @@ _ARENA_TAGS = frozenset({
     'physical_fatigue.PhysicalFatigueState','spatial.state.CartesianPosition',
     'spatial.state.SpatialState','arena_perception.ArenaPerceptionEvidence',
     'arena_perception.ArenaPerceptionLedger','activities.RunAction',
-    'activities.PickUpAction','activities.ReadyWeaponAction',
+    'activities.PickUpAction','activities.ReadyWeaponAction','melee_combat.MeleeStrike',
+    'melee_combat.MeleeResult',
     'atomic_publication.PublishedInterval','atomic_publication.TargetIntervalRecord',
     'encounter_inspection.CommittedBoundaryRecord','encounter_inspection.EntityInspection',
     'action_settlement.TargetCandidate','action_evaluation.ActionProposal',
@@ -43,6 +44,7 @@ _ARENA_TAGS = frozenset({
     'action_evaluation.IdentifiedEffect','action_evaluation.PickupEffect',
     'action_evaluation.ReadyWeaponEffect','action_evaluation.PracticeEffect',
     'observer_proposals.ActionOutcomeEffect','observer_proposals.LifecycleEffect',
+    'observer_proposals.ReservationReleaseEffect',
     'observer_proposals.ObserverProjection','frozen_practice.PracticeProjection',
     'frozen_practice.CandidatePracticeUse','frozen_practice.CandidateSkillTransition',
     'experience.SkillUse','experience.BatchSkillUse','interval_staging.AuthorityReference',
