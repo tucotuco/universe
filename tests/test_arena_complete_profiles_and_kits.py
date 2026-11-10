@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from arena_browser_session import GeneratedArenaSession, ArenaBrowserRequestError
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
@@ -12,6 +14,7 @@ from arena_loadout_profiles import bundled_profiles, preview, realize
 from library import Library
 from armor import ArmorInstance
 from weapon import WeaponInstance
+from npcgen import api
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,14 +43,93 @@ class TestArenaCompleteProfilesAndKits(unittest.TestCase):
                          session.active_candidate.participants[0].native.source_sha256)
         saved = session.save_encounter_bytes()
         restored = GeneratedArenaSession()
-        loaded_view = restored.load_encounter_bytes(saved)
+        with patch("npcgen.api.arena_ready_being",
+                   side_effect=AssertionError("Load must not regenerate initial equipment")):
+            loaded_view = restored.load_encounter_bytes(saved)
         self.assertEqual(tuple(row.native.source_record_bytes for row in restored.active_candidate.participants),
                          original_source)
         self.assertEqual(loaded_view["character"]["npcgen_specification"], specification)
+        self.assertEqual(restored.active_candidate.initial_equipment_provenance,
+                         session.active_candidate.initial_equipment_provenance)
         player = restored.active_candidate.participants[0].native.being
         self.assertEqual(player.get_experience(), specification["state"]["xps"][0]
                          + sum(specification["state"]["xps"][1:]))
         self.assertIsNot(player.original, player.current)
+
+    def test_arena_generation_invokes_api_with_universe_snapshots_and_fails_closed(self):
+        real = api.arena_ready_being
+        with patch("npcgen.api.arena_ready_being", wraps=real) as ready_api:
+            candidate = initialize_two_being_arena(1000, 5, 5, 9001, equipment_mode="equipped")
+        self.assertEqual(ready_api.call_count, 2)
+        for call, participant, provenance in zip(
+                ready_api.call_args_list, candidate.participants,
+                candidate.initial_equipment_provenance):
+            args = call.args
+            self.assertEqual(len(args), 5)
+            _npc_candidate, catalog, anatomy, policy, equipment_seed = args
+            self.assertEqual(catalog, provenance["catalog"])
+            self.assertEqual(anatomy, provenance["anatomy"])
+            self.assertEqual(policy, provenance["policy_snapshot"])
+            self.assertEqual(equipment_seed, provenance["equipment_seed"])
+            self.assertEqual(anatomy["hands"],
+                             [name for name in ("right hand", "left hand")
+                              if participant.native.being.original.body_parts.get(name) is None])
+
+        with patch("npcgen.api.arena_ready_being", return_value={"format": "npcgen-arena-ready-being"}):
+            with self.assertRaises(ArenaInitializationRefusal) as caught:
+                initialize_two_being_arena(1000, 5, 5, 9001, equipment_mode="equipped")
+        self.assertEqual(caught.exception.code, "candidate_terminal_failure")
+        self.assertEqual(caught.exception.details["refusal"]["code"], "arena_ready_refused")
+
+        with patch("npcgen.api.arena_ready_being", side_effect=AssertionError("should not be called")):
+            unequipped = initialize_two_being_arena(1000, 5, 5, 9001, equipment_mode="unequipped")
+        self.assertEqual(unequipped.initial_equipment_provenance, ())
+
+    def test_api_equipment_selection_and_input_snapshots_are_seed_deterministic(self):
+        first = initialize_two_being_arena(12000, 5, 5, 4411, equipment_mode="equipped")
+        second = initialize_two_being_arena(12000, 5, 5, 4411, equipment_mode="equipped")
+        self.assertEqual(
+            [(row["equipment_seed"], row["catalog"], row["anatomy"],
+              row["policy_snapshot"], row["specification"])
+             for row in first.initial_equipment_provenance],
+            [(row["equipment_seed"], row["catalog"], row["anatomy"],
+              row["policy_snapshot"], row["specification"])
+             for row in second.initial_equipment_provenance])
+
+    def test_pre_u_arena_009_equipped_save_remains_loadable_without_regeneration(self):
+        session = GeneratedArenaSession(root_seed_factory=lambda: 718)
+        session.generate({"starting_experience": "1000", "width_cells": "5",
+                          "height_cells": "5", "equipment_mode": "equipped"})
+        candidate = session.active_candidate
+        legacy_rows = []
+        for participant in candidate.participants:
+            being = participant.native.being
+            weapon_id = being.weapons[0]
+            weapon = candidate.universe.get_object_by_id(weapon_id)
+            hand = next(name for name, held in being.current.body_parts.items()
+                        if held == weapon_id)
+            armor_id = being.current.armor_id
+            armor = candidate.universe.get_object_by_id(armor_id)
+            legacy_rows.append({
+                "policy": "universe-arena-class-xp-equipment/1",
+                "being_id": being.id,
+                "weapon": {"object_id": weapon_id, "type": weapon.current.obj_type,
+                           "hand": hand, "basis": "saved legacy preference",
+                           "status": "native held/readied at initial state"},
+                "armor": {"object_id": armor_id, "type": armor.current.obj_type,
+                          "basis": "saved legacy preference",
+                          "status": "native armor_id reference"},
+                "shield": None,
+            })
+        session._active = replace(candidate, initial_equipment_provenance=tuple(legacy_rows))
+        wire = session.save_encounter_bytes()
+        loaded = GeneratedArenaSession()
+        with patch("npcgen.api.arena_ready_being",
+                   side_effect=AssertionError("legacy Load must not regenerate equipment")):
+            loaded.load_encounter_bytes(wire)
+        self.assertEqual(loaded.active_candidate.initial_equipment_provenance,
+                         tuple(legacy_rows))
+        self.assertTrue(loaded.save_encounter_bytes())
 
     def test_checked_profiles_match_the_native_catalog_and_record_exact_selection(self):
         weapons = self.library.weapon_dictionary
@@ -125,16 +207,35 @@ class TestArenaCompleteProfilesAndKits(unittest.TestCase):
         self.assertIn("requires 24 distinct cells", caught.exception.message)
         self.assertIn("at least 26 total cells", caught.exception.message)
 
-    def test_two_beings_receive_real_class_skill_strength_and_level_based_native_kits(self):
+    def test_two_beings_use_installed_arena_ready_spec_for_native_equipment(self):
         candidate = initialize_two_being_arena(1000, 5, 5, 11, equipment_mode="equipped")
         kits = candidate.initial_equipment_provenance
         self.assertEqual(len(kits), 2)
-        self.assertNotEqual(kits[0]["armor"]["type"], kits[1]["armor"]["type"])
         by_id = {being.id: being for being in (p.native.being for p in candidate.participants)}
+        self.assertEqual({row["policy"] for row in kits},
+                         {"universe-arena-class-xp-equipment/2"})
+        self.assertNotEqual(
+            [row["specification"]["equipment"]["units"][1]["native_type_key"] for row in kits][0],
+            [row["specification"]["equipment"]["units"][1]["native_type_key"] for row in kits][1])
+        all_native_ids = []
         for kit in kits:
             being = by_id[kit["being_id"]]
-            weapon = candidate.universe.get_object_by_id(kit["weapon"]["object_id"])
-            armor = candidate.universe.get_object_by_id(kit["armor"]["object_id"])
+            specification = kit["specification"]
+            self.assertEqual(specification["format"], "npcgen-arena-ready-being")
+            self.assertEqual(specification["schema_version"], 1)
+            self.assertEqual(specification["being"]["source_record"],
+                             json.loads(next(p.native.source_record_bytes for p in candidate.participants
+                                             if p.native.being.id == being.id)))
+            self.assertEqual(kit["catalog"]["catalog_id"], "universe-native-arena-equipment/1")
+            self.assertEqual(kit["anatomy"]["hands"], ["right hand", "left hand"])
+            units = specification["equipment"]["units"]
+            self.assertEqual([unit["category"] for unit in units], ["weapon", "armor"])
+            self.assertTrue(all(unit["mechanics"] is None for unit in units))
+            self.assertTrue(all(unit["ordinary"] and not unit["magical"] for unit in units))
+            weapon_id = kit["object_ids"][units[0]["equipment_id"]]
+            armor_id = kit["object_ids"][units[1]["equipment_id"]]
+            weapon = candidate.universe.get_object_by_id(weapon_id)
+            armor = candidate.universe.get_object_by_id(armor_id)
             self.assertIs(type(weapon), WeaponInstance)
             self.assertIs(type(armor), ArmorInstance)
             self.assertEqual(weapon.parent_container_id, being.id)
@@ -144,11 +245,15 @@ class TestArenaCompleteProfilesAndKits(unittest.TestCase):
             self.assertIn(weapon.id, being.possessions)
             self.assertIn(armor.id, being.possessions)
             self.assertIn(weapon.id, being.weapons)
-            self.assertEqual(being.current.body_parts[kit["weapon"]["hand"]], weapon.id)
+            self.assertEqual(being.current.body_parts[units[0]["placement"]["hands"][0]], weapon.id)
             self.assertEqual(being.current.armor_id, armor.id)
-            self.assertEqual(weapon.current.obj_type, kit["weapon"]["type"])
-            self.assertEqual(armor.current.obj_type, kit["armor"]["type"])
+            self.assertEqual(weapon.current.obj_type, units[0]["native_type_key"])
+            self.assertEqual(armor.current.obj_type, units[1]["native_type_key"])
             self.assertTrue(armor.current.defenses)
+            self.assertEqual(specification["equipment"]["anatomy"]["sha256"],
+                             kit["specification"]["equipment"]["anatomy"]["sha256"])
+            all_native_ids.extend(kit["object_ids"].values())
+        self.assertEqual(len(all_native_ids), len(set(all_native_ids)))
         unequipped = initialize_two_being_arena(1000, 5, 5, 11, equipment_mode="unequipped")
         self.assertEqual(unequipped.initial_equipment_provenance, ())
         self.assertTrue(all(not p.native.being.possessions and not p.native.being.weapons

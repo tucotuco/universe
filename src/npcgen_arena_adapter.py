@@ -52,6 +52,7 @@ class ArenaNativeBeing:
     engine_identity: dict
     skills_status: dict
     generated_items: dict | None = None
+    arena_ready_equipment: dict | None = None
 
 
 def _refuse(code: str, message: str, **details):
@@ -248,7 +249,8 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
 
 
 def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experience: int,
-                               cost_modifiers: str, class_index: int | None = None) -> ArenaNativeBeing:
+                               cost_modifiers: str, class_index: int | None = None,
+                               arena_ready_equipment: bool = False) -> ArenaNativeBeing:
     """Generate and validate one supported native Being without registry mutation.
 
     The cost policy is mandatory and passed through unchanged. The supplied
@@ -322,6 +324,22 @@ def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experi
                 or generated_items.get("schema_version") != 1):
             _refuse("generator_items_unsupported", "npcgen returned an unsupported typed possession projection")
 
+    ready_equipment = None
+    if arena_ready_equipment:
+        try:
+            from arena_initial_equipment import (
+                ArenaInitialEquipmentRefusal, prepare_arena_ready_specification)
+            ready_equipment = prepare_arena_ready_specification(
+                ArenaNativeBeing(
+                    being=being, source_record_bytes=record_bytes,
+                    source_sha256=hashlib.sha256(record_bytes).hexdigest(),
+                    engine_identity=dict(fields["identity"]),
+                    skills_status=fields["status"], generated_items=generated_items),
+                universe, api, candidate, seed)
+        except ArenaInitialEquipmentRefusal as exc:
+            code = "unsupported_equipment_anatomy" if "hand" in str(exc).lower() else "arena_ready_refused"
+            _refuse(code, "npcgen Arena-ready equipment could not be represented natively", reason=str(exc))
+
     return ArenaNativeBeing(
         being=being,
         source_record_bytes=record_bytes,
@@ -329,6 +347,7 @@ def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experi
         engine_identity=dict(fields["identity"]),
         skills_status=fields["status"],
         generated_items=generated_items,
+        arena_ready_equipment=ready_equipment,
     )
 
 

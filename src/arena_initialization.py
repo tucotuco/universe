@@ -236,7 +236,8 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
             try:
                 native = prepare_npcgen_arena_being(
                     world, seed=candidate_seed, starting_experience=starting_experience,
-                    cost_modifiers="character")
+                    cost_modifiers="character",
+                    arena_ready_equipment=equipment_mode == "equipped")
             except ArenaNPCRefusal as exc:
                 attempts.append(ArenaAttempt(role, attempt_index + 1, candidate_seed,
                                              "rejected", exc.code, dict(exc.details)))

@@ -284,8 +284,7 @@ class GeneratedArenaSession:
 
     @staticmethod
     def _validate_initial_equipment_provenance(candidate):
-        from armor import ArmorInstance
-        from weapon import WeaponInstance
+        from arena_initial_equipment import validate_saved_equipment_row
         mode = candidate.equipment_mode
         rows = candidate.initial_equipment_provenance
         if mode == "unequipped":
@@ -297,16 +296,41 @@ class GeneratedArenaSession:
         by_being = {row.get("being_id"): row for row in rows if type(row) is dict}
         if len(by_being) != 2 or set(by_being) != set(candidate.encounter.being_list):
             raise ArenaBrowserRequestError("initial kit identities do not match native Encounter participants")
+        source_by_being = {participant.native.being.id: participant.native.source_record_bytes
+                           for participant in candidate.participants}
+        if all(row.get("policy") == "universe-arena-class-xp-equipment/1"
+               for row in by_being.values()):
+            return GeneratedArenaSession._validate_legacy_initial_equipment_provenance(
+                candidate, by_being)
+        for being_id in candidate.encounter.being_list:
+            being = candidate.universe.get_object_by_id(being_id)
+            try:
+                validate_saved_equipment_row(
+                    by_being[being_id], being, source_by_being[being_id], candidate.universe)
+            except (TypeError, ValueError, KeyError) as exc:
+                raise ArenaBrowserRequestError(
+                    "initial equipment commitment disagrees with its source profile or native state: "
+                    + str(exc)) from exc
+        return True
+
+    @staticmethod
+    def _validate_legacy_initial_equipment_provenance(candidate, by_being):
+        """Keep the pre-U-ARENA-009 save representation readable without regeneration."""
+        from armor import ArmorInstance
+        from weapon import WeaponInstance
+
         for being_id in candidate.encounter.being_list:
             being = candidate.universe.get_object_by_id(being_id)
             row = by_being[being_id]
-            if type(row) is not dict or set(row) != {"policy", "being_id", "weapon", "armor", "shield"}:
-                raise ArenaBrowserRequestError("initial kit provenance has an unsupported field set")
+            if (type(row) is not dict or set(row) !=
+                    {"policy", "being_id", "weapon", "armor", "shield"}
+                    or row["policy"] != "universe-arena-class-xp-equipment/1"):
+                raise ArenaBrowserRequestError("legacy initial kit provenance has an unsupported field set")
             weapon_row, armor_row, shield_row = row["weapon"], row["armor"], row["shield"]
             if (type(weapon_row) is not dict or type(armor_row) is not dict
                     or set(weapon_row) != {"object_id", "type", "hand", "basis", "status"}
                     or set(armor_row) != {"object_id", "type", "basis", "status"}):
-                raise ArenaBrowserRequestError("initial weapon/armor provenance is malformed")
+                raise ArenaBrowserRequestError("legacy initial weapon/armor provenance is malformed")
             weapon = candidate.universe.get_object_by_id(weapon_row["object_id"])
             armor = candidate.universe.get_object_by_id(armor_row["object_id"])
             if (type(weapon) is not WeaponInstance or type(armor) is not ArmorInstance
@@ -316,17 +340,22 @@ class GeneratedArenaSession:
                     or weapon.get_position() is not None or armor.get_position() is not None
                     or weapon.id not in being.possessions or armor.id not in being.possessions
                     or weapon.id not in being.weapons
+                    or being.current.body_parts.get(weapon_row["hand"]) != weapon.id
                     or being.current.armor_id != armor.id):
-                raise ArenaBrowserRequestError("initial equipment claims disagree with native custody or slots")
+                raise ArenaBrowserRequestError(
+                    "legacy initial equipment claims disagree with native custody or slots")
             if shield_row is not None:
                 if (type(shield_row) is not dict or set(shield_row) !=
                         {"object_id", "type", "hand", "basis", "status"}):
-                    raise ArenaBrowserRequestError("initial shield provenance is malformed")
+                    raise ArenaBrowserRequestError("legacy initial shield provenance is malformed")
                 shield = candidate.universe.get_object_by_id(shield_row["object_id"])
-                if (type(shield) is not WeaponInstance or shield.current.obj_type != shield_row["type"]
+                if (type(shield) is not WeaponInstance
+                        or shield.current.obj_type != shield_row["type"]
                         or shield.parent_container_id != being.id or shield.get_position() is not None
-                        or shield.id not in being.possessions or shield.id not in being.weapons):
-                    raise ArenaBrowserRequestError("initial shield claim disagrees with native custody or hand state")
+                        or shield.id not in being.possessions or shield.id not in being.weapons
+                        or being.current.body_parts.get(shield_row["hand"]) != shield.id):
+                    raise ArenaBrowserRequestError(
+                        "legacy initial shield claim disagrees with native custody or hand state")
         return True
 
     def load_encounter_bytes(self, wire):
