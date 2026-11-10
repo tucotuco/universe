@@ -194,7 +194,8 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         positions = tuple((entity_id, tuple(active.universe.get_object_by_id(entity_id).get_position().as_tuple())
                            if active.universe.get_object_by_id(entity_id).get_position() is not None else None)
                           for entity_id in active.encounter.being_list + active.encounter.non_being_object_list)
-        with self.assertRaisesRegex(ArenaBrowserRequestError, "missing closed-field adapter: activities.PickUpAction"):
+        with self.assertRaisesRegex(ArenaBrowserRequestError,
+                                    "Saving after Pick up or Draw is not supported yet"):
             session.save_encounter_bytes()
         self.assertIs(session.active_candidate, active)
         self.assertEqual(tuple(row.boundary for row in active.encounter._atomic_interval_history), receipt_ids)

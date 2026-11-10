@@ -267,9 +267,14 @@ class GeneratedArenaSession:
                 native_wire=encode_run_spot_envelope(envelope)
                 return encode(self,native_wire)
             except (TypeError,ValueError,RuntimeError) as exc:
+                detail = str(exc)
+                if 'activities.PickUpAction' in detail or 'activities.ReadyWeaponAction' in detail:
+                    raise ArenaBrowserRequestError(
+                        "Saving after Pick up or Draw is not supported yet. "
+                        "Your current Encounter remains active and unchanged.") from exc
                 raise ArenaBrowserRequestError(
                     "This Arena state cannot be saved yet; native checkpoint validation refused it: "
-                    +str(exc)) from exc
+                    +detail) from exc
 
     def load_encounter_bytes(self, wire):
         """Validate and atomically replace this session from a portable native file."""

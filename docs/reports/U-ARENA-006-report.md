@@ -14,11 +14,11 @@
 
 ## Explicit remaining blocker
 
-The current checkpoint closure and restoration adapters cover movement-only receipts and a bounded Run/Spot Action subset. Pick up and ReadyWeaponAction are not yet covered as portable pending declarations or committed receipt Actions/effects. The first authentic ground Pick up commit is currently rejected at capture with:
+The current checkpoint closure and restoration adapters cover movement-only receipts and a bounded Run/Spot Action subset. Pick up and ReadyWeaponAction are not yet covered as portable pending declarations or committed receipt Actions/effects. After a real ground Pick up commit, the browser now reports:
 
-> `This Arena state cannot be saved yet; native checkpoint validation refused it: missing closed-field adapter: activities.PickUpAction`
+> `Saving after Pick up or Draw is not supported yet. Your current Encounter remains active and unchanged.`
 
-After adding PickUpAction/ReadyWeaponAction to the event type catalog to expose the next validator boundary, capture still fails closed until their exact native field adapters, choice descriptors, effect/action receipt encodings, Target/observer state rebinding, and reconstruction paths are reviewed and implemented. The restored movement path also assumes every historical receipt is Action-free and returns to quarantine during its owner-controlled next-step proof. General repeated play across mixed movement and Action history therefore still needs a trusted, indefinitely usable restoration path. No unsupported Action or history was dropped to make a save appear successful.
+The underlying capture refusal is `missing closed-field adapter: activities.PickUpAction`. After adding PickUpAction/ReadyWeaponAction to the event type catalog to expose the next validator boundary, capture still fails closed until their exact native field adapters, choice descriptors, effect/action receipt encodings, Target/observer state rebinding, and reconstruction paths are reviewed and implemented. The restored movement path also assumes every historical receipt is Action-free and returns to quarantine during its owner-controlled next-step proof. General repeated play across mixed movement and Action history therefore still needs a trusted, indefinitely usable restoration path. No unsupported Action or history was dropped to make a save appear successful.
 
 This is an implementation dependency in the checkpoint machinery; no Encounter timing or simulation-rule decision is being requested. The browser reports the native refusal and retains the current Encounter.
 
@@ -66,4 +66,5 @@ Open `http://127.0.0.1:8000/`. Generate, then use the Save/Load controls. At thi
 - `5936dce` Document Arena persistence implementation status
 - `f4021c0` Add generated Arena save and load at time zero
 - `fde4feb` Restore Arena movement checkpoints with Objects
-- `test_arena_persistence.py` adds a deterministic real Pick up checkpoint-refusal regression; no changes were pushed.
+- `046dfac` Verify Arena pickup checkpoint refusal
+- The Pick up/Draw capture refusal now has player-facing wording while preserving the underlying fail-closed diagnostic for logs/tests. No changes were pushed.
