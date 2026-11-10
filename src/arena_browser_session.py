@@ -23,6 +23,7 @@ from atomic_publication import RNGCursor
 from arena_hex_map import HexAddress
 from movement_intent import MovementIntent, MovementRateConditions
 from arena_ui_trace import ArenaUITerminalTrace
+from melee_defense import MeleeDefense
 from measured_values import truncate_measurement
 
 
@@ -565,8 +566,11 @@ class GeneratedArenaSession:
         opponent_melee_action = self._opponent_melee_action_view(
             candidate, opponent, player.native.being)
         opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
+        defense_action = self._defense_action_view(candidate, player.native.being)
+        opponent_defense_action = self._opponent_defense_action_view(
+            candidate, opponent, player.native.being)
         opponent_decision = self._opponent_decision(candidate)
-        opponent_can_act = opponent_decision["kind"] in ("attack", "move")
+        opponent_can_act = opponent_decision["kind"] in ("attack", "move", "defend")
         self._opponent_attack_refusal = opponent_decision["reason"]
         movement_plan = None
         movement_available = player.native.being.posture in ("standing", "crouching", "lying")
@@ -585,7 +589,7 @@ class GeneratedArenaSession:
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
             for action_type in (RunAction, SpotAction, PickUpAction, ReadyWeaponAction,
-                                MeleeStrike)
+                                MeleeStrike, MeleeDefense)
         }
         perceived = []
         for evidence in ledger.current:
@@ -642,11 +646,15 @@ class GeneratedArenaSession:
             "ready_weapon_action": ready_weapon_action,
             "melee_action": melee_action,
             "opponent_melee_action": opponent_melee_action,
+            "defense_action": defense_action,
+            "opponent_defense_action": opponent_defense_action,
             "opponent_strategy": self._opponent_strategy,
-            "opponent_activity": ("Thrust resolving" if opponent_melee_pending else
+            "opponent_activity": ("Dodge resolving" if opponent_defense_action is not None
+                                  and opponent_defense_action["status"] in ("preparing", "committed") else
+                                  "Thrust resolving" if opponent_melee_pending else
                                   "approaching" if opponent_decision["kind"] == "move" else
                                   "attack opportunity" if opponent_decision["kind"] == "attack" else
-                                  "waiting" if self._opponent_strategy == "attack_only" else "inactive"),
+                                  "waiting" if self._opponent_strategy in ("attack_only", "defense_only") else "inactive"),
             "entities": perceived,
             "selected_entity": selected,
             "action_catalog": action_catalog,
@@ -659,6 +667,10 @@ class GeneratedArenaSession:
                                        and self._ready_weapon_action_outcome is None)
                                    or melee_pending
                                    or opponent_melee_pending
+                                   or (defense_action is not None
+                                       and defense_action["status"] in ("accepted", "preparing", "committed"))
+                                   or (opponent_defense_action is not None
+                                       and opponent_defense_action["status"] in ("accepted", "preparing", "committed"))
                                    or opponent_can_act
                                    or movement_plan is not None),
             "movement_available": movement_available,
@@ -879,6 +891,163 @@ class GeneratedArenaSession:
         return self._melee_action_pending(
             candidate, self._opponent_melee_action(candidate, opponent))
 
+    @staticmethod
+    def _all_melee_defenses(candidate):
+        event_by_id = dict(candidate.universe.event_history)
+        committed = (set(candidate.encounter.pending_action_list)
+                     | set(candidate.encounter.finished_action_list)
+                     | set(candidate.encounter.cancelled_action_list))
+        choice_ids = set()
+        for record in candidate.encounter._choice_book._choices.values():
+            if record.view.state not in ("accepted", "executing", "finished"):
+                continue
+            choice_ids.update(record.view.action_ids)
+            for member in record.members:
+                if type(member.action) is MeleeDefense:
+                    event_by_id[member.action.id] = member.action
+        for action_id in committed:
+            action = candidate.universe.get_event_by_id(action_id)
+            if type(action) is MeleeDefense:
+                event_by_id[action.id] = action
+        return [action for action in event_by_id.values()
+                if type(action) is MeleeDefense and action.id in committed | choice_ids]
+
+    @staticmethod
+    def _latest_melee_defense(candidate, actor):
+        actions = [action for action in GeneratedArenaSession._all_melee_defenses(candidate)
+                   if action.actor_id == actor.id]
+        return max(actions, key=lambda action: (action.start_time, action.id), default=None)
+
+    @staticmethod
+    def _visible_incoming_strike(candidate, defender, attacker, ledger):
+        """Resolve one currently observed, still-pending native strike."""
+        encounter = candidate.encounter
+        evidence = None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id == attacker.id), None)
+        if (ledger is None or ledger.observer_id != defender.id
+                or evidence is None or evidence.category != "being"
+                or evidence.present_state != "present" or evidence.time != encounter.time
+                or evidence.position is None or not encounter.is_aware(defender.id, attacker.id)):
+            return None
+        visible_after = [action for action in GeneratedArenaSession._all_melee_actions(candidate)
+                         if action.actor_id == attacker.id and action.target_id == defender.id
+                         and action.id in encounter.pending_action_list
+                         and action.start_time < encounter.time
+                         and evidence.time >= action.start_time + 1]
+        return min(visible_after, key=lambda action: (action.end_time, action.start_time, action.id),
+                   default=None)
+
+    @staticmethod
+    def _melee_defense_pending(candidate, action):
+        return GeneratedArenaSession._melee_action_pending(candidate, action)
+
+    def _defense_action_view(self, candidate, actor):
+        action = self._latest_melee_defense(candidate, actor)
+        if action is None:
+            return None
+        encounter = candidate.encounter
+        pending = self._melee_defense_pending(candidate, action)
+        accepted = None
+        for record in encounter._choice_book._choices.values():
+            if action.id in record.view.action_ids and record.view.state == "accepted":
+                accepted = next((packet for member, packet in
+                                 zip(record.members, record.prepared)
+                                 if member.action.id == action.id), None)
+                break
+        if accepted is not None:
+            end_time = accepted.end_time
+            ready_at = dict(accepted.initialization).get("ready_at")
+            status = "accepted"
+        else:
+            end_time = action.end_time
+            ready_at = action.ready_at
+            status = ("preparing" if ready_at is not None and encounter.time < ready_at else
+                      "committed") if pending else "completed"
+        remaining = max(0, math.ceil(end_time - encounter.time))
+        if pending or accepted is not None:
+            return {"name": "Dodge", "status": status, "outcome": None,
+                    "duration_seconds": end_time - action.start_time,
+                    "seconds_remaining": remaining,
+                    "preparation_ready_at": ready_at}
+        if action.id in encounter.cancelled_action_list:
+            return {"name": "Dodge", "status": "cancelled", "outcome": None,
+                    "duration_seconds": end_time - action.start_time,
+                    "seconds_remaining": 0, "preparation_ready_at": ready_at}
+        try:
+            result = encounter.inspect_committed(int(math.ceil(end_time))).action(action.id)
+        except (ValueError, KeyError, AttributeError):
+            return {"name": "Dodge", "status": "completed", "outcome": "unavailable",
+                    "duration_seconds": end_time - action.start_time,
+                    "seconds_remaining": 0, "preparation_ready_at": ready_at}
+        return {"name": "Dodge", "status": "completed", "outcome": result.facts.outcome,
+                "duration_seconds": end_time - action.start_time,
+                "seconds_remaining": 0, "preparation_ready_at": ready_at}
+
+    def _opponent_defense_action_view(self, candidate, opponent, player):
+        action = self._latest_melee_defense(candidate, opponent)
+        if action is None or action.target_id != player.id:
+            return None
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        evidence = None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id == opponent.id), None)
+        if (evidence is None or evidence.category != "being"
+                or evidence.present_state != "present"
+                or evidence.time < action.start_time + 1
+                or not candidate.encounter.is_aware(player.id, opponent.id)):
+            return None
+        return self._defense_action_view(candidate, opponent)
+
+    def _opponent_defense_decision(self, candidate):
+        if self._opponent_strategy != "defense_only":
+            return {"kind": "none", "reason": "strategy_disabled"}
+        encounter = candidate.encounter
+        if (not encounter.initiated or encounter.progression_mode != "transactional"
+                or not encounter.arena_activation_enabled):
+            return {"kind": "none", "reason": "encounter_not_activated"}
+        opponent = candidate.participants[1].native.being
+        player = candidate.participants[0].native.being
+        ledger = object.__getattribute__(opponent, "__dict__").get("_arena_perception_ledger")
+        evidence = None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id == player.id), None)
+        if (evidence is None or evidence.category != "being"
+                or evidence.present_state != "present" or evidence.time != encounter.time
+                or evidence.position is None or not encounter.is_aware(opponent.id, player.id)):
+            return {"kind": "none", "reason": "opponent_has_no_current_awareness_evidence"}
+        if opponent.get_hit_points() <= 0 or opponent.is_helpless():
+            return {"kind": "none", "reason": "opponent_unable_to_defend"}
+        if encounter._choice_book.actor_planned_now(opponent.id):
+            return {"kind": "none", "reason": "opponent_action_already_pending"}
+        strike = self._visible_incoming_strike(candidate, opponent, player, ledger)
+        if strike is None:
+            return {"kind": "none", "reason": "no_observed_incoming_strike"}
+        defense = MeleeDefense(encounter, opponent.id, player.id,
+                               kind="dodge", target_action_id=strike.id)
+        try:
+            prepared = encounter.prepare_action(defense)
+        except (TypeError, ValueError, RuntimeError):
+            return {"kind": "none", "reason": "native_dodge_not_ready_before_impact"}
+        return {"kind": "defend", "reason": "observed_strike_native_dodge",
+                "strike": strike, "action": defense, "prepared": prepared}
+
+    def _schedule_opponent_defense(self, candidate, decision):
+        if decision["kind"] != "defend":
+            return None
+        action = decision["action"]
+        encounter = candidate.encounter
+        sequence = 1 + sum(row.actor_id == action.actor_id
+                           for row in self._all_melee_defenses(candidate))
+        action.id = f"{encounter.id}/arena-opponent-dodge/{sequence}"
+        try:
+            prepared = encounter.prepare_action(action)
+            encounter.schedule_action(action)
+        except Exception as exc:
+            raise ArenaBrowserRequestError(
+                "native opponent Dodge was not accepted; Arena state is unchanged") from exc
+        self._trace.native_advance(None, None,
+            f"action=opponent_defense kind=dodge preparation="
+            f"{dict(prepared.initialization)['ready_at']-prepared.start_time:g}s")
+        return action
+
     def _opponent_attack_preflight(self, candidate):
         """Read-only attack-only eligibility from opponent-owned current state."""
         if self._opponent_strategy != "attack_only":
@@ -925,6 +1094,8 @@ class GeneratedArenaSession:
 
     def _opponent_decision(self, candidate):
         """Derive one attack-only choice from the opponent's current evidence."""
+        if self._opponent_strategy == "defense_only":
+            return self._opponent_defense_decision(candidate)
         eligible, reason = self._opponent_attack_preflight(candidate)
         if not eligible:
             return {"kind": "none", "reason": reason}
@@ -1140,6 +1311,69 @@ class GeneratedArenaSession:
                 f"action=melee_strike motion={motion} duration={prepared.end_time-prepared.start_time:g}s")
             return self._view_unlocked()
 
+    def _player_dodge_preflight(self, candidate, player, entity_id, evidence,
+                                supported=True):
+        if not supported or not _has_native_transactional_action_contract(MeleeDefense):
+            raise ArenaBrowserRequestError("The native MeleeDefense scheduler or resolver contract is unavailable.")
+        if evidence is None or evidence.category != "being" or evidence.present_state != "present":
+            raise ArenaBrowserRequestError("Select the currently perceived attacker first.")
+        encounter = candidate.encounter
+        attacker = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if (attacker is None or attacker.id == player.id
+                or not encounter.is_aware(player.id, attacker.id)):
+            raise ArenaBrowserRequestError("The selected Entity is not an aware participating attacker.")
+        if not encounter.initiated or encounter.progression_mode != "transactional":
+            raise ArenaBrowserRequestError("Activate the native Encounter before choosing Dodge.")
+        if encounter._choice_book.actor_planned_now(player.id):
+            raise ArenaBrowserRequestError("The player already has a native Action accepted or resolving.")
+        current_defense = self._latest_melee_defense(candidate, player)
+        if self._melee_defense_pending(candidate, current_defense):
+            raise ArenaBrowserRequestError("A player Dodge is already preparing or committed.")
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        strike = self._visible_incoming_strike(candidate, player, attacker, ledger)
+        if strike is None:
+            raise ArenaBrowserRequestError(
+                "No currently perceived, pending native strike from this Being can be designated for Dodge.")
+        action = MeleeDefense(encounter, player.id, attacker.id, kind="dodge",
+                              target_action_id=strike.id)
+        try:
+            prepared = encounter.prepare_action(action)
+        except Exception as exc:
+            raise ArenaBrowserRequestError(
+                "The native two-second Dodge cannot be ready before this strike's impact.") from exc
+        return action, prepared, strike
+
+    def choose_dodge(self, payload):
+        if type(payload) is not dict or set(payload) != {"handle"}:
+            raise ArenaBrowserRequestError("Dodge accepts exactly one currently perceived attacker handle")
+        handle = payload["handle"]
+        if type(handle) is not str:
+            raise ArenaBrowserRequestError("Dodge attacker handle must be text")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Dodge")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key, value in self._view_handles.items()
+                              if value == handle), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            action, prepared, _strike = self._player_dodge_preflight(
+                candidate, player, entity_id, evidence)
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Dodge Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = handle
+            self._trace.native_advance(None, None,
+                f"action=player_defense kind=dodge preparation="
+                f"{dict(prepared.initialization)['ready_at']-prepared.start_time:g}s")
+            return self._view_unlocked()
+
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction
 
@@ -1211,6 +1445,9 @@ class GeneratedArenaSession:
                 continue
             elif name.casefold() == "ready object":
                 reason = "No native transactional ready-object Action is implemented for the generated Arena."
+            elif name.casefold().startswith("parry"):
+                reason = ("The current Arena connects only the targeted native Dodge contract. Native Parry's "+
+                          "target-independent retained readiness and weapon-skill eligibility are not represented here.")
             elif name.casefold() == "throw":
                 reason = ("The native Throw resolver has a narrow authored parameter bracket, but the Arena "
                           "has no supported control for its load and trajectory inputs.")
@@ -1263,6 +1500,28 @@ class GeneratedArenaSession:
                 "present_state": selected["present_state"],
             }),
         })
+        dodge_reason = "Select an aware attacker with a pending, currently perceived native strike."
+        dodge_status = "unavailable"
+        dodge_target = None
+        if selected is not None:
+            dodge_target = {"handle": handle, "name": selected["name"],
+                            "type": selected["type"],
+                            "present_state": selected["present_state"]}
+        if not supported_actions.get(MeleeDefense, False):
+            dodge_status = "not_implemented"
+            dodge_reason = "The native MeleeDefense scheduler or resolver contract is unavailable."
+        else:
+            try:
+                _, prepared, strike = self._player_dodge_preflight(
+                    candidate, player, entity_id, evidence)
+                dodge_status = "available"
+                dodge_reason = (f"Native Dodge: 2 seconds of preparation; currently observed strike resolves at "
+                                f"second {strike.end_time:g}. Select to commit this defense before its outcome is known.")
+            except ArenaBrowserRequestError as exc:
+                dodge_reason = str(exc)
+        arena_rows.append({"name": "Dodge", "group": "Attack responses",
+                           "status": dodge_status, "reason": dodge_reason,
+                           "target": dodge_target})
         return {"catalog_source": "native Action catalog", "entries": catalog_rows + arena_rows}
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
@@ -1753,8 +2012,8 @@ class GeneratedArenaSession:
                 or set(payload) - allowed_keys):
             raise ArenaBrowserRequestError("Generate requires XP, dimensions, and supported Arena options")
         opponent_strategy = payload.get("opponent_strategy", "none")
-        if opponent_strategy not in ("none", "attack_only"):
-            raise ArenaBrowserRequestError("opponent_strategy must be none or attack_only")
+        if opponent_strategy not in ("none", "attack_only", "defense_only"):
+            raise ArenaBrowserRequestError("opponent_strategy must be none, attack_only, or defense_only")
         starting_experience = _parse_decimal(payload, "starting_experience", 0)
         width_cells = _parse_decimal(payload, "width_cells", 5)
         height_cells = _parse_decimal(payload, "height_cells", 5)
@@ -2069,7 +2328,7 @@ class GeneratedArenaSession:
             opponent = candidate.participants[1].native.being
             opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
             opponent_decision = self._opponent_decision(candidate)
-            opponent_can_act = opponent_decision["kind"] in ("attack", "move")
+            opponent_can_act = opponent_decision["kind"] in ("attack", "move", "defend")
             self._opponent_attack_refusal = opponent_decision["reason"]
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
@@ -2101,6 +2360,8 @@ class GeneratedArenaSession:
             try:
                 if opponent_decision["kind"] == "attack":
                     self._schedule_opponent_attack(candidate)
+                elif opponent_decision["kind"] == "defend":
+                    self._schedule_opponent_defense(candidate, opponent_decision)
                 elif opponent_decision["kind"] == "move":
                     self._trace.native_advance(
                         trace_request_id, trace_client_sequence,

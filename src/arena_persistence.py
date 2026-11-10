@@ -61,7 +61,7 @@ def _session_record(session, native_wire):
     candidate=session._active
     if type(candidate) is not ArenaInitializationCandidate:
         raise ArenaSaveRejected('Generate an Arena before saving')
-    if session._opponent_strategy not in ('none', 'attack_only'):
+    if session._opponent_strategy not in ('none', 'attack_only', 'defense_only'):
         raise ArenaSaveRejected('Arena opponent strategy is unsupported')
     players=candidate.participants
     sources=[]
@@ -174,7 +174,7 @@ def decode(wire):
         raise ArenaSaveRejected('Arena starting equipment provenance is malformed')
     if data['schema'] == _PREVIOUS_SCHEMA:
         s['opponent_strategy'] = 'none'
-    if s['opponent_strategy'] not in ('none', 'attack_only'):
+    if s['opponent_strategy'] not in ('none', 'attack_only', 'defense_only'):
         raise ArenaSaveRejected('Arena opponent strategy is unsupported')
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)

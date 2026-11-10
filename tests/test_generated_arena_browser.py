@@ -90,6 +90,46 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         invalid = b'{"format":"wrong","schema_version":1}'
         self.assertEqual(self.raw_request("/api/generated/profile-upload", invalid)[0], 409)
 
+    def test_dodge_action_http_route_and_shipped_browser_controls(self):
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn('value="defense_only"', page)
+        self.assertIn('Defense only (native Dodge)', page)
+        self.assertIn("function submitDodge(handle)", page)
+        self.assertIn("/api/generated/dodge", page)
+        self.assertIn("actionDodge", page)
+        self.assertIn("Native two-second Dodge accepted", page)
+
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261107,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "attack_only"})
+        self.assertEqual(status, 200)
+        self.assertEqual(generated["opponent_strategy"], "attack_only")
+        status, activated = self.request("/api/generated/run", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(activated["advance_available"])
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        status, attacking = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(attacking["opponent_melee_action"]["status"], "executing")
+        handle = next(row["handle"] for row in attacking["entities"]
+                      if row["category"] == "being")
+        status, selected = self.request("/api/generated/inspect", {"handle": handle})
+        self.assertEqual(status, 200)
+        dodge = next(row for row in selected["action_catalog"]["entries"]
+                     if row["name"] == "Dodge")
+        self.assertEqual(dodge["status"], "available")
+        self.assertNotIn("target_action_id", json.dumps(dodge))
+        status, accepted = self.request("/api/generated/dodge", {"handle": handle})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted["defense_action"]["status"], "accepted")
+        self.assertNotIn("target_action_id", json.dumps(accepted))
+        self.assertNotIn("arena-opponent-dodge", json.dumps(accepted))
+
     def test_attack_only_browser_requests_drive_native_approach_and_thrust(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
         self.session = GeneratedArenaSession(
