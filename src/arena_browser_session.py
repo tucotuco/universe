@@ -276,8 +276,8 @@ class GeneratedArenaSession:
         import base64
         import hashlib
         from arena_persistence import decode
-        from checkpoint_reconstruction import (reconstruct_initial_run_spot,
-            _admit_pristine_arena_reconstruction)
+        from checkpoint_reconstruction import reconstruct_initial_run_spot
+        from checkpoint_restore_preparation import _admit_trusted_movement_arena
         from arena_initialization import (ArenaInitializationCandidate,ArenaMap,
             ArenaWorldPremise,ArenaParticipant,ArenaPlacement)
         from arena_hex_map import ArenaHexLayout
@@ -288,9 +288,19 @@ class GeneratedArenaSession:
 
         try:
             data=decode(wire)
-            private=reconstruct_initial_run_spot(data['decoded_native'])
-            universe,encounter,rng_owner=_admit_pristine_arena_reconstruction(private)
             meta=data['session']
+            boundary_rows=data['decoded_native'].envelope_data[4]
+            if boundary_rows:
+                if meta['movement_plan_base64'] is None:
+                    raise ArenaBrowserRequestError(
+                        "This committed movement checkpoint has no accepted destination plan to restore.")
+                universe,encounter,rng_owner=_admit_trusted_movement_arena(
+                    data['decoded_native'],
+                    base64.b64decode(meta['movement_plan_base64'],validate=True))
+            else:
+                private=reconstruct_initial_run_spot(data['decoded_native'])
+                from checkpoint_reconstruction import _admit_pristine_arena_reconstruction
+                universe,encounter,rng_owner=_admit_pristine_arena_reconstruction(private)
             if (len(encounter.being_list)!=2 or meta['player_id']!=encounter.being_list[0]
                     or meta['opponent_id']!=encounter.being_list[1]
                     or meta['starting_experience']!=universe.get_object_by_id(meta['player_id']).original.experience):

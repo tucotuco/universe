@@ -766,7 +766,7 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
             start_fences=tuple(_portable_fence(f,encounter,live_actions,future_action_ids) for f in receipt.inspection.starts)
             portable_targets=tuple(sorted(targets_by_boundary[receipt.boundary],key=lambda x:x.target_id))
             if not aids:
-                participant_ids=tuple(receipt.inspection.participants)
+                participant_ids=tuple(sorted(receipt.inspection.participants))
                 if tuple(row.target_id for row in portable_targets)!=tuple(sorted(participant_ids)):
                     raise ReceiptDescriptorRejected(
                         'initial movement-only boundary lacks complete participant Target history')

@@ -833,15 +833,21 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
     registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
     registry = graph.raw_mapping(registry_fields['object_instances'])
     participants = projection.participant_ids
-    _need(set(registry) == set(participants) and len(registry) == 2,
-          'native registry identity set differs from movement participants')
+    entity_ids = tuple(row[0] for row in projection.target_records)
+    encounter_beings=graph.data(encounter_fields['being_list'])
+    encounter_objects=graph.data(encounter_fields['non_being_object_list'])
+    _need(set(registry) == set(entity_ids)
+          and set(participants) == set(encounter_beings)|set(encounter_objects)
+          and set(entity_ids)==set(encounter_beings)|set(encounter_objects)
+          and len(encounter_beings)==2,
+          'native registry identity set differs from movement Targets')
     library_ref = graph.raw_ref(universe_fields['library'])
     library_fields = graph.fields(library_ref, 'library.Library')[1]
     dictionary_ref = graph.raw_ref(library_fields['being_dictionary'])
     dictionary_fields = graph.fields(dictionary_ref, 'being.BeingDictionary')[1]
     all_definitions = graph.raw_mapping(dictionary_fields['objects'])
     referenced_names = set()
-    for target_id in participants:
+    for target_id in encounter_beings:
         instance_ref = graph.raw_ref(registry[target_id])
         original_ref = graph.raw_ref(graph.fields(instance_ref)[1]['original'])
         original_fields = graph.fields(original_ref, 'being.BeingDefinition')[1]
@@ -850,7 +856,8 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
           'Being originals have no matching registered Library templates')
     definitions = {name: all_definitions[name] for name in referenced_names}
     try:
-        _validate_being_definition_bindings(graph, registry, definitions)
+        _validate_being_definition_bindings(graph,
+            {key: registry[key] for key in encounter_beings}, definitions)
     except (TypeError, ValueError) as exc:
         raise IdentityBindingRejected(f'Being original identity binding refused: {exc}') from exc
 
@@ -864,17 +871,23 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
         target_rows_by_boundary[receipt_row[1]] = {row[0]: row for row in receipt_row[4]}
     _need(tuple(sorted(target_rows_by_boundary)) == data[4],
           'movement receipt Target chronology differs from checkpoint boundaries')
-    _need(all(set(rows) == set(participants) for rows in target_rows_by_boundary.values()),
-          'portable Target identities do not cover every participant boundary')
-    for target_id in participants:
+    _need(all(set(rows) == set(entity_ids) for rows in target_rows_by_boundary.values()),
+          'portable Target identities do not cover every native Entity boundary')
+    for target_id in entity_ids:
         instance_ref = graph.raw_ref(registry[target_id])
-        instance_tag, instance_fields = graph.fields(instance_ref, 'being.BeingInstance')
+        instance_tag, instance_fields = graph.fields(instance_ref)
+        expected_tags={'being.BeingInstance':'being',
+            'object.ObjectInstance':'object','weapon.WeaponInstance':'weapon',
+            'armor.ArmorInstance':'armor'}
+        _need(instance_tag in expected_tags,
+              'Target owner has an unsupported native Entity type')
         _need(graph.data(instance_fields['id']) == target_id,
               'Target owner and ObjectRegistry logical identity differ')
-        original_ref = graph.raw_ref(instance_fields['original'])
-        current_ref = graph.raw_ref(instance_fields['current'])
-        definition_values.append((target_id, _projection(graph.native(original_ref)),
-                                  _projection(graph.native(current_ref))))
+        if instance_tag == 'being.BeingInstance':
+            original_ref = graph.raw_ref(instance_fields['original'])
+            current_ref = graph.raw_ref(instance_fields['current'])
+            definition_values.append((target_id, _projection(graph.native(original_ref)),
+                                      _projection(graph.native(current_ref))))
         history_ref = graph.raw_ref(instance_fields['_atomic_target_history'])
         history_tag, history_values = graph.nodes[history_ref]
         _need(history_tag == 'list' and len(history_values) == projection.boundary,
@@ -894,7 +907,9 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
             candidate = TargetCandidate(**{key: graph.value(value)
                                            for key, value in state_fields.items()})
             _need(target_id in target_rows_by_boundary[expected_boundary]
-                  and _value(candidate) == target_rows_by_boundary[expected_boundary][target_id][3],
+                  and _value(candidate) == target_rows_by_boundary[expected_boundary][target_id][3]
+                  and candidate.target_id == target_id
+                  and candidate.category == expected_tags[instance_tag],
                   'Target-owned native state differs from its boundary receipt')
             observed_boundaries.append(expected_boundary)
             record_identity_ids.append((target_id, target_ref))
@@ -932,6 +947,7 @@ class _QuarantinedMovementNativeGraph:
     universe: object
     encounter: object
     beings: tuple
+    entities: tuple
     targets: tuple
     source_receipt_fields: tuple
     source_inspections: tuple
@@ -957,8 +973,14 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
     registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
     registry = graph.raw_mapping(registry_fields['object_instances'])
     participants = binding.sidecar.projection.participant_ids
-    _need(set(registry) == set(participants) and len(registry) == 2,
-          'movement native construction requires exactly the recorded two Being identities')
+    entity_ids = tuple(row[0] for row in binding.sidecar.projection.target_records)
+    encounter_beings=graph.data(encounter_fields['being_list'])
+    encounter_objects=graph.data(encounter_fields['non_being_object_list'])
+    _need(set(registry)==set(entity_ids)
+          and set(participants)==set(encounter_beings)|set(encounter_objects)
+          and set(entity_ids)==set(encounter_beings)|set(encounter_objects)
+          and len(encounter_beings)==2,
+          'movement native construction requires the complete recorded Arena Entity set')
 
     library_ref = graph.raw_ref(universe_fields['library'])
     library_fields = graph.fields(library_ref, 'library.Library')[1]
@@ -967,7 +989,7 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
     all_definitions = graph.raw_mapping(being_dictionary_fields['objects'])
     referenced_types = set()
     instance_fields_by_id = {}
-    for being_id in participants:
+    for being_id in encounter_beings:
         instance_ref = graph.raw_ref(registry[being_id])
         fields = graph.fields(instance_ref, 'being.BeingInstance')[1]
         _need(graph.data(fields['id']) == being_id,
@@ -982,7 +1004,8 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
                    for name in referenced_types}
     try:
         validated, template_refs, kinds = _validate_being_definition_bindings(
-            graph, registry, {name: all_definitions[name] for name in referenced_types})
+            graph, {key:registry[key] for key in encounter_beings},
+            {name: all_definitions[name] for name in referenced_types})
     except (TypeError, ValueError) as exc:
         raise IdentityBindingRejected(f'Being template/original reconstruction refused: {exc}') from exc
     _need(all(validated[name] is definitions[name] for name in definitions),
@@ -1011,12 +1034,16 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
         name=graph.data(library_fields['name']), id=graph.data(library_fields['id']))
     native_library.being_dictionary = native_being_dictionary
     native_library.skill_dictionary = native_skill_dictionary
-    # The result is inspection-only and remains quarantined. The full catalog is
-    # retained in the portable source graph but is outside this native import.
     for field, constructor in (
             ('action_dictionary', ActionDictionary), ('armor_dictionary', ArmorDictionary),
             ('object_dictionary', ObjectDictionary), ('weapon_dictionary', WeaponDictionary)):
-        setattr(native_library, field, constructor())
+        dictionary_ref=graph.raw_ref(library_fields[field])
+        dictionary_fields=graph.fields(dictionary_ref)[1]
+        dictionary=constructor()
+        for name,value in dictionary_fields.items():
+            setattr(dictionary,name,graph.mapping(value,native_values=True)
+                    if name=='objects' and field!='action_dictionary' else graph.data(value))
+        setattr(native_library, field, dictionary)
     native_universe = Universe(name=graph.data(universe_fields['name']),
                                library=native_library)
     _need(native_universe.id == data[1],
@@ -1026,7 +1053,37 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
     evidence_by_observer = dict(binding.sidecar.projection.observer_evidence)
     entity_ids = tuple(sorted(registry))
     native_beings = {}
-    for being_id in participants:
+    native_entities = {}
+    pending_non_beings = []
+    from object import ObjectInstance
+    from weapon import WeaponInstance
+    from armor import ArmorInstance
+    for being_id in entity_ids:
+        instance_ref=graph.raw_ref(registry[being_id])
+        instance_tag=graph.nodes[instance_ref][0]
+        if instance_tag!='being.BeingInstance':
+            fields = graph.fields(instance_ref)[1]
+            constructors = {'object.ObjectInstance': ObjectInstance,
+                'weapon.WeaponInstance': WeaponInstance,
+                'armor.ArmorInstance': ArmorInstance}
+            constructor = constructors.get(instance_tag)
+            _need(constructor is not None and graph.data(fields['id']) == being_id,
+                  'Object identity or native type is unsupported by movement reconstruction')
+            original = graph.native(graph.raw_ref(fields['original']))
+            entity = constructor(original, name=graph.data(fields['name']))
+            from identifiable import Identifiable
+            Identifiable.__init__(entity, graph.data(fields['name']), id=being_id)
+            entity.original = original
+            entity.current = graph.native(graph.raw_ref(fields['current']))
+            for field in ('top_facing', 'front_facing', 'parent_container_id'):
+                setattr(entity, field, graph.value(fields[field]))
+            for field, setter in (('spatial_state', 'set_spatial_state'),
+                    ('geometry', 'set_geometry'), ('visual_occlusion', 'set_visual_occlusion')):
+                getattr(entity, setter)(graph.value(fields[field]))
+            entity._atomic_target_history=[]
+            pending_non_beings.append(entity)
+            native_entities[being_id]=entity
+            continue
         fields = instance_fields_by_id[being_id]
         expected_fields = {
             '_arena_perception_ledger', '_atomic_target_history',
@@ -1074,6 +1131,7 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
         being._atomic_target_history = []
         native_universe.add_object(being)
         native_beings[being_id] = being
+        native_entities[being_id] = being
 
     from action_settlement import TargetCandidate
     from atomic_publication import RNGCursor, TargetIntervalRecord
@@ -1081,8 +1139,9 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
     target_data = {receipt_row[1]: {row[0]: row for row in receipt_row[4]}
                    for receipt_row in binding.sidecar.projection.receipt_rows}
     native_targets = {}
-    for target_id in participants:
-        fields = instance_fields_by_id[target_id]
+    for target_id in entity_ids:
+        fields = (instance_fields_by_id[target_id] if target_id in instance_fields_by_id
+                  else graph.fields(graph.raw_ref(registry[target_id]))[1])
         source_history_ref = graph.raw_ref(fields['_atomic_target_history'])
         source_history = graph.nodes[source_history_ref][1]
         _need(len(source_history) == projection.boundary,
@@ -1103,10 +1162,11 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
                                         for key, value in target_fields.items()})
             _need(target_id in target_data[expected_boundary]
                   and _value(target) == target_data[expected_boundary][target_id][3]
-                  and target.target_id == target_id and target.category == 'being',
+                  and target.target_id == target_id
+                  and target.category == target_data[expected_boundary][target_id][1],
                   'materialized native Target differs from its committed receipt')
             records.append(TargetIntervalRecord(data[2], expected_boundary, target))
-        native_beings[target_id]._atomic_target_history = records
+        native_entities[target_id]._atomic_target_history = records
         native_targets[target_id] = tuple(records)
 
     module_rng_before = random.getstate()
@@ -1115,7 +1175,10 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
           'native movement reconstruction changed process RNG')
     from encounter import Encounter, _QuarantinedPostBoundaryPlan
     awareness = graph.data(encounter_fields['awareness'])
-    awareness_rows = tuple((key, tuple(sorted(value)))
+    # The quarantined shell constructor currently accepts only participant
+    # awareness. Build its minimum valid shell, then restore the captured full
+    # Entity awareness map exactly after Objects have joined the registry.
+    awareness_rows = tuple((key, tuple(sorted(set(value) & set(encounter_beings))))
                            for key, value in sorted(awareness.items()))
     plan = _QuarantinedPostBoundaryPlan(native_universe, data[2], 0, projection.boundary,
         graph.data(encounter_fields['difficulty_class']),
@@ -1123,16 +1186,24 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
         graph.data(encounter_fields['location']),
         graph.data(encounter_fields['parent_event_id']),
         graph.data(encounter_fields['end_time']),
-        graph.data(encounter_fields['initiated']), tuple(participants),
+        graph.data(encounter_fields['initiated']), tuple(encounter_beings),
         awareness_rows, rng_owner)
     try:
         native_encounter = Encounter._construct_quarantined_post_boundary(plan)
     except (TypeError, ValueError) as exc:
         raise IdentityBindingRejected(f'native Encounter shell construction refused: {exc}') from exc
+    for entity in pending_non_beings:
+        # The reconstructed Universe is quarantined, so its public mutation
+        # method correctly rejects normal callers. This private staging owner
+        # binds the already validated checkpoint Entities directly into the
+        # fresh, unexposed registry before receipt anchors are imported.
+        native_universe.object_registry.add_object(entity)
+    native_encounter.awareness = {key: set(value) for key, value in awareness.items()}
     activation_ref = graph.raw_ref(encounter_fields['arena_movement_activation'])
     activation = graph.native(activation_ref)
     native_encounter.arena_activation_enabled = True
     native_encounter.arena_movement_activation = activation
+    native_encounter.non_being_object_list = list(encounter_objects)
     _need(native_encounter.initiated is True and native_encounter.arena_activation is None
           and native_encounter.initiation is None,
           'native movement activation phase is inconsistent')
@@ -1185,6 +1256,7 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
             for key, value in receipt_fields.items() if key != 'inspection'))
     return _QuarantinedMovementNativeGraph(
         native_universe, native_encounter, tuple(sorted(native_beings.items())),
+        tuple(sorted(native_entities.items())),
         tuple(sorted(native_targets.items())),
         tuple(source_receipt_fields), tuple(source_inspections),
         rng_owner, binding.sidecar.projection)

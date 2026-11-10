@@ -947,6 +947,7 @@ def _register_quarantined_movement_import(encounter, receipt, rng_owner, *, auth
         raise PublicationRejected(f'inconsistent Arena movement activation: {exc}') from exc
     need(activation is encounter.arena_movement_activation,
          'native Arena movement activation is not bound to this Encounter')
+    entity_ids = tuple(sorted(tuple(encounter.being_list) + tuple(encounter.non_being_object_list)))
     history = object.__getattribute__(encounter, '__dict__').get('_atomic_interval_history')
     need(type(history) is list and history == [receipt]
          and receipt.encounter_id == encounter.id and receipt.boundary == 1
@@ -958,28 +959,32 @@ def _register_quarantined_movement_import(encounter, receipt, rng_owner, *, auth
     need(type(meta) is CommittedBoundaryRecord and meta.start == 0 and meta.end == 1
          and not meta.actions and not meta.action_anchors and not meta.effects
          and not meta.objective and not meta.objective_use and not meta.recipients
-         and not meta.starts and set(meta.participants) == set(encounter.being_list)
-         and set(meta.entities) == set(encounter.being_list)
-         and set(meta.target_anchors) == set(encounter.being_list),
+         and not meta.starts and set(meta.participants) == set(entity_ids)
+         and set(meta.entities) == set(entity_ids)
+         and set(meta.target_anchors) == set(entity_ids),
          'imported committed inspection record has unsupported Action/Target coverage')
-    need(set(encounter.being_list) == set(meta.target_anchors)
-         and len(encounter.being_list) == 2,
-         'imported Target anchors do not cover exactly both participants')
+    need(set(entity_ids) == set(meta.target_anchors) and len(encounter.being_list) == 2,
+         'imported Target anchors do not cover exactly the registered Encounter entities')
     registry = encounter.universe.object_registry.object_instances
-    for being_id in encounter.being_list:
-        being = registry.get(being_id)
-        need(type(being) is BeingInstance and being.id == being_id,
-             'movement Target owner is not the registered native Being')
-        storage = object.__getattribute__(being, '__dict__').get('_atomic_target_history')
+    for entity_id in entity_ids:
+        entity = registry.get(entity_id)
+        category = ('being' if type(entity) is BeingInstance else
+                    'weapon' if type(entity) is WeaponInstance else
+                    'armor' if type(entity) is ArmorInstance else
+                    'object' if type(entity) is ObjectInstance else None)
+        need(category is not None and entity.id == entity_id,
+             'movement Target owner is not a supported registered native Entity')
+        storage = object.__getattribute__(entity, '__dict__').get('_atomic_target_history')
         need(type(storage) is list and len(storage) == 1
              and type(storage[0]) is TargetIntervalRecord
              and storage[0].encounter_id == encounter.id and storage[0].boundary == 1
              and type(storage[0].state) is TargetCandidate
-             and storage[0].state.target_id == being_id,
+             and storage[0].state.target_id == entity_id
+             and storage[0].state.category == category,
              'imported Target history is missing, duplicated or misowned')
         record = storage[0]
-        anchor = meta.target_anchors[being_id]
-        expected = (id(being), id(being.current), id(being.spatial_state),
+        anchor = meta.target_anchors[entity_id]
+        expected = (id(entity), id(entity.current), id(entity.spatial_state),
                     id(storage), id(record), fingerprint(record))
         need(type(anchor) is tuple and anchor == expected,
              'imported Target anchor differs from its newly materialized native identities')
@@ -1029,6 +1034,7 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
     need(activation is encounter.arena_movement_activation
          and activation.time == 0 and activation.movement_decision_id,
          'initial movement activation is missing or inconsistent')
+    entity_ids = tuple(sorted(tuple(encounter.being_list) + tuple(encounter.non_being_object_list)))
     metas = []
     for index, receipt in enumerate(receipts):
         boundary = index + 1
@@ -1040,9 +1046,9 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
              and meta.end == boundary and not meta.actions and not meta.action_anchors
              and not meta.effects and not meta.objective and not meta.objective_use
              and not meta.recipients and not meta.starts
-             and set(meta.participants) == set(encounter.being_list)
-             and set(meta.entities) == set(encounter.being_list)
-             and set(meta.target_anchors) == set(encounter.being_list),
+             and set(meta.participants) == set(entity_ids)
+             and set(meta.entities) == set(entity_ids)
+             and set(meta.target_anchors) == set(entity_ids),
              'movement receipt or its committed inspection record is invalid')
         if boundary == boundary_count:
             need(tuple(receipt.rng_state) == tuple(rng_owner.state),
@@ -1050,21 +1056,25 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
         metas.append(meta)
     need(len(encounter.being_list) == 2, 'exactly two movement participants are required')
     registry = encounter.universe.object_registry.object_instances
-    for being_id in encounter.being_list:
-        being = registry.get(being_id)
-        need(type(being) is BeingInstance and being.id == being_id,
-             'movement Target owner is not the registered native Being')
-        storage = being.__dict__.get('_atomic_target_history')
+    for entity_id in entity_ids:
+        entity = registry.get(entity_id)
+        category = ('being' if type(entity) is BeingInstance else
+                    'weapon' if type(entity) is WeaponInstance else
+                    'armor' if type(entity) is ArmorInstance else
+                    'object' if type(entity) is ObjectInstance else None)
+        need(category is not None and entity.id == entity_id,
+             'movement Target owner is not a supported registered native Entity')
+        storage = entity.__dict__.get('_atomic_target_history')
         need(type(storage) is list and len(storage) == boundary_count,
              'movement Target history must contain the complete owned receipt prefix')
         for index, record in enumerate(storage):
             boundary = index + 1
             need(type(record) is TargetIntervalRecord and record.encounter_id == encounter.id
                  and record.boundary == boundary and type(record.state) is TargetCandidate
-                 and record.state.target_id == being_id,
+                 and record.state.target_id == entity_id and record.state.category == category,
                  'movement Target record is missing, duplicated or misowned')
-            anchor = metas[index].target_anchors.get(being_id)
-            expected = (id(being), id(being.current), id(being.spatial_state),
+            anchor = metas[index].target_anchors.get(entity_id)
+            expected = (id(entity), id(entity.current), id(entity.spatial_state),
                         id(storage), id(record), fingerprint(record))
             need(type(anchor) is tuple and anchor == expected,
                  'movement Target anchor differs from the reconstructed native record')

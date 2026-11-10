@@ -251,14 +251,15 @@ def project_quarantined_movement_boundary(decoded):
           for index, continuing in enumerate(rows[1:], 1)),
           'continuing movement receipts are not consecutive or participant/RNG-bound')
     _need(row[2] == ('integer', '0') and type(row[3]) is tuple
-          and len(row[3]) == 2 and len(set(row[3])) == len(row[3])
+          and 2 <= len(row[3]) <= 3002 and len(set(row[3])) == len(row[3])
+          and row[3] == tuple(sorted(row[3]))
           and all(type(value) is str and value for value in row[3]),
           'movement receipt has invalid start or participant identities')
-    _need(type(row[4]) is tuple and len(row[4]) == 2
-          and tuple(target[0] for target in row[4]) == tuple(sorted(row[3]))
+    _need(type(row[4]) is tuple and 2 <= len(row[4]) <= 3002
+          and tuple(target[0] for target in row[4]) == tuple(sorted(target[0] for target in row[4]))
           and all(type(target) is tuple and len(target) == 4
-                  and target[1] == 'being' for target in row[4]),
-          'movement receipt does not contain one Being Target per participant')
+                  and target[1] in ('being','object','weapon','armor') for target in row[4]),
+          'movement receipt does not contain one typed Entity Target per registered Entity')
     from checkpoint_reconstruction import _rng_data
     def receipt_rng(value):
         _need(type(value) is tuple and len(value) == 2
@@ -308,20 +309,23 @@ def project_quarantined_movement_boundary(decoded):
           and graph.data(activation_fields['activation_kind']) == 'first_player_movement'
           and graph.data(activation_fields['actor_id']) in row[3],
           'native movement activation does not match the receipt')
-    _need(set(graph.data(encounter_fields['being_list'])) == set(row[3])
-          and len(graph.data(encounter_fields['being_list'])) == 2,
+    being_ids = set(graph.data(encounter_fields['being_list']))
+    object_ids = set(graph.data(encounter_fields['non_being_object_list']))
+    entity_ids = {target[0] for target in row[4]}
+    _need(len(being_ids) == 2 and being_ids.issubset(set(row[3]))
+          and set(row[3]) == being_ids | object_ids and entity_ids == set(row[3]),
           'movement participants differ from native Encounter membership')
     awareness = graph.data(encounter_fields['awareness'])
-    _need(type(awareness) is dict and set(awareness) == set(row[3]),
+    _need(type(awareness) is dict and set(awareness) == being_ids,
           'native observer awareness does not cover both participants')
     observer_evidence = []
     universe_fields = graph.fields(('universe', data[1]))[1]
     registry_ref = graph.raw_ref(universe_fields['object_registry'])
     registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
     registry = graph.raw_mapping(registry_fields['object_instances'])
-    _need(set(registry) == set(row[3]),
-          'native ObjectRegistry differs from movement participants')
-    for observer_id in row[3]:
+    _need(set(registry) == entity_ids,
+          'native ObjectRegistry differs from movement Target entities')
+    for observer_id in sorted(being_ids):
         being_ref = graph.raw_ref(registry[observer_id])
         being_fields = graph.fields(being_ref, 'being.BeingInstance')[1]
         encoded = being_fields.get('_arena_perception_ledger')
@@ -336,13 +340,14 @@ def project_quarantined_movement_boundary(decoded):
              'fatal_effect_ids', 'incoming', 'outgoing_effect_ids', 'aware_of',
              'practice_state', 'observer_state'))
         _need(_string(state['target_id'], 'Target ID') == target[0]
-              and _string(state['category'], 'Target category') == 'being',
+              and _string(state['category'], 'Target category') == target[1],
               'Target state identity/category differs from portable Target')
         known = _tag(state['aware_of'], 'Target awareness', 'set')
         _need(type(known[1]) is tuple, 'Target awareness set is malformed')
         target_awareness[target[0]] = set(_string(value, 'aware Entity ID')
                                           for value in known[1])
-    _need(target_awareness == awareness,
+    _need({key: target_awareness[key] for key in being_ids} == awareness
+          and all(not target_awareness[key] for key in object_ids),
           'observer-owned Target awareness differs from native Encounter state')
     return QuarantinedMovementBoundaryProjection(
         MOVEMENT_PROJECTION_SCHEMA, data[1], data[2], latest_boundary, row[2], row[3],
