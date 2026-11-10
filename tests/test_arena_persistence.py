@@ -10,6 +10,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from arena_browser_session import GeneratedArenaSession
+from arena_browser_session import ArenaBrowserRequestError
+from arena_hex_map import HexAddress
 
 
 class TestArenaPersistence(unittest.TestCase):
@@ -160,6 +162,46 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
                  len(obj._atomic_target_history)] for obj in expected_objects])
             self.assertEqual(self._tuplify(restored["rng"]), uninterrupted._rng_cursor.state)
             self.assertEqual(restored["receipts"], len(encounter._atomic_interval_history))
+
+    def test_action_bearing_pickup_save_refuses_without_mutating_active_session(self):
+        profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
+        session = GeneratedArenaSession(root_seed_factory=lambda: 5050,
+                                        ground_loadout_profile=profile)
+        session.generate({"starting_experience": "10000",
+                          "width_cells": "10", "height_cells": "5"})
+        candidate = session.active_candidate
+        player = candidate.participants[0].native.being
+        dagger = next(row for row in candidate.ground_objects
+                      if row.category == "weapon" and row.native_type_key == "Dagger")
+        session.choose_destination({"column": dagger.column, "row": dagger.row,
+                                    "rate": "walk", "facing_policy": "turn"})
+        for _ in range(20):
+            session.advance_one_second()
+            if candidate.arena_map.layout.cell_at_position(player.get_position()) == HexAddress(
+                    dagger.column, dagger.row):
+                break
+        else:
+            self.fail("native movement did not reach the generated Dagger's hex")
+        visible = next(row for row in session.public_view()["entities"]
+                       if row["category"] == "object" and row["type"] == "Dagger"
+                       and row["cell"] == {"column": dagger.column, "row": dagger.row})
+        session.choose_pickup({"handle": visible["handle"]})
+        session.advance_one_second()
+        self.assertEqual(session.public_view()["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        active = session.active_candidate
+        receipt_ids = tuple(row.boundary for row in active.encounter._atomic_interval_history)
+        positions = tuple((entity_id, tuple(active.universe.get_object_by_id(entity_id).get_position().as_tuple())
+                           if active.universe.get_object_by_id(entity_id).get_position() is not None else None)
+                          for entity_id in active.encounter.being_list + active.encounter.non_being_object_list)
+        with self.assertRaisesRegex(ArenaBrowserRequestError, "missing closed-field adapter: activities.PickUpAction"):
+            session.save_encounter_bytes()
+        self.assertIs(session.active_candidate, active)
+        self.assertEqual(tuple(row.boundary for row in active.encounter._atomic_interval_history), receipt_ids)
+        self.assertEqual(positions, tuple((entity_id,
+            tuple(active.universe.get_object_by_id(entity_id).get_position().as_tuple())
+            if active.universe.get_object_by_id(entity_id).get_position() is not None else None)
+            for entity_id in active.encounter.being_list + active.encounter.non_being_object_list))
 
 
 if __name__ == "__main__":

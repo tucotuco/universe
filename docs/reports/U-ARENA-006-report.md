@@ -37,8 +37,8 @@ The smoke used an ephemeral loopback port. The first normal sandbox bind attempt
 
 Passed:
 
-- `PYTHONPATH=src:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_arena_persistence -q` — **3 passed**. Covers pristine ground Object restoration, and three-process repeatable movement continuation both with no Objects and with eight typed ground Objects. Compares native position/facing, RNG, Object IDs/types/positions/history lengths, and receipt-history counts with uninterrupted execution.
-- `PYTHONPATH=src:examples:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_generated_arena_browser tests.test_arena_ground_objects tests.test_arena_persistence -q` — **42 passed**.
+- `PYTHONPATH=src:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_arena_persistence -q` — **4 passed**. Covers pristine ground Object restoration, three-process repeatable movement continuation both with no Objects and with eight typed ground Objects, and exact fail-closed/unchanged-session behavior after a real native Pick up. Compares native position/facing, RNG, Object IDs/types/positions/history lengths, and receipt-history counts with uninterrupted execution.
+- `PYTHONPATH=src:examples:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_generated_arena_browser tests.test_arena_ground_objects tests.test_arena_persistence -q` — **44 passed** after including pristine Object persistence and the fail-closed Pick up case.
 - `PYTHONPATH=src:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_checkpoint_bounded_closure tests.test_checkpoint_movement_continuation tests.test_checkpoint_receipt_descriptors tests.test_checkpoint_projection tests.test_checkpoint_wire -q` — **33 passed**.
 - `python -m py_compile` over the modified persistence/checkpoint/session/test modules — passed.
 - `git diff --check` — passed.
@@ -65,4 +65,5 @@ Open `http://127.0.0.1:8000/`. Generate, then use the Save/Load controls. At thi
 - `7b43efe` Close Arena checkpoint over native Objects
 - `5936dce` Document Arena persistence implementation status
 - `f4021c0` Add generated Arena save and load at time zero
-- Additional Object-inclusive movement restore work is being validated for a focused commit; no changes were pushed.
+- `fde4feb` Restore Arena movement checkpoints with Objects
+- `test_arena_persistence.py` adds a deterministic real Pick up checkpoint-refusal regression; no changes were pushed.
