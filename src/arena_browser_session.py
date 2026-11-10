@@ -565,8 +565,9 @@ class GeneratedArenaSession:
         opponent_melee_action = self._opponent_melee_action_view(
             candidate, opponent, player.native.being)
         opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
-        opponent_can_act, opponent_reason = self._opponent_attack_preflight(candidate)
-        self._opponent_attack_refusal = opponent_reason
+        opponent_decision = self._opponent_decision(candidate)
+        opponent_can_act = opponent_decision["kind"] in ("attack", "move")
+        self._opponent_attack_refusal = opponent_decision["reason"]
         movement_plan = None
         movement_available = player.native.being.posture in ("standing", "crouching", "lying")
         movement_available = movement_available and player.native.being.hex_facing is not None
@@ -642,6 +643,10 @@ class GeneratedArenaSession:
             "melee_action": melee_action,
             "opponent_melee_action": opponent_melee_action,
             "opponent_strategy": self._opponent_strategy,
+            "opponent_activity": ("Thrust resolving" if opponent_melee_pending else
+                                  "approaching" if opponent_decision["kind"] == "move" else
+                                  "attack opportunity" if opponent_decision["kind"] == "attack" else
+                                  "waiting" if self._opponent_strategy == "attack_only" else "inactive"),
             "entities": perceived,
             "selected_entity": selected,
             "action_catalog": action_catalog,
@@ -896,6 +901,7 @@ class GeneratedArenaSession:
             (row for row in ledger.current if row.entity_id == player.id), None))
         if (evidence is None or evidence.category != "being"
                 or evidence.present_state != "present"
+                or evidence.time != encounter.time or evidence.position is None
                 or not encounter.is_aware(opponent.id, player.id)):
             return False, "opponent_has_no_current_awareness_evidence"
         if opponent.get_hit_points() <= 0 or opponent.is_helpless():
@@ -917,10 +923,85 @@ class GeneratedArenaSession:
             return False, "native_melee_contract_unavailable"
         return True, "eligible"
 
-    def _schedule_opponent_attack(self, candidate):
+    def _opponent_decision(self, candidate):
+        """Derive one attack-only choice from the opponent's current evidence."""
         eligible, reason = self._opponent_attack_preflight(candidate)
-        self._opponent_attack_refusal = reason
         if not eligible:
+            return {"kind": "none", "reason": reason}
+        encounter = candidate.encounter
+        opponent = candidate.participants[1].native.being
+        player = candidate.participants[0].native.being
+        weapon_id = self._initial_ready_dagger_id(candidate, opponent)
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        reach = effective_melee_reach_meters(opponent.current, weapon.current)
+        strike = MeleeStrike(encounter, opponent.id, player.id, weapon.id,
+                             motion="thrust", reach=reach)
+        status, _ = strike._status(encounter)
+        if status == "in_reach":
+            return {"kind": "attack", "reason": "native_thrust_in_reach"}
+        if status not in ("not_facing", "out_of_reach"):
+            return {"kind": "none", "reason": "native_thrust_" + str(status)}
+        # The current ordinary starter profile includes unmodeled ground
+        # Objects. Keep its conservative path behavior; attack-only pursuit
+        # is limited to explicitly empty-ground encounters.
+        if candidate.ground_objects:
+            return {"kind": "none", "reason": "unmodeled_ground_objects"}
+        layout = candidate.arena_map.layout
+        ledger = object.__getattribute__(opponent, "__dict__").get("_arena_perception_ledger")
+        evidence = None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id == player.id), None)
+        if (evidence is None or evidence.time != encounter.time
+                or evidence.present_state != "present" or evidence.position is None):
+            return {"kind": "none", "reason": "opponent_has_no_current_awareness_evidence"}
+        observed_cell = layout.cell_at_position(evidence.position)
+        start = opponent.get_position()
+        if observed_cell is None or start is None or layout.cell_at_position(start) is None:
+            return {"kind": "none", "reason": "unplaced_participant"}
+        start_cell = layout.cell_at_position(start)
+        from hex_facing import nearest_facing
+        recent_cells = set()
+        if type(encounter.time) is int:
+            for prior_boundary in range(max(1, encounter.time - 3), encounter.time):
+                try:
+                    prior_position = encounter.inspect_committed(prior_boundary).target(
+                        opponent.id).position
+                    prior_cell = layout.cell_at_position(prior_position)
+                    if prior_cell is not None:
+                        recent_cells.add(prior_cell)
+                except (ValueError, KeyError, AttributeError):
+                    continue
+        options = []
+        for address in layout.neighbors(observed_cell):
+            if not layout.contains(address) or address in (observed_cell, start_cell):
+                continue
+            destination = layout.center_position(address, z=start.z)
+            delta = (destination.x - start.x, destination.y - start.y,
+                     destination.z - start.z)
+            if not any(delta):
+                continue
+            heading = nearest_facing(delta)
+            target_heading = nearest_facing((evidence.position.x - destination.x,
+                                             evidence.position.y - destination.y,
+                                             evidence.position.z - destination.z))
+            heading_delta = abs(heading - target_heading)
+            heading_delta = min(heading_delta, 12 - heading_delta)
+            options.append((heading_delta > 1, heading_delta,
+                            address in recent_cells,
+                            math.dist(start.as_tuple(), destination.as_tuple()),
+                            address.column, address.row, address, destination))
+        if not options:
+            return {"kind": "none", "reason": "no_lawful_in_map_approach_destination"}
+        # Native position history supplies a short anti-reversal tie-break so
+        # a one-boundary destination is not alternated endlessly. It adds no
+        # controller state and makes no collision or pathfinding claim.
+        _, _, _, _, _, _, address, destination = min(options)
+        return {"kind": "move", "reason": "native_turn_and_move_approach",
+                "address": address, "destination": destination}
+
+    def _schedule_opponent_attack(self, candidate):
+        decision = self._opponent_decision(candidate)
+        self._opponent_attack_refusal = decision["reason"]
+        if decision["kind"] != "attack":
             return None
         encounter = candidate.encounter
         opponent = candidate.participants[1].native.being
@@ -1987,8 +2068,9 @@ class GeneratedArenaSession:
             melee_pending = self._melee_action_pending(candidate, melee_action)
             opponent = candidate.participants[1].native.being
             opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
-            opponent_can_act, opponent_reason = self._opponent_attack_preflight(candidate)
-            self._opponent_attack_refusal = opponent_reason
+            opponent_decision = self._opponent_decision(candidate)
+            opponent_can_act = opponent_decision["kind"] in ("attack", "move")
+            self._opponent_attack_refusal = opponent_decision["reason"]
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
                     and not opponent_melee_pending and not opponent_can_act
@@ -2017,26 +2099,47 @@ class GeneratedArenaSession:
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
-                if opponent_can_act:
+                if opponent_decision["kind"] == "attack":
                     self._schedule_opponent_attack(candidate)
-                if self._movement_plan is not None:
-                    plan = self._movement_plan
-                    conditions = self._movement_conditions(candidate)
-                    next_boundary = candidate.encounter.last_processed_boundary + 1
-                    intent = MovementIntent(
-                        candidate.participants[0].native.being.id, plan.destination,
-                        plan.rate, f"{plan.decision_id}:boundary:{next_boundary}", next_boundary,
-                        facing_policy=plan.facing_policy)
-                    candidate.encounter.step(1, movement_intent=intent,
-                                             movement_conditions=conditions)
-                    position = candidate.participants[0].native.being.get_position()
-                    if position == plan.destination:
-                        self._movement_plan = None
-                        self._movement_outcome = "arrived"
-                    else:
-                        self._movement_outcome = "progressed"
+                elif opponent_decision["kind"] == "move":
+                    self._trace.native_advance(
+                        trace_request_id, trace_client_sequence,
+                        f"opponent_decision=approach rate=sprint facing_policy=turn boundary={candidate.encounter.last_processed_boundary + 1}")
+                next_boundary = candidate.encounter.last_processed_boundary + 1
+                movement_intents = []
+                movement_conditions = {}
+                plan = self._movement_plan
+                if plan is not None:
+                    player_id = candidate.participants[0].native.being.id
+                    movement_intents.append(MovementIntent(
+                        player_id, plan.destination, plan.rate,
+                        f"{plan.decision_id}:boundary:{next_boundary}", next_boundary,
+                        facing_policy=plan.facing_policy))
+                    movement_conditions[player_id] = self._movement_conditions(
+                        candidate, player_id)
+                if opponent_decision["kind"] == "move":
+                    opponent_id = candidate.participants[1].native.being.id
+                    movement_intents.append(MovementIntent(
+                        opponent_id, opponent_decision["destination"], "sprint",
+                        f"{candidate.encounter.id}/arena-opponent-approach/boundary:{next_boundary}",
+                        next_boundary, facing_policy="turn"))
+                    movement_conditions[opponent_id] = self._movement_conditions(
+                        candidate, opponent_id)
+                if movement_intents:
+                    candidate.encounter.step(1, movement_intents=tuple(movement_intents),
+                                             movement_conditions=movement_conditions)
+                elif plan is not None:
+                    candidate.encounter.step(1)
                 else:
                     candidate.encounter.step(1)
+                if plan is not None:
+                    if plan is self._movement_plan:
+                        position = candidate.participants[0].native.being.get_position()
+                        if position == plan.destination:
+                            self._movement_plan = None
+                            self._movement_outcome = "arrived"
+                        else:
+                            self._movement_outcome = "progressed"
                 if (self._player_action_id is not None
                         and candidate.encounter.time >= 1
                         and self._player_action_outcome is None):
@@ -2082,15 +2185,16 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     @staticmethod
-    def _movement_conditions(candidate):
+    def _movement_conditions(candidate, actor_id=None):
         from activities import RunAction
         from melee_combat import MeleeStrike
         from movement_intent import MovementIntentRefusal
         player_id = candidate.participants[0].native.being.id
+        actor_id = player_id if actor_id is None else actor_id
         demanding = False
         for action_id in candidate.encounter.pending_action_list:
             action = candidate.universe.event_history.get(action_id)
-            if action is None or getattr(action, "actor_id", None) != player_id:
+            if action is None or getattr(action, "actor_id", None) != actor_id:
                 continue
             if type(action) is MeleeStrike:
                 demanding = True

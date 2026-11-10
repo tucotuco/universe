@@ -90,6 +90,45 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         invalid = b'{"format":"wrong","schema_version":1}'
         self.assertEqual(self.raw_request("/api/generated/profile-upload", invalid)[0], 409)
 
+    def test_attack_only_browser_requests_drive_native_approach_and_thrust(self):
+        profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261123, ground_loadout_profile=profile)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "attack_only"})
+        self.assertEqual(status, 200)
+        self.assertEqual(generated["opponent_activity"], "waiting")
+        candidate = self.session.active_candidate
+        opponent = candidate.participants[1].native.being
+        initial_opponent_position = opponent.get_position()
+        status, accepted = self.request("/api/generated/run", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(accepted["advance_available"])
+        status, approached = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(approached["time_seconds"], 1)
+        self.assertEqual(approached["opponent_activity"], "approaching")
+        first_position = opponent.get_position()
+        self.assertNotEqual(first_position, initial_opponent_position)
+        self.assertEqual(self.session._opponent_decision(candidate)["kind"], "move")
+        status, attack_ready = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        attack_position = opponent.get_position()
+        self.assertNotEqual(attack_position, first_position)
+        self.assertEqual(attack_ready["opponent_activity"], "attack opportunity")
+        status, pending = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(opponent.get_position(), attack_position)
+        self.assertEqual(pending["opponent_melee_action"]["status"], "executing")
+        self.assertEqual(pending["opponent_melee_action"]["seconds_remaining"], 3)
+        self.assertNotIn(opponent.id, json.dumps(pending))
+        self.assertNotIn("destination", json.dumps(pending).lower())
+        page_status, page = self.request("/")
+        self.assertEqual(page_status, 200)
+        self.assertIn("Opponent is approaching.", page)
+        self.assertIn("s.opponent_activity==='attack opportunity'", page)
+
     def enable_trace(self):
         import io
         stream = io.StringIO()

@@ -338,7 +338,9 @@ class TestNativeMovementIntent(unittest.TestCase):
                        "selected_being", "action_catalog",
                        "run_available", "advance_available",
                        "movement_available", "movement_reason", "movement_plan", "movement_outcome",
-                       "ready_weapon_action", "spot_available", "spot_reason"}
+                       "ready_weapon_action", "spot_available", "spot_reason",
+                       "default_equipment_mode", "opponent_strategy", "opponent_melee_action",
+                       "opponent_activity", "melee_action"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)
@@ -350,8 +352,82 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(public_after["player"]["cell"], {"column": 2, "row": 1})
         self.assertEqual(self.encounter.aware_beings(self.player.id), [self.opponent.id])
         self.assertEqual(self.encounter.aware_beings(self.opponent.id), [self.player.id])
+
+    def test_two_distinct_movement_intents_settle_from_one_common_native_boundary(self):
+        self.activate_run_observer()
+        self.player.set_position(CartesianPosition(0.0, 0.0, 0.0))
+        self.opponent.set_position(CartesianPosition(10.0, 10.0, 0.0))
+        self.player.set_hit_points(10)
+        self.opponent.set_hit_points(10)
+        self.player.set_hex_facing(0)
+        self.opponent.set_hex_facing(0)
+        intents = (
+            MovementIntent(self.player.id, CartesianPosition(20.0, 0.0, 0.0),
+                           "walk", "player-boundary-1", 1, facing_policy="turn"),
+            MovementIntent(self.opponent.id, CartesianPosition(10.0, 30.0, 0.0),
+                           "walk", "opponent-boundary-1", 1, facing_policy="turn"),
+        )
+        conditions = {self.player.id: self.conditions(),
+                      self.opponent.id: MovementRateConditions(
+                          terrain_multiplier=1.0, hampered_multiplier=1.0,
+                          concurrent_demanding_action=False)}
+        before = (self.player.get_position(), self.opponent.get_position())
+        step = self.encounter.step(1, movement_intents=intents,
+                                   movement_conditions=conditions)
+        after = (self.player.get_position(), self.opponent.get_position())
+        self.assertEqual(step.movement_decision_ids,
+                         tuple(intent.decision_id for intent in sorted(intents, key=lambda row: row.actor_id)))
+        self.assertEqual(self.encounter.time, 1)
+        self.assertNotEqual(after[0], before[0])
+        self.assertNotEqual(after[1], before[1])
+        record = self.encounter.inspect_committed(1)
+        self.assertEqual(record.target(self.player.id).position, after[0])
+        self.assertEqual(record.target(self.opponent.id).position, after[1])
+        self.assertEqual(self.player.hex_facing, 0)
+        self.assertEqual(self.opponent.hex_facing, 3)
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
         self.assertEqual(random.getstate(), self.global_rng)
+
+    def test_two_actor_movement_rolls_back_as_one_publication(self):
+        action = self.activate_run_observer()
+        self.player.set_position(CartesianPosition(0.0, 0.0, 0.0))
+        self.opponent.set_position(CartesianPosition(10.0, 10.0, 0.0))
+        self.player.set_hit_points(10)
+        self.opponent.set_hit_points(10)
+        self.player.set_hex_facing(0)
+        self.opponent.set_hex_facing(0)
+        intents = (
+            MovementIntent(self.player.id, CartesianPosition(20.0, 0.0, 0.0),
+                           "walk", "player-rollback", 1, facing_policy="turn"),
+            MovementIntent(self.opponent.id, CartesianPosition(10.0, 30.0, 0.0),
+                           "walk", "opponent-rollback", 1, facing_policy="turn"),
+        )
+        conditions = {self.player.id: self.conditions(),
+                      self.opponent.id: MovementRateConditions(
+                          terrain_multiplier=1.0, hampered_multiplier=1.0,
+                          concurrent_demanding_action=False)}
+        before = (self.player.get_position(), self.player.hex_facing,
+                  self.opponent.get_position(), self.opponent.hex_facing,
+                  self.rng.state, self.encounter.choice_state)
+        import atomic_publication
+        original = atomic_publication.publish_interval_candidate
+
+        def fail_after_motion(encounter, candidate, **kwargs):
+            kwargs["_fail_after"] = "movement"
+            return original(encounter, candidate, **kwargs)
+
+        with patch.object(atomic_publication, "publish_interval_candidate", fail_after_motion):
+            from atomic_publication import PublicationFailure
+            with self.assertRaises(PublicationFailure) as failure:
+                self.encounter.step(1, movement_intents=intents,
+                                    movement_conditions=conditions)
+        self.assertFalse(failure.exception.rollback_errors)
+        self.assertEqual((self.player.get_position(), self.player.hex_facing,
+                          self.opponent.get_position(), self.opponent.hex_facing,
+                          self.rng.state, self.encounter.choice_state), before)
+        self.assertEqual(self.encounter.time, 0)
+        self.assertIsNone(action.resolution)
+        self.encounter.recover_transactional_progression(failure.exception.recovery_token)
 
     def test_explicit_turn_commits_with_movement_and_is_in_same_second_snapshot(self):
         action = self.activate_run_observer()

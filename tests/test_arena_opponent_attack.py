@@ -1,6 +1,9 @@
 """Native attack-only Arena opponent integration and persistence checks."""
 import json
+import hashlib
+import os
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -33,6 +36,48 @@ def first_move(session, candidate, destination):
     return view
 
 
+def native_continuation_state(session):
+    candidate = session.active_candidate
+    encounter = candidate.encounter
+    rows, histories = [], []
+    for participant in candidate.participants:
+        being = participant.native.being
+        rows.append((being.id, being.get_position(), being.hex_facing,
+                     being.get_hit_points()))
+        ledger = object.__getattribute__(being, "__dict__").get("_arena_perception_ledger")
+        histories.append((ledger.current, ledger.history))
+    return (encounter.time, encounter.last_processed_boundary, tuple(rows),
+            tuple(encounter.pending_action_list), tuple(encounter.finished_action_list),
+            tuple(encounter.cancelled_action_list), tuple(sorted(candidate.universe.event_history)),
+            encounter.choice_state, tuple(histories), session._rng_cursor.state)
+
+
+def subprocess_advance_checkpoint(wire, seconds):
+    script = r'''
+import sys
+import npcgen.api
+from tests.test_arena_opponent_attack import native_continuation_state, continuation_digest
+from arena_browser_session import GeneratedArenaSession
+npcgen.api.arena_ready_being = lambda *args, **kwargs: (_ for _ in ()).throw(
+    AssertionError("checkpoint load must not regenerate Beings"))
+session = GeneratedArenaSession()
+session.load_encounter_bytes(sys.stdin.buffer.read())
+for _ in range(int(sys.argv[1])):
+    session.advance_one_second()
+sys.stdout.write(continuation_digest(native_continuation_state(session)))
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(seconds)],
+        input=wire, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        check=True, env=os.environ.copy())
+    return completed.stdout.decode("ascii")
+
+
+def continuation_digest(state):
+    canonical = json.dumps(state, default=repr, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class TestArenaOpponentAttack(unittest.TestCase):
     def test_attack_only_native_thrust_pending_restore_and_completed_restore(self):
         source, candidate, player, opponent, view = create_session()
@@ -45,10 +90,15 @@ class TestArenaOpponentAttack(unittest.TestCase):
             self.assertIsNotNone(initial_dagger_id)
             self.assertIn(initial_dagger_id, being.armed_with(candidate.universe).values())
         self.assertIsNone(view["opponent_melee_action"])
-        first_move(source, candidate, (5, 4))
-
-        # A player's first ordinary movement choice activates the Arena. The
-        # AI uses only the opposing Being's current native evidence and state.
+        # A player Run Choice activates the Encounter without moving either
+        # Being; the opponent then makes a native approach decision.
+        source.choose_run()
+        view = source.advance_one_second()
+        self.assertNotEqual(player.get_position(), opponent.get_position())
+        self.assertIsNone(source._opponent_melee_action(candidate, opponent))
+        self.assertEqual(view["time_seconds"], 1)
+        self.assertEqual(source._opponent_decision(candidate)["kind"], "attack")
+        # Attack only after the approach leaves a current Thrust opportunity.
         view = source.advance_one_second()
         action = source._opponent_melee_action(candidate, opponent)
         self.assertIs(type(action), MeleeStrike)
@@ -121,8 +171,9 @@ class TestArenaOpponentAttack(unittest.TestCase):
                 completed_restore.active_candidate.participants[1].native.being).id)
 
     def test_native_impact_legality_out_of_reach_and_pending_deduplication(self):
-        session, candidate, _player, opponent, _ = create_session()
-        first_move(session, candidate, (0, 0))
+        session, candidate, player, opponent, _ = create_session()
+        session.choose_run()
+        session.advance_one_second()
         view = session.advance_one_second()
         action = session._opponent_melee_action(candidate, opponent)
         self.assertIsInstance(action, MeleeStrike)
@@ -132,10 +183,14 @@ class TestArenaOpponentAttack(unittest.TestCase):
         self.assertIsNone(session._schedule_opponent_attack(candidate))
         self.assertEqual(session._opponent_melee_action(candidate, opponent).id, action_id)
         self.assertTrue(view["advance_available"])
+        old_position = player.get_position()
+        session.choose_destination({"column": 0, "row": 0, "rate": "sprint",
+                                   "facing_policy": "turn"})
         for _ in range(3):
             view = session.advance_one_second()
         self.assertEqual(view["opponent_melee_action"]["status"], "completed")
         self.assertEqual(view["opponent_melee_action"]["outcome"], "out_of_reach")
+        self.assertNotEqual(player.get_position(), old_position)
 
     def test_ineligible_opponent_requests_do_not_create_choices_or_consume_native_rng(self):
         cases = ("no_evidence", "unready", "missing_weapon", "unable")
@@ -176,7 +231,8 @@ class TestArenaOpponentAttack(unittest.TestCase):
 
     def test_player_and_opponent_strikes_share_native_same_boundary_settlement(self):
         session, candidate, player, opponent, view = create_session()
-        first_move(session, candidate, (5, 4))
+        session.choose_run()
+        view = session.advance_one_second()
         target = next(row for row in view["entities"] if row["category"] == "being")
         session.inspect_entity({"handle": target["handle"]})
         session.choose_melee_strike({"handle": target["handle"], "motion": "thrust"})
@@ -186,13 +242,105 @@ class TestArenaOpponentAttack(unittest.TestCase):
         opponent_action = session._opponent_melee_action(candidate, opponent)
         self.assertIsInstance(opponent_action, MeleeStrike)
         self.assertEqual(source_action.start_time, opponent_action.start_time)
-        self.assertEqual(source_action.start_time, 0)
+        self.assertEqual(source_action.start_time, 1)
         for _ in range(3):
             session.advance_one_second()
-        record = candidate.encounter.inspect_committed(4)
+        record = candidate.encounter.inspect_committed(5)
         self.assertIn(source_action.id, record.actions)
         self.assertIn(opponent_action.id, record.actions)
         self.assertEqual(session.public_view()["opponent_melee_action"]["status"], "completed")
+
+    def test_approach_and_pending_thrust_restore_continue_deterministically(self):
+        source, candidate, player, opponent, _ = create_session(seed=20261123)
+        initial_player_position = player.get_position()
+        initial_opponent_position = opponent.get_position()
+        source.choose_run()
+        source.advance_one_second()
+        self.assertNotEqual(opponent.get_position(), initial_opponent_position)
+        self.assertEqual(player.get_position(), initial_player_position)
+        self.assertIsNone(source._opponent_melee_action(candidate, opponent))
+        self.assertEqual(source._opponent_decision(candidate)["kind"], "move")
+
+        approach_wire = source.save_encounter_bytes()
+        process_reference = GeneratedArenaSession()
+        process_reference.load_encounter_bytes(approach_wire)
+        process_reference.advance_one_second()
+        self.assertEqual(subprocess_advance_checkpoint(approach_wire, 1),
+                         continuation_digest(native_continuation_state(process_reference)))
+        restored = GeneratedArenaSession()
+        with mock.patch("npcgen.api.arena_ready_being",
+                        side_effect=AssertionError("Load must not regenerate either Being")):
+            restored.load_encounter_bytes(approach_wire)
+        restored_candidate = restored.active_candidate
+        restored_player, restored_opponent = (
+            part.native.being for part in restored_candidate.participants)
+
+        for _ in range(3):
+            left = source.advance_one_second()
+            right = restored.advance_one_second()
+            self.assertEqual(left["time_seconds"], right["time_seconds"])
+            self.assertEqual(native_continuation_state(source),
+                             native_continuation_state(restored))
+            if source._opponent_melee_pending(candidate, opponent):
+                break
+        self.assertTrue(source._opponent_melee_pending(candidate, opponent))
+        pending_wire = source.save_encounter_bytes()
+        pending_restore = GeneratedArenaSession()
+        with mock.patch("npcgen.api.arena_ready_being",
+                        side_effect=AssertionError("Load must not regenerate a pending Thrust")):
+            pending_restore.load_encounter_bytes(pending_wire)
+        restored_action = pending_restore._opponent_melee_action(
+            pending_restore.active_candidate,
+            pending_restore.active_candidate.participants[1].native.being)
+        self.assertEqual(restored_action.id,
+                         source._opponent_melee_action(candidate, opponent).id)
+        self.assertEqual(restored_action.instrument_id,
+                         source._opponent_melee_action(candidate, opponent).instrument_id)
+        for _ in range(3):
+            source.advance_one_second()
+            pending_restore.advance_one_second()
+            self.assertEqual(native_continuation_state(source),
+                             native_continuation_state(pending_restore))
+        self.assertEqual(subprocess_advance_checkpoint(pending_wire, 3),
+                         continuation_digest(native_continuation_state(source)))
+        self.assertEqual(source.public_view()["opponent_melee_action"],
+                         pending_restore.public_view()["opponent_melee_action"])
+        self.assertEqual(source.public_view()["opponent_melee_action"]["status"], "completed")
+        self.assertEqual(source._rng_cursor.state, pending_restore._rng_cursor.state)
+        self.assertEqual(source.active_candidate.encounter.choice_state,
+                         pending_restore.active_candidate.encounter.choice_state)
+        self.assertEqual(source.active_candidate.encounter.finished_action_list,
+                         pending_restore.active_candidate.encounter.finished_action_list)
+        for left_part, right_part in zip(source.active_candidate.participants,
+                                         pending_restore.active_candidate.participants):
+            left_ledger = object.__getattribute__(left_part.native.being, "__dict__")["_arena_perception_ledger"]
+            right_ledger = object.__getattribute__(right_part.native.being, "__dict__")["_arena_perception_ledger"]
+            self.assertEqual(left_ledger.history, right_ledger.history)
+
+    def test_player_movement_is_independent_during_approach_and_pending_thrust(self):
+        session, candidate, player, opponent, _ = create_session(seed=20261123)
+        session.choose_run()
+        session.advance_one_second()
+        before_player, before_opponent = player.get_position(), opponent.get_position()
+        session.choose_destination({"column": 8, "row": 0, "rate": "walk",
+                                   "facing_policy": "turn"})
+        session.advance_one_second()
+        self.assertNotEqual(player.get_position(), before_player)
+        self.assertNotEqual(opponent.get_position(), before_opponent)
+
+        # Separate case: retain U-012's close generated seed and move the
+        # player only after the opponent's genuine Thrust has been accepted.
+        moving, moved_candidate, moving_player, moving_opponent, _ = create_session()
+        moving.choose_run()
+        moving.advance_one_second()
+        moving.advance_one_second()
+        self.assertTrue(moving._opponent_melee_pending(moved_candidate, moving_opponent))
+        old_position = moving_player.get_position()
+        moving.choose_destination({"column": 0, "row": 0, "rate": "sprint",
+                                  "facing_policy": "turn"})
+        moving.advance_one_second()
+        self.assertNotEqual(moving_player.get_position(), old_position)
+        self.assertTrue(moving._opponent_melee_pending(moved_candidate, moving_opponent))
 
     def test_old_arena_save_schema_loads_with_autonomous_strategy_disabled(self):
         import hashlib

@@ -619,15 +619,34 @@ def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
 
 
 def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_member_candidate=None,
-                        movement_intent=None,movement_conditions=None):
+                        movement_intent=None,movement_conditions=None,movement_intents=None):
     from atomic_publication import publication_boundary,publish_interval_candidate
     from interval_staging import _motion
     from encounter import EncounterStep
     assert_not_quarantined(encounter, 'Encounter progression')
     if mode_of(encounter)!='transactional':raise TransactionalProgressionError('explicit transactional selection required')
-    if movement_intent is None and movement_conditions is not None:
+    if movement_intent is not None and movement_intents is not None:
+        raise TransactionalProgressionError('singular and plural MovementIntent inputs cannot be combined')
+    if movement_intents is not None:
+        if type(movement_intents) not in (tuple, list) or not movement_intents:
+            raise TransactionalProgressionError('movement_intents must be a nonempty native sequence')
+        if type(movement_conditions) is not dict:
+            raise TransactionalProgressionError('plural movement intents require actor-keyed native rate conditions')
+        movement_intents=tuple(movement_intents)
+        actors=[getattr(intent,'actor_id',None) for intent in movement_intents]
+        if any(type(actor) is not str or not actor for actor in actors) or len(set(actors))!=len(actors):
+            raise TransactionalProgressionError('plural movement intents require distinct native actors')
+        if set(movement_conditions)!=set(actors):
+            raise TransactionalProgressionError('plural movement conditions must match the intent actors exactly')
+    elif movement_intent is not None:
+        movement_intents=(movement_intent,)
+        if movement_conditions is None:
+            raise TransactionalProgressionError('a MovementIntent requires movement conditions')
+        if type(movement_conditions) is dict:
+            raise TransactionalProgressionError('singular MovementIntent requires one MovementRateConditions value')
+    elif movement_conditions is not None:
         raise TransactionalProgressionError('movement conditions require a MovementIntent')
-    if movement_intent is not None:
+    if movement_intents is not None:
         if velocities is not None:
             raise TransactionalProgressionError('MovementIntent and caller-supplied velocities cannot be combined')
         if duration != 1.0:
@@ -652,19 +671,29 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                 context=_all_declarations(encounter,boundary,binding.rng_owner)
                 if motion is None:
                     positions={key:context.snapshot.entities[key].position for key in context.snapshot.participant_ids}
-                    if movement_intent is not None:
+                    if movement_intents is not None:
                         from movement_intent import prepare_movement_intent
-                        prepared=prepare_movement_intent(
-                            encounter,movement_intent,movement_conditions,duration=duration,
-                            pre_action_snapshot=context.snapshot)
-                        motion={movement_intent.actor_id:prepared.velocity_meters_per_second}
-                        facing_updates = ({movement_intent.actor_id: prepared.facing_update}
-                                          if prepared.facing_update is not None else {})
-                        if prepared.arrival_time_seconds is not None:
-                            movement_stop_times = {
-                                movement_intent.actor_id: start + prepared.arrival_time_seconds}
-                            movement_targets = {movement_intent.actor_id: movement_intent.destination}
-                        movement_decision_ids.append(movement_intent.decision_id)
+                        prepared_rows=[]
+                        for intent in sorted(movement_intents,key=lambda row:row.actor_id):
+                            conditions=(movement_conditions[intent.actor_id]
+                                        if type(movement_conditions) is dict else movement_conditions)
+                            prepared_rows.append((intent,prepare_movement_intent(
+                                encounter,intent,conditions,duration=duration,
+                                pre_action_snapshot=context.snapshot)))
+                        motion={intent.actor_id:prepared.velocity_meters_per_second
+                                for intent,prepared in prepared_rows}
+                        facing_updates={intent.actor_id:prepared.facing_update
+                                        for intent,prepared in prepared_rows
+                                        if prepared.facing_update is not None}
+                        arrivals=[(intent,prepared) for intent,prepared in prepared_rows
+                                  if prepared.arrival_time_seconds is not None]
+                        if arrivals:
+                            movement_stop_times={intent.actor_id:start+prepared.arrival_time_seconds
+                                                 for intent,prepared in arrivals}
+                            movement_targets={intent.actor_id:intent.destination
+                                              for intent,prepared in arrivals}
+                        movement_decision_ids.extend(intent.decision_id
+                                                     for intent,_ in prepared_rows)
                     else:
                         motion=dict(_motion(positions,velocities,encounter.local_frame,velocity_frame,end-start))
                 # The same scope covers validation, staging and publication.

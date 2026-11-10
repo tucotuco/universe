@@ -1259,26 +1259,28 @@ class Encounter(Event):
 
     def step(self, duration=1.0, velocities=None, velocity_frame="global", *,
              adult_member_candidate=None, movement_intent=None,
-             movement_conditions=None):
+             movement_conditions=None, movement_intents=None):
         """Advance fractional kinematics; dispatch only crossed integer boundaries."""
         if self._running:
             raise BoundaryInvariantError('Reentrant progression during run()')
         return self._advance(duration, velocities, velocity_frame,
                              adult_member_candidate=adult_member_candidate,
                              movement_intent=movement_intent,
-                             movement_conditions=movement_conditions)
+                             movement_conditions=movement_conditions,
+                             movement_intents=movement_intents)
 
     def _advance(self, duration, velocities=None, velocity_frame="global", *,
                  adult_member_candidate=None, movement_intent=None,
-                 movement_conditions=None):
+                 movement_conditions=None, movement_intents=None):
         from transactional_progression import assert_not_quarantined, mode_of, step_transactionally
         assert_not_quarantined(self, 'Encounter progression')
         if mode_of(self) == 'transactional':
             return step_transactionally(self, duration, velocities, velocity_frame,
                 adult_member_candidate=adult_member_candidate,
                 movement_intent=movement_intent,
-                movement_conditions=movement_conditions)
-        if movement_intent is not None or movement_conditions is not None:
+                movement_conditions=movement_conditions,
+                movement_intents=movement_intents)
+        if movement_intent is not None or movement_conditions is not None or movement_intents is not None:
             raise BoundaryInvariantError('native movement intents require transactional progression')
         if adult_member_candidate is not None:
             raise BoundaryInvariantError(
