@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import inspect
+import json
 import re
 import random
 import secrets
@@ -147,7 +149,7 @@ class GeneratedArenaSession:
 
     def __init__(self, *, root_seed_factory=None, trace_ui=False, trace_stream=None,
                  ground_item_descriptions=None, ground_loadout_profile=None,
-                 authored_draw_scenario=None):
+                 authored_draw_scenario=None, default_equipment_mode="unequipped"):
         self._root_seed_factory = root_seed_factory or (lambda: secrets.randbits(256))
         self._lock = threading.RLock()
         self._active = None
@@ -169,6 +171,12 @@ class GeneratedArenaSession:
         # only its existing three Generate fields and has no gear distribution.
         self._ground_item_descriptions = copy.deepcopy(ground_item_descriptions)
         self._ground_loadout_profile = copy.deepcopy(ground_loadout_profile)
+        from arena_loadout_profiles import bundled_profiles
+        self._bundled_ground_profiles = bundled_profiles()
+        self._uploaded_ground_profiles = {}
+        self._selected_ground_profile_id = (
+            None if self._ground_loadout_profile is None else
+            self._ground_loadout_profile.get("profile_id", "caller-profile"))
         if authored_draw_scenario is not None and (
                 ground_item_descriptions is not None or ground_loadout_profile is not None):
             raise ArenaBrowserRequestError(
@@ -180,6 +188,10 @@ class GeneratedArenaSession:
             except ValueError as exc:
                 raise ArenaBrowserRequestError(str(exc)) from exc
         self._authored_draw_scenario = copy.deepcopy(authored_draw_scenario)
+        if default_equipment_mode not in ("equipped", "unequipped"):
+            raise ArenaBrowserRequestError("default equipment mode must be equipped or unequipped")
+        self._default_equipment_mode = (
+            "unequipped" if authored_draw_scenario is not None else default_equipment_mode)
         self._view_handles = {}
         self._selected_entity_handle = None
         self._display_names = {}
@@ -261,6 +273,7 @@ class GeneratedArenaSession:
             if self._active is None:
                 raise ArenaBrowserRequestError("Generate an Encounter before saving")
             try:
+                self._validate_initial_equipment_provenance(self._active)
                 inventory=capture(self._active.universe,self._active.encounter,self._rng_cursor)
                 return encode(self,inventory)
             except (TypeError,ValueError,RuntimeError) as exc:
@@ -268,6 +281,53 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError(
                     "This Arena state cannot be saved yet; native checkpoint validation refused it: "
                     +detail) from exc
+
+    @staticmethod
+    def _validate_initial_equipment_provenance(candidate):
+        from armor import ArmorInstance
+        from weapon import WeaponInstance
+        mode = candidate.equipment_mode
+        rows = candidate.initial_equipment_provenance
+        if mode == "unequipped":
+            if rows:
+                raise ArenaBrowserRequestError("unequipped Arena has an unexpected initial kit claim")
+            return True
+        if mode != "equipped" or type(rows) not in (tuple, list) or len(rows) != 2:
+            raise ArenaBrowserRequestError("equipped Arena does not record both participants' initial kits")
+        by_being = {row.get("being_id"): row for row in rows if type(row) is dict}
+        if len(by_being) != 2 or set(by_being) != set(candidate.encounter.being_list):
+            raise ArenaBrowserRequestError("initial kit identities do not match native Encounter participants")
+        for being_id in candidate.encounter.being_list:
+            being = candidate.universe.get_object_by_id(being_id)
+            row = by_being[being_id]
+            if type(row) is not dict or set(row) != {"policy", "being_id", "weapon", "armor", "shield"}:
+                raise ArenaBrowserRequestError("initial kit provenance has an unsupported field set")
+            weapon_row, armor_row, shield_row = row["weapon"], row["armor"], row["shield"]
+            if (type(weapon_row) is not dict or type(armor_row) is not dict
+                    or set(weapon_row) != {"object_id", "type", "hand", "basis", "status"}
+                    or set(armor_row) != {"object_id", "type", "basis", "status"}):
+                raise ArenaBrowserRequestError("initial weapon/armor provenance is malformed")
+            weapon = candidate.universe.get_object_by_id(weapon_row["object_id"])
+            armor = candidate.universe.get_object_by_id(armor_row["object_id"])
+            if (type(weapon) is not WeaponInstance or type(armor) is not ArmorInstance
+                    or weapon.current.obj_type != weapon_row["type"]
+                    or armor.current.obj_type != armor_row["type"]
+                    or weapon.parent_container_id != being.id or armor.parent_container_id != being.id
+                    or weapon.get_position() is not None or armor.get_position() is not None
+                    or weapon.id not in being.possessions or armor.id not in being.possessions
+                    or weapon.id not in being.weapons
+                    or being.current.armor_id != armor.id):
+                raise ArenaBrowserRequestError("initial equipment claims disagree with native custody or slots")
+            if shield_row is not None:
+                if (type(shield_row) is not dict or set(shield_row) !=
+                        {"object_id", "type", "hand", "basis", "status"}):
+                    raise ArenaBrowserRequestError("initial shield provenance is malformed")
+                shield = candidate.universe.get_object_by_id(shield_row["object_id"])
+                if (type(shield) is not WeaponInstance or shield.current.obj_type != shield_row["type"]
+                        or shield.parent_container_id != being.id or shield.get_position() is not None
+                        or shield.id not in being.possessions or shield.id not in being.weapons):
+                    raise ArenaBrowserRequestError("initial shield claim disagrees with native custody or hand state")
+        return True
 
     def load_encounter_bytes(self, wire):
         """Validate and atomically replace this session from a portable native file."""
@@ -339,7 +399,9 @@ class GeneratedArenaSession:
                 meta['root_seed'],meta['placement_seed'],
                 participants[0].native.engine_identity,tuple(participants),(),tuple(ground),
                 tuple((row.source_item_id,row.native_object_id) for row in ground),
-                layout,0,())
+                layout,0,tuple(meta['ground_loadout_provenance']),
+                tuple(meta['initial_equipment_provenance']),meta['equipment_mode'])
+            self._validate_initial_equipment_provenance(candidate)
             plan_wire=(None if meta['movement_plan_base64'] is None else
                 base64.b64decode(meta['movement_plan_base64'],validate=True))
             plan_data=None if plan_wire is None else decode_plan(plan_wire)
@@ -432,6 +494,7 @@ class GeneratedArenaSession:
                 "movement_available": False,
                 "movement_reason": _MOVEMENT_DISABLED,
                 "starter_ground_equipment_available": self._ground_loadout_profile is not None,
+                "default_equipment_mode": self._default_equipment_mode,
             }
         candidate = self._active
         from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction
@@ -493,6 +556,7 @@ class GeneratedArenaSession:
                 "name": self._display_names.get(evidence.entity_id, evidence.name),
                 "type": evidence.type_key,
                 "present_state": evidence.present_state,
+                "equipment_status": evidence.equipment_status,
                 "position_meters": None if p is None else {"x": p.x, "y": p.y, "z": p.z},
                 "cell": None if address is None else {"column": address.column, "row": address.row},
                 "pickup_available": pickup_available,
@@ -509,6 +573,7 @@ class GeneratedArenaSession:
         return {
             "state": "active",
             "starter_ground_equipment_available": self._ground_loadout_profile is not None,
+            "default_equipment_mode": candidate.equipment_mode,
             "save_available": True,
             "load_available": True,
             "encounter_name": self._encounter_name,
@@ -853,6 +918,10 @@ class GeneratedArenaSession:
                 }
 
             class_allocations = [dict(row) for row in initial_profile["class_allocations"]]
+            try:
+                npcgen_specification = json.loads(participant.native.source_record_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ArenaBrowserRequestError("complete NPC Generator source specification is malformed") from exc
             return {
                 "identity": {
                     "display_name": self._player_name,
@@ -888,6 +957,7 @@ class GeneratedArenaSession:
                 "anatomy": anatomy,
                 "movement": movement,
                 "inventory": inventory,
+                "npcgen_specification": npcgen_specification,
             }
 
     @staticmethod
@@ -905,11 +975,32 @@ class GeneratedArenaSession:
                 active.append(label)
         return active
 
-    @staticmethod
-    def _observer_being_sheet_unlocked(candidate, evidence):
+    def _observer_being_sheet_unlocked(self, candidate, evidence):
         """Same character-sheet schema, populated only from player evidence."""
         unknown = "Unknown from player-authorized evidence."
         position = evidence.get("position_meters")
+        target_id = next((entity_id for entity_id, handle in self._view_handles.items()
+                          if handle == evidence.get("handle")), None)
+        from arena_perception import ArenaPerceptionLedger
+        player = candidate.participants[0].native.being
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.id:
+            raise ArenaBrowserRequestError("player equipment observation evidence is unavailable")
+        visible_inventory = []
+        for item_evidence in ledger.current:
+            if (item_evidence.category != "object" or item_evidence.owner_id != target_id):
+                continue
+            handle = self._view_handles.get(item_evidence.entity_id)
+            if handle is None:
+                raise ArenaBrowserRequestError("visible equipment Object has no player-authorized handle")
+            visible_inventory.append({
+                "handle": handle,
+                "name": self._display_names.get(item_evidence.entity_id, item_evidence.name),
+                "type": item_evidence.type_key,
+                "status": ("carried; equipment state not represented"
+                           if item_evidence.equipment_status == "carried"
+                           else item_evidence.equipment_status),
+            })
         return {
             "identity": {"display_name": evidence["name"],
                 "native_type": evidence["type"], "race": None,
@@ -931,8 +1022,9 @@ class GeneratedArenaSession:
             "movement": {"position_meters": position, "cell": evidence.get("cell"),
                 "hex_facing": None, "posture": None, "selected_plan": None,
                 "speed": None, "speed_status": unknown},
-            "inventory": {"status": "unavailable", "items": [],
-                "carried_weight_pounds": None, "encumbrance_status": unknown},
+            "inventory": {"status": "available", "items": visible_inventory,
+                "carried_weight_pounds": None,
+                "encumbrance_status": "Weight and unobserved custody details are unavailable from player evidence."},
         }
 
     @staticmethod
@@ -1104,11 +1196,88 @@ class GeneratedArenaSession:
         with self._lock:
             return self._view_unlocked()
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _profile_validation_library():
+        from library import Library
+        return Library(config_dir=str(Path(__file__).resolve().parent / "config"))
+
+    def ground_profile_catalog(self):
+        from arena_loadout_profiles import preview
+        library = self._profile_validation_library()
+        with self._lock:
+            rows = [{"profile_id": "none", "title": "No ground Objects",
+                     "count_per_encounter": 0, "type_counts": {}}]
+            for profile in self._bundled_ground_profiles.values():
+                summary = preview(profile, library)
+                rows.append({**summary, "profile_id": profile["profile_id"]})
+            for profile_id, profile in self._uploaded_ground_profiles.items():
+                summary = preview(profile, library)
+                rows.append({**summary, "profile_id": profile_id})
+            if (self._ground_loadout_profile is not None
+                    and self._selected_ground_profile_id not in {row["profile_id"] for row in rows}):
+                summary = preview(self._ground_loadout_profile, library)
+                rows.append({**summary, "profile_id": self._selected_ground_profile_id,
+                             "title": "Server supplied: " + summary["title"]})
+            return {"profiles": rows, "selected_profile_id": self._selected_ground_profile_id}
+
+    def select_ground_profile(self, payload):
+        if type(payload) is not dict or set(payload) != {"profile_id"}:
+            raise ArenaBrowserRequestError("profile selection requires exactly profile_id")
+        profile_id = payload["profile_id"]
+        if type(profile_id) is not str:
+            raise ArenaBrowserRequestError("profile_id must be text")
+        with self._lock:
+            if self._active is not None:
+                raise ArenaBrowserRequestError("start a New Encounter before changing its ground profile")
+            if profile_id == "none":
+                self._selected_ground_profile_id = None
+                self._ground_loadout_profile = None
+                self._ground_item_descriptions = None
+            else:
+                profile = (self._bundled_ground_profiles.get(profile_id)
+                           or self._uploaded_ground_profiles.get(profile_id))
+                if (profile is None and type(self._ground_loadout_profile) is dict
+                        and profile_id == self._ground_loadout_profile.get("profile_id")):
+                    profile = self._ground_loadout_profile
+                if profile is None:
+                    raise ArenaBrowserRequestError("selected ground profile is unavailable")
+                from arena_loadout_profiles import validate_profile
+                try:
+                    self._ground_loadout_profile = validate_profile(
+                        profile, self._profile_validation_library())
+                except ValueError as exc:
+                    raise ArenaBrowserRequestError(f"ground profile was refused: {exc}") from exc
+                self._ground_item_descriptions = None
+                self._selected_ground_profile_id = profile_id
+            return self.ground_profile_catalog()
+
+    def upload_ground_profile(self, raw):
+        from arena_loadout_profiles import parse_upload, preview
+        try:
+            profile = parse_upload(raw, self._profile_validation_library())
+            digest = hashlib.sha256(raw).hexdigest()[:16]
+            profile_id = "uploaded:" + digest
+            with self._lock:
+                if self._active is not None:
+                    raise ArenaBrowserRequestError("start a New Encounter before uploading a profile")
+                self._uploaded_ground_profiles[profile_id] = profile
+                self._selected_ground_profile_id = profile_id
+                self._ground_loadout_profile = profile
+                self._ground_item_descriptions = None
+                return {"selected_profile_id": profile_id,
+                        "preview": {**preview(profile, self._profile_validation_library()),
+                                    "profile_id": profile_id},
+                        **self.ground_profile_catalog()}
+        except ValueError as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
+
     def generate(self, payload):
         expected = {"starting_experience", "width_cells", "height_cells"}
         if (type(payload) is not dict or set(payload) not in
-                (expected, expected | {"ground_equipment"})):
-            raise ArenaBrowserRequestError("Generate requires XP, dimensions, and optional ground_equipment")
+                (expected, expected | {"ground_equipment"},
+                 expected | {"equipment_mode"}, expected | {"equipment_mode", "ground_equipment"})):
+            raise ArenaBrowserRequestError("Generate requires XP, dimensions, and optional equipment settings")
         starting_experience = _parse_decimal(payload, "starting_experience", 0)
         width_cells = _parse_decimal(payload, "width_cells", 5)
         height_cells = _parse_decimal(payload, "height_cells", 5)
@@ -1124,6 +1293,9 @@ class GeneratedArenaSession:
         elif equipment_choice == "none":
             loadout_profile = None
             item_descriptions = None
+        equipment_mode = payload.get("equipment_mode", self._default_equipment_mode)
+        if equipment_mode not in ("equipped", "unequipped"):
+            raise ArenaBrowserRequestError("equipment_mode must be equipped or unequipped")
 
         # Serialize generation with all session edits/reads. The prior candidate
         # stays active until a complete new candidate and native RNG owner exist.
@@ -1135,7 +1307,9 @@ class GeneratedArenaSession:
                 candidate = initialize_two_being_arena(
                     starting_experience, width_cells, height_cells, root_seed,
                     ground_item_descriptions=item_descriptions,
-                    ground_loadout_profile=loadout_profile)
+                    ground_loadout_profile=loadout_profile,
+                    equipment_mode=equipment_mode)
+                self._validate_initial_equipment_provenance(candidate)
                 if self._authored_draw_scenario is not None:
                     from arena_authored_draw_scenario import author_scenario
                     author_scenario(candidate, self._authored_draw_scenario)

@@ -177,7 +177,8 @@ def _ground_positions(layout, occupied_addresses, item_count, seed):
 
 
 def realize_arena_ground_objects(universe, item_descriptions, initial_layout,
-                                 being_addresses, placement_seed) -> ArenaGroundObjectSet:
+                                 being_addresses, placement_seed, *,
+                                 require_initial_capacity=False) -> ArenaGroundObjectSet:
     """Preflight, independently instantiate, and register typed ground Objects.
 
     Initial vacant hexes are randomly selected without replacement. If those
@@ -186,6 +187,18 @@ def realize_arena_ground_objects(universe, item_descriptions, initial_layout,
     a display-reference placement only and makes no geometry or clearance claim.
     """
     specs = _validated_specs(universe, item_descriptions)
+    if require_initial_capacity:
+        occupied = set(being_addresses)
+        map_cells = len(set(initial_layout.addresses()))
+        available = map_cells - len(occupied)
+        if len(specs) > available:
+            required = len(specs) + len(occupied)
+            _refuse("ground_profile_exceeds_map_capacity",
+                    f"Ground profile requires {len(specs)} distinct cells; map has "
+                    f"{map_cells} cells, including {len(occupied)} Being cells, "
+                    f"so choose dimensions with at least {required} total cells.",
+                    required_ground_cells=len(specs), required_total_cells=required,
+                    available_ground_cells=available)
     layout, addresses = _ground_positions(initial_layout, being_addresses, len(specs), placement_seed)
     if len(addresses) != len(specs) or len(set(addresses)) != len(specs):
         _refuse("ground_placement_collision", "ground Objects must receive distinct cell addresses")

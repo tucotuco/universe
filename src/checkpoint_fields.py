@@ -503,8 +503,8 @@ FIELD_ADAPTERS = {
         "required": '_current _history environment observer_id'.split(),
     },
     'arena_perception.ArenaPerceptionEvidence': {
-        "allowed": 'basis boundary category entity_id name observer_id position present_state time type_key'.split(),
-        "required": 'basis boundary category entity_id name observer_id position present_state time type_key'.split(),
+        "allowed": 'basis boundary category entity_id name observer_id position present_state time type_key owner_id equipment_status'.split(),
+        "required": 'basis boundary category entity_id name observer_id position present_state time type_key owner_id equipment_status'.split(),
     },
 }
 

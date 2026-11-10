@@ -27,6 +27,8 @@ class ArenaPerceptionEvidence:
     boundary: int
     time: float
     basis: str = BASIS
+    owner_id: str | None = None
+    equipment_status: str | None = None
 
     def __post_init__(self):
         if any(type(value) is not str or not value for value in
@@ -39,6 +41,15 @@ class ArenaPerceptionEvidence:
             raise ValueError("unsupported Arena present-state evidence")
         if self.present_state == "ground" and self.position is None:
             raise ValueError("ground Object evidence requires a current position")
+        if self.owner_id is not None and (type(self.owner_id) is not str or not self.owner_id):
+            raise ValueError("Arena Object owner evidence must be a native Being identity or None")
+        if self.category == "being" and (self.owner_id is not None or self.equipment_status is not None):
+            raise ValueError("Being evidence cannot contain Object equipment state")
+        if self.equipment_status is not None and self.equipment_status not in (
+                "carried", "worn", "held in left hand", "held in right hand"):
+            raise ValueError("unsupported visible Arena equipment status")
+        if (self.equipment_status is not None) != (self.owner_id is not None):
+            raise ValueError("visible equipment status requires its owner identity")
         if self.position is not None and type(self.position) is not CartesianPosition:
             raise TypeError("Arena position evidence requires native CartesianPosition")
         if type(self.boundary) is not int or self.boundary < 0:
@@ -94,9 +105,23 @@ def _initial_evidence(encounter, observer_id, entity_id, *, boundary=0):
              "ground" if parent is None and position is not None else
              "carried" if parent is not None else "unplaced")
     type_key = "Being" if category == "being" else obj.current.obj_type
+    owner_id = None
+    equipment_status = None
+    if category == "object" and parent is not None:
+        from being import BeingInstance
+        owner = encounter.universe.get_object_by_id(parent)
+        if type(owner) is not BeingInstance or owner.id not in encounter.being_list:
+            raise ValueError("visible carried Object must belong to a participating native Being")
+        owner_id = owner.id
+        if owner.current.armor_id == entity_id:
+            equipment_status = "worn"
+        else:
+            slots = [slot for slot, held in owner.current.body_parts.items() if held == entity_id]
+            equipment_status = f"held in {slots[0]}" if slots else "carried"
     return ArenaPerceptionEvidence(observer_id, entity_id, category,
         obj.name or type_key, type_key, position, state,
-        boundary, float(encounter.time))
+        boundary, float(encounter.time), owner_id=owner_id,
+        equipment_status=equipment_status)
 
 
 def initialize_arena_perception(encounter):
@@ -141,7 +166,8 @@ def refresh_candidate_names(encounter):
             obj = encounter.universe.get_object_by_id(entity_id)
             updated = ArenaPerceptionEvidence(previous.observer_id, previous.entity_id,
                 previous.category, obj.name or obj.current.obj_type, previous.type_key,
-                previous.position, previous.present_state, 0, 0.0)
+                previous.position, previous.present_state, 0, 0.0,
+                owner_id=previous.owner_id, equipment_status=previous.equipment_status)
             ledger._current[entity_id] = updated
             for index, row in enumerate(ledger._history):
                 if row.entity_id == entity_id:

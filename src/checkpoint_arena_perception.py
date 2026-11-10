@@ -12,8 +12,8 @@ from arena_perception import (
 )
 
 
-LEDGER_SCHEMA = "universe.arena-perception-ledger/1"
-EVIDENCE_SCHEMA = "universe.arena-perception-evidence/1"
+LEDGER_SCHEMA = "universe.arena-perception-ledger/2"
+EVIDENCE_SCHEMA = "universe.arena-perception-evidence/2"
 POSITION_SCHEMA = "universe.cartesian-position-binary64/1"
 MAX_LEDGER_ENTITIES = 3002  # Two Beings plus the adopted 3,000-object Arena ceiling.
 MAX_HISTORY_ROWS = 16_384
@@ -21,7 +21,7 @@ MAX_TEXT_CHARS = 4096
 _LEDGER_FIELDS = frozenset(("_current", "_history", "environment", "observer_id"))
 _EVIDENCE_FIELDS = frozenset((
     "basis", "boundary", "category", "entity_id", "name", "observer_id",
-    "position", "present_state", "time", "type_key",
+    "position", "present_state", "time", "type_key", "owner_id", "equipment_status",
 ))
 
 
@@ -126,16 +126,28 @@ def _evidence_data(row):
           "Being evidence must use the present state")
     _need(fields["category"] != "object" or state != "present",
           "Object evidence cannot use the Being present state")
+    owner_id, equipment_status = fields["owner_id"], fields["equipment_status"]
+    _need(owner_id is None or type(owner_id) is str and owner_id,
+          "visible Object owner must be a native Being identity or None")
+    _need(equipment_status is None or equipment_status in (
+          "carried", "worn", "held in left hand", "held in right hand"),
+          "unsupported visible Object equipment status")
+    _need((owner_id is None) == (equipment_status is None),
+          "visible Object equipment status requires its owner identity")
+    _need(fields["category"] == "object" or owner_id is None,
+          "Being evidence cannot contain an Object owner")
     return (EVIDENCE_SCHEMA, fields["observer_id"], fields["entity_id"],
             fields["category"], fields["name"], fields["type_key"], position,
-            state, fields["boundary"], _time_data(fields["time"]), fields["basis"])
+            state, fields["boundary"], _time_data(fields["time"]), fields["basis"],
+            owner_id, equipment_status)
 
 
 def _evidence_from_data(data):
-    _need(type(data) is tuple and len(data) == 11
+    _need(type(data) is tuple and len(data) == 13
           and type(data[0]) is str and data[0] == EVIDENCE_SCHEMA,
           "malformed Arena perception evidence record")
-    _, observer_id, entity_id, category, name, type_key, position, state, boundary, time_data, basis = data
+    (_, observer_id, entity_id, category, name, type_key, position, state,
+     boundary, time_data, basis, owner_id, equipment_status) = data
     values = (observer_id, entity_id, category, name, type_key, state, basis)
     _need(all(type(value) is str and value for value in values),
           "Arena evidence identity and label values must be nonempty text")
@@ -144,7 +156,8 @@ def _evidence_from_data(data):
     _need(type(boundary) is int and boundary >= 0, "invalid evidence boundary")
     try:
         return ArenaPerceptionEvidence(observer_id, entity_id, category, name, type_key,
-            _decode_position(position), state, boundary, _decode_time(time_data), basis)
+            _decode_position(position), state, boundary, _decode_time(time_data), basis,
+            owner_id, equipment_status)
     except (TypeError, ValueError) as exc:
         raise ArenaPerceptionCheckpointRejected(
             f"malformed Arena perception evidence value: {exc}") from exc
@@ -211,6 +224,8 @@ def _validate_wire(data, *, observer_id, entity_ids, visible_entity_ids, boundar
     for row in current_by_id.values():
         _need(row.boundary == boundary and row.time == time,
               "current Arena evidence is stale relative to the committed boundary")
+        _need(row.owner_id is None or row.owner_id in entity_ids,
+              "current visible Object owner is outside the native Entity binding set")
 
     last_boundary = -1
     last_time = -1.0
@@ -221,6 +236,8 @@ def _validate_wire(data, *, observer_id, entity_ids, visible_entity_ids, boundar
         row = _evidence_from_data(row_data)
         _need(row.observer_id == observer_id and row.entity_id in allowed,
               "history evidence has a foreign observer or dangling Entity")
+        _need(row.owner_id is None or row.owner_id in entity_ids,
+              "history Object owner is outside the native Entity binding set")
         _need(row.boundary <= boundary and row.time <= time,
               "history evidence lies beyond the committed boundary")
         _need(row.boundary >= last_boundary and row.time >= last_time,
@@ -310,8 +327,21 @@ def encode_arena_perception_ledger(ledger, *, observer, encounter, registry):
                           "carried" if parent is not None else
                           "ground" if position is not None else "unplaced")
         expected_position = None if expected_state == "carried" else position
+        expected_owner = parent if category == "object" and parent is not None else None
+        expected_equipment = None
+        if expected_owner is not None:
+            from being import BeingInstance
+            owner = registry.get(expected_owner)
+            _need(type(owner) is BeingInstance and owner.id in encounter.being_list,
+                  "visible carried Object owner is not a participating native Being")
+            if owner.current.armor_id == entity_id:
+                expected_equipment = "worn"
+            else:
+                slots = [slot for slot, held in owner.current.body_parts.items() if held == entity_id]
+                expected_equipment = f"held in {slots[0]}" if slots else "carried"
         _need(row.name == expected_name and row.present_state == expected_state
-              and row.position == expected_position,
+              and row.position == expected_position and row.owner_id == expected_owner
+              and row.equipment_status == expected_equipment,
               "current Arena evidence disagrees with committed Entity name, custody, or position")
     for row in ledger._history:
         _evidence_data(row)
@@ -321,6 +351,10 @@ def encode_arena_perception_ledger(ledger, *, observer, encounter, registry):
         _need((row.observer_id, row.category, row.type_key)
               == (observer.id, category, type_key),
               "Arena history evidence disagrees with its durable observer/Entity binding")
+        if row.owner_id is not None:
+            owner = registry.get(row.owner_id)
+            _need(type(owner) is BeingInstance and owner.id in encounter.being_list,
+                  "Arena history equipment evidence has a non-Being owner")
     return encode_detached_arena_perception_ledger(ledger,
         observer_id=observer.id, entity_ids=entity_ids,
         visible_entity_ids=visible_entity_ids, boundary=boundary,

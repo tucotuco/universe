@@ -202,9 +202,10 @@ class TestArenaReadyWeapon(unittest.TestCase):
                     "status": "available", "hands": [
                         {"name": "left hand", "occupancy": "empty"},
                         {"name": "right hand", "occupancy": "empty"}]})
-                opponent_projection = next(row for row in view["entities"]
-                                           if row["category"] == "being"
-                                           and row["name"] == opponent.name)
+                # Arena presentation adds a session-only label to the opponent;
+                # it remains the sole other Being in the observer's entity view.
+                opponent_projection, = (row for row in view["entities"]
+                                        if row["category"] == "being")
                 self.assertNotIn("anatomy", opponent_projection)
                 self.assertNotIn("body_parts", opponent_projection)
                 source = json.loads(candidate.participants[0].native.source_record_bytes)
@@ -215,8 +216,11 @@ class TestArenaReadyWeapon(unittest.TestCase):
                     "FIT": scores[4]})
                 self.assertEqual(player.get_hit_points(), source["state"]["hps"])
                 self.assertEqual(player.get_experience(), 10000)
-                self.assertEqual(player.current.length, source["state"]["height"])
-                self.assertEqual(player.current.weight, source["state"]["weight"])
+                from measured_values import truncate_measurement
+                self.assertEqual(player.current.length,
+                                 truncate_measurement(source["state"]["height"]))
+                self.assertEqual(player.current.weight,
+                                 truncate_measurement(source["state"]["weight"]))
                 self.assertEqual(player.possessions, [])
                 self.assertEqual(player.weapons, [])
                 self.assertEqual(opponent.possessions, [])

@@ -40,7 +40,12 @@ def fixture(seed=20261107):
 
 def move_player_to(session, candidate, player, address):
     layout = candidate.arena_map.layout
-    destination = layout.center_position(address, z=player.get_position().z)
+    # Arena map destinations follow the adopted two-decimal native truncation;
+    # compare against the accepted coordinate, not the untruncated geometric
+    # center used to derive the hex address.
+    from measured_values import truncate_position
+    destination = truncate_position(
+        layout.center_position(address, z=player.get_position().z))
     if player.get_position() == destination:
         return
     session.choose_destination({"column": address.column, "row": address.row,
@@ -133,7 +138,9 @@ class TestArenaGroundPickup(unittest.TestCase):
         destination = max(candidate.arena_map.layout.addresses(),
                           key=lambda cell: math.dist(origin.as_tuple(),
                               candidate.arena_map.layout.center_position(cell, z=origin.z).as_tuple()))
-        destination_position = candidate.arena_map.layout.center_position(destination, z=origin.z)
+        from measured_values import truncate_position
+        destination_position = truncate_position(
+            candidate.arena_map.layout.center_position(destination, z=origin.z))
         session.choose_destination({"column": destination.column, "row": destination.row,
                                     "rate": "sprint", "facing_policy": "turn"})
         for _ in range(100):

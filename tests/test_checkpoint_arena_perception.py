@@ -68,7 +68,7 @@ class ArenaPerceptionCheckpointTests(unittest.TestCase):
         for participant in candidate.participants:
             observer = participant.native.being
             data = _native_encoding(candidate, observer)
-            self.assertEqual(data[0], "universe.arena-perception-ledger/1")
+            self.assertEqual(data[0], "universe.arena-perception-ledger/2")
             self.assertEqual(len(data[3]), 1)
             decoded = _decode(candidate, observer, data)
             self.assertIsNot(decoded, observer._arena_perception_ledger)
@@ -190,7 +190,7 @@ print(repr(roundtrip))
 
         history = list(data[4])
         row = history[0]
-        history[0] = (*row[:8], 1, row[9], row[10])
+        history[0] = (*row[:8], 1, *row[9:])
         with self.assertRaisesRegex(ArenaPerceptionCheckpointRejected,
                                     "beyond the committed boundary"):
             decode_arena_perception_ledger((data[0], data[1], data[2], data[3],
@@ -272,7 +272,7 @@ print(repr(roundtrip))
             encounter.arena_activation_enabled = True
             encounter.arena_movement_activation = None
             with self.assertRaisesRegex(CheckpointRejected,
-                    "lacks its movement activation record"):
+                    "unactivated Arena state contains incompatible activation or progression data"):
                 capture_checkpoint_candidate(candidate.universe, encounter,
                     quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
         finally:
@@ -366,7 +366,7 @@ print(repr(roundtrip))
         repeated_empty = replace(movement_receipt, boundary=2,
                                  start=("integer", "1"))
         with self.assertRaisesRegex(ReceiptDescriptorRejected,
-                                   "movement-only receipt is not the initial boundary"):
+                                   "initial and continuing movement receipt order is invalid"):
             validate_receipt_descriptor(replace(descriptor,
                 receipts=(movement_receipt, repeated_empty)))
         committed_history = encounter.__dict__["_atomic_interval_history"]

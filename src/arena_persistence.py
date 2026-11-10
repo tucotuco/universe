@@ -9,7 +9,7 @@ import math
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/3'
+SCHEMA = 'universe.generated-arena-save/4'
 MAX_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 
@@ -96,6 +96,9 @@ def _session_record(session, native_wire):
             if value==session._selected_entity_handle),None),
         'source_beings':sources,
         'ground_objects':grounds,
+        'ground_loadout_provenance':list(candidate.ground_loadout_provenance),
+        'initial_equipment_provenance':list(candidate.initial_equipment_provenance),
+        'equipment_mode':candidate.equipment_mode,
     }
 
 
@@ -136,7 +139,8 @@ def decode(wire):
     required={'encounter_name','player_name','player_id','opponent_id','starting_experience',
         'root_seed','placement_seed',
         'map','world_premise','display_names','movement_plan_base64','movement_sequence',
-        'selected_entity_id','source_beings','ground_objects'}
+        'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
+        'initial_equipment_provenance','equipment_mode'}
     if type(s) is not dict or set(s)!=required:
         raise ArenaSaveRejected('Arena session metadata has unknown or missing fields')
     for key in ('encounter_name','player_name','player_id','opponent_id'):
@@ -157,6 +161,10 @@ def decode(wire):
         raise ArenaSaveRejected('Arena source Being records are malformed')
     if type(s['ground_objects']) is not list:
         raise ArenaSaveRejected('Arena ground Object records are malformed')
+    if (type(s['ground_loadout_provenance']) is not list
+            or type(s['initial_equipment_provenance']) is not list
+            or s['equipment_mode'] not in ('equipped','unequipped')):
+        raise ArenaSaveRejected('Arena starting equipment provenance is malformed')
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)
         except (TypeError,ValueError) as exc:raise ArenaSaveRejected('movement plan encoding is invalid') from exc

@@ -21,7 +21,8 @@ YARDS_TO_METERS = 0.9144
 MAX_ATTEMPTS_PER_ROLE = 32
 MAX_MAP_CELLS = 1_000_000
 HIGH_XP_AGE_DIAGNOSTIC = "The starting experience is probably unreasonably high. Try reducing the XP value."
-_RETRYABLE_CODES = frozenset(("unsupported_native_race", "skill_profile_unresolved"))
+_RETRYABLE_CODES = frozenset(("unsupported_native_race", "skill_profile_unresolved",
+                              "unsupported_equipment_anatomy"))
 
 
 class ArenaInitializationRefusal(ValueError):
@@ -133,6 +134,8 @@ class ArenaInitializationCandidate:
     ground_layout: ArenaHexLayout | None = None
     ground_placement_seed: int | None = None
     ground_loadout_provenance: tuple[dict, ...] = ()
+    initial_equipment_provenance: tuple[dict, ...] = ()
+    equipment_mode: str = "equipped"
 
 
 def _reject(code: str, message: str, **details):
@@ -168,13 +171,16 @@ def _validate_request(starting_experience, width_cells, height_cells, root_seed)
 def initialize_two_being_arena(starting_experience: int, width_cells: int, height_cells: int,
                                root_seed: int, *, library: Library | None = None,
                                ground_item_descriptions=None,
-                               ground_loadout_profile: dict | None = None) -> ArenaInitializationCandidate:
+                               ground_loadout_profile: dict | None = None,
+                               equipment_mode: str = "unequipped") -> ArenaInitializationCandidate:
     """Prepare a complete time-zero Arena in a fresh Universe, then return it atomically.
 
     Candidate seeds are SHA-256-derived by role and attempt. Placement uses an
     independently namespaced seed and a private ``random.Random`` instance.
     """
     _validate_request(starting_experience, width_cells, height_cells, root_seed)
+    if equipment_mode not in ("equipped", "unequipped"):
+        _reject("invalid_equipment_mode", "equipment mode must be equipped or unequipped")
     try:
         from npcgen import api
         identity = api.engine_identity()
@@ -182,6 +188,8 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         _reject("npcgen_unavailable", "install the npcgen package before Arena initialization", error=str(exc))
     if type(identity) is not dict:
         _reject("engine_identity_unavailable", "npcgen returned no engine identity")
+    if library is None:
+        library = Library(config_dir=str(Path(__file__).resolve().parent / "config"))
     if ground_item_descriptions is not None and ground_loadout_profile is not None:
         _reject("ambiguous_ground_equipment_source",
                 "supply typed test items or a Generator profile, not both")
@@ -189,20 +197,33 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
             and type(ground_item_descriptions) not in (list, tuple)):
         _reject("invalid_ground_items", "ground item descriptions must be a finite list")
     normalized_loadout_profile = None
+    arena_profile_format = "universe-arena-ground-loadout-profile"
     if ground_loadout_profile is not None:
-        if not callable(getattr(api, "arena_loadout", None)) or not callable(
-                getattr(api, "validate_loadout_profile", None)) or not callable(
-                getattr(api, "validate_loadout", None)):
-            _reject("npcgen_loadout_unavailable",
-                    "installed npcgen package lacks the validated ordinary loadout API")
         try:
-            normalized_loadout_profile = api.validate_loadout_profile(ground_loadout_profile)
+            if (type(ground_loadout_profile) is dict
+                    and ground_loadout_profile.get("format") == arena_profile_format):
+                from arena_loadout_profiles import validate_profile
+                normalized_loadout_profile = validate_profile(ground_loadout_profile, library)
+            else:
+                if not callable(getattr(api, "arena_loadout", None)) or not callable(
+                        getattr(api, "validate_loadout_profile", None)) or not callable(
+                        getattr(api, "validate_loadout", None)):
+                    _reject("npcgen_loadout_unavailable",
+                            "installed npcgen package lacks the validated ordinary loadout API")
+                from arena_loadout_profiles import validate_profile
+                normalized_loadout_profile = validate_profile(ground_loadout_profile, library)
         except Exception as exc:
-            _reject("invalid_ground_loadout_profile", "caller-supplied npcgen profile was refused",
+            _reject("invalid_ground_loadout_profile", "caller-supplied ground profile was refused",
                     error=type(exc).__name__, reason=str(exc)[:256])
-
-    if library is None:
-        library = Library(config_dir=str(Path(__file__).resolve().parent / "config"))
+        from arena_loadout_profiles import preview
+        max_objects = preview(normalized_loadout_profile, library)["count_per_encounter"]
+        capacity = width_cells * height_cells - 2
+        if max_objects > capacity:
+            _reject("ground_profile_exceeds_map_capacity",
+                    f"Ground profile requires {max_objects} distinct cells; map has {width_cells * height_cells} cells, "
+                    f"including 2 Being cells, so choose dimensions with at least {max_objects + 2} total cells.",
+                    required_ground_cells=max_objects, required_total_cells=max_objects + 2,
+                    available_ground_cells=capacity, profile_id=normalized_loadout_profile["profile_id"])
     world = Universe("Arena candidate", library=library)
     roles = ("player_controlled", "arena_controlled")
     selected: list[tuple[str, ArenaNativeBeing, int]] = []
@@ -225,6 +246,19 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
                             attempt_history=[_attempt_dict(item) for item in attempts])
                 failures.append(exc)
                 continue
+            if equipment_mode == "equipped":
+                parts = native.being.current.body_parts
+                if (type(parts) is not dict
+                        or not any(name in parts and parts[name] is None
+                                   for name in ("right hand", "left hand"))):
+                    refusal = ArenaNPCRefusal(
+                        "unsupported_equipment_anatomy",
+                        "native race template has no explicitly represented free hand",
+                        details={"native_type": native.being.current.obj_type})
+                    attempts.append(ArenaAttempt(role, attempt_index + 1, candidate_seed,
+                        "rejected", refusal.code, dict(refusal.details), native.source_sha256))
+                    failures.append(refusal)
+                    continue
             attempts.append(ArenaAttempt(role, attempt_index + 1, candidate_seed,
                                          "selected", source_sha256=native.source_sha256))
             selected.append((role, native, candidate_seed))
@@ -268,9 +302,29 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
     world.add_object(first.being)
     world.add_object(second.being)
 
+    initial_equipment = []
+    if equipment_mode == "equipped":
+        from arena_initial_equipment import ArenaInitialEquipmentRefusal, equip_generated_being
+        try:
+            for native in (first, second):
+                initial_equipment.append(equip_generated_being(native, world, encounter))
+        except ArenaInitialEquipmentRefusal as exc:
+            _reject("initial_equipment_unavailable",
+                    "could not create a supported native starting kit", reason=str(exc))
+
     ground_descriptions = list(ground_item_descriptions or ())
     loadout_provenance = []
-    if normalized_loadout_profile is not None:
+    if (normalized_loadout_profile is not None
+            and normalized_loadout_profile.get("format") == arena_profile_format):
+        from arena_loadout_profiles import realize
+        try:
+            custom_descriptions, custom_provenance = realize(
+                normalized_loadout_profile, library, root_seed=root_seed)
+        except ValueError as exc:
+            _reject("arena_ground_profile_refused", "Arena ground profile selection failed", reason=str(exc))
+        ground_descriptions.extend(custom_descriptions or ())
+        loadout_provenance.extend(custom_provenance)
+    elif normalized_loadout_profile is not None:
         for role_index, (role, native, _candidate_seed) in enumerate(selected):
             sampling_seed = _seed(root_seed, identity, "npcgen-arena-loadout-v1", role_index)
             try:
@@ -316,7 +370,8 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
             ground_set = realize_arena_ground_objects(
                 world, ground_descriptions, layout,
                 tuple(layout.cell_at_position(placement.position) for placement in placements),
-                ground_placement_seed)
+                ground_placement_seed,
+                require_initial_capacity=normalized_loadout_profile is not None)
         except ArenaGroundObjectRefusal as exc:
             _reject(exc.code, exc.message, **exc.details)
         ground_objects = ground_set.placements
@@ -349,4 +404,4 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         world, encounter, ArenaMap(width_cells, height_cells, layout), ArenaWorldPremise(), starting_experience,
         root_seed, placement_seed, dict(identity), tuple(participants), tuple(attempts),
         ground_objects, ground_item_bindings, ground_layout, ground_placement_seed,
-        tuple(loadout_provenance))
+        tuple(loadout_provenance), tuple(initial_equipment), equipment_mode)

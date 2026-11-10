@@ -63,7 +63,8 @@ def main():
         print("Arena UI terminal tracing enabled.", flush=True)
     serve_local(args.port, session=GeneratedArenaSession(
         trace_ui=trace_ui, ground_loadout_profile=profile,
-        authored_draw_scenario=draw_scenario))
+        authored_draw_scenario=draw_scenario,
+        default_equipment_mode="equipped"))
 
 
 if __name__ == "__main__":

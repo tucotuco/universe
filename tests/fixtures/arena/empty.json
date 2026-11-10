@@ -1,0 +1,8 @@
+{
+  "format": "universe-arena-ground-loadout-profile",
+  "schema_version": 1,
+  "profile_id": "empty",
+  "title": "Empty ground",
+  "mode": "empty",
+  "items": []
+}

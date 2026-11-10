@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import re
 
 from abilities import Abilities
 from being import BeingDefinition, BeingInstance
@@ -50,6 +51,7 @@ class ArenaNativeBeing:
     source_sha256: str
     engine_identity: dict
     skills_status: dict
+    generated_items: dict | None = None
 
 
 def _refuse(code: str, message: str, **details):
@@ -275,6 +277,12 @@ def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experi
     record_bytes = fields["record_bytes"]
     if json.loads(record_bytes) != fields["record"]:
         _refuse("record_mismatch", "npcgen API record and canonical JSON export disagree")
+    try:
+        validate_npcgen_source_record(record_bytes)
+    except ValueError as exc:
+        _refuse("invalid_complete_generator_record",
+                "complete npcgen specification did not round-trip through its native current schema",
+                reason=str(exc)[:512])
 
     definition = fields["template"].copy()
     # Native templates intentionally leave several common human Being races
@@ -301,12 +309,26 @@ def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experi
 
     being = BeingInstance(definition, name=fields["name"])
     being._arena_initial_profile = fields["initial_profile"]
+    generated_items = None
+    arena_items = getattr(api, "arena_items", None)
+    if callable(arena_items):
+        try:
+            generated_items = arena_items(candidate.npc)
+        except Exception as exc:
+            _refuse("generator_items_refused", "npcgen typed possession projection was refused",
+                    error=type(exc).__name__, reason=str(exc)[:256])
+        if (type(generated_items) is not dict
+                or generated_items.get("format") != "npcgen-arena-items"
+                or generated_items.get("schema_version") != 1):
+            _refuse("generator_items_unsupported", "npcgen returned an unsupported typed possession projection")
+
     return ArenaNativeBeing(
         being=being,
         source_record_bytes=record_bytes,
         source_sha256=hashlib.sha256(record_bytes).hexdigest(),
         engine_identity=dict(fields["identity"]),
         skills_status=fields["status"],
+        generated_items=generated_items,
     )
 
 
@@ -326,6 +348,7 @@ def generate_npcgen_arena_being(universe: Universe, *, seed: int, starting_exper
 
 def validate_arena_initial_profile(profile, source_record_bytes):
     """Validate the native initial-profile record against preserved source data."""
+    validate_npcgen_source_record(source_record_bytes)
     validate_arena_initial_profile_record(profile)
     if type(profile) is not dict or set(profile) != {
             "schema_version", "age_years", "age_category", "birthday",
@@ -373,6 +396,67 @@ def validate_arena_initial_profile(profile, source_record_bytes):
             or initial_skills["resolution"] != generation.get("skill_resolution")):
         raise ValueError("Arena explicit initial skill ranks disagree with Generator provenance")
     return True
+
+
+def validate_npcgen_source_record(source_record_bytes):
+    """Validate every retained schema field without invoking or regenerating npcgen."""
+    def unique_pairs(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate NPC Generator field {key!r}")
+            out[key] = value
+        return out
+    try:
+        record = json.loads(source_record_bytes.decode("utf-8"),
+            object_pairs_hook=unique_pairs,
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(
+                f"non-finite NPC Generator value {value}")))
+    except Exception as exc:
+        raise ValueError(f"complete npcgen source record is malformed: {exc}") from exc
+    root_fields = {"format", "schema_version", "engine", "generation", "edits", "state", "sheet", "notes"}
+    state_fields = {"name", "classes", "xps", "levels", "race", "subrace", "sex", "scores",
+                    "exc_str", "age", "month", "day", "height", "weight", "hps", "psionics",
+                    "possessions", "family", "seed", "skills"}
+    sheet_fields = {"identity", "abilities", "age", "classes", "hit_points", "skills",
+                    "psionics", "possessions", "family"}
+    if (type(record) is not dict or set(record) != root_fields
+            or record.get("format") != "npcgen-npc" or record.get("schema_version") != 2
+            or type(record.get("engine")) is not dict
+            or set(record["engine"]) != {"name", "version", "rules_hash"}
+            or record["engine"].get("name") != "npcgen"
+            or type(record["engine"].get("version")) is not str
+            or not record["engine"]["version"]
+            or type(record["engine"].get("rules_hash")) is not str
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", record["engine"]["rules_hash"])
+            or type(record.get("state")) is not dict or set(record["state"]) != state_fields
+            or type(record.get("sheet")) is not dict or set(record["sheet"]) != sheet_fields
+            or type(record.get("generation")) is not dict
+            or type(record.get("edits")) is not list or type(record.get("notes")) is not dict):
+        raise ValueError("complete npcgen source record differs from the supported current v2 schema")
+    generation, state, sheet = record["generation"], record["state"], record["sheet"]
+    if (generation.get("seed") != state.get("seed")
+            or type(generation.get("seed")) is not int
+            or generation.get("mode") not in ("random", "class")
+            or type(generation.get("starting_experience")) is not int
+            or generation.get("starting_experience_meaning") != "arena-starting-total"
+            or type(generation.get("skill_resolution")) is not dict
+            or generation["skill_resolution"].get("status") not in ("resolved", "unresolved")
+            or type(state.get("classes")) is not list or type(state.get("xps")) is not list
+            or type(state.get("levels")) is not list
+            or not (len(state["classes"]) == len(state["xps"]) == len(state["levels"]))
+            or any(type(value) is not int or value < 0 for value in state["xps"])
+            or sum(state["xps"]) != generation["starting_experience"]
+            or state.get("skills") != sheet.get("skills")
+            or type(sheet.get("classes")) is not list
+            or len(sheet["classes"]) != len(state["classes"])
+            or any(type(row) is not str for row in record["notes"].values())):
+        raise ValueError("complete npcgen source record contains inconsistent generated fields")
+    expected_notes = {"identity", "abilities", "age", "classes", "hit_points", "psionics",
+                      "possessions", "family", "general"}
+    if set(record["notes"]) != expected_notes:
+        raise ValueError("complete npcgen source note sections are incompatible")
+    return record
 
 
 def validate_arena_initial_profile_record(profile):

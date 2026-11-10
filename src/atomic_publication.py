@@ -666,7 +666,8 @@ def _make_plan(encounter,candidate,rng_owner):
     # after movement and custody writes have been prepared and before readers
     # can observe the committed boundary.
     from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger, BASIS
-    picked_up_ids = {row.effect.object_id for row in supported.boundary.effects.values()
+    pickup_owners = {row.effect.object_id: row.effect.target_id
+                     for row in supported.boundary.effects.values()
                      if type(row.effect) is PickupEffect}
     for observer_id in encounter.being_list:
         observer = objects.get(observer_id)
@@ -684,17 +685,32 @@ def _make_plan(encounter,candidate,rng_owner):
             if view is None or view.geometry is not None or view.visual_occlusion is not None:
                 raise PublicationRejected('Arena passive perception lacks an unobstructed native snapshot')
             position = changes['positions'].get(entity_id, view.position)
-            carried = entity_id in picked_up_ids or view.data.get('parent_container_id') is not None
+            owner_id = pickup_owners.get(entity_id, view.data.get('parent_container_id'))
+            carried = owner_id is not None
             state = ('present' if prior.category == 'being' else
                      'carried' if carried else 'ground' if position is not None else 'unplaced')
+            equipment_status = None
+            if prior.category == 'object' and owner_id is not None:
+                owner = candidate.pre_action_snapshot.entities.get(owner_id)
+                if owner is None or owner.category != 'being':
+                    raise PublicationRejected('visible carried Object owner is not a participating Being')
+                if owner.data.get('armor_id') == entity_id:
+                    equipment_status = 'worn'
+                else:
+                    slots = owner.data.get('body_parts')
+                    slots = slots if type(slots) is dict else {}
+                    held = [slot for slot, item_id in slots.items() if item_id == entity_id]
+                    equipment_status = f"held in {held[0]}" if held else 'carried'
             updated = ArenaPerceptionEvidence(observer_id, entity_id, prior.category,
                 view.data.get('name') or prior.type_key,
                 prior.type_key if prior.category == 'being' else view.obj_type,
                 None if carried else position, state, candidate.boundary,
-                float(candidate.boundary), BASIS)
+                float(candidate.boundary), BASIS, owner_id, equipment_status)
             current[entity_id] = updated
-            if (updated.name, updated.type_key, updated.position, updated.present_state) != (
-                    prior.name, prior.type_key, prior.position, prior.present_state):
+            if (updated.name, updated.type_key, updated.position, updated.present_state,
+                    updated.owner_id, updated.equipment_status) != (
+                    prior.name, prior.type_key, prior.position, prior.present_state,
+                    prior.owner_id, prior.equipment_status):
                 history.append(updated)
         plan.contents('observers', ledger._current, current)
         plan.contents('observers', ledger._history, history)

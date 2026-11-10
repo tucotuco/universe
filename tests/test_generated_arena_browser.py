@@ -51,6 +51,45 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             body = json.loads(json.dumps(body) if type(body) is not str else body)
         return result["status"], body
 
+    def raw_request(self, path, raw, content_type="application/octet-stream"):
+        handler_type = make_handler(self.session)
+        handler = object.__new__(handler_type)
+        handler.path = path
+        handler.server = type("FakeServer", (), {"server_port": 8000})()
+        handler.wfile = io.BytesIO()
+        handler.headers = {"Content-Length": str(len(raw)), "Content-Type": content_type}
+        handler.rfile = io.BytesIO(raw)
+        result = {}
+        handler._send = lambda status, body, content_type="application/json; charset=utf-8": result.update(
+            status=status, body=body, content_type=content_type)
+        handler.do_POST()
+        body = result["body"]
+        if result["content_type"].startswith("application/json"):
+            body = json.loads(json.dumps(body) if type(body) is not str else body)
+        return result["status"], body
+
+    def test_generate_page_exposes_profile_chooser_upload_and_native_equipment_mode(self):
+        status, html = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn('id="groundProfile"', html)
+        self.assertIn('id="groundProfileFile"', html)
+        self.assertIn('id="equipmentMode"', html)
+        self.assertIn("/api/generated/profile-upload", html)
+        status, catalog = self.request("/api/generated/profiles")
+        self.assertEqual(status, 200)
+        self.assertEqual({row["profile_id"] for row in catalog["profiles"]}, {
+            "none", "empty", "universe-arena-starter-ground-equipment", "all_swords",
+            "one_random_per_weapon_group"})
+        profile = (ROOT / "tests" / "fixtures" / "arena" / "empty.json").read_bytes()
+        status, uploaded = self.raw_request("/api/generated/profile-upload", profile)
+        self.assertEqual(status, 200)
+        self.assertTrue(uploaded["selected_profile_id"].startswith("uploaded:"))
+        self.assertEqual(uploaded["preview"]["count_per_encounter"], 0)
+        self.assertEqual(self.raw_request("/api/generated/profile-upload", profile,
+            "text/plain")[0], 409)
+        invalid = b'{"format":"wrong","schema_version":1}'
+        self.assertEqual(self.raw_request("/api/generated/profile-upload", invalid)[0], 409)
+
     def enable_trace(self):
         import io
         stream = io.StringIO()
@@ -349,9 +388,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         handler.end_headers = lambda: None
         handler.do_GET()
         self.assertEqual(response_headers["cache-control"], "no-store")
-        self.assertEqual(response_headers["x-arena-ui-generation"], "005D")
+        self.assertEqual(response_headers["x-arena-ui-generation"], "008")
         page = handler.wfile.getvalue().decode("utf-8")
-        self.assertIn('<meta name="arena-ui-generation" content="005D">', page)
+        self.assertIn('<meta name="arena-ui-generation" content="008">', page)
 
     def test_trace_off_is_quiet_and_diagnostic_route_is_unavailable(self):
         import io
@@ -373,7 +412,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         stream = self.enable_trace()
         status, page = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn('<meta name="arena-ui-generation" content="005D">', page)
+        self.assertIn('<meta name="arena-ui-generation" content="008">', page)
         self.assertIn("Close this dialog to return to the map and movement controls.", page)
         self.assertIn("const traceEnabled=true", page)
         # This source-level contract verifies that shipped handlers correlate a
@@ -503,7 +542,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
 
     def test_map_click_trace_is_fixed_schema_and_contains_no_entity_identity(self):
         stream = self.enable_trace()
-        self.assertIn('<meta name="arena-ui-generation" content="005D">',
+        self.assertIn('<meta name="arena-ui-generation" content="008">',
                       self.request("/")[1])
         events = [
             {"event": "page_script_ready"},

@@ -1,0 +1,9 @@
+{
+  "format": "universe-arena-ground-loadout-profile",
+  "schema_version": 1,
+  "profile_id": "one_random_per_weapon_group",
+  "title": "One seeded random item from every native weapon group",
+  "mode": "one_per_weapon_group",
+  "items": [],
+  "seed": 2026008
+}

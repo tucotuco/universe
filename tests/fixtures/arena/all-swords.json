@@ -1,0 +1,53 @@
+{
+  "format": "universe-arena-ground-loadout-profile",
+  "schema_version": 1,
+  "profile_id": "all_swords",
+  "title": "All supported swords",
+  "mode": "explicit_items",
+  "items": [
+    {
+      "category": "weapon",
+      "native_type_key": "Bastard sword"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Broadsword"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Falchion"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Greatsword (2-handed)"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Katana"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Longsword"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Machete (Parang)"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Rapier"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Scimitar"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Short sword"
+    },
+    {
+      "category": "weapon",
+      "native_type_key": "Wakizashi"
+    }
+  ]
+}

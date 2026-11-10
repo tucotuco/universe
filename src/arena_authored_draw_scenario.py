@@ -78,7 +78,8 @@ def author_scenario(candidate, value):
     weapon.parent_container_id = player.id
     author_worn_sheath_draw_location(weapon, player.id)
     evidence = ArenaPerceptionEvidence(player.id, object_id, "object", weapon.name,
-        "Dagger", None, "carried", 0, float(candidate.encounter.time))
+        "Dagger", None, "carried", 0, float(candidate.encounter.time),
+        owner_id=player.id, equipment_status="carried")
     ledger._current[object_id] = evidence
     ledger._history.append(evidence)
     candidate.encounter.awareness[player.id].add(object_id)
