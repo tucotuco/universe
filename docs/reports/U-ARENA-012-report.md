@@ -42,4 +42,4 @@ Only attack-only is implemented. The opponent does not pursue, change facing, or
 
 ## Commit
 
-Implementation and report commit: recorded after final verification.
+Implementation commit: `3bd2359` (`Implement native Arena opponent attack-only strategy`).
