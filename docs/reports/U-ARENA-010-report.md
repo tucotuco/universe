@@ -40,4 +40,6 @@ To make this strict native snapshot close over the attack path, the reviewed Are
 
 The implementation changes are in `src/arena_browser_session.py`, `src/arena_native_snapshot.py`, `src/checkpoint_inventory.py`, `src/arena_ui_trace.py`, `examples/arena_web.py`, `tests/test_arena_melee_attack.py`, `tests/arena_browser_js_harness.swift`, and `tests/test_generated_arena_browser.py`.
 
+Implementation and acceptance coverage were committed on `main` as `3e5df25` (`Add native Dagger attacks to generated Arena`). The report closeout is committed separately; nothing was pushed.
+
 Generated Arena Being geometry is still absent, so native strikes may resolve `uncertain_path` even when center distance is within the native reach bound. The real-browser smoke verified generation, movement to adjacent reach, and authorized target inspection, but not the final player-popup strike click because the available CUA canvas interaction could not target the player marker. The shipped JavaScript interaction and HTTP/native progression were verified independently as described above. No Generator code, attack physics, default equipment policy, or push was changed.
