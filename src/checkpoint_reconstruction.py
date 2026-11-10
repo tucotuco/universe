@@ -63,6 +63,10 @@ _SUPPORTED_TAGS = frozenset({
     'action_evaluation.EffectIdentity', 'action_evaluation.AwarenessEffect',
     'action_evaluation.PracticeEffect', 'observer_proposals.LifecycleEffect',
     'observer_proposals.ActionOutcomeEffect',
+    'action_settlement.TargetCandidate',
+    'encounter_inspection.CommittedBoundaryRecord',
+    'encounter_inspection.EntityInspection',
+    'interval_staging.QueueProjection',
 })
 
 
@@ -246,6 +250,25 @@ class _Graph:
         elif tag == 'action_evaluation.PracticeEffect': obj = PracticeEffect(**values)
         elif tag == 'observer_proposals.LifecycleEffect': obj = LifecycleEffect(**values)
         elif tag == 'observer_proposals.ActionOutcomeEffect': obj = ActionOutcomeEffect(**values)
+        elif tag == 'action_settlement.TargetCandidate':
+            from action_settlement import TargetCandidate
+            obj = TargetCandidate(**values)
+        elif tag == 'encounter_inspection.CommittedBoundaryRecord':
+            from encounter_inspection import CommittedBoundaryRecord
+            obj = CommittedBoundaryRecord(**values)
+        elif tag == 'encounter_inspection.EntityInspection':
+            from encounter_inspection import EntityInspection
+            obj = EntityInspection(**values)
+        elif tag == 'interval_staging.QueueProjection':
+            from interval_staging import QueueProjection
+            obj = QueueProjection(**values)
+        elif tag.startswith('encounter.'):
+            from encounter import (EncounterInitiation, ArenaActionActivation,
+                                   ArenaMovementActivation)
+            constructors = {'encounter.EncounterInitiation': EncounterInitiation,
+                'encounter.ArenaActionActivation': ArenaActionActivation,
+                'encounter.ArenaMovementActivation': ArenaMovementActivation}
+            obj = constructors[tag](**values)
         else:
             raise ReconstructionRejected(f'native object requires a root adapter: {tag}')
         actual_fields = object.__getattribute__(obj, '__dict__')

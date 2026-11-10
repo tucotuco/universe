@@ -248,8 +248,12 @@ def prepare_record(encounter, candidate, anchors, events):
 
 def _idle(encounter):
     import atomic_publication as publication
-    from transactional_progression import mode_of, _BINDINGS
-    _require(mode_of(encounter) == 'transactional', 'inspection requires explicitly selected transactional mode')
+    from transactional_progression import mode_of, _BINDINGS, is_quarantined
+    mode = mode_of(encounter)
+    _require(mode in ('transactional', 'quarantined_inspection'),
+             'inspection requires an explicitly bound native inspection mode')
+    _require(mode != 'quarantined_inspection' or is_quarantined(encounter),
+             'quarantined inspection binding lost its quarantine marker')
     _require(not publication._ACTIVE and not publication._PUBLISHING,
              'inspection unavailable during publication ownership')
     _require(not _BINDINGS[id(encounter)].running.locked(), 'inspection unavailable during progression')

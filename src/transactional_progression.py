@@ -193,7 +193,59 @@ def mode_of(encounter):
     if (binding is None or binding.encounter() is not encounter or declared is not binding.mode
             or type(declared) is not ProgressionMode or declared.encounter_identity!=id(encounter)):
         raise TransactionalProgressionError('missing/changed native transactional mode binding; no legacy fallback')
-    return 'transactional'
+    return binding.mode.name
+
+
+def _bind_quarantined_movement_inspection(encounter, rng_owner, receipt, *, authority):
+    """Bind a read-only inspection mode after the restoration owner imports a receipt."""
+    from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
+    from atomic_publication import RNGCursor, _COMMITTED_RECEIPTS
+    from encounter import Encounter
+    if authority is not _MOVEMENT_IMPORT_AUTHORITY:
+        raise TransactionalProgressionError(
+            'quarantined movement inspection binding is restoration-owner controlled')
+    if (type(encounter) is not Encounter or not is_quarantined(encounter)
+            or type(rng_owner) is not RNGCursor or receipt is None):
+        raise TransactionalProgressionError(
+            'quarantined native movement graph and exclusive RNG cursor are required')
+    history = encounter.__dict__.get('_atomic_interval_history')
+    issued = _COMMITTED_RECEIPTS.get(id(receipt))
+    if (type(history) is not list or history != [receipt]
+            or issued is None or issued[0]() is not receipt
+            or issued[1]() is not encounter or receipt.boundary != 1
+            or tuple(receipt.rng_state) != tuple(rng_owner.state)
+            or encounter.time != 1 or encounter.last_processed_boundary != 1):
+        raise TransactionalProgressionError(
+            'native imported receipt, RNG or boundary is not consistently registered')
+    key = id(encounter)
+    if key in _BINDINGS or '_transactional_mode' in encounter.__dict__:
+        raise TransactionalProgressionError('Encounter already has a progression binding')
+    mode = ProgressionMode('quarantined_inspection', id(encounter),
+        'caller_cursor', id(rng_owner), 'imported_movement_inspection_only')
+    binding = _Binding(weakref.ref(encounter,
+        lambda ref: _BINDINGS.pop(key, None)), mode, rng_owner, threading.Lock())
+    _BINDINGS[key] = binding
+    try:
+        encounter.__dict__['_transactional_mode'] = mode
+    except BaseException:
+        _BINDINGS.pop(key, None)
+        raise
+    return mode
+
+
+def _unbind_quarantined_movement_inspection(encounter, *, authority):
+    """Remove only the inspection-only binding while rolling back an unexposed import."""
+    from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
+    if authority is not _MOVEMENT_IMPORT_AUTHORITY:
+        raise TransactionalProgressionError('movement inspection rollback is restoration-owner controlled')
+    key = id(encounter)
+    binding = _BINDINGS.get(key)
+    if binding is None or binding.encounter() is not encounter:
+        return
+    if binding.mode.name != 'quarantined_inspection':
+        raise TransactionalProgressionError('refusing to remove a non-imported progression binding')
+    _BINDINGS.pop(key, None)
+    encounter.__dict__.pop('_transactional_mode', None)
 
 
 def guard_legacy_encounter(encounter, operation='legacy consumer'):

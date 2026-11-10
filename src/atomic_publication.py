@@ -912,6 +912,97 @@ def publish_interval_candidate(encounter,candidate,*,ownership=None,rng_state=No
     finally:_PUBLISHING=False
 
 
+def _register_quarantined_movement_import(encounter, receipt, rng_owner, *, authority):
+    """Register one exact imported 0->1 Arena movement receipt for inspection only.
+
+    This is a restoration-owner hook, not an issuance API for callers. It never
+    publishes an interval and accepts only an already reconstructed, quarantined
+    graph with two Target-owned Being rows and no Actions/effects.
+    """
+    from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
+    from encounter_inspection import (CommittedBoundaryRecord, fingerprint)
+    from transactional_progression import is_quarantined
+    from encounter import Encounter
+    from being import BeingInstance
+    from action_settlement import TargetCandidate
+    from checkpoint_adapters import _movement_activation_state, CheckpointRejected
+    from atomic_publication import RNGCursor, TargetIntervalRecord, PublishedInterval
+
+    def need(value, message):
+        if not value:
+            raise PublicationRejected(message)
+
+    need(authority is _MOVEMENT_IMPORT_AUTHORITY,
+         'quarantined movement receipt import is restoration-owner controlled')
+    need(type(encounter) is Encounter and is_quarantined(encounter)
+         and type(receipt) is PublishedInterval and type(rng_owner) is RNGCursor,
+         'quarantined native Encounter, receipt and exclusive RNG cursor are required')
+    need(encounter.start_time == 0 and encounter.time == 1
+         and encounter.last_processed_boundary == 1
+         and encounter._coordinator_time == 1 and encounter._interval_start == 1,
+         'only the committed 0-to-1 Arena movement boundary may be imported')
+    try:
+        activation = _movement_activation_state(encounter)
+    except CheckpointRejected as exc:
+        raise PublicationRejected(f'inconsistent Arena movement activation: {exc}') from exc
+    need(activation is encounter.arena_movement_activation,
+         'native Arena movement activation is not bound to this Encounter')
+    history = object.__getattribute__(encounter, '__dict__').get('_atomic_interval_history')
+    need(type(history) is list and history == [receipt]
+         and receipt.encounter_id == encounter.id and receipt.boundary == 1
+         and receipt.committed is True and not receipt.action_ids
+         and not receipt.effect_ids and not receipt.notification_intents
+         and tuple(receipt.rng_state) == tuple(rng_owner.state),
+         'imported PublishedInterval differs from the recorded movement-only event')
+    meta = receipt.inspection
+    need(type(meta) is CommittedBoundaryRecord and meta.start == 0 and meta.end == 1
+         and not meta.actions and not meta.action_anchors and not meta.effects
+         and not meta.objective and not meta.objective_use and not meta.recipients
+         and not meta.starts and set(meta.participants) == set(encounter.being_list)
+         and set(meta.entities) == set(encounter.being_list)
+         and set(meta.target_anchors) == set(encounter.being_list),
+         'imported committed inspection record has unsupported Action/Target coverage')
+    need(set(encounter.being_list) == set(meta.target_anchors)
+         and len(encounter.being_list) == 2,
+         'imported Target anchors do not cover exactly both participants')
+    registry = encounter.universe.object_registry.object_instances
+    for being_id in encounter.being_list:
+        being = registry.get(being_id)
+        need(type(being) is BeingInstance and being.id == being_id,
+             'movement Target owner is not the registered native Being')
+        storage = object.__getattribute__(being, '__dict__').get('_atomic_target_history')
+        need(type(storage) is list and len(storage) == 1
+             and type(storage[0]) is TargetIntervalRecord
+             and storage[0].encounter_id == encounter.id and storage[0].boundary == 1
+             and type(storage[0].state) is TargetCandidate
+             and storage[0].state.target_id == being_id,
+             'imported Target history is missing, duplicated or misowned')
+        record = storage[0]
+        anchor = meta.target_anchors[being_id]
+        expected = (id(being), id(being.current), id(being.spatial_state),
+                    id(storage), id(record), fingerprint(record))
+        need(type(anchor) is tuple and anchor == expected,
+             'imported Target anchor differs from its newly materialized native identities')
+    key = id(receipt)
+    need(key not in _COMMITTED_RECEIPTS,
+         'imported receipt identity collides with an existing process-local receipt')
+    receipt_fingerprint = fingerprint(receipt)
+    _COMMITTED_RECEIPTS[key] = (
+        weakref.ref(receipt, lambda ref, key=key: _COMMITTED_RECEIPTS.pop(key, None)),
+        weakref.ref(encounter), receipt_fingerprint)
+    return receipt_fingerprint
+
+
+def _unregister_quarantined_movement_import(encounter, receipt, *, authority):
+    """Rollback an unexposed restoration graph after a later private bind fails."""
+    from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
+    if authority is not _MOVEMENT_IMPORT_AUTHORITY:
+        raise PublicationRejected('quarantined movement rollback is restoration-owner controlled')
+    entry = _COMMITTED_RECEIPTS.get(id(receipt))
+    if entry is not None and entry[0]() is receipt and entry[1]() is encounter:
+        _COMMITTED_RECEIPTS.pop(id(receipt), None)
+
+
 def recover_interval_publication(encounter,recovery_token,*,ownership=None,rng_state=None,rng_owner=None):
     """Acknowledge a restored fault only; never replay or repair a broken graph.
 

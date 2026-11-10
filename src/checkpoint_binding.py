@@ -914,6 +914,255 @@ def bind_quarantined_movement_boundary(decoded, projection=None):
         data[1], data[2], projection.boundary, sidecar, True)
 
 
+@dataclass(frozen=True)
+class _QuarantinedMovementNativeGraph:
+    universe: object
+    encounter: object
+    beings: tuple
+    targets: tuple
+    source_receipt_fields: tuple
+    source_inspection: object
+    rng_owner: object
+    projection: QuarantinedMovementBoundaryProjection
+
+
+def _materialize_quarantined_movement_native(decoded, projection=None):
+    """Build a private boundary-1 Arena graph; receipt import is owned elsewhere."""
+    binding = bind_quarantined_movement_boundary(decoded, projection)
+    data = decoded.envelope_data
+    from checkpoint_reconstruction import (_Graph, _sections, _rng_data,
+        _materialize_being_original, _validate_being_definition_bindings)
+    sections = _sections(data[5])
+    rng_state = _rng_data(sections['rng'][2])
+    graph = _Graph(sections['nodes'][0])
+    universe_ref = ('universe', data[1])
+    encounter_ref = ('encounter', data[2])
+    universe_fields = graph.fields(universe_ref, 'universe.Universe')[1]
+    encounter_fields = graph.fields(encounter_ref, 'encounter.Encounter')[1]
+    registry_ref = graph.raw_ref(universe_fields['object_registry'])
+    registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
+    registry = graph.raw_mapping(registry_fields['object_instances'])
+    participants = binding.sidecar.projection.participant_ids
+    _need(set(registry) == set(participants) and len(registry) == 2,
+          'movement native construction requires exactly the recorded two Being identities')
+
+    library_ref = graph.raw_ref(universe_fields['library'])
+    library_fields = graph.fields(library_ref, 'library.Library')[1]
+    being_dictionary_ref = graph.raw_ref(library_fields['being_dictionary'])
+    being_dictionary_fields = graph.fields(being_dictionary_ref, 'being.BeingDictionary')[1]
+    all_definitions = graph.raw_mapping(being_dictionary_fields['objects'])
+    referenced_types = set()
+    instance_fields_by_id = {}
+    for being_id in participants:
+        instance_ref = graph.raw_ref(registry[being_id])
+        fields = graph.fields(instance_ref, 'being.BeingInstance')[1]
+        _need(graph.data(fields['id']) == being_id,
+              'native participant reference differs from its registry identity')
+        instance_fields_by_id[being_id] = fields
+        original_ref = graph.raw_ref(fields['original'])
+        original_fields = graph.fields(original_ref, 'being.BeingDefinition')[1]
+        referenced_types.add(graph.data(original_fields['obj_type']))
+    _need(referenced_types and referenced_types <= set(all_definitions),
+          'native Being originals have no matching registered templates')
+    definitions = {name: graph.native(graph.raw_ref(all_definitions[name]))
+                   for name in referenced_types}
+    try:
+        validated, template_refs, kinds = _validate_being_definition_bindings(
+            graph, registry, {name: all_definitions[name] for name in referenced_types})
+    except (TypeError, ValueError) as exc:
+        raise IdentityBindingRejected(f'Being template/original reconstruction refused: {exc}') from exc
+    _need(all(validated[name] is definitions[name] for name in definitions),
+          'native shared Being template identity changed during reconstruction')
+
+    from being import BeingDictionary, BeingInstance
+    from skill import SkillDictionary
+    from library import Library
+    from actiondictionary import ActionDictionary
+    from armor import ArmorDictionary
+    from object import ObjectDictionary
+    from weapon import WeaponDictionary
+    from universe import Universe
+    from identifiable import Identifiable
+    native_being_dictionary = BeingDictionary()
+    native_being_dictionary.objects = definitions
+    native_being_dictionary.object_categories = graph.data(
+        being_dictionary_fields['object_categories'])
+    skill_ref = graph.raw_ref(library_fields['skill_dictionary'])
+    skill_fields = graph.fields(skill_ref, 'skill.SkillDictionary')[1]
+    native_skill_dictionary = SkillDictionary()
+    native_skill_dictionary.skills = graph.data(skill_fields['skills'])
+    _need(type(native_skill_dictionary.skills) is dict,
+          'native skill dictionary is outside the bounded movement import')
+    native_library = Library(load_definitions=False,
+        name=graph.data(library_fields['name']), id=graph.data(library_fields['id']))
+    native_library.being_dictionary = native_being_dictionary
+    native_library.skill_dictionary = native_skill_dictionary
+    # The result is inspection-only and remains quarantined. The full catalog is
+    # retained in the portable source graph but is outside this native import.
+    for field, constructor in (
+            ('action_dictionary', ActionDictionary), ('armor_dictionary', ArmorDictionary),
+            ('object_dictionary', ObjectDictionary), ('weapon_dictionary', WeaponDictionary)):
+        setattr(native_library, field, constructor())
+    native_universe = Universe(name=graph.data(universe_fields['name']),
+                               library=native_library)
+    _need(native_universe.id == data[1],
+          'native Universe constructor changed the logical identity')
+
+    from checkpoint_arena_perception import decode_arena_perception_ledger
+    evidence_by_observer = dict(binding.sidecar.projection.observer_evidence)
+    entity_ids = tuple(sorted(registry))
+    native_beings = {}
+    for being_id in participants:
+        fields = instance_fields_by_id[being_id]
+        expected_fields = {
+            '_arena_perception_ledger', '_atomic_target_history',
+            '_skill_practice_baselines', 'current', 'effective_fitness', 'exertion',
+            'fatigue_level', 'front_facing', 'hex_facing', 'geometry', 'id', 'name',
+            'original', 'parent_container_id', 'personal_history', 'physical_fatigue',
+            'physiology_id', 'possessions', 'skill_experience', 'skill_use_history',
+            'spatial_state', 'strategy', 'top_facing', 'type', 'visual_occlusion',
+            'weapons', '_posture'}
+        _need(set(fields) == expected_fields,
+              'Being checkpoint has missing or unsupported movement state fields')
+        _need(graph.data(fields['personal_history']) is None,
+              'personal-history-bearing Beings are outside movement restoration')
+        name = graph.data(fields['name'])
+        original = _materialize_being_original(graph, being_id, fields,
+            definitions, template_refs, kinds)
+        being = BeingInstance(original, name=name)
+        Identifiable.__init__(being, name, id=being_id)
+        current = graph.native(graph.raw_ref(fields['current']))
+        _need(current is not original and current.obj_type == original.obj_type,
+              'Being original/current separation is invalid')
+        being.current = current
+        for field in ('top_facing', 'front_facing', 'parent_container_id',
+                      'physiology_id', 'fatigue_level', 'effective_fitness',
+                      'skill_experience', '_skill_practice_baselines',
+                      'possessions', 'weapons'):
+            setattr(being, field, graph.value(fields[field]))
+        facing = graph.data(fields['hex_facing'])
+        posture = graph.data(fields['_posture'])
+        being.set_hex_facing(facing)
+        being.set_posture(posture)
+        for field, setter in (('spatial_state', 'set_spatial_state'),
+                              ('geometry', 'set_geometry'),
+                              ('visual_occlusion', 'set_visual_occlusion')):
+            getattr(being, setter)(graph.value(fields[field]))
+        being.physical_fatigue = graph.value(fields['physical_fatigue'])
+        being.strategy = graph.value(fields['strategy'])
+        being.exertion = graph.value(fields['exertion'])
+        encoded = evidence_by_observer[being_id]
+        visible_ids = tuple(row[0] for row in encoded[3])
+        being._arena_perception_ledger = decode_arena_perception_ledger(
+            encoded, observer_id=being_id, entity_ids=entity_ids,
+            visible_entity_ids=visible_ids, boundary=1, time=1)
+        being._atomic_target_history = []
+        native_universe.add_object(being)
+        native_beings[being_id] = being
+
+    from action_settlement import TargetCandidate
+    from atomic_publication import RNGCursor, TargetIntervalRecord
+    from checkpoint_receipts import _value
+    target_data = {row[0]: row for row in binding.sidecar.projection.target_records}
+    native_targets = {}
+    for target_id in participants:
+        fields = instance_fields_by_id[target_id]
+        source_history_ref = graph.raw_ref(fields['_atomic_target_history'])
+        source_history = graph.nodes[source_history_ref][1]
+        _need(len(source_history) == 1,
+              'source Being does not have exactly one committed Target record')
+        source_target_ref = graph.raw_ref(source_history[0])
+        source_record = graph.fields(source_target_ref,
+            'atomic_publication.TargetIntervalRecord')[1]
+        _need(graph.data(source_record['encounter_id']) == data[2]
+              and graph.data(source_record['boundary']) == 1,
+              'source Target record identity differs from imported boundary')
+        target_ref = graph.raw_ref(source_record['state'])
+        target_fields = graph.fields(target_ref, 'action_settlement.TargetCandidate')[1]
+        target = TargetCandidate(**{key: graph.value(value)
+                                    for key, value in target_fields.items()})
+        _need(_value(target) == target_data[target_id][3]
+              and target.target_id == target_id and target.category == 'being',
+              'materialized native Target differs from its exact committed record')
+        record = TargetIntervalRecord(data[2], 1, target)
+        native_beings[target_id]._atomic_target_history = [record]
+        native_targets[target_id] = record
+
+    module_rng_before = random.getstate()
+    rng_owner = RNGCursor(rng_state)
+    _need(rng_owner.state == rng_state and random.getstate() == module_rng_before,
+          'native movement reconstruction changed process RNG')
+    from encounter import Encounter, _QuarantinedPostBoundaryPlan
+    awareness = graph.data(encounter_fields['awareness'])
+    awareness_rows = tuple((key, tuple(sorted(value)))
+                           for key, value in sorted(awareness.items()))
+    plan = _QuarantinedPostBoundaryPlan(native_universe, data[2], 0, 1,
+        graph.data(encounter_fields['difficulty_class']),
+        graph.data(encounter_fields['name']), graph.data(encounter_fields['event_type']),
+        graph.data(encounter_fields['location']),
+        graph.data(encounter_fields['parent_event_id']),
+        graph.data(encounter_fields['end_time']),
+        graph.data(encounter_fields['initiated']), tuple(participants),
+        awareness_rows, rng_owner)
+    try:
+        native_encounter = Encounter._construct_quarantined_post_boundary(plan)
+    except (TypeError, ValueError) as exc:
+        raise IdentityBindingRejected(f'native Encounter shell construction refused: {exc}') from exc
+    activation_ref = graph.raw_ref(encounter_fields['arena_movement_activation'])
+    activation = graph.native(activation_ref)
+    native_encounter.arena_activation_enabled = True
+    native_encounter.arena_movement_activation = activation
+    _need(native_encounter.initiated is True and native_encounter.arena_activation is None
+          and native_encounter.initiation is None,
+          'native movement activation phase is inconsistent')
+
+    source_history_ref = graph.raw_ref(encounter_fields['_atomic_interval_history'])
+    source_history = graph.nodes[source_history_ref][1]
+    _need(len(source_history) == 1,
+          'native movement import requires one recorded PublishedInterval')
+    source_receipt_ref = graph.raw_ref(source_history[0])
+    source_receipt_fields = graph.fields(source_receipt_ref,
+        'atomic_publication.PublishedInterval')[1]
+    _need(graph.data(source_receipt_fields['encounter_id']) == data[2]
+          and graph.data(source_receipt_fields['boundary']) == 1
+          and not graph.data(source_receipt_fields['action_ids'])
+          and not graph.data(source_receipt_fields['effect_ids'])
+          and graph.data(source_receipt_fields['committed']) is True
+          and not graph.data(source_receipt_fields['notification_intents']),
+          'source receipt is outside the exact Action-free movement contract')
+    source_inspection_ref = graph.raw_ref(source_receipt_fields['inspection'])
+    meta_fields = graph.fields(source_inspection_ref,
+        'encounter_inspection.CommittedBoundaryRecord')[1]
+    _need(set(meta_fields) == {'start', 'end', 'entities', 'target_anchors', 'actions',
+          'action_anchors', 'effects', 'objective', 'objective_use', 'recipients',
+          'starts', 'participants', 'schedule', 'projectile_states'}
+          and meta_fields['target_anchors'] == ('derived-rebuild-required', 'target_anchors')
+          and meta_fields['action_anchors'] == ('derived-rebuild-required', 'action_anchors'),
+          'source receipt does not use the strict native anchor-rebuild markers')
+    from encounter_inspection import CommittedBoundaryRecord
+    source_inspection = CommittedBoundaryRecord(
+        graph.data(meta_fields['start']), graph.data(meta_fields['end']),
+        graph.mapping(meta_fields['entities'], native_values=True), {},
+        graph.mapping(meta_fields['actions']), {}, graph.mapping(meta_fields['effects']),
+        graph.mapping(meta_fields['objective']), graph.data(meta_fields['objective_use']),
+        graph.mapping(meta_fields['recipients']), graph.data(meta_fields['starts']),
+        graph.data(meta_fields['participants']), graph.value(meta_fields['schedule']),
+        graph.mapping(meta_fields['projectile_states']))
+    _need(set(source_inspection.participants) == set(participants)
+          and set(source_inspection.entities) == set(participants)
+          and not source_inspection.actions and not source_inspection.effects
+          and not source_inspection.objective and not source_inspection.recipients
+          and not source_inspection.target_anchors
+          and not source_inspection.action_anchors,
+          'stored committed inspection data has unsupported Action/Target coverage')
+    return _QuarantinedMovementNativeGraph(
+        native_universe, native_encounter, tuple(sorted(native_beings.items())),
+        tuple(sorted(native_targets.items())),
+        tuple(sorted((key, graph.data(value)) for key, value in source_receipt_fields.items()
+                     if key != 'inspection')), source_inspection,
+        rng_owner, binding.sidecar.projection)
+
+
 # The legacy symbol now calls the Run-only binder; Spot projection data is
 # rejected by the same strict Run projection validator.
 bind_quarantined_spot_boundary = bind_quarantined_run_boundary

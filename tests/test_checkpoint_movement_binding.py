@@ -53,6 +53,60 @@ print(json.dumps({
 '''
 
 
+_FRESH_NATIVE_IMPORT = r'''
+import hashlib, json, sys
+assert 'npcgen' not in sys.modules
+from checkpoint_wire import decode_run_spot_wire
+from checkpoint_restore_preparation import (
+  _import_quarantined_movement_boundary, _QUARANTINED_MOVEMENT_IMPORTS)
+from transactional_progression import mode_of, is_quarantined
+from encounter_inspection import inspect_encounter
+from encounter_inspection import fingerprint
+from transactional_progression import step_transactionally, TransactionalProgressionError
+decoded = decode_run_spot_wire(sys.stdin.buffer.read())
+handle = _import_quarantined_movement_boundary(decoded)
+private = _QUARANTINED_MOVEMENT_IMPORTS[handle]
+native = private.native
+encounter = native.encounter
+inspection = inspect_encounter(encounter)
+digest = lambda value: hashlib.sha256(repr(value).encode()).hexdigest()
+beings = []
+targets = []
+for being_id, _being in native.beings:
+  being = dict(native.beings)[being_id]
+  position = being.get_position()
+  beings.append((being_id, tuple(position.as_tuple()), being.get_posture(),
+    being.hex_facing, digest(__import__('checkpoint_reconstruction')._projection(being.original)),
+    digest(__import__('checkpoint_reconstruction')._projection(being.current)),
+    tuple(sorted(encounter.awareness[being_id]))))
+  targets.append((being_id, fingerprint(being._atomic_target_history[0]),
+    digest(inspection.target_history(being_id))))
+receipt = private.receipt
+meta = receipt.inspection
+try:
+  step_transactionally(encounter, 1, None, None)
+  step = 'unexpectedly-advanced'
+except TransactionalProgressionError as exc:
+  step = str(exc)
+print(json.dumps({
+  'schema': handle.schema, 'boundary': inspection.boundary,
+  'latest': inspection.latest_boundary, 'timeline': [
+    [row.boundary, list(row.action_ids), list(row.effect_ids)] for row in inspection.timeline],
+  'participants': sorted(inspection.participants), 'beings': beings,
+  'targets': targets, 'receipt_fingerprint': handle.receipt_fingerprint,
+  'receipt': [receipt.encounter_id, receipt.boundary, list(receipt.action_ids),
+    list(receipt.effect_ids), receipt.rng_state, list(receipt.notification_intents),
+    receipt.committed, meta.start, meta.end, list(meta.participants)],
+  'activation': [encounter.arena_movement_activation.activation_kind,
+    encounter.arena_movement_activation.time],
+  'observers': [(row[0], digest(row[1])) for row in handle.observer_evidence],
+  'rng': digest(native.rng_owner.state), 'choices': encounter._choice_book._counter,
+  'action_ids': sorted(inspection.actions), 'quarantined': is_quarantined(encounter),
+  'mode': mode_of(encounter), 'refusal': step
+}))
+'''
+
+
 def _digest(value):
     return hashlib.sha256(repr(value).encode()).hexdigest()
 
@@ -130,6 +184,72 @@ class MovementOnlyIdentityBindingTests(unittest.TestCase):
             'projection exists; native receipt authenticity depends on process-local issuance, '
             'which checkpoint reconstruction must not recreate')
         self.assertTrue(child['quarantined'])
+        self.assertEqual(envelope.to_data()[12:16], (True, False, False, False))
+
+    def test_fixed_seed_boundary_imports_as_quarantined_native_encounter(self):
+        session, envelope, _decoded = self._source()
+        source = session.active_candidate
+        source_encounter = source.encounter
+        from encounter_inspection import inspect_encounter
+        from checkpoint_reconstruction import _projection
+        source_inspection = inspect_encounter(source_encounter)
+        source_beings = []
+        source_targets = []
+        source_observers = []
+        from checkpoint_arena_perception import encode_arena_perception_ledger
+        for participant in source.participants:
+            being = participant.native.being
+            position = being.get_position()
+            source_beings.append((being.id, tuple(position.as_tuple()),
+                being.get_posture(), being.hex_facing,
+                _digest(_projection(being.original)),
+                _digest(_projection(being.current)),
+                tuple(sorted(source_encounter.awareness[being.id]))))
+            source_targets.append((being.id,
+                __import__('encounter_inspection').fingerprint(
+                    being._atomic_target_history[0]),
+                _digest(source_inspection.target_history(being.id))))
+            encoded_ledger = encode_arena_perception_ledger(
+                being._arena_perception_ledger, observer=being,
+                encounter=source_encounter,
+                registry=source.universe.object_registry.object_instances)
+            source_observers.append((being.id, _digest(encoded_ledger)))
+        source_beings.sort()
+        source_targets.sort()
+        source_observers.sort()
+        process = subprocess.run([sys.executable, '-c', _FRESH_NATIVE_IMPORT],
+            input=encode_run_spot_envelope(envelope), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, cwd=os.getcwd(), env={**os.environ,
+                'PYTHONPATH': os.pathsep.join((os.path.abspath('src'),
+                                                os.environ.get('PYTHONPATH', '')))},
+            check=False, timeout=120)
+        self.assertEqual(process.returncode, 0, process.stderr.decode(errors='replace'))
+        child = json.loads(process.stdout)
+        self.assertEqual(child['schema'],
+            'universe.quarantined-movement-native-inspection/1')
+        self.assertEqual((child['boundary'], child['latest']), (1, 1))
+        self.assertEqual(child['timeline'], [[1, [], []]])
+        self.assertEqual(sorted(child['beings']), json.loads(json.dumps(source_beings)))
+        self.assertEqual(sorted(child['targets']), json.loads(json.dumps(source_targets)))
+        self.assertEqual(child['participants'], sorted(row[0] for row in source_beings))
+        source_receipt = source_encounter._atomic_interval_history[-1]
+        source_meta = source_receipt.inspection
+        self.assertEqual(child['receipt'], json.loads(json.dumps([
+            source_receipt.encounter_id, source_receipt.boundary,
+            source_receipt.action_ids, source_receipt.effect_ids,
+            source_receipt.rng_state, source_receipt.notification_intents,
+            source_receipt.committed, source_meta.start, source_meta.end,
+            source_meta.participants])))
+        self.assertEqual(len(child['receipt_fingerprint']), 64)
+        self.assertEqual(child['activation'], ['first_player_movement', 0])
+        self.assertEqual(sorted(child['observers']),
+                         json.loads(json.dumps(source_observers)))
+        self.assertEqual(child['rng'], _digest(session._rng_cursor.state))
+        self.assertEqual(child['choices'], 0)
+        self.assertEqual(child['action_ids'], [])
+        self.assertTrue(child['quarantined'])
+        self.assertEqual(child['mode'], 'quarantined_inspection')
+        self.assertIn('quarantined', child['refusal'].lower())
         self.assertEqual(envelope.to_data()[12:16], (True, False, False, False))
 
     def test_movement_receipt_rejects_corrupted_rows_without_source_mutation(self):
@@ -245,6 +365,37 @@ class MovementOnlyIdentityBindingTests(unittest.TestCase):
             tuple((participant.native.being.id,
                    tuple(participant.native.being.get_position().as_tuple()))
                   for participant in session.active_candidate.participants))
+        self.assertEqual(after, before)
+
+    def test_native_import_rejects_forged_event_before_receipt_registration(self):
+        session, _envelope, decoded = self._source()
+        encounter = session.active_candidate.encounter
+        before = (encounter.time, encounter.last_processed_boundary,
+            tuple(encounter._atomic_interval_history), session._rng_cursor.state,
+            tuple((p.native.being.id,
+                   tuple(p.native.being.get_position().as_tuple()),
+                   tuple(p.native.being._atomic_target_history))
+                  for p in session.active_candidate.participants))
+        data = list(decoded.envelope_data)
+        chain = list(data[8])
+        row = list(chain[4][0])
+        row[2] = ('invented-action',)
+        chain[4] = (tuple(row),)
+        data[8] = tuple(chain)
+        forged = replace(decoded, envelope_data=tuple(data))
+        from atomic_publication import _COMMITTED_RECEIPTS
+        from checkpoint_restore_preparation import (
+            RestorePreparationRejected, _import_quarantined_movement_boundary)
+        receipts_before = set(_COMMITTED_RECEIPTS)
+        with self.assertRaises(RestorePreparationRejected):
+            _import_quarantined_movement_boundary(forged)
+        self.assertEqual(set(_COMMITTED_RECEIPTS), receipts_before)
+        after = (encounter.time, encounter.last_processed_boundary,
+            tuple(encounter._atomic_interval_history), session._rng_cursor.state,
+            tuple((p.native.being.id,
+                   tuple(p.native.being.get_position().as_tuple()),
+                   tuple(p.native.being._atomic_target_history))
+                  for p in session.active_candidate.participants))
         self.assertEqual(after, before)
 
 
