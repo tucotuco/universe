@@ -88,7 +88,7 @@ _OUTCOMES = {
     'history_request': frozenset(('unplaced', 'out_of_range', 'not_aware', 'heard')),
     'combat': _ATTACK_OUTCOMES | {'weapon_unavailable'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
-        'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'parried', 'dodged'},
+        'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'},
     'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),

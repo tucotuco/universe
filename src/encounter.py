@@ -564,8 +564,14 @@ class Encounter(Event):
         start, end = source.get_position(), target.get_position()
         if start is None or end is None or start == end:
             return None
-        candidates = ((entity_id, self.get_entity(entity_id))
-                      for entity_id in self.entity_ids())
+        from arena_hex_map import layout_from_encounter_map
+        arena_hex_context = layout_from_encounter_map(self.map) is not None
+        candidates = ((entity_id, entity)
+                      for entity_id in self.entity_ids()
+                      for entity in (self.get_entity(entity_id),)
+                      if entity is not None
+                      and (not arena_hex_context
+                           or getattr(entity, "parent_container_id", None) is None))
         return trace_physical_path(start, end, candidates,
                                    exclude_ids=(source_entity_id, target_entity_id))
 

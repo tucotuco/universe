@@ -104,7 +104,7 @@ function fetch(path,options={}){
       for(const e of __serverState.entities||[])if(e.category==='object'&&e.cell&&e.cell.column===__serverState.player.cell.column&&e.cell.row===__serverState.player.cell.row)e.pickup_available=true;
     }else if(__serverState.melee_action&&__serverState.melee_action.status==='executing'){
       __serverState.melee_action.seconds_remaining-=1;
-      if(__serverState.melee_action.seconds_remaining===0)__serverState.melee_action={name:__serverState.melee_action.name,status:'completed',outcome:'uncertain_path',duration_seconds:4,seconds_remaining:0,target_name:__serverState.melee_action.target_name};
+      if(__serverState.melee_action.seconds_remaining===0)__serverState.melee_action={name:__serverState.melee_action.name,status:'completed',outcome:'normal',duration_seconds:4,seconds_remaining:0,target_name:__serverState.melee_action.target_name};
     }else if(__serverState.ready_weapon_action&&__serverState.ready_weapon_action.status==='executing'){
       __serverState.ready_weapon_action.seconds_remaining-=1;
       if(__serverState.ready_weapon_action.seconds_remaining===0){__serverState.ready_weapon_action={name:'Draw',status:'completed',outcome:'success',duration_seconds:2,seconds_remaining:0};if(__serverState.character&&__serverState.character.inventory.items.length){const item=__serverState.character.inventory.items[0];item.status='readied in right hand';const hand=__serverState.character.anatomy.hands.find(row=>row.name==='right hand');if(hand){hand.occupancy='occupied';hand.object={handle:item.handle,name:item.name,type:item.type};}}}
@@ -169,7 +169,7 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(!request||request.body.handle!==opponent.handle||request.body.motion!=='thrust'||'native_id' in request.body)throw Error('browser did not submit only the visible target handle and native motion');
   if(currentView.melee_action.status!=='executing'||!currentView.advance_available)throw Error('browser did not expose pending native strike progression');
   for(let i=0;i<4;i++)await __element('advance').onclick();
-  if(currentView.melee_action.status!=='completed'||currentView.melee_action.outcome!=='uncertain_path'||currentView.time_seconds!==startTime+4)throw Error('browser did not display the native four-second resolution result: '+JSON.stringify({action:currentView.melee_action,time:currentView.time_seconds,advance:currentView.advance_available}));
+  if(currentView.melee_action.status!=='completed'||currentView.melee_action.outcome!=='normal'||currentView.time_seconds!==startTime+4)throw Error('browser did not display the four-second resolution result: '+JSON.stringify({action:currentView.melee_action,time:currentView.time_seconds,advance:currentView.advance_available}));
   globalThis.__result=JSON.stringify({calls:__calls,actionResult:__element('actionResult').textContent,time:currentView.time_seconds,melee_action:currentView.melee_action});
 })().then(()=>globalThis.__done=true).catch(e=>{globalThis.__failure=String(e);globalThis.__done=true});
 """# : drawOnly ? #"""

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from encounter import Encounter
 from library import Library
-from arena_hex_map import ArenaHexLayout
+from arena_hex_map import ArenaHexLayout, encounter_map_descriptor
 from arena_ground_objects import (ArenaGroundObjectRefusal, realize_arena_ground_objects)
 from npcgen_arena_adapter import ArenaNPCRefusal, ArenaNativeBeing, prepare_npcgen_arena_being
 from spatial.state import CartesianPosition
@@ -291,6 +291,7 @@ def initialize_two_being_arena(starting_experience: int, width_cells: int, heigh
         placements.append(ArenaPlacement(role, native.being.id, column, row, position))
 
     encounter = Encounter(world, difficulty_class=0, start_time=0, name="Arena",
+                          map=encounter_map_descriptor(layout),
                           arena_activation_enabled=True)
     for native in (first, second):
         encounter.add_being(native.being.id)

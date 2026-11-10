@@ -72,3 +72,8 @@ def classify_vector(facing: int, vector: tuple[float, float, float]) -> FacingSe
     tolerance = 16.0 * math.ulp(1.0)
     return (FacingSector.FRONT if dot + tolerance >= boundary
             else FacingSector.NON_FORWARD)
+
+
+def vector_is_behind(facing: int, vector: tuple[float, float, float]) -> bool:
+    """Whether a vector lies inside the adopted rear sector of a facing."""
+    return classify_vector((validate_facing(facing) + 6) % 12, vector) is FacingSector.FRONT

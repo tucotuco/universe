@@ -12,9 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src"), str(ROOT / "examples")]
 
 from arena_browser_session import GeneratedArenaSession
-from arena_hex_map import HexAddress
+from action_calculations import melee_hex_path_status
+from arena_hex_map import ArenaHexLayout, HexAddress
 from arena_web import make_handler
 from melee_combat import MeleeStrike, effective_melee_reach_meters
+from spatial.state import CartesianPosition
+from spatial.visibility import PhysicalPathResult
 
 
 class TestArenaMeleeAttack(unittest.TestCase):
@@ -180,8 +183,133 @@ class TestArenaMeleeAttack(unittest.TestCase):
         self.assertEqual(strike["body"], {"handle": target["handle"], "motion": "thrust"})
         self.assertEqual(result["time"], view["time_seconds"] + 4)
         self.assertEqual(result["melee_action"]["status"], "completed")
-        self.assertEqual(result["melee_action"]["outcome"], "uncertain_path")
-        self.assertIn("Thrust resolved: uncertain_path", result["actionResult"])
+        self.assertEqual(result["melee_action"]["outcome"], "normal")
+        self.assertIn("Thrust resolved: normal", result["actionResult"])
+
+    def test_hex_reach_uses_target_occupancy_and_strict_interior_overlap(self):
+        layout = ArenaHexLayout.rectangle(5, 5)
+        target = layout.center_position(HexAddress(2, 2))
+        rightmost = max(point[0] for point in layout.vertex_offsets_meters)
+        attacker = CartesianPosition(target.x + rightmost + 0.1, target.y, target.z)
+        path = PhysicalPathResult(attacker, target, (), ())
+        status, distance = melee_hex_path_status(attacker, target, 0.2, path, layout, 6)
+        self.assertEqual(status, "in_reach")
+        self.assertGreater(distance, 0.2)  # Target reference point is outside reach.
+        self.assertEqual(melee_hex_path_status(attacker, target, 0.2,
+            PhysicalPathResult(attacker, target, (object(),), ()), layout, 6)[0], "blocked")
+        self.assertEqual(melee_hex_path_status(attacker, target, 0.2,
+            PhysicalPathResult(attacker, target, (), ("unmodeled-ground-object",)),
+            layout, 6)[0], "uncertain_path")
+
+        tangent = CartesianPosition(target.x + rightmost + 0.2, target.y, target.z)
+        tangent_path = PhysicalPathResult(tangent, target, (), ())
+        status, _ = melee_hex_path_status(tangent, target, 0.2, tangent_path, layout, 6)
+        self.assertEqual(status, "out_of_reach")  # Edge/vertex tangency is not penetration.
+        inward = CartesianPosition(math.nextafter(tangent.x, target.x),
+                                   target.y, target.z)
+        inward_path = PhysicalPathResult(inward, target, (), ())
+        status, _ = melee_hex_path_status(inward, target, 0.2, inward_path, layout, 6)
+        self.assertEqual(status, "in_reach")
+        self.assertEqual(melee_hex_path_status(attacker, target, 0.2, path,
+                                                layout, 0)[0], "not_facing")
+
+        same_cell = CartesianPosition(target.x + 0.1, target.y, target.z)
+        same_cell_path = PhysicalPathResult(same_cell, target, (), ())
+        self.assertEqual(melee_hex_path_status(same_cell, target, 0.01,
+                                                same_cell_path, layout, 6)[0], "in_reach")
+
+        address = HexAddress(2, 2)
+        neighbor = next(row for row in layout.neighbors(address) if layout.contains(row))
+        a, b = layout.center_position(address), layout.center_position(neighbor)
+        edge = CartesianPosition((a.x + b.x) / 2, (a.y + b.y) / 2, 0)
+        expected = min(address, neighbor)
+        self.assertEqual(layout.cell_at_position(edge), expected)
+        self.assertEqual(layout.cell_at_position(edge), layout.cell_at_position(edge))
+
+    def test_generated_geometryless_target_resolves_and_unobserved_target_is_refused(self):
+        view = self.generate()
+        candidate = self.session.active_candidate
+        player, target = (p.native.being for p in candidate.participants)
+        self.assertIsNone(target.geometry)
+        row = next(row for row in view["entities"] if row["category"] == "being"
+                   and row["name"] != view["player"]["name"])
+        self.request("/api/generated/run", {})
+        self.request("/api/generated/advance", {"seconds": 1})
+        candidate.encounter.awareness[player.id].discard(target.id)
+        status, refusal = self.request("/api/generated/melee-strike", {
+            "handle": row["handle"], "motion": "thrust"})
+        self.assertEqual(status, 409)
+        self.assertNotIn(target.id, json.dumps(refusal))
+        self.assertIn("aware participating Being", refusal["error"])
+
+    def test_distant_strike_uses_post_movement_hex_at_impact(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261100)
+        view = self.generate()
+        candidate = self.session.active_candidate
+        player, target = (p.native.being for p in candidate.participants)
+        target_hp_before = target.get_hit_points()
+        weapon_id = self.session._initial_ready_dagger_id(candidate, player)
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        reach = effective_melee_reach_meters(player.current, weapon.current)
+        initial_distance = candidate.encounter.distance_between_beings(player.id, target.id)
+        self.assertGreater(initial_distance, reach + candidate.arena_map.layout.side_length_meters)
+
+        self.request("/api/generated/run", {})
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        view = self.session.public_view()
+        row = next(row for row in view["entities"] if row["category"] == "being"
+                   and row["name"] != view["player"]["name"])
+        self.request("/api/generated/inspect", {"handle": row["handle"]})
+        status, accepted = self.request("/api/generated/melee-strike", {
+            "handle": row["handle"], "motion": "thrust"})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["melee_action"]["status"], "executing")
+
+        layout = candidate.arena_map.layout
+        target_cell = layout.cell_at_position(target.get_position())
+        destination = min((cell for cell in layout.neighbors(target_cell)
+                           if layout.contains(cell)),
+                          key=lambda cell: math.dist(
+                              layout.center_position(cell).as_tuple(), player.get_position().as_tuple()))
+        status, movement = self.request("/api/generated/destination", {
+            "column": destination.column, "row": destination.row,
+            "rate": "sprint", "facing_policy": "maintain"})
+        self.assertEqual(status, 200, movement)
+        from hex_facing import nearest_facing
+        target_to_destination = (layout.center_position(destination).x - target.get_position().x,
+                                 layout.center_position(destination).y - target.get_position().y,
+                                 layout.center_position(destination).z - target.get_position().z)
+        target.hex_facing = (nearest_facing(target_to_destination) + 6) % 12
+        target.strategy.defense = 100
+        original_position = player.get_position()
+        for index in range(4):
+            status, movement = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, movement)
+            if index < 3:
+                self.assertEqual(movement["melee_action"]["status"], "executing")
+        self.assertNotEqual(player.get_position(), original_position)
+        self.assertEqual(movement["melee_action"]["outcome"], "normal")
+        self.assertLess(target.get_hit_points(), target_hp_before)
+        self.assertEqual(movement["time_seconds"], 5)
+
+    def test_attack_from_behind_uses_adopted_zero_target_defense(self):
+        _, _, action, _, _, _ = self.schedule_thrust()
+        actor, target = action.get_actor(), action.get_target()
+        source, destination = actor.get_position(), target.get_position()
+        target_to_actor = (source.x - destination.x, source.y - destination.y,
+                           source.z - destination.z)
+        from hex_facing import nearest_facing
+        target_facing_actor = nearest_facing(target_to_actor)
+        target.strategy.defense = 3
+        # Pick a roll exactly at the unopposed threshold: it fails with the
+        # ordinary defense allocation and succeeds when the attacker is behind.
+        fatigue = actor.exertion.fatigue_levels[actor.get_fatigue_level()]['ability_adjustment']
+        attack = actor.get_weapon_skill_level(action.get_instrument().current.obj_type) + action.strategy.attack
+        roll = 10 - fatigue - attack
+        target.hex_facing = target_facing_actor
+        self.assertFalse(action.roll_hits(roll, 10))
+        target.hex_facing = (target_facing_actor + 6) % 12
+        self.assertTrue(action.roll_hits(roll, 10))
 
     def test_native_out_of_reach_resolves_at_impact_and_unready_is_refused(self):
         view = self.generate()

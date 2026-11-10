@@ -112,6 +112,7 @@ class EvaluationSnapshot:
     objective_inputs: object = None
     omitted_objective_action_ids: tuple = ()
     imported_practice_dependency: object = None
+    encounter_map: object = None
 
     def entity(self, identity):
         try:
@@ -136,10 +137,25 @@ class EvaluationSnapshot:
         distance = self.distance(first, second)
         if distance is None or distance == 0:
             return None
+        from arena_hex_map import layout_from_encounter_map
+        arena_hex_context = layout_from_encounter_map(self.encounter_map) is not None
         return trace_physical_path(self.entity(first).position, self.entity(second).position,
-            ((key, self.entity(key)) for key in self.participant_ids), exclude_ids=(first, second))
+            ((key, entity) for key in self.participant_ids
+             for entity in (self.entity(key),)
+             if (not arena_hex_context
+                 or entity.data.get('parent_container_id') is None)),
+            exclude_ids=(first, second))
 
     def melee_status(self, action):
+        from arena_hex_map import layout_from_encounter_map
+        from action_calculations import melee_hex_path_status
+        layout = layout_from_encounter_map(self.encounter_map)
+        if layout is not None:
+            source = self.entity(action.actor_id).position
+            target = self.entity(action.target_id).position
+            return melee_hex_path_status(source, target, action.data['reach'],
+                self.physical_path(action.actor_id, action.target_id), layout,
+                self.entity(action.actor_id).data.get('hex_facing'))
         distance = self.distance(action.actor_id, action.target_id)
         path = self.physical_path(action.actor_id, action.target_id) if distance is not None and 0 < distance <= action.data['reach'] else None
         return melee_path_status(distance, action.data['reach'], path)
@@ -462,7 +478,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         MappingProxyType(entities), participants, MappingProxyType(actions), freeze(ed['awareness']),
         freeze(frame.to_dict()), freeze(profiles), freeze(random.getstate() if rng_state is None else rng_state),
         practice_inputs=practice_inputs, objective_inputs=objective_inputs,
-        imported_practice_dependency=imported_dependency)
+        imported_practice_dependency=imported_dependency,
+        encounter_map=freeze(ed.get('map')))
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -721,12 +738,24 @@ def _combat(snapshot, action, rng, dependencies):
         else:
             def hits(roll, dc):
                 adjustment = 0
+                target_defense = target.data.get('strategy', {}).get('defense', 0)
                 if action.family == 'melee':
                     adjustment = actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
                     if adjustment is None:
                         return False
+                    from arena_hex_map import layout_from_encounter_map
+                    if layout_from_encounter_map(snapshot.encounter_map) is not None:
+                        target_facing = target.data.get('hex_facing')
+                        if target_facing is not None:
+                            from hex_facing import vector_is_behind
+                            source_position, target_position = actor.position, target.position
+                            if vector_is_behind(target_facing,
+                                (source_position.x - target_position.x,
+                                 source_position.y - target_position.y,
+                                 source_position.z - target_position.z)):
+                                target_defense = 0
                 return attack_hits(roll, actor.data['weapon_skills'].get(weapon.obj_type, 0) + actor.data['strategy']['attack'],
-                    target.data.get('strategy', {}).get('defense', 0), dc - adjustment)
+                    target_defense, dc - adjustment)
             def save(being, dc):
                 return saving_throw(rng.roll('1d20'), dc,
                     saving_throw_experience_modifier(experience_level(being.data['experience'])))

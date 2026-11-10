@@ -22,6 +22,31 @@ _ORIGIN_X_YARDS = _SIDE_YARDS
 _ORIGIN_Y_YARDS = 0.5
 _TIE_EPSILON_YARDS = 1e-12
 _AXIAL_NEIGHBORS = ((1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1))
+ENCOUNTER_MAP_SCHEMA = "flat-top-hex-1-yard-v1"
+
+
+def encounter_map_descriptor(layout: "ArenaHexLayout") -> dict:
+    """Return the strict, serializable map contract used by Arena Encounters."""
+    if (type(layout) is not ArenaHexLayout or type(layout.cell_ids) is not range
+            or layout.cell_ids != range(layout.width_columns * layout.height_rows)):
+        raise ValueError("Encounter map descriptor requires a rectangular native hex layout")
+    return {"schema": ENCOUNTER_MAP_SCHEMA,
+            "width_columns": layout.width_columns,
+            "height_rows": layout.height_rows}
+
+
+def layout_from_encounter_map(value) -> "ArenaHexLayout | None":
+    """Rebuild only the adopted rectangular one-yard Arena hex convention."""
+    if value is None:
+        return None
+    from types import MappingProxyType
+    if (type(value) not in (dict, MappingProxyType)
+            or set(value) != {"schema", "width_columns", "height_rows"}
+            or value["schema"] != ENCOUNTER_MAP_SCHEMA
+            or type(value["width_columns"]) is not int
+            or type(value["height_rows"]) is not int):
+        raise ValueError("unsupported Encounter map descriptor")
+    return ArenaHexLayout.rectangle(value["width_columns"], value["height_rows"])
 
 
 @dataclass(frozen=True, order=True)

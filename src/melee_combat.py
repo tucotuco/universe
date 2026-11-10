@@ -97,13 +97,15 @@ class MeleeStrike(Action):
     ``reach`` is an explicit limit in the Encounter's continuous-coordinate
     units (meters). Callers with native physical definitions should use
     ``effective_melee_reach_meters`` to combine inch-valued personal/weapon
-    dimensions. This Action checks that limit against center distance at impact.
+    dimensions. In a mapped hex Encounter, impact eligibility requires that
+    reach enter the target's authoritative occupied hex; elsewhere it retains
+    the legacy center-distance check.
 
     An obstructed or indeterminate reference-point path is conservatively
     unavailable, even if an intervening modeled physical Entity is transparent.
     StatisticalGroup footprint envelopes are descriptive bounds, not physical
     Entities for this test. An open straight segment does not certify that a
-    swing has enough room. Facing, body-part reach and simultaneous impacts are next.
+    swing has enough room. Being body geometry remains deferred.
     """
 
     def __init__(self, encounter, actor_id, target_id, weapon_id,
@@ -125,8 +127,16 @@ class MeleeStrike(Action):
                          parent_event_id=encounter.id)
 
     def _status(self, encounter):
-        from action_calculations import melee_path_status
+        from action_calculations import melee_hex_path_status, melee_path_status
+        from arena_hex_map import layout_from_encounter_map
         distance = encounter.distance_between_beings(self.actor_id, self.target_id)
+        source = encounter.get_being(self.actor_id).get_position()
+        target = encounter.get_being(self.target_id).get_position()
+        layout = layout_from_encounter_map(encounter.map)
+        if layout is not None:
+            path = encounter.physical_path(self.actor_id, self.target_id)
+            facing = encounter.get_being(self.actor_id).hex_facing
+            return melee_hex_path_status(source, target, self.reach, path, layout, facing)
         path = (encounter.physical_path(self.actor_id, self.target_id)
                 if distance is not None and 0 < distance <= self.reach else None)
         return melee_path_status(distance, self.reach, path)
@@ -179,7 +189,22 @@ class MeleeStrike(Action):
         adjustment = self.get_actor().exertion.fatigue_levels[fatigue]['ability_adjustment']
         if adjustment is None:
             return False
-        return super().roll_hits(roll, difficulty_class - adjustment)
+        target_dc = difficulty_class
+        from arena_hex_map import layout_from_encounter_map
+        if layout_from_encounter_map(self.encounter.map) is not None:
+            target = self.get_target()
+            actor = self.get_actor()
+            if (target is not None and actor is not None
+                    and target.hex_facing is not None
+                    and target.get_position() is not None
+                    and actor.get_position() is not None):
+                from hex_facing import vector_is_behind
+                target_to_actor = (actor.get_position().x - target.get_position().x,
+                                   actor.get_position().y - target.get_position().y,
+                                   actor.get_position().z - target.get_position().z)
+                if vector_is_behind(target.hex_facing, target_to_actor):
+                    target_dc -= target.strategy.defense
+        return super().roll_hits(roll, target_dc - adjustment)
 
     def resolve(self, difficulty_class):
         guard_legacy_action(self, effect=True)
