@@ -321,12 +321,20 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         action_id = next(member.action.id for row in
             source.active_candidate.encounter._choice_book._choices.values()
             for member in row.members)
+        pending = GeneratedArenaSession()
+        pending_view = pending.load_encounter_bytes(source.save_encounter_bytes())
+        self.assertEqual(pending_view["player_action"], {
+            "name": "Run", "status": "executing", "outcome": None})
+        pending.advance_one_second()
         source.advance_one_second()
         outcome = source.public_view()["player_action"]["outcome"]
         self.assertIn(outcome, ("success", "no_movement"))
         expected_action = {"name": "Run", "status": "completed", "outcome": outcome}
+        self.assertEqual(pending.public_view()["player_action"], expected_action)
+        self.assertEqual(pending.active_candidate.participants[0].native.being.get_position(),
+                         source.active_candidate.participants[0].native.being.get_position())
         restored = GeneratedArenaSession()
-        loaded = restored.load_encounter_bytes(source.save_encounter_bytes())
+        loaded = restored.load_encounter_bytes(pending.save_encounter_bytes())
         self.assertEqual(loaded["player_action"], expected_action)
         candidate = restored.active_candidate
         action = candidate.universe.get_event_by_id(action_id)
