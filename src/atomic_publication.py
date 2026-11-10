@@ -47,6 +47,7 @@ _PUBLISHING = False
 _FAULTS = {}
 _EMERGENCIES = {}  # No automatic reset: shared RNG/recipient authority may be tainted.
 _COMMITTED_RECEIPTS = {}  # Process-local successful issuance; never a replay format.
+_ARENA_RESTORED_RECEIPT_AUTHORITY = object()
 _COUNTER = itertools.count(1)
 _MODULE_GETSTATE, _MODULE_SETSTATE = random.getstate, random.setstate
 
@@ -1100,6 +1101,61 @@ def _unregister_quarantined_movement_import(encounter, receipt, *, authority):
         entry = _COMMITTED_RECEIPTS.get(id(row))
         if entry is not None and entry[0]() is row and entry[1]() is encounter:
             _COMMITTED_RECEIPTS.pop(id(row), None)
+
+
+def _register_arena_restored_receipts(encounter, authority):
+    """Restoration-owner import of an exact generated-Arena receipt chain."""
+    if authority is not _ARENA_RESTORED_RECEIPT_AUTHORITY:
+        raise PublicationRejected('Arena receipt import is restoration-owner controlled')
+    from encounter import Encounter
+    from encounter_inspection import CommittedBoundaryRecord, fingerprint
+    if type(encounter) is not Encounter:
+        raise PublicationRejected('native Arena Encounter is required')
+    history = encounter.__dict__.get('_atomic_interval_history')
+    if type(history) is not list:
+        raise PublicationRejected('native Arena receipt history is malformed')
+    if not history:
+        return ()
+    if (len(history) > 4096 or encounter.start_time != 0
+            or encounter.time != len(history)
+            or encounter.last_processed_boundary != encounter.time
+            or encounter._coordinator_time != encounter.time
+            or encounter._interval_start != encounter.time):
+        raise PublicationRejected('native Arena receipt chronology is inconsistent '
+            f'(start={encounter.start_time!r}, time={encounter.time!r}, '
+            f'cursor={encounter.last_processed_boundary!r}, coordinator={encounter._coordinator_time!r}, '
+            f'interval={encounter._interval_start!r}, receipts={len(history)})')
+    previous = 0
+    for boundary, receipt in enumerate(history, 1):
+        if (type(receipt) is not PublishedInterval or receipt.encounter_id != encounter.id
+                or receipt.boundary != boundary or receipt.committed is not True
+                or type(receipt.inspection) is not CommittedBoundaryRecord
+                or receipt.inspection.start != previous
+                or receipt.inspection.end != boundary
+                or tuple(receipt.action_ids) != tuple(receipt.inspection.actions)
+                or tuple(receipt.effect_ids) != tuple(receipt.inspection.effects)):
+            raise PublicationRejected('native Arena receipt chain is incomplete or inconsistent')
+        previous = boundary
+    keys = tuple(id(row) for row in history)
+    if len(set(keys)) != len(keys) or set(keys).intersection(_COMMITTED_RECEIPTS):
+        raise PublicationRejected('native Arena receipt identity collides with current process state')
+    import weakref
+    fingerprints = tuple(fingerprint(row) for row in history)
+    for receipt, stamp in zip(history, fingerprints):
+        key = id(receipt)
+        _COMMITTED_RECEIPTS[key] = (
+            weakref.ref(receipt, lambda ref, key=key: _COMMITTED_RECEIPTS.pop(key, None)),
+            weakref.ref(encounter), stamp)
+    return fingerprints
+
+
+def _unregister_arena_restored_receipts(encounter, authority):
+    if authority is not _ARENA_RESTORED_RECEIPT_AUTHORITY:
+        raise PublicationRejected('Arena receipt rollback is restoration-owner controlled')
+    for receipt in encounter.__dict__.get('_atomic_interval_history', ()):
+        row = _COMMITTED_RECEIPTS.get(id(receipt))
+        if row is not None and row[0]() is receipt and row[1]() is encounter:
+            _COMMITTED_RECEIPTS.pop(id(receipt), None)
 
 
 def recover_interval_publication(encounter,recovery_token,*,ownership=None,rng_state=None,rng_owner=None):

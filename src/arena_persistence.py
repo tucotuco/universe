@@ -6,12 +6,12 @@ import hashlib
 import json
 import math
 
-from checkpoint_wire import decode_run_spot_wire
+from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/1'
+SCHEMA = 'universe.generated-arena-save/2'
 MAX_BYTES = 64 * 1024 * 1024
-_FIELDS = frozenset(('schema','native_checkpoint_base64','session','sha256'))
+_FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 
 
 class ArenaSaveRejected(ValueError):
@@ -99,16 +99,14 @@ def _session_record(session, native_wire):
     }
 
 
-def encode(session, native_wire):
-    if type(native_wire) is not bytes or not native_wire or len(native_wire)>MAX_BYTES:
-        raise ArenaSaveRejected('native checkpoint is empty or exceeds the file limit')
-    try:decode_run_spot_wire(native_wire)
-    except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'native checkpoint is invalid: {exc}') from exc
+def encode(session, native_inventory):
+    try:native_wire=encode_native(native_inventory)
+    except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'native Arena state is invalid: {exc}') from exc
     with session._lock:
         record=_session_record(session,native_wire)
         _tree(record)
         payload={'schema':SCHEMA,
-            'native_checkpoint_base64':base64.b64encode(native_wire).decode('ascii'),
+            'native_state_base64':base64.b64encode(native_wire).decode('ascii'),
             'session':record}
         wire=_canonical(dict(payload,sha256=hashlib.sha256(_canonical(payload)).hexdigest()))
     if len(wire)>MAX_BYTES:raise ArenaSaveRejected('Arena save exceeds the file size limit')
@@ -130,10 +128,10 @@ def decode(wire):
         raise ArenaSaveRejected('Arena save digest does not match its contents')
     if _canonical(data)!=wire:raise ArenaSaveRejected('Arena save is not canonical')
     _tree(data['session'])
-    try:native_wire=base64.b64decode(data['native_checkpoint_base64'],validate=True)
-    except (TypeError,ValueError) as exc:raise ArenaSaveRejected('embedded native checkpoint encoding is invalid') from exc
-    try:decoded=decode_run_spot_wire(native_wire)
-    except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'embedded native checkpoint refused: {exc}') from exc
+    try:native_wire=base64.b64decode(data['native_state_base64'],validate=True)
+    except (TypeError,ValueError) as exc:raise ArenaSaveRejected('embedded native state encoding is invalid') from exc
+    try:decoded=decode_native(native_wire)
+    except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'embedded native Arena state refused: {exc}') from exc
     s=data['session']
     required={'encounter_name','player_name','player_id','opponent_id','starting_experience',
         'root_seed','placement_seed',

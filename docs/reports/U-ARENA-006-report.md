@@ -1,70 +1,57 @@
 # U-ARENA-006 Engineering Report
 
-## Status
+## Result
 
-**General Arena Save/Load is not complete yet.** The browser provides real local file download/upload and replaces the current session only after validation. It restores pristine generated Arenas and movement-only activated Arenas across server processes, including the supported ground Object profile. Those restored sessions can continue with native movement. Saving or restoring after an Action such as Pick up or Draw is still refused by the native checkpoint contract. The feature must therefore be treated as a verified partial implementation, not general Arena persistence.
+Implemented a portable, versioned Save/Load format for the generated Arena's currently supported native graph and browser session. Save and Load now include completed and pending Run, Pick up, and Draw Actions, movement plans, and mixed Action/movement histories. Loaded sessions resume ordinary native progression and can be saved and loaded repeatedly. The format is deliberately scoped to this Arena implementation and fails closed for unknown schemas, native types, fields, references, or runtime compatibility.
 
-## Implemented and verified
+## Design and preserved state
 
-- Added a canonical, bounded JSON save envelope (`universe.generated-arena-save/1`) around the strict native checkpoint and an Arena session record. Decoding rejects unknown/duplicate fields, noncanonical JSON, digest mismatches, invalid base64, malformed metadata, excessive size/tree depth, and invalid embedded native wire.
-- Added shipped **Save Encounter** and **Load Encounter** controls. Save downloads `universe-arena.json`; Load uses the browser file picker. The HTTP endpoint accepts only bounded binary files. Loading stages and validates a separate native graph before atomically replacing the current session; rejected data leaves the old session active.
-- Preserved session names, map dimensions and world premise, seed/source records, ground-Object source/identity bindings, display-name overrides, accepted destination plan, movement sequence, and selected visible Entity.
-- Added owner-controlled import for the existing movement-only receipt prefix with any supported Arena Objects. Typed Object originals/current state, native identity/custody/position, each Entity's committed Target history, process-local receipt anchors, Encounter awareness, observer-owned perception ledgers, and RNG cursor are rebuilt from validated checkpoint data without replaying boundaries or regenerating Being data.
-- A fresh process can load a movement-only checkpoint with eight ground combat Objects, advance normally, save again, and continue at the next boundary. Movement plans remain bound to the original decision, destination, rate, facing policy, map, and current native Encounter.
+- Replaced the Run/Spot checkpoint wire as the Arena file format with `universe.generated-arena-save/2`, containing a separate `universe.generated-arena-native-state/1` graph inventory and the Arena-owned session record. Canonical JSON, duplicate-key rejection, SHA-256 integrity, strict field sets, depth/node/file bounds, exact runtime compatibility, and an allowlisted native type closure reject incompatible or malformed files.
+- The native graph is captured from the existing checkpoint inventory's authoritative state, including the exact Being and Object definitions/instances, identities, current and historical state, possessions, body-part/equipment state, Action/Choice objects and timing, Target histories, observer-owned perception, committed receipts, and RNG cursor. The browser sidecar preserves names, map/world premise, generated input evidence, Object source bindings, accepted movement destination/options, movement sequence, and current selection.
+- Restoration allocates the captured native graph without calling npcgen or replaying a committed effect. Under restoration-owner-only hooks it rebinds process-local locks, Choice declaration signatures, native references, receipt identity anchors, and progression ownership. Native Encounter inspection validates committed history before the session is exposed. The restored graph then uses the ordinary progression pipeline for every subsequent second.
+- Completed Action summaries are rebuilt from native inspection. Pending Actions are recovered from accepted native Choices as well as committed event history; this covers a pending Pick up, which the native scheduler holds in ChoiceBook before it appears in event history. No pending Action is synthesized.
+- The accepted movement plan remains valid after subsequent plan changes; it is checked against the native Arena activation actor/time, map, destination, movement rules and checkpoint boundary rather than requiring its decision ID to be the first activation decision.
+- Load stages a separate graph and session record, then replaces the live browser session only after validation. Version 1 files and unsupported type closures are rejected without replacing the active session.
 
-## Explicit remaining blocker
+This is a dedicated Arena save contract. It does not expand the supported general Universe checkpoint format and it does not claim to serialize arbitrary Encounter types or future Actions.
 
-The current checkpoint closure and restoration adapters cover movement-only receipts and a bounded Run/Spot Action subset. Pick up and ReadyWeaponAction are not yet covered as portable pending declarations or committed receipt Actions/effects. After a real ground Pick up commit, the browser now reports:
+## Browser acceptance demonstrations
 
-> `Saving after Pick up or Draw is not supported yet. Your current Encounter remains active and unchanged.`
+All demonstrations used the shipped Arena JavaScript in isolated Chrome tabs and a freshly launched local server on `127.0.0.1` ephemeral ports.
 
-The underlying capture refusal is `missing closed-field adapter: activities.PickUpAction`. After adding PickUpAction/ReadyWeaponAction to the event type catalog to expose the next validator boundary, capture still fails closed until their exact native field adapters, choice descriptors, effect/action receipt encodings, Target/observer state rebinding, and reconstruction paths are reviewed and implemented. The restored movement path also assumes every historical receipt is Action-free and returns to quarantine during its owner-controlled next-step proof. General repeated play across mixed movement and Action history therefore still needs a trusted, indefinitely usable restoration path. No unsupported Action or history was dropped to make a save appear successful.
+### Pick up → Save → Restart → Load → Continue
 
-This is an implementation dependency in the checkpoint machinery; no Encounter timing or simulation-rule decision is being requested. The browser reports the native refusal and retains the current Encounter.
+Generated an Arena with the explicit ground-loadout test profile, moved to a native ground Dagger, picked it up, and committed the one-second Action. Saved through **Save Encounter**, stopped the server, launched a fresh server, and loaded the downloaded version 2 file through **Load Encounter**. The loaded browser showed native time 2 and the carried Dagger. Selected a destination and advanced one second; time became 3 and the authoritative position changed to `(2.389259973808466, 1.805280332873052, 0)` m. The loaded Encounter was in the ordinary playable state.
 
-## Browser demonstration
+### Pending Draw → Save → Restart → Load → Complete Draw
 
-Using the actual shipped browser code in a new isolated local session:
+Generated the opt-in authored Draw scenario with its explicitly drawable carried Dagger and empty native hands. Selected the carried Dagger and **Draw (2 s)** in the character Action catalog, then advanced one second. Saved while the native Draw Choice was pending, stopped the server, launched a fresh server, and loaded the file into a new browser tab. The browser restored native time 1 and the pending Draw. Advancing one more second resolved it successfully at time 2. The character panel showed the same Dagger readied in the left hand; possession and Object identity remained intact.
 
-1. Open the generated Arena, select **Generate Encounter**, and use **Save Encounter** to download a file.
-2. Stop and restart the loopback Arena server.
-3. Select **Load Encounter** and choose the downloaded file. The browser displayed “Encounter loaded. Native state and observer evidence restored.” at native time zero.
-4. Clicked a map hex, confirmed the server accepted a Walk/turn destination, then clicked **Advance 1 second**. The page reported native time 1 and showed the player's updated authoritative Cartesian position/facing.
+### Mixed movement and Action history; repeated Save/Load
 
-The smoke used an ephemeral loopback port. The first normal sandbox bind attempt failed with `PermissionError`; the server was then launched with narrowly scoped loopback permission. No external host was bound. The smoke download is `<LOCAL_HOME_PATH>`.
+The integration regression compares uninterrupted play with save/load branches after native movement and completed Pick up. Both branches accept a further movement plan, commit it, save/load again, and advance another boundary. Positions, RNG state, receipt counts, Dagger custody/identity, and Target history match. Pending Pick up is separately saved/restored and completed at its exact one-second boundary. Pending Draw is separately restored with one second remaining and completes only at its native two-second boundary. Completed Draw and Run histories also round-trip.
 
-## Test evidence
+## Verification
 
-Passed:
-
-- `PYTHONPATH=src:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_arena_persistence -q` — **4 passed**. Covers pristine ground Object restoration, three-process repeatable movement continuation both with no Objects and with eight typed ground Objects, and exact fail-closed/unchanged-session behavior after a real native Pick up. Compares native position/facing, RNG, Object IDs/types/positions/history lengths, and receipt-history counts with uninterrupted execution.
-- `PYTHONPATH=src:examples:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_generated_arena_browser tests.test_arena_ground_objects tests.test_arena_persistence -q` — **44 passed** after including pristine Object persistence and the fail-closed Pick up case.
+- `PYTHONPATH=src:examples:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_arena_persistence tests.test_generated_arena_browser tests.test_arena_ground_objects -q` — **47 passed**.
 - `PYTHONPATH=src:tests:.venv/lib/python3.12/site-packages .venv/bin/python -m unittest tests.test_checkpoint_bounded_closure tests.test_checkpoint_movement_continuation tests.test_checkpoint_receipt_descriptors tests.test_checkpoint_projection tests.test_checkpoint_wire -q` — **33 passed**.
-- `python -m py_compile` over the modified persistence/checkpoint/session/test modules — passed.
+- `py_compile` over all changed Python implementation and test modules — passed.
 - `git diff --check` — passed.
-- Separate real-browser download → server restart → file load → map destination → native one-second progression smoke — passed.
+- Real-browser Pick up and pending Draw restart workflows above — passed.
+- One initial attempt to launch the local server inside the network-restricted sandbox was denied with `PermissionError`. Each browser smoke then used narrowly approved execution for only the server command, bound only to loopback on an OS-assigned port. All servers were stopped after use.
 
-Additional failure characterization:
+The full repository test suite was not run. Save files cover only the currently allowlisted generated Arena type and Action closure; a later native Action or new state type is rejected until deliberately added and verified.
 
-- Captured an authentic completed native Pick up in a generated ground-Dagger Arena. Saving was refused with the closed-field-adapter message above; no file was emitted and the session remained active.
+## Files changed
 
-The full repository suite was not run. Pending Draw, post-Draw, post-Pick-up load, mixed Action/movement restore, observer-history ground-to-carried persistence, save rollback injection, and an uninterrupted-versus-restored Action-bearing comparison remain unverified and unsupported.
-
-## User instructions
-
-From the repository root, launch the generated Arena locally:
-
-```sh
-PYTHONPATH=../npc-generator .venv/bin/python examples/generated_arena_browser.py --port 8000
-```
-
-Open `http://127.0.0.1:8000/`. Generate, then use the Save/Load controls. At this implementation stage, save/load is supported before activation and during supported Action-free movement history; an Action-bearing state produces an explicit refusal. The checked-in authored Draw scenario can be started with `--authored-draw-scenario`, but Draw persistence is not yet implemented.
+- `src/arena_native_snapshot.py` — bounded Arena-only native graph encoding, validation, reconstruction, and restoration-owner binding.
+- `src/arena_persistence.py` — version 2 portable file envelope and strict metadata validation.
+- `src/arena_browser_session.py` — native graph Save/Load integration and restoration of completed/pending Run, Pick up, and Draw state.
+- `src/atomic_publication.py`, `src/transactional_progression.py` — private restoration-owner receipt import and ordinary progression binding.
+- `src/checkpoint_inventory.py` — closes the exact Pick up and Draw effect types needed by the Arena graph.
+- `src/arena_movement_plan_checkpoint.py` — preserves later accepted movement plans across activation history.
+- `tests/test_arena_persistence.py` — pending/completed Action, mixed-history repeated-save, native-state, and deterministic-continuation regressions.
 
 ## Commits
 
-- `7b43efe` Close Arena checkpoint over native Objects
-- `5936dce` Document Arena persistence implementation status
-- `f4021c0` Add generated Arena save and load at time zero
-- `fde4feb` Restore Arena movement checkpoints with Objects
-- `046dfac` Verify Arena pickup checkpoint refusal
-- The Pick up/Draw capture refusal now has player-facing wording while preserving the underlying fail-closed diagnostic for logs/tests. No changes were pushed.
+See the repository history for the verified implementation commits. No changes were pushed.

@@ -163,7 +163,7 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             self.assertEqual(self._tuplify(restored["rng"]), uninterrupted._rng_cursor.state)
             self.assertEqual(restored["receipts"], len(encounter._atomic_interval_history))
 
-    def test_action_bearing_pickup_save_refuses_without_mutating_active_session(self):
+    def test_pickup_save_load_preserves_action_inventory_and_continuation(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
         session = GeneratedArenaSession(root_seed_factory=lambda: 5050,
                                         ground_loadout_profile=profile)
@@ -190,19 +190,154 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         self.assertEqual(session.public_view()["character"]["inventory"]["items"][0]["status"],
                          "carried; not readied")
         active = session.active_candidate
-        receipt_ids = tuple(row.boundary for row in active.encounter._atomic_interval_history)
-        positions = tuple((entity_id, tuple(active.universe.get_object_by_id(entity_id).get_position().as_tuple())
-                           if active.universe.get_object_by_id(entity_id).get_position() is not None else None)
-                          for entity_id in active.encounter.being_list + active.encounter.non_being_object_list)
-        with self.assertRaisesRegex(ArenaBrowserRequestError,
-                                    "Saving after Pick up or Draw is not supported yet"):
-            session.save_encounter_bytes()
-        self.assertIs(session.active_candidate, active)
-        self.assertEqual(tuple(row.boundary for row in active.encounter._atomic_interval_history), receipt_ids)
-        self.assertEqual(positions, tuple((entity_id,
-            tuple(active.universe.get_object_by_id(entity_id).get_position().as_tuple())
-            if active.universe.get_object_by_id(entity_id).get_position() is not None else None)
-            for entity_id in active.encounter.being_list + active.encounter.non_being_object_list))
+        saved = session.save_encounter_bytes()
+        restored = GeneratedArenaSession()
+        loaded = restored.load_encounter_bytes(saved)
+        loaded_candidate = restored.active_candidate
+        loaded_being = loaded_candidate.participants[0].native.being
+        loaded_dagger = loaded_candidate.universe.get_object_by_id(dagger.native_object_id)
+        self.assertEqual(loaded["pickup_action"], {"name": "Pick up", "status": "completed",
+                         "outcome": "success"})
+        self.assertEqual(loaded["character"]["inventory"]["items"][0]["status"],
+                         "carried; not readied")
+        self.assertIs(type(loaded_dagger), type(active.universe.get_object_by_id(dagger.native_object_id)))
+        self.assertEqual(loaded_dagger.id, dagger.native_object_id)
+        self.assertEqual(loaded_dagger.parent_container_id, loaded_being.id)
+        self.assertIn(loaded_dagger.id, loaded_being.possessions)
+        self.assertEqual(len(loaded_candidate.encounter._atomic_interval_history),
+                         len(active.encounter._atomic_interval_history))
+        destination = next(address for address in loaded_candidate.arena_map.layout.addresses()
+                           if address != loaded_candidate.arena_map.layout.cell_at_position(
+                               loaded_being.get_position()))
+        for current in (session, restored):
+            current.choose_destination({"column": destination.column, "row": destination.row,
+                                        "rate": "walk", "facing_policy": "turn"})
+            current.advance_one_second()
+        self.assertEqual(session.active_candidate.participants[0].native.being.get_position(),
+                         restored.active_candidate.participants[0].native.being.get_position())
+        repeated_session = GeneratedArenaSession()
+        repeated = repeated_session.load_encounter_bytes(restored.save_encounter_bytes())
+        self.assertEqual(repeated["time_seconds"], restored.active_candidate.encounter.time)
+        session.advance_one_second()
+        repeated_session.advance_one_second()
+        source_candidate = session.active_candidate
+        repeated_candidate = repeated_session.active_candidate
+        self.assertEqual(repeated_candidate.participants[0].native.being.get_position(),
+                         source_candidate.participants[0].native.being.get_position())
+        self.assertEqual(repeated_session._rng_cursor.state, session._rng_cursor.state)
+        self.assertEqual(len(repeated_candidate.encounter._atomic_interval_history),
+                         len(source_candidate.encounter._atomic_interval_history))
+        source_dagger = source_candidate.universe.get_object_by_id(dagger.native_object_id)
+        repeated_dagger = repeated_candidate.universe.get_object_by_id(dagger.native_object_id)
+        self.assertEqual(repeated_dagger.parent_container_id, source_dagger.parent_container_id)
+        self.assertEqual(repeated_dagger._atomic_target_history, source_dagger._atomic_target_history)
+
+    def test_pending_draw_save_load_keeps_exact_two_second_boundary(self):
+        scenario = json.loads((ROOT / "examples/arena_scenarios/ordinary-dagger-draw.json")
+                              .read_text(encoding="utf-8"))
+        source = GeneratedArenaSession(root_seed_factory=lambda: 5050,
+                                       authored_draw_scenario=scenario)
+        source.generate({"starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        candidate = source.active_candidate
+        player = candidate.participants[0].native.being
+        dagger = candidate.universe.get_object_by_id(player.possessions[0])
+        row = next(row for row in source.public_view()["entities"] if row["type"] == "Dagger")
+        source.choose_ready_weapon({"handle": row["handle"], "hand": "right hand"})
+        source.advance_one_second()
+        saved = source.save_encounter_bytes()
+        restored = GeneratedArenaSession()
+        before = restored.load_encounter_bytes(saved)
+        self.assertEqual(before["ready_weapon_action"]["status"], "executing")
+        self.assertEqual(before["ready_weapon_action"]["seconds_remaining"], 1)
+        restored_player = restored.active_candidate.participants[0].native.being
+        restored_dagger = restored.active_candidate.universe.get_object_by_id(dagger.id)
+        self.assertIsNone(restored_player.current.body_parts["right hand"])
+        self.assertEqual(restored_player.possessions, [dagger.id])
+        source.advance_one_second()
+        after = restored.advance_one_second()
+        self.assertEqual(after["ready_weapon_action"]["outcome"], "success")
+        self.assertEqual(restored.active_candidate.encounter.time, source.active_candidate.encounter.time)
+        self.assertEqual(restored_player.current.body_parts, player.current.body_parts)
+        self.assertEqual(restored_player.possessions, [dagger.id])
+        self.assertEqual(restored_player.weapons, player.weapons)
+        self.assertEqual(restored_dagger.parent_container_id, dagger.parent_container_id)
+        self.assertEqual(restored_dagger.current.weight, dagger.current.weight)
+        self.assertEqual(restored._rng_cursor.state, source._rng_cursor.state)
+        completed_file = restored.save_encounter_bytes()
+        completed_restore = GeneratedArenaSession()
+        completed = completed_restore.load_encounter_bytes(completed_file)
+        completed_player = completed_restore.active_candidate.participants[0].native.being
+        completed_dagger = completed_restore.active_candidate.universe.get_object_by_id(dagger.id)
+        self.assertEqual(completed["ready_weapon_action"]["status"], "completed")
+        self.assertEqual(completed_player.current.body_parts["right hand"], dagger.id)
+        self.assertEqual(completed_player.possessions, [dagger.id])
+        self.assertEqual(completed_player.weapons, [dagger.id])
+        self.assertEqual(completed_dagger.parent_container_id, player.id)
+
+    def test_pending_pickup_save_load_keeps_exact_one_second_boundary(self):
+        profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
+        source = GeneratedArenaSession(root_seed_factory=lambda: 6060,
+                                       ground_loadout_profile=profile)
+        source.generate({"starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        candidate = source.active_candidate
+        player = candidate.participants[0].native.being
+        dagger = next(row for row in candidate.ground_objects
+                      if row.category == "weapon" and row.native_type_key == "Dagger")
+        source.choose_destination({"column": dagger.column, "row": dagger.row,
+                                   "rate": "walk", "facing_policy": "turn"})
+        for _ in range(20):
+            source.advance_one_second()
+            if candidate.arena_map.layout.cell_at_position(player.get_position()) == HexAddress(
+                    dagger.column, dagger.row):
+                break
+        else:
+            self.fail("native movement did not reach the generated Dagger's hex")
+        visible = next(row for row in source.public_view()["entities"]
+                       if row["category"] == "object" and row["type"] == "Dagger"
+                       and row["cell"] == {"column": dagger.column, "row": dagger.row})
+        source.choose_pickup({"handle": visible["handle"]})
+        saved = source.save_encounter_bytes()
+        restored = GeneratedArenaSession()
+        pending = restored.load_encounter_bytes(saved)
+        restored_candidate = restored.active_candidate
+        restored_player = restored_candidate.participants[0].native.being
+        restored_dagger = restored_candidate.universe.get_object_by_id(dagger.native_object_id)
+        self.assertEqual(pending["pickup_action"], {"name": "Pick up", "status": "executing",
+                         "outcome": None})
+        self.assertEqual(restored_player.possessions, [])
+        self.assertIsNone(restored_dagger.parent_container_id)
+        result = restored.advance_one_second()
+        self.assertEqual(result["pickup_action"], {"name": "Pick up", "status": "completed",
+                         "outcome": "success"})
+        self.assertEqual(restored_player.possessions, [dagger.native_object_id])
+        self.assertEqual(restored_dagger.parent_container_id, player.id)
+        self.assertIsNone(restored_dagger.get_position())
+        self.assertEqual(restored._rng_cursor.state, source._rng_cursor.state)
+
+    def test_run_action_round_trips_as_completed_native_history(self):
+        source = GeneratedArenaSession(root_seed_factory=lambda: 7070)
+        source.generate({"starting_experience": "10000", "width_cells": "5", "height_cells": "5"})
+        accepted = source.choose_run()
+        action_id = next(member.action.id for row in
+            source.active_candidate.encounter._choice_book._choices.values()
+            for member in row.members)
+        source.advance_one_second()
+        outcome = source.public_view()["player_action"]["outcome"]
+        self.assertIn(outcome, ("success", "no_movement"))
+        expected_action = {"name": "Run", "status": "completed", "outcome": outcome}
+        restored = GeneratedArenaSession()
+        loaded = restored.load_encounter_bytes(source.save_encounter_bytes())
+        self.assertEqual(loaded["player_action"], expected_action)
+        candidate = restored.active_candidate
+        action = candidate.universe.get_event_by_id(action_id)
+        self.assertIsNotNone(action)
+        self.assertEqual(candidate.encounter.time, source.active_candidate.encounter.time)
+        self.assertEqual(len(candidate.encounter._atomic_interval_history),
+                         len(source.active_candidate.encounter._atomic_interval_history))
+        restored_player = candidate.participants[0].native.being
+        source_player = source.active_candidate.participants[0].native.being
+        self.assertEqual(restored_player._atomic_target_history,
+                         source_player._atomic_target_history)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ def capture_accepted_plan(session):
                 or premise.terrain_multiplier != 1.0 or premise.hampered_multiplier != 1.0):
             raise MovementPlanRejected("unsupported native Arena movement-rate premise")
         player = candidate.participants[0].native.being
-        if (activation.actor_id != player.id or activation.movement_decision_id != plan.decision_id
+        if (activation.actor_id != player.id
                 or type(plan.destination) is not CartesianPosition or type(plan.address) is not HexAddress
                 or not layout.contains(plan.address) or plan.rate not in _RATES
                 or plan.facing_policy not in ("turn", "maintain")

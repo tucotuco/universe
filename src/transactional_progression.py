@@ -531,6 +531,57 @@ def enable_transactional_progression(encounter, *, quiescent=False, rng_owner=No
         return _enable_transactional_progression_owned(encounter, rng_owner=rng_owner)
 
 
+def _bind_restored_arena_progression(encounter, rng_owner, authority):
+    """Bind a fully validated native Arena graph to ordinary progression."""
+    import atomic_publication as publication
+    from encounter import Encounter
+    from interval_staging import _rng_input
+    if authority is not publication._ARENA_RESTORED_RECEIPT_AUTHORITY:
+        raise TransactionalProgressionError('Arena progression restore is restoration-owner controlled')
+    if type(encounter) is not Encounter or mode_of(encounter) != 'legacy':
+        raise TransactionalProgressionError('fresh native Arena Encounter is required')
+    if is_quarantined(encounter) or is_quarantined(encounter.universe):
+        raise TransactionalProgressionError('Arena restore graph cannot be quarantined')
+    ed = object.__getattribute__(encounter, '__dict__')
+    history = ed.get('_atomic_interval_history')
+    if (type(history) is not list or encounter.time != encounter.last_processed_boundary
+            or encounter.time != len(history) or encounter.active_boundary is not None
+            or encounter.boundary_fault is not None or encounter.pending_action_list is None
+            or encounter._advancing or encounter._running or encounter._dispatching):
+        raise TransactionalProgressionError('restored Arena cursor/receipt chain is not quiescent')
+    role, identity, state = _rng_input(encounter, None, rng_owner)
+    if role != 'caller_cursor' or (history and tuple(history[-1].rng_state) != tuple(state)):
+        raise TransactionalProgressionError('restored Arena RNG cursor is not the committed native state')
+    encounter._choice_book.assert_accepted()
+    if encounter.initiated:
+        _all_declarations(encounter, encounter.last_processed_boundary + 1, rng_owner)
+    elif (history or encounter.pending_action_list or encounter.finished_action_list
+          or encounter.cancelled_action_list or encounter._choice_book._choices):
+        raise TransactionalProgressionError('uninitiated Arena contains committed or scheduled native state')
+    descriptor = ProgressionMode('transactional', id(encounter), role, identity)
+    key = id(encounter)
+    binding = _Binding(weakref.ref(encounter,
+        lambda ref: _BINDINGS.pop(key, None)), descriptor, rng_owner,
+        threading.Lock())
+    _BINDINGS[key] = binding
+    try:
+        ed['_transactional_mode'] = descriptor
+    except BaseException:
+        _BINDINGS.pop(key, None)
+        raise
+    return descriptor
+
+
+def _unbind_restored_arena_progression(encounter, authority):
+    import atomic_publication as publication
+    if authority is not publication._ARENA_RESTORED_RECEIPT_AUTHORITY:
+        raise TransactionalProgressionError('Arena progression rollback is restoration-owner controlled')
+    binding = _BINDINGS.get(id(encounter))
+    if binding is not None and binding.encounter() is encounter:
+        _BINDINGS.pop(id(encounter), None)
+        object.__getattribute__(encounter, '__dict__').pop('_transactional_mode', None)
+
+
 def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
     """Select transactional mode inside an already-held publication lease."""
     from encounter import Encounter

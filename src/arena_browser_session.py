@@ -254,24 +254,16 @@ class GeneratedArenaSession:
 
     def save_encounter_bytes(self):
         """Capture the native graph and its Arena session sidecar atomically."""
-        from checkpoint_envelope import assemble_native_run_spot_envelope
-        from checkpoint_wire import encode_run_spot_envelope
+        from arena_native_snapshot import capture
         from arena_persistence import encode
         with self._lock:
             if self._active is None:
                 raise ArenaBrowserRequestError("Generate an Encounter before saving")
             try:
-                envelope=assemble_native_run_spot_envelope(self._active.universe,
-                    self._active.encounter,quiescent=True,rng_scope='exclusive_encounter',
-                    rng_owner=self._rng_cursor)
-                native_wire=encode_run_spot_envelope(envelope)
-                return encode(self,native_wire)
+                inventory=capture(self._active.universe,self._active.encounter,self._rng_cursor)
+                return encode(self,inventory)
             except (TypeError,ValueError,RuntimeError) as exc:
                 detail = str(exc)
-                if 'activities.PickUpAction' in detail or 'activities.ReadyWeaponAction' in detail:
-                    raise ArenaBrowserRequestError(
-                        "Saving after Pick up or Draw is not supported yet. "
-                        "Your current Encounter remains active and unchanged.") from exc
                 raise ArenaBrowserRequestError(
                     "This Arena state cannot be saved yet; native checkpoint validation refused it: "
                     +detail) from exc
@@ -281,8 +273,7 @@ class GeneratedArenaSession:
         import base64
         import hashlib
         from arena_persistence import decode
-        from checkpoint_reconstruction import reconstruct_initial_run_spot
-        from checkpoint_restore_preparation import _admit_trusted_movement_arena
+        from arena_native_snapshot import restore as restore_native
         from arena_initialization import (ArenaInitializationCandidate,ArenaMap,
             ArenaWorldPremise,ArenaParticipant,ArenaPlacement)
         from arena_hex_map import ArenaHexLayout
@@ -294,18 +285,7 @@ class GeneratedArenaSession:
         try:
             data=decode(wire)
             meta=data['session']
-            boundary_rows=data['decoded_native'].envelope_data[4]
-            if boundary_rows:
-                if meta['movement_plan_base64'] is None:
-                    raise ArenaBrowserRequestError(
-                        "This committed movement checkpoint has no accepted destination plan to restore.")
-                universe,encounter,rng_owner=_admit_trusted_movement_arena(
-                    data['decoded_native'],
-                    base64.b64decode(meta['movement_plan_base64'],validate=True))
-            else:
-                private=reconstruct_initial_run_spot(data['decoded_native'])
-                from checkpoint_reconstruction import _admit_pristine_arena_reconstruction
-                universe,encounter,rng_owner=_admit_pristine_arena_reconstruction(private)
+            universe,encounter,rng_owner=restore_native(data['decoded_native'])
             if (len(encounter.being_list)!=2 or meta['player_id']!=encounter.being_list[0]
                     or meta['opponent_id']!=encounter.being_list[1]
                     or meta['starting_experience']!=universe.get_object_by_id(meta['player_id']).original.experience):
@@ -364,7 +344,8 @@ class GeneratedArenaSession:
                 if (plan_data.universe_id!=universe.id or plan_data.encounter_id!=encounter.id
                         or plan_data.actor_id!=meta['player_id'] or plan_data.checkpoint_boundary!=encounter.time
                         or (encounter.arena_movement_activation is not None
-                            and plan_data.decision_id!=encounter.arena_movement_activation.movement_decision_id)):
+                            and (encounter.arena_movement_activation.actor_id!=plan_data.actor_id
+                                 or encounter.arena_movement_activation.time!=0))):
                     raise ArenaBrowserRequestError("Saved movement plan disagrees with native activation state")
         except ArenaBrowserRequestError:
             raise
@@ -388,6 +369,33 @@ class GeneratedArenaSession:
                 self._pickup_action_id=None;self._pickup_action_outcome=None
                 self._ready_weapon_action_id=None;self._ready_weapon_action_outcome=None
                 self._ready_weapon_end_time=None
+                from activities import RunAction, PickUpAction, ReadyWeaponAction
+                from encounter_inspection import inspect_encounter
+                by_id={event_id:event for event_id,event in universe.event_history.items()}
+                # A newly accepted Choice is not necessarily in event_history:
+                # PickUpAction is held by ChoiceBook until its scheduled
+                # boundary. Include those accepted native members so pending
+                # Actions survive a server restart with their original timing.
+                for accepted in encounter._choice_book._choices.values():
+                    for member in accepted.members:
+                        action=member.action
+                        if type(action) in (RunAction,PickUpAction,ReadyWeaponAction):
+                            by_id[action.id]=action
+                native_actions=[event for event in by_id.values()
+                    if type(event) in (RunAction,PickUpAction,ReadyWeaponAction)
+                    and event.actor_id==meta['player_id']]
+                completed={}
+                if encounter._atomic_interval_history:
+                    completed=inspect_encounter(encounter).actions
+                for event in sorted(native_actions,key=lambda row:(row.start_time,row.id)):
+                    outcome=(completed[event.id].facts.outcome if event.id in completed else None)
+                    if type(event) is RunAction:
+                        self._player_action_id=event.id;self._player_action_outcome=outcome
+                    elif type(event) is PickUpAction:
+                        self._pickup_action_id=event.id;self._pickup_action_outcome=outcome
+                    elif type(event) is ReadyWeaponAction:
+                        self._ready_weapon_action_id=event.id;self._ready_weapon_action_outcome=outcome
+                        self._ready_weapon_end_time=event.end_time
                 result=self._view_unlocked()
                 selected_id=meta['selected_entity_id']
                 if selected_id is not None:
