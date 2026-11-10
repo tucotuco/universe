@@ -231,6 +231,8 @@ class TestArenaOpponentAttack(unittest.TestCase):
         self.assertEqual(view["opponent_defense_action"]["status"], "preparing")
         defense = source._latest_melee_defense(candidate, opponent)
         self.assertEqual(defense.target_action_id, player_strike.id)
+        self.assertEqual([action for action in source._all_melee_defenses(candidate)
+                          if action.actor_id == opponent.id], [defense])
         self.assertFalse(any(action.actor_id == opponent.id
                              for action in source._all_melee_actions(candidate)))
 
@@ -244,6 +246,11 @@ class TestArenaOpponentAttack(unittest.TestCase):
             restored.advance_one_second()
             self.assertEqual(native_continuation_state(source),
                              native_continuation_state(restored))
+            self.assertEqual([action for action in source._all_melee_defenses(
+                source.active_candidate)
+                if action.actor_id == source.active_candidate.participants[1].native.being.id],
+                [source._latest_melee_defense(source.active_candidate,
+                    source.active_candidate.participants[1].native.being)])
         self.assertEqual(subprocess_advance_checkpoint(wire, 2),
                          continuation_digest(native_continuation_state(source)))
         completed = source.public_view()

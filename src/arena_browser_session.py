@@ -1017,6 +1017,9 @@ class GeneratedArenaSession:
             return {"kind": "none", "reason": "opponent_unable_to_defend"}
         if encounter._choice_book.actor_planned_now(opponent.id):
             return {"kind": "none", "reason": "opponent_action_already_pending"}
+        current_defense = self._latest_melee_defense(candidate, opponent)
+        if self._melee_defense_pending(candidate, current_defense):
+            return {"kind": "none", "reason": "opponent_defense_already_pending"}
         strike = self._visible_incoming_strike(candidate, opponent, player, ledger)
         if strike is None:
             return {"kind": "none", "reason": "no_observed_incoming_strike"}
