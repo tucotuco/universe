@@ -59,6 +59,7 @@ _CONTEXT_REVISION_LOCK = Lock()
 _CONTEXT_REVISIONS = count(1)
 _MOVEMENT_IMPORT_AUTHORITY = object()
 _QUARANTINED_MOVEMENT_IMPORTS = WeakKeyDictionary()
+_MOVEMENT_CONTINUATION_APPROVALS = WeakKeyDictionary()
 
 
 @dataclass(frozen=True, eq=False)
@@ -75,10 +76,27 @@ class QuarantinedMovementNativeInspection:
 
 
 @dataclass(frozen=True)
+class TrustedMovementContinuationInspection:
+    """Detached boundary-2 result of one explicitly trusted restored movement."""
+    schema: str
+    movement_plan: object
+    inspection: object
+    native_beings: tuple
+    observer_evidence: tuple
+    rng_state: tuple
+    quarantined_after_step: bool
+
+
+@dataclass(frozen=True)
 class _PrivateMovementNativeInspection:
     native: object
     receipt: object
     fingerprint: str
+
+
+class _HostMovementContinuationApproval:
+    """Process-local host decision bound to one import and exact accepted plan."""
+    __slots__ = ('__weakref__',)
 
 
 @dataclass(frozen=True)
@@ -224,6 +242,188 @@ def _import_quarantined_movement_boundary(decoded):
         if isinstance(exc, RestorePreparationRejected):
             raise
         raise RestorePreparationRejected(f'quarantined movement receipt import refused: {exc}') from exc
+
+
+def _host_authorize_movement_continuation(import_handle, movement_plan):
+    """Record the host's out-of-band trust decision for this exact plan/import."""
+    from arena_movement_plan_checkpoint import (
+        ArenaMovementPlanCheckpoint, MovementPlanRejected, encode, decode)
+    if (_QUARANTINED_MOVEMENT_IMPORTS.get(import_handle) is None
+            or type(movement_plan) is not ArenaMovementPlanCheckpoint):
+        raise RestorePreparationRejected('host approval requires an exact imported graph and closed plan')
+    try:
+        movement_plan = decode(encode(movement_plan))
+    except (MovementPlanRejected, TypeError, ValueError) as exc:
+        raise RestorePreparationRejected(f'host-approved movement plan is invalid: {exc}') from exc
+    approval = _HostMovementContinuationApproval()
+    _MOVEMENT_CONTINUATION_APPROVALS[approval] = (import_handle, movement_plan)
+    return approval
+
+
+def _trusted_continue_imported_movement_boundary(import_handle, movement_plan, *, approval):
+    """Advance one validated imported Arena movement boundary under host trust.
+
+    This is intentionally a one-boundary restoration-owner operation. The
+    source plan must be separately captured from the accepted live session;
+    checkpoint bytes cannot manufacture host trust or a new movement Choice.
+    """
+    from arena_movement_plan_checkpoint import (
+        ArenaMovementPlanCheckpoint, MovementPlanRejected, SCHEMA, encode, decode)
+    from arena_hex_map import ArenaHexLayout, HexAddress
+    from spatial.state import CartesianPosition
+    from movement_intent import MovementIntent, MovementRateConditions
+    from checkpoint_adapters import _movement_activation_state, CheckpointRejected
+    from encounter_inspection import inspect_encounter, fingerprint
+    from transactional_progression import (
+        TransactionalProgressionError, _trusted_imported_movement_scope,
+        _bind_trusted_imported_movement_progression, is_quarantined)
+    from being import BeingInstance
+
+    private = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
+    approved = _MOVEMENT_CONTINUATION_APPROVALS.get(approval)
+    if (private is None or type(movement_plan) is not ArenaMovementPlanCheckpoint
+            or movement_plan.schema != SCHEMA or approved is None
+            or approved[0] is not import_handle):
+        raise RestorePreparationRejected('trusted movement requires host approval for this exact imported graph and plan')
+    try:
+        movement_plan = decode(encode(movement_plan))
+    except (MovementPlanRejected, TypeError, ValueError) as exc:
+        raise RestorePreparationRejected(f'accepted movement plan failed strict validation: {exc}') from exc
+    if movement_plan != approved[1]:
+        raise RestorePreparationRejected('accepted movement plan differs from the host-approved plan')
+    native = private.native
+    encounter = native.encounter
+    universe = native.universe
+    beings = dict(native.beings)
+    plan = movement_plan
+    try:
+        activation = _movement_activation_state(encounter)
+    except (TypeError, ValueError, CheckpointRejected) as exc:
+        raise RestorePreparationRejected(f'imported native movement state is invalid: {exc}') from exc
+    if (not is_quarantined(universe) or not is_quarantined(encounter)
+            or not all(is_quarantined(being) for being in beings.values())
+            or encounter.progression_mode != 'quarantined_inspection'
+            or plan.universe_id != universe.id or plan.encounter_id != encounter.id
+            or plan.actor_id != activation.actor_id
+            or plan.decision_id != activation.movement_decision_id
+            or plan.accepted_at != activation.time or plan.checkpoint_boundary != 1
+            or activation.activation_kind != 'first_player_movement'
+            or tuple(encounter.being_list) != tuple(private.native.encounter.being_list)
+            or set(universe.object_registry.object_instances) != set(encounter.being_list)
+            or set(beings) != set(encounter.being_list)):
+        raise RestorePreparationRejected('trusted plan/Encounter/participant activation binding is inconsistent')
+    if (type(plan.layout) is not tuple or len(plan.layout) != 2
+            or any(type(value) is not int or value < 1 for value in plan.layout)):
+        raise RestorePreparationRejected('movement-plan layout is invalid')
+    try:
+        layout = ArenaHexLayout.rectangle(*plan.layout)
+        address = HexAddress(*plan.cell)
+        destination = CartesianPosition(*plan.destination)
+        expected_destination = layout.center_position(address, z=destination.z)
+    except (TypeError, ValueError) as exc:
+        raise RestorePreparationRejected(f'movement-plan destination cannot be reconstructed: {exc}') from exc
+    if destination != expected_destination:
+        raise RestorePreparationRejected('accepted movement destination is not the recorded native hex center')
+    actor = beings.get(plan.actor_id)
+    if (type(actor) is not BeingInstance or universe.get_object_by_id(actor.id) is not actor
+            or actor.get_position() is None or actor.get_position() == destination
+            or type(actor.current.hit_points) not in (int, float) or actor.current.hit_points <= 0
+            or actor.is_helpless()):
+        raise RestorePreparationRejected('movement actor is missing, unable, or already at destination')
+    if (type(encounter.pending_action_list) is not list or encounter.pending_action_list
+            or encounter.finished_action_list or encounter.cancelled_action_list
+            or encounter._choice_book._counter != 0 or encounter._choice_book._choices
+            or encounter._choice_book._drafts or encounter._choice_book._registered
+            or encounter._choice_book._reservations or encounter._choice_book._tokens
+            or encounter._choice_book._states or encounter._choice_book._closed_drafts
+            or universe.__dict__.get('_choice_books') != [encounter._choice_book]
+            or universe.__dict__.get('_schedule_revision') != 0
+            or set(universe.event_history) != {'0', encounter.id}
+            or any(being.original is being.current for being in beings.values())):
+        raise RestorePreparationRejected('supported continuation requires the authentic empty Action/Choice state')
+    try:
+        before_inspection = inspect_encounter(encounter)
+    except Exception as exc:
+        raise RestorePreparationRejected(f'imported boundary failed native inspection: {exc}') from exc
+    if (before_inspection.boundary != 1 or before_inspection.latest_boundary != 1
+            or set(before_inspection.targets) != set(encounter.being_list)
+            or len(before_inspection.timeline) != 1
+            or before_inspection.timeline[0].action_ids
+            or before_inspection.timeline[0].effect_ids
+            or len(encounter._atomic_interval_history) != 1
+            or encounter._atomic_interval_history[0] is not private.receipt):
+        raise RestorePreparationRejected('imported native receipt chain is outside boundary-1 movement scope')
+    if (type(plan.world_premise) is not tuple or len(plan.world_premise) != 6
+            or plan.world_premise != ('Plains', 'Road', 1.0, 1.0, True, False)):
+        raise RestorePreparationRejected('movement plan premise differs from supported generated Arena world')
+    conditions = MovementRateConditions(terrain_multiplier=plan.world_premise[2],
+        hampered_multiplier=plan.world_premise[3], direction=None,
+        concurrent_demanding_action=False)
+    next_boundary = encounter.last_processed_boundary + 1
+    intent = MovementIntent(plan.actor_id, destination, plan.rate,
+        f'{plan.decision_id}:boundary:{next_boundary}', next_boundary,
+        facing_policy=plan.facing_policy)
+    from transactional_progression import _BINDINGS
+    binding = _BINDINGS.get(id(encounter))
+    if (binding is None or binding.encounter() is not encounter
+            or binding.mode.name != 'quarantined_inspection'
+            or binding.rng_owner is not native.rng_owner):
+        raise RestorePreparationRejected('imported inspection binding or exclusive RNG owner changed')
+    if _MOVEMENT_CONTINUATION_APPROVALS.pop(approval, None) != approved:
+        raise RestorePreparationRejected('host movement approval is stale or already consumed')
+    old_receipts = tuple(encounter._atomic_interval_history)
+    old_rng = native.rng_owner.state
+    old_position = actor.get_position()
+    context = None
+    try:
+        with _trusted_imported_movement_scope(encounter, import_handle,
+                authority=_MOVEMENT_IMPORT_AUTHORITY) as context:
+            _bind_trusted_imported_movement_progression(encounter, import_handle,
+                native.rng_owner, private.receipt, context,
+                authority=_MOVEMENT_IMPORT_AUTHORITY)
+            encounter.step(1, movement_intent=intent, movement_conditions=conditions)
+        after = inspect_encounter(encounter)
+        if (after.boundary != 2 or after.latest_boundary != 2
+                or tuple(record.boundary for record in encounter._atomic_interval_history) != (1, 2)
+                or len(after.timeline) != 2
+                or any(row.action_ids or row.effect_ids for row in after.timeline)
+                or any(len(after.histories[being_id]) != 2 for being_id in encounter.being_list)):
+            raise RestorePreparationRejected('native continuation did not produce an inspected boundary 2')
+    except BaseException as exc:
+        if encounter.time == 1 and tuple(encounter._atomic_interval_history) == old_receipts:
+            native.rng_owner.state = old_rng
+            if actor.get_position() != old_position:
+                raise RestorePreparationRejected('failed native publication did not restore movement state') from exc
+            from transactional_progression import _restore_quarantined_movement_inspection
+            try:
+                _restore_quarantined_movement_inspection(encounter,
+                    import_handle, private.receipt,
+                    authority=_MOVEMENT_IMPORT_AUTHORITY)
+            except TransactionalProgressionError:
+                pass
+        if isinstance(exc, RestorePreparationRejected):
+            raise
+        raise RestorePreparationRejected(f'trusted native movement continuation failed: {exc}') from exc
+    from checkpoint_reconstruction import _projection
+    from checkpoint_arena_perception import encode_arena_perception_ledger
+    native_rows = []
+    observer_rows = []
+    registry = universe.object_registry.object_instances
+    for being_id in sorted(beings):
+        being = beings[being_id]
+        position = being.get_position()
+        native_rows.append((being_id, tuple(position.as_tuple()), being.get_posture(),
+            being.hex_facing, _projection(being.original), _projection(being.current),
+            tuple(sorted(encounter.awareness[being_id])),
+            tuple(record.boundary for record in after.histories[being_id]),
+            tuple(fingerprint(record) for record in being._atomic_target_history)))
+        observer_rows.append((being_id, encode_arena_perception_ledger(
+            being._arena_perception_ledger, observer=being, encounter=encounter,
+            registry=registry)))
+    return TrustedMovementContinuationInspection(
+        'universe.trusted-movement-continuation-inspection/1', plan, after,
+        tuple(native_rows), tuple(observer_rows), native.rng_owner.state,
+        is_quarantined(encounter))
 
 
 def _host_authorize_trusted_local_restore(binding):

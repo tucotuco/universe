@@ -248,6 +248,93 @@ def _unbind_quarantined_movement_inspection(encounter, *, authority):
     encounter.__dict__.pop('_transactional_mode', None)
 
 
+@contextmanager
+def _trusted_imported_movement_scope(encounter, import_handle, *, authority):
+    """Open one restoration-owner-controlled boundary-1→2 execution scope."""
+    global _ACTIVE_RESTORED_EXECUTION
+    from checkpoint_restore_preparation import (
+        _MOVEMENT_IMPORT_AUTHORITY, _QUARANTINED_MOVEMENT_IMPORTS)
+    if authority is not _MOVEMENT_IMPORT_AUTHORITY:
+        raise TransactionalProgressionError('imported movement continuation is restoration-owner controlled')
+    entry = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
+    if (entry is None or entry.native.encounter is not encounter
+            or not is_quarantined(encounter)
+            or mode_of(encounter) != 'quarantined_inspection'
+            or _ACTIVE_RESTORED_EXECUTION is not None):
+        raise TransactionalProgressionError('exact quarantined movement import is required')
+    context = (import_handle, object())
+    _ACTIVE_RESTORED_EXECUTION = (weakref.ref(encounter), threading.get_ident(), context)
+    try:
+        yield context
+    finally:
+        _ACTIVE_RESTORED_EXECUTION = None
+
+
+def _bind_trusted_imported_movement_progression(encounter, import_handle, rng_owner,
+                                                receipt, context, *, authority):
+    """Temporarily bind normal progression to one validated imported boundary."""
+    from checkpoint_restore_preparation import (
+        _MOVEMENT_IMPORT_AUTHORITY, _QUARANTINED_MOVEMENT_IMPORTS)
+    from atomic_publication import RNGCursor, _COMMITTED_RECEIPTS
+    from encounter import Encounter
+    if authority is not _MOVEMENT_IMPORT_AUTHORITY:
+        raise TransactionalProgressionError('imported movement activation is restoration-owner controlled')
+    active = _ACTIVE_RESTORED_EXECUTION
+    entry = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
+    issued = _COMMITTED_RECEIPTS.get(id(receipt))
+    if (active is None or active[0]() is not encounter
+            or active[1] != threading.get_ident() or active[2] is not context
+            or context[0] is not import_handle or entry is None
+            or entry.native.encounter is not encounter or type(encounter) is not Encounter
+            or not is_quarantined(encounter) or mode_of(encounter) != 'quarantined_inspection'
+            or type(rng_owner) is not RNGCursor or entry.native.rng_owner is not rng_owner
+            or entry.receipt is not receipt or type(issued) is not tuple
+            or issued[0]() is not receipt or issued[1]() is not encounter
+            or encounter.time != 1 or encounter.last_processed_boundary != 1
+            or encounter._coordinator_time != 1 or encounter._interval_start != 1
+            or encounter.pending_action_list or encounter.finished_action_list
+            or encounter.cancelled_action_list or encounter._choice_book._counter != 0
+            or encounter._choice_book._choices or encounter._choice_book._drafts
+            or encounter._choice_book._registered or encounter._choice_book._reservations):
+        raise TransactionalProgressionError('imported movement continuation preconditions changed')
+    old = _BINDINGS.get(id(encounter))
+    if old is None or old.encounter() is not encounter or old.mode.name != 'quarantined_inspection':
+        raise TransactionalProgressionError('quarantined inspection binding is missing')
+    mode = ProgressionMode('transactional', id(encounter), 'caller_cursor', id(rng_owner),
+        'trusted_imported_movement_boundary_1_to_2')
+    _BINDINGS[id(encounter)] = _Binding(old.encounter, mode, rng_owner, old.running)
+    encounter.__dict__['_transactional_mode'] = mode
+    return mode
+
+
+def _restore_quarantined_movement_inspection(encounter, import_handle, receipt, *, authority):
+    """Reinstate read-only mode after an unpublished continuation refusal."""
+    from checkpoint_restore_preparation import (
+        _MOVEMENT_IMPORT_AUTHORITY, _QUARANTINED_MOVEMENT_IMPORTS)
+    from atomic_publication import _COMMITTED_RECEIPTS
+    if authority is not _MOVEMENT_IMPORT_AUTHORITY:
+        raise TransactionalProgressionError('quarantined movement rollback is restoration-owner controlled')
+    private = _QUARANTINED_MOVEMENT_IMPORTS.get(import_handle)
+    binding = _BINDINGS.get(id(encounter))
+    receipt_entry = _COMMITTED_RECEIPTS.get(id(receipt))
+    if (private is None or private.native.encounter is not encounter
+            or private.receipt is not receipt or binding is None
+            or binding.encounter() is not encounter
+            or binding.mode.name != 'transactional'
+            or binding.mode.authority_contract != 'trusted_imported_movement_boundary_1_to_2'
+            or not is_quarantined(encounter)
+            or encounter.time != 1 or encounter.last_processed_boundary != 1
+            or encounter.__dict__.get('_atomic_interval_history') != [receipt]
+            or receipt_entry is None or receipt_entry[0]() is not receipt
+            or receipt_entry[1]() is not encounter):
+        raise TransactionalProgressionError('failed movement continuation is outside exact pre-boundary rollback')
+    mode = ProgressionMode('quarantined_inspection', id(encounter), 'caller_cursor',
+        id(binding.rng_owner), 'imported_movement_inspection_only')
+    _BINDINGS[id(encounter)] = _Binding(binding.encounter, mode,
+        binding.rng_owner, binding.running)
+    encounter.__dict__['_transactional_mode'] = mode
+
+
 def guard_legacy_encounter(encounter, operation='legacy consumer'):
     assert_not_quarantined(encounter, operation)
     if mode_of(encounter)=='transactional':
