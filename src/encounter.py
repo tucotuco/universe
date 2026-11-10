@@ -169,7 +169,7 @@ class Encounter(Event):
         if self.time != start_time:
             if (_post_boundary_token is not _QUARANTINED_POST_BOUNDARY_TOKEN
                     or type(start_time) is not int or start_time != 0
-                    or type(self.time) is not int or self.time not in (1, 2)):
+                    or type(self.time) is not int or not 1 <= self.time <= 4096):
                 raise BoundaryInvariantError('Restoring an advanced Encounter requires an unsupported checkpoint migration')
         elif _post_boundary_token is not None:
             raise BoundaryInvariantError('Quarantined advanced-time constructor token requires the supported 0-to-1 boundary')
@@ -246,8 +246,8 @@ class Encounter(Event):
         need(type(plan.universe) is Universe and not is_quarantined(plan.universe),
              'construction requires a private, unquarantined Universe shell')
         need(type(plan.start_time) is int and plan.start_time == 0
-             and type(plan.time) is int and plan.time in (1, 2),
-             'only the validated initial or one continuing movement boundary is supported')
+             and type(plan.time) is int and 1 <= plan.time <= 4096,
+             'only a bounded validated movement boundary prefix is supported')
         need(type(plan.encounter_id) is str and plan.encounter_id
              and plan.encounter_id != '0', 'Encounter logical identity is invalid')
         need(type(plan.being_ids) is tuple and len(plan.being_ids) == 2

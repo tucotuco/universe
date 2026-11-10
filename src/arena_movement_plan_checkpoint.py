@@ -57,7 +57,8 @@ def capture_accepted_plan(session):
             raise MovementPlanRejected("an accepted, still-pending Arena movement plan is required")
         encounter = candidate.encounter
         activation = encounter.arena_movement_activation
-        if (encounter.time != 1 or encounter.last_processed_boundary != 1
+        if (type(encounter.time) is not int or not 1 <= encounter.time <= 4096
+                or encounter.last_processed_boundary != encounter.time
                 or not encounter.initiated or encounter.progression_mode != "transactional"
                 or type(activation) is not ArenaMovementActivation
                 or activation.encounter_id != encounter.id or activation.time != 0
@@ -88,7 +89,7 @@ def capture_accepted_plan(session):
             raise MovementPlanRejected("accepted destination differs from its native hex-cell center")
         row = ArenaMovementPlanCheckpoint(
             SCHEMA, candidate.universe.id, encounter.id, player.id, plan.decision_id,
-            activation.time, 1,
+            activation.time, encounter.time,
             (plan.destination.x, plan.destination.y, plan.destination.z),
             (plan.address.column, plan.address.row),
             (layout.width_columns, layout.height_rows), plan.rate,
@@ -163,7 +164,8 @@ def _validate(row):
         raise MovementPlanRejected("movement-plan identity is malformed")
     if (type(row.accepted_at) not in (int, float) or not math.isfinite(row.accepted_at)
             or row.accepted_at != 0 or type(row.checkpoint_boundary) is not int
-            or row.checkpoint_boundary not in (1, 2) or type(row.movement_sequence) is not int
+            or row.checkpoint_boundary < 1 or row.checkpoint_boundary > 4096
+            or type(row.movement_sequence) is not int
             or row.movement_sequence < 1):
         raise MovementPlanRejected("movement-plan chronology is unsupported")
     if (type(row.destination) is not tuple or len(row.destination) != 3

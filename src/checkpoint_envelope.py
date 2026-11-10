@@ -187,8 +187,8 @@ def _components(candidate_envelope, diagnostics):
         _require(receipt_chain[1:3] == _logical_roots(sections),
                  'receipt chain refers to different Universe/Encounter roots')
         receipt_rows = receipt_chain[4]
-        _require(type(receipt_rows) is tuple and 1 <= len(receipt_rows) <= 2,
-                 'committed receipt chain must contain one or two boundaries')
+        _require(type(receipt_rows) is tuple and 1 <= len(receipt_rows) <= 4096,
+                 'committed receipt chain exceeds the supported boundary limit')
         def receipt_boundary(row):
             if type(row) is tuple and len(row) == 9 and type(row[0]) is int:
                 return row[0]

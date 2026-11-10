@@ -355,6 +355,34 @@ class NativeMovementContinuationTests(unittest.TestCase):
             project_quarantined_movement_boundary(dc_replace(decoded,
                 envelope_data=tuple(bad_order_data)))
 
+    def test_three_boundary_native_chain_restores_and_advances_without_replay(self):
+        session, _envelope, _plan_wire = self._source_at_boundary_one()
+        session.advance_one_second()
+        session.advance_one_second()
+        plan_wire = capture_accepted_plan(session)
+        envelope = assemble_native_run_spot_envelope(
+            session.active_candidate.universe, session.active_candidate.encounter,
+            quiescent=True, rng_scope='exclusive_encounter')
+        session.advance_one_second()
+        expected = self._source_state(session, plan_wire)
+        self.assertEqual(expected['boundary'], 4)
+        payload = json.dumps({'checkpoint':base64.b64encode(
+            encode_run_spot_envelope(envelope)).decode(),
+            'movement_plan':base64.b64encode(plan_wire).decode()},
+            sort_keys=True,separators=(',',':')).encode()
+        process = subprocess.run([sys.executable, '-c', _BOUNDARY_THREE_CHILD],
+            input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=os.getcwd(), env={**os.environ, 'PYTHONPATH': os.pathsep.join((
+                os.path.abspath('src'), os.path.abspath('tests'),
+                os.environ.get('PYTHONPATH', '')))}, check=False, timeout=180)
+        self.assertEqual(process.returncode, 0, process.stderr.decode(errors='replace'))
+        actual = json.loads(process.stdout)
+        self.assertEqual(actual['boundary'], 4)
+        for key in ('encounter','boundary','latest','participants','timeline','beings',
+                    'observers','rng','choices','pending','finished','cancelled',
+                    'activation','receipt_count','plan'):
+            self.assertEqual(actual[key], expected[key], key)
+
     def test_mismatched_plan_is_refused_without_admitting_or_mutating_import(self):
         session, envelope, plan_wire = self._source_at_boundary_one()
         from checkpoint_restore_preparation import (

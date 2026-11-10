@@ -336,7 +336,7 @@ def _validate_receipt_chain(chain, universe_id, encounter_id, participants,
           'receipt RNG ownership is incompatible')
     rows = chain[4]
     _need(type(rows) is tuple and len(rows) == len(boundaries)
-          and len(rows) in (1, 2), 'receipt boundary rows are incomplete')
+          and 1 <= len(rows) <= 4096, 'receipt boundary rows are incomplete')
     actions_by_id = {}
     all_effects = set()
     lifecycle_choices = {}
@@ -346,7 +346,7 @@ def _validate_receipt_chain(chain, universe_id, encounter_id, participants,
                 'universe.committed-movement-only-boundary/1',
                 'universe.committed-movement-only-boundary/2')):
             initial = row[0] == 'universe.committed-movement-only-boundary/1'
-            _need((initial and index == 0 or not initial and index == 1
+            _need((initial and index == 0 or not initial and index > 0
                    and rows[0][0] == 'universe.committed-movement-only-boundary/1')
                   and row[1] == boundaries[index],
                   'movement-only receipt has the wrong initial/continuing position')
@@ -587,7 +587,7 @@ def _validate_descriptor_components(data):
     _need(type(rng) is tuple and len(rng) == 3
           and rng[:2] == ('caller_cursor', 'exclusive_encounter'),
           'wire private RNG state has an unsupported owner')
-    _need(type(boundaries) is tuple and len(boundaries) <= 2
+    _need(type(boundaries) is tuple and len(boundaries) <= 4096
           and all(type(x) is int and x > 0 for x in boundaries),
           'committed boundary sequence is outside the bounded subset')
     if receipts:

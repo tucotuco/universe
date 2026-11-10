@@ -290,7 +290,7 @@ def _movement_checkpoint_capture_is_authorized(world, encounter):
     private = _QUARANTINED_MOVEMENT_IMPORTS.get(handle)
     return (thread_id == __import__('threading').get_ident() and private is not None
             and private.native.universe is world and private.native.encounter is encounter
-            and is_quarantined(encounter) and encounter.time in (1, 2)
+            and is_quarantined(encounter) and 1 <= encounter.time <= 4096
             and private.accepted_plan is not None)
 
 
@@ -309,8 +309,8 @@ def _capture_trusted_movement_checkpoint(import_handle):
         raise RestorePreparationRejected('only a just-continued native movement graph can be checkpointed')
     encounter = private.native.encounter
     boundary = encounter.time
-    if boundary not in (2,) or not is_quarantined(encounter):
-        raise RestorePreparationRejected('repeatable capture is bounded to restored movement boundary 2')
+    if not 2 <= boundary <= 4096 or not is_quarantined(encounter):
+        raise RestorePreparationRejected('repeatable capture requires a bounded restored movement boundary')
     plan = replace(private.accepted_plan, checkpoint_boundary=boundary)
     plan_wire = encode_plan(plan)
     if decode_plan(plan_wire) != plan:
@@ -320,7 +320,7 @@ def _capture_trusted_movement_checkpoint(import_handle):
     if (inspection.boundary != boundary or inspection.latest_boundary != boundary
             or actor is None or actor.get_position() is None
             or tuple(actor.get_position().as_tuple()) == plan.destination):
-        raise RestorePreparationRejected('boundary 2 is terminal or its native inspection is inconsistent')
+        raise RestorePreparationRejected('restored movement boundary is terminal or its native inspection is inconsistent')
     if _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE is not None:
         raise RestorePreparationRejected('another owner-controlled movement capture is active')
     _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE = (import_handle, __import__('threading').get_ident())
@@ -347,7 +347,7 @@ def _capture_trusted_movement_checkpoint(import_handle):
             if encounter_quarantined:
                 encounter.__dict__['_checkpoint_quarantined'] = True
     except BaseException as exc:
-        raise RestorePreparationRejected(f'owner-controlled boundary-2 checkpoint capture failed: {exc}') from exc
+        raise RestorePreparationRejected(f'owner-controlled movement checkpoint capture failed: {exc}') from exc
     finally:
         _ACTIVE_MOVEMENT_CHECKPOINT_CAPTURE = None
     return checkpoint_wire, plan_wire

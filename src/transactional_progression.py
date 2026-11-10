@@ -215,7 +215,7 @@ def _bind_quarantined_movement_inspection(encounter, rng_owner, receipt, *, auth
             or any((lambda issued, row: issued is None or issued[0]() is not row
                     or issued[1]() is not encounter)(_COMMITTED_RECEIPTS.get(id(row)), row)
                    for row in receipts)
-            or latest.boundary not in (1, 2)
+            or not 1 <= latest.boundary <= 4096
             or tuple(latest.rng_state) != tuple(rng_owner.state)
             or encounter.time != latest.boundary
             or encounter.last_processed_boundary != latest.boundary):

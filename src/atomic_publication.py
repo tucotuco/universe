@@ -994,7 +994,7 @@ def _register_quarantined_movement_import(encounter, receipt, rng_owner, *, auth
 
 
 def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, *, authority):
-    """Register only the validated 1→2 Action-free movement receipt prefix."""
+    """Register only the validated consecutive Action-free movement prefix."""
     from checkpoint_restore_preparation import _MOVEMENT_IMPORT_AUTHORITY
     from encounter_inspection import CommittedBoundaryRecord, fingerprint
     from transactional_progression import is_quarantined
@@ -1011,13 +1011,15 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
     need(authority is _MOVEMENT_IMPORT_AUTHORITY,
          'movement receipt-chain import is restoration-owner controlled')
     need(type(encounter) is Encounter and is_quarantined(encounter)
-         and type(receipts) is tuple and len(receipts) == 2
+         and type(receipts) is tuple and 2 <= len(receipts) <= 4096
          and all(type(row) is PublishedInterval for row in receipts)
          and type(rng_owner) is RNGCursor,
          'quarantined Encounter, two receipts and exclusive RNG cursor are required')
-    need(encounter.start_time == 0 and encounter.time == 2
-         and encounter.last_processed_boundary == 2
-         and encounter._coordinator_time == 2 and encounter._interval_start == 2
+    boundary_count = len(receipts)
+    need(encounter.start_time == 0 and encounter.time == boundary_count
+         and encounter.last_processed_boundary == boundary_count
+         and encounter._coordinator_time == boundary_count
+         and encounter._interval_start == boundary_count
          and tuple(encounter.__dict__.get('_atomic_interval_history', ())) == receipts,
          'movement receipt chain differs from Encounter committed chronology')
     try:
@@ -1042,7 +1044,7 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
              and set(meta.entities) == set(encounter.being_list)
              and set(meta.target_anchors) == set(encounter.being_list),
              'movement receipt or its committed inspection record is invalid')
-        if boundary == 2:
+        if boundary == boundary_count:
             need(tuple(receipt.rng_state) == tuple(rng_owner.state),
                  'latest movement receipt RNG differs from the exclusive cursor')
         metas.append(meta)
@@ -1053,8 +1055,8 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
         need(type(being) is BeingInstance and being.id == being_id,
              'movement Target owner is not the registered native Being')
         storage = being.__dict__.get('_atomic_target_history')
-        need(type(storage) is list and len(storage) == 2,
-             'movement Target history must contain exactly two owned records')
+        need(type(storage) is list and len(storage) == boundary_count,
+             'movement Target history must contain the complete owned receipt prefix')
         for index, record in enumerate(storage):
             boundary = index + 1
             need(type(record) is TargetIntervalRecord and record.encounter_id == encounter.id
@@ -1067,7 +1069,7 @@ def _register_quarantined_movement_chain_import(encounter, receipts, rng_owner, 
             need(type(anchor) is tuple and anchor == expected,
                  'movement Target anchor differs from the reconstructed native record')
     keys = tuple(id(row) for row in receipts)
-    need(len(set(keys)) == 2 and not set(keys).intersection(_COMMITTED_RECEIPTS),
+    need(len(set(keys)) == len(receipts) and not set(keys).intersection(_COMMITTED_RECEIPTS),
          'movement receipt identity collides with an existing process-local receipt')
     fingerprints = tuple(fingerprint(row) for row in receipts)
     for receipt, receipt_fingerprint in zip(receipts, fingerprints):

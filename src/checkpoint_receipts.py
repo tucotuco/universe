@@ -608,7 +608,7 @@ def _movement_activation_for_receipt(encounter):
 
 def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                                      rng_scope=None):
-    """Capture 1–2 authentic consecutive Run/Spot receipt boundaries read-only."""
+    """Capture a bounded consecutive Run/Spot or Arena movement receipt chain."""
     from universe import Universe
     from encounter import Encounter
     from atomic_publication import coordinated_access
@@ -625,8 +625,8 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
         except Exception as exc:
             raise ReceiptDescriptorRejected(f'live receipt authentication/anchor validation failed: {exc}') from exc
         history=encounter.__dict__.get('_atomic_interval_history')
-        if type(history) is not list or len(history) not in (1,2):
-            raise ReceiptDescriptorRejected('exactly one or two committed boundaries are supported')
+        if type(history) is not list or not 1 <= len(history) <= 4096:
+            raise ReceiptDescriptorRejected('one to 4096 committed boundaries are supported')
         if view.boundary!=history[-1].boundary or view.latest_boundary!=view.boundary:
             raise ReceiptDescriptorRejected('inspection and committed receipt cursors disagree')
         if view.objective or view.objective_use or view.recipients:
@@ -644,14 +644,14 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
             movement_activation=_movement_activation_for_receipt(encounter)
             if movement_activation is None:
                 raise ReceiptDescriptorRejected('Action-free boundary lacks native movement activation')
-            if movement_only_boundaries not in ((0,), (0, 1)):
+            if movement_only_boundaries != tuple(range(len(history))):
                 raise ReceiptDescriptorRejected(
-                    'Action-free movement must be the initial boundary or its immediate continuation')
-            if len(movement_only_boundaries)==2 and (
-                    len(history)!=2 or history[0].boundary+1!=history[1].boundary
-                    or history[0].boundary!=math.floor(encounter.start_time)+1):
+                    'Action-free movement must be one complete consecutive initial history')
+            if (len(history) > 1 and any(
+                    history[index-1].boundary + 1 != history[index].boundary
+                    for index in range(1, len(history)))):
                 raise ReceiptDescriptorRejected(
-                    'continuing movement-only boundary must immediately follow the initial activation')
+                    'movement-only history contains a gap or duplicate boundary')
         live_actions={}
         action_actors={}
         effects_by_boundary={};actions_by_boundary={};targets_by_boundary={}
@@ -726,9 +726,9 @@ def describe_committed_receipt_chain(world, encounter, *, quiescent=False,
                 meta=receipt.inspection
                 expected_start_only = (receipt_index == 0 and
                                        movement_activation is not None)
-                expected_continuation = (receipt_index == 1 and len(history) == 2
+                expected_continuation = (receipt_index > 0
                     and not history[0].action_ids
-                    and history[0].boundary + 1 == receipt.boundary)
+                    and history[receipt_index - 1].boundary + 1 == receipt.boundary)
                 if (not (expected_start_only or expected_continuation) or eids
                         or meta.actions or meta.action_anchors or meta.effects
                         or type(meta.participants) is not tuple or not meta.participants
@@ -785,7 +785,8 @@ def validate_receipt_descriptor(value):
     if d['schema']!=DESCRIPTOR_SCHEMA:raise ReceiptDescriptorRejected('unknown committed-receipt schema version')
     _id(d['universe_id'],'Universe');_id(d['encounter_id'],'Encounter')
     start_time=_decoded_number(d['start_time'],'Encounter start time')
-    if type(d['receipts']) is not tuple or len(d['receipts']) not in (1,2):raise ReceiptDescriptorRejected('receipt chain must contain one or two rows')
+    if type(d['receipts']) is not tuple or not 1 <= len(d['receipts']) <= 4096:
+        raise ReceiptDescriptorRejected('receipt chain must contain one to 4096 rows')
     if d['rng_ownership']!=('caller-cursor','exclusive_encounter-asserted'):
         raise ReceiptDescriptorRejected('ambiguous or unsupported RNG ownership descriptor')
     prior=None;all_actions=set();all_choices=set();lifecycle_choices={}

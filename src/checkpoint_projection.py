@@ -228,8 +228,9 @@ def project_quarantined_movement_boundary(decoded):
           'unsupported checkpoint envelope version')
     _need(data[12:16] == (True, False, False, False),
           'movement projection cannot promote checkpoint readiness flags')
-    _need(data[4] in ((1,), (1, 2)) and data[7] == (),
-          'movement projection requires boundary 1, optional boundary 2, and no Choices')
+    _need(type(data[4]) is tuple and 1 <= len(data[4]) <= 4096
+          and data[4] == tuple(range(1, len(data[4]) + 1)) and data[7] == (),
+          'movement projection requires a consecutive boundary prefix and no Choices')
     chain = data[8]
     _need(type(chain) is tuple and len(chain) == 8
           and chain[:3] == ('universe.committed-native-receipt-chain/1', data[1], data[2])
@@ -241,12 +242,14 @@ def project_quarantined_movement_boundary(decoded):
           and row[0] == 'universe.committed-movement-only-boundary/1'
           and row[1] == 1,
           'receipt is not the authentic initial movement-only boundary')
-    _need(row[2] == ('integer', '0') and
-          (len(rows) == 1 or (type(rows[1]) is tuple and len(rows[1]) == 7
-           and rows[1][0] == 'universe.committed-movement-only-boundary/2'
-           and rows[1][1] == 2 and rows[1][2] == ('integer', '1')
-           and rows[1][3] == row[3] and rows[1][6] == row[6])),
-          'continuing movement receipt is not consecutive or participant-bound')
+    _need(row[2] == ('integer', '0') and all(
+          type(continuing) is tuple and len(continuing) == 7
+          and continuing[0] == 'universe.committed-movement-only-boundary/2'
+          and continuing[1] == index + 1
+          and continuing[2] == ('integer', str(index))
+          and continuing[3] == row[3] and continuing[6] == row[6]
+          for index, continuing in enumerate(rows[1:], 1)),
+          'continuing movement receipts are not consecutive or participant/RNG-bound')
     _need(row[2] == ('integer', '0') and type(row[3]) is tuple
           and len(row[3]) == 2 and len(set(row[3])) == len(row[3])
           and all(type(value) is str and value for value in row[3]),
