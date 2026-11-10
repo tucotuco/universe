@@ -392,6 +392,8 @@ class BeingInstance(ObjectInstance):
         data['skill_use_history'] = [entry.to_dict() for entry in self.skill_use_history]
         data['hex_facing'] = self.hex_facing
         data['posture'] = self._posture
+        if hasattr(self, '_arena_initial_profile'):
+            data['arena_initial_profile'] = self._arena_initial_profile
         if self.personal_history is not None:
             data['personal_history'] = self.personal_history.to_jsonable()
         return json.dumps(data)

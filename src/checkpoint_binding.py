@@ -1086,7 +1086,7 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
             continue
         fields = instance_fields_by_id[being_id]
         expected_fields = {
-            '_arena_perception_ledger', '_atomic_target_history',
+            '_arena_initial_profile', '_arena_perception_ledger', '_atomic_target_history',
             '_skill_practice_baselines', 'current', 'effective_fitness', 'exertion',
             'fatigue_level', 'front_facing', 'hex_facing', 'geometry', 'id', 'name',
             'original', 'parent_container_id', 'personal_history', 'physical_fatigue',
@@ -1119,6 +1119,13 @@ def _materialize_quarantined_movement_native(decoded, projection=None):
                               ('geometry', 'set_geometry'),
                               ('visual_occlusion', 'set_visual_occlusion')):
             getattr(being, setter)(graph.value(fields[field]))
+        initial_profile = graph.value(fields['_arena_initial_profile'])
+        if initial_profile is not None:
+            from npcgen_arena_adapter import validate_arena_initial_profile_record
+            validate_arena_initial_profile_record(initial_profile)
+            _need(initial_profile['initial_total_experience'] == original.experience,
+                  'Arena initial profile XP differs from individualized Being original')
+        being._arena_initial_profile = initial_profile
         being.physical_fatigue = graph.value(fields['physical_fatigue'])
         being.strategy = graph.value(fields['strategy'])
         being.exertion = graph.value(fields['exertion'])

@@ -566,6 +566,16 @@ def reconstruct_initial_run_spot(decoded):
                       '_skill_practice_baselines', 'possessions', 'weapons'):
             if field in fields:
                 setattr(instance, field, graph.value(fields[field]))
+        if '_arena_initial_profile' in fields and fields['_arena_initial_profile'] != ('null',):
+            profile = graph.value(fields['_arena_initial_profile'])
+            from npcgen_arena_adapter import validate_arena_initial_profile_record
+            try:
+                validate_arena_initial_profile_record(profile)
+            except (TypeError, ValueError) as exc:
+                raise ReconstructionRejected(f'Arena initial profile refused: {exc}') from exc
+            _need(profile['initial_total_experience'] == instance.original.experience,
+                  'Arena initial profile XP differs from the reconstructed Being original')
+            instance._arena_initial_profile = profile
         if fields.get('_arena_perception_ledger') != ('absent-for-non-Arena',):
             ledger_value=fields.get('_arena_perception_ledger')
             _need(type(ledger_value) is tuple and len(ledger_value)==2

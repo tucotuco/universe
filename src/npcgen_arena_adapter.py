@@ -16,6 +16,7 @@ from abilities import Abilities
 from being import BeingDefinition, BeingInstance
 from skill import Skills
 from universe import Universe
+from measured_values import is_truncated_measurement, truncate_measurement
 
 
 _ABILITY_ORDER = ("Str", "Int", "Wis", "Dex", "Con", "Cha")
@@ -118,6 +119,11 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
         if type(level) is not int or level < 0:
             _refuse("invalid_class_state", "class levels must be nonnegative integers", slot=slot)
 
+    class_allocations = tuple({
+        "id": class_id, "name": rules.classes[class_id].name,
+        "level": level, "experience": xp_slots[slot],
+    } for slot, (class_id, level) in enumerate(zip(classes, levels)))
+
     source_status = generation.get("skill_resolution")
     if (type(source_status) is not dict or source_status.get("policy") != "resolve_skills_by_age"
             or source_status.get("cost_modifiers") != cost_modifiers
@@ -169,12 +175,31 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
     initial_hp = state.get("hps")
     if type(initial_hp) is not int or initial_hp < 0 or sheet.get("hit_points") != initial_hp:
         _refuse("invalid_hit_points", "state.hps and sheet.hit_points must agree as a nonnegative integer")
-    height = _positive_measure(state.get("height"), "state.height")
-    weight = _positive_measure(state.get("weight"), "state.weight")
+    source_height = _positive_measure(state.get("height"), "state.height")
+    source_weight = _positive_measure(state.get("weight"), "state.weight")
     age = sheet.get("age")
-    if (type(age) is not dict or age.get("height_inches") != round(height, 2)
-            or age.get("weight_pounds") != round(weight, 2)):
-        _refuse("invalid_measurements", "source measurements disagree with their rounded sheet projections")
+    if (type(age) is not dict or type(age.get("age")) not in (int, float)
+            or not math.isfinite(age["age"]) or age["age"] < 0
+            or type(age.get("category")) is not str or not age["category"].strip()
+            or type(age.get("birthday")) is not dict
+            or age.get("height_inches") != round(source_height, 2)
+            or age.get("weight_pounds") != round(source_weight, 2)):
+        _refuse("invalid_measurements", "source age/measurements disagree with their sheet projections")
+    height = truncate_measurement(source_height)
+    weight = truncate_measurement(source_weight)
+    initial_profile = {
+        "schema_version": 1,
+        "age_years": truncate_measurement(float(age["age"])),
+        "age_category": age["category"],
+        "birthday": dict(age["birthday"]),
+        "class_allocations": class_allocations,
+        "initial_total_experience": requested_xp,
+        "initial_skills": {
+            "ordinary": tuple(ordinary),
+            "weapons": tuple(weapons),
+            "resolution": dict(source_status),
+        },
+    }
 
     race_index = state.get("race")
     race_name = sheet.get("identity", {}).get("race") if type(sheet.get("identity")) is dict else None
@@ -213,6 +238,7 @@ def _validate_record(universe: Universe, candidate, requested_xp: int, seed: int
         "weight": weight,
         "hit_points": initial_hp,
         "experience": requested_xp,
+        "initial_profile": initial_profile,
         "abilities": ability_values,
         "ordinary_ranks": ordinary,
         "weapon_ranks": weapons,
@@ -274,6 +300,7 @@ def prepare_npcgen_arena_being(universe: Universe, *, seed: int, starting_experi
     definition.skills = skills
 
     being = BeingInstance(definition, name=fields["name"])
+    being._arena_initial_profile = fields["initial_profile"]
     return ArenaNativeBeing(
         being=being,
         source_record_bytes=record_bytes,
@@ -295,3 +322,103 @@ def generate_npcgen_arena_being(universe: Universe, *, seed: int, starting_exper
     if universe.get_object_by_id(result.being.id) is not result.being:
         _refuse("native_registration_failed", "Universe did not register the constructed Being")
     return result
+
+
+def validate_arena_initial_profile(profile, source_record_bytes):
+    """Validate the native initial-profile record against preserved source data."""
+    validate_arena_initial_profile_record(profile)
+    if type(profile) is not dict or set(profile) != {
+            "schema_version", "age_years", "age_category", "birthday",
+            "class_allocations", "initial_total_experience", "initial_skills"}:
+        raise ValueError("Arena initial character profile has an unsupported schema")
+    if profile["schema_version"] != 1:
+        raise ValueError("Arena initial character profile version is unsupported")
+    try:
+        record = json.loads(source_record_bytes.decode("utf-8"))
+        generation, state, sheet = record["generation"], record["state"], record["sheet"]
+        age = sheet["age"]
+        skills = state["skills"]
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError("Arena initial profile source record is malformed") from exc
+    if (type(age) is not dict or type(age.get("age")) not in (int, float)
+            or not is_truncated_measurement(profile["age_years"])
+            or profile["age_years"] != truncate_measurement(float(age["age"]))
+            or profile["age_category"] != age.get("category")
+            or profile["birthday"] != age.get("birthday")):
+        raise ValueError("Arena age record disagrees with its preserved Generator source")
+    allocations = profile["class_allocations"]
+    if type(allocations) not in (tuple, list) or not (
+            len(allocations) == len(state.get("classes", ()))
+            == len(state.get("levels", ())) == len(state.get("xps", ()))):
+        raise ValueError("Arena class allocations are not parallel to the source profile")
+    for row, class_id, level, experience in zip(
+            allocations, state["classes"], state["levels"], state["xps"]):
+        if (type(row) is not dict or set(row) != {"id", "name", "level", "experience"}
+                or row["id"] != class_id or row["level"] != level
+                or row["experience"] != experience
+                or type(row["name"]) is not str or not row["name"].strip()):
+            raise ValueError("Arena class allocation disagrees with its source XP/level slots")
+    if (profile["initial_total_experience"] != generation.get("starting_experience")
+            or type(profile["initial_total_experience"]) is not int
+            or sum(state.get("xps", ())) != profile["initial_total_experience"]):
+        raise ValueError("Arena initial class XP allocations disagree with the source total")
+    initial_skills = profile["initial_skills"]
+    if type(initial_skills) is not dict or set(initial_skills) != {
+            "ordinary", "weapons", "resolution"} or type(skills) is not dict:
+        raise ValueError("Arena explicit initial skills are malformed")
+    expected_ordinary = tuple(sorted(skills.get("skills", {}).items()))
+    expected_weapons = tuple(sorted(skills.get("weapon_skills", {}).items()))
+    if (initial_skills["ordinary"] != expected_ordinary
+            or initial_skills["weapons"] != expected_weapons
+            or initial_skills["resolution"] != generation.get("skill_resolution")):
+        raise ValueError("Arena explicit initial skill ranks disagree with Generator provenance")
+    return True
+
+
+def validate_arena_initial_profile_record(profile):
+    """Validate the closed serializable shape of the Arena's initial profile."""
+    if type(profile) is not dict or set(profile) != {
+            "schema_version", "age_years", "age_category", "birthday",
+            "class_allocations", "initial_total_experience", "initial_skills"}:
+        raise ValueError("Arena initial profile has an unsupported schema")
+    if (type(profile["schema_version"]) is not int or profile["schema_version"] != 1
+            or not is_truncated_measurement(profile["age_years"])
+            or type(profile["age_category"]) is not str or not profile["age_category"].strip()
+            or type(profile["birthday"]) is not dict
+            or not profile["birthday"]
+            or any(type(key) is not str or not key
+                   or type(value) not in (str, int, float, bool)
+                   or type(value) is float and not math.isfinite(value)
+                   for key, value in profile["birthday"].items())
+            or type(profile["initial_total_experience"]) is not int
+            or profile["initial_total_experience"] < 0):
+        raise ValueError("Arena initial age, birthday, or experience record is malformed")
+    allocations = profile["class_allocations"]
+    if type(allocations) not in (tuple, list):
+        raise ValueError("Arena initial class allocations are malformed")
+    for row in allocations:
+        if (type(row) is not dict or set(row) != {"id", "name", "level", "experience"}
+                or type(row["id"]) is not int
+                or type(row["name"]) is not str or not row["name"].strip()
+                or type(row["level"]) is not int or row["level"] < 0
+                or type(row["experience"]) is not int or row["experience"] < 0):
+            raise ValueError("Arena initial class allocation is malformed")
+    skills = profile["initial_skills"]
+    if type(skills) is not dict or set(skills) != {"ordinary", "weapons", "resolution"}:
+        raise ValueError("Arena initial skill provenance is malformed")
+    for key in ("ordinary", "weapons"):
+        rows = skills[key]
+        if type(rows) not in (tuple, list):
+            raise ValueError("Arena initial acquired skills are malformed")
+        for row in rows:
+            if (type(row) not in (tuple, list) or len(row) != 2
+                    or type(row[0]) is not str or not row[0].strip()
+                    or type(row[1]) not in (int, float) or not math.isfinite(row[1])
+                    or row[1] < 0):
+                raise ValueError("Arena initial acquired skill rank is malformed")
+    resolution = skills["resolution"]
+    if (type(resolution) is not dict
+            or any(type(key) is not str or not key or type(value) is not str
+                   for key, value in resolution.items())):
+        raise ValueError("Arena skill resolution provenance is malformed")
+    return True

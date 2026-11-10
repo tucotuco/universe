@@ -58,8 +58,14 @@ class TestNpcgenArenaAdapter(unittest.TestCase):
             self.assertEqual(result.being._skill_practice_baselines, {})
             self.assertEqual(result.source_sha256, hashlib.sha256(result.source_record_bytes).hexdigest())
             self.assertEqual(result.engine_identity, record["engine"])
-            # Generator class/level data is retained verbatim, not translated to a native class.
+            # Initial class allocation is retained as Arena provenance, separate
+            # from native total XP and skill practice.
             self.assertEqual(len(record["state"]["classes"]), len(record["state"]["levels"]))
+            profile = result.being._arena_initial_profile
+            self.assertEqual(profile["age_years"], record["sheet"]["age"]["age"])
+            self.assertEqual(profile["class_allocations"][0]["id"], record["state"]["classes"][0])
+            self.assertEqual(profile["class_allocations"][0]["level"], record["state"]["levels"][0])
+            self.assertEqual(profile["class_allocations"][0]["experience"], record["state"]["xps"][0])
         self.assertEqual(positive.source_record_bytes, positive_again.source_record_bytes)
         self.assertNotEqual(positive.being.id, positive_again.being.id)
         self.assertIs(world.get_object_by_id(positive.being.id), positive.being)
@@ -82,6 +88,21 @@ class TestNpcgenArenaAdapter(unittest.TestCase):
             self.assertEqual(kind, "individualized-native-template")
             inventory._closed_definition_value(result.being.current,
                 owner=("being-current", str(index)), mutable_owners=mutable_owners)
+
+    def test_1000_xp_dagger_three_is_explicit_but_other_rank_ones_are_native_derived(self):
+        result = generate_npcgen_arena_being(
+            _world(), seed=8, starting_experience=1000, cost_modifiers="character")
+        record = json.loads(result.source_record_bytes)
+        acquired = record["state"]["skills"]["weapon_skills"]
+        self.assertEqual(acquired, {"Dagger": 3})
+        self.assertEqual(record["state"]["skills"]["skills"], {"armed combat": 3})
+        self.assertEqual(record["state"]["xps"], [1000])
+        self.assertEqual(result.being._arena_initial_profile["class_allocations"][0]["experience"], 1000)
+        effective = result.being.current.skills.weapon_skills
+        derived = {name: rank for name, rank in effective.items() if name not in acquired and rank > 0}
+        self.assertTrue(derived)
+        self.assertTrue(all(rank == 1 for rank in derived.values()))
+        self.assertEqual(result.being.skill_experience, {})
 
     def test_resolved_empty_is_imported_but_unresolved_refuses_without_registration(self):
         world = _world()

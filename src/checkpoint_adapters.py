@@ -283,6 +283,15 @@ class NativeInventory(_Inventory):
         if tag=='being.BeingInstance' and field=='_posture':
             _require(item is None or type(item) is str and item in ('standing', 'crouching', 'lying'),
                      'native Being posture must be unknown or a supported posture string')
+        if tag=='being.BeingInstance' and field=='_arena_initial_profile' and item is not None:
+            from npcgen_arena_adapter import validate_arena_initial_profile_record
+            try:
+                validate_arena_initial_profile_record(item)
+            except (TypeError, ValueError) as exc:
+                raise CheckpointRejected(str(exc)) from exc
+            owner=self._objects_by_identity[self._owner_identity(ref)]
+            _require(item['initial_total_experience'] == owner.original.experience,
+                     'Arena initial profile XP differs from the registered Being original')
         if tag=='activities.SpotAction' and field=='location_ledger' and item is not None:
             self.issue('unbound_location_evidence_recipient',ref,field,
                 'Observer-owned location evidence has no portable recipient binding contract; restoration remains refused.')
@@ -734,6 +743,11 @@ class NativeInventory(_Inventory):
             geometry=data.get('geometry')
             _require(geometry is None or type(geometry) in (Sphere,AxisAlignedBox),
                      'unsupported optional Being geometry')
+            if geometry is not None:
+                from measured_values import is_truncated_measurement
+                _require(all(is_truncated_measurement(getattr(geometry, name))
+                             for name in geometry._MEASURED_ATTRIBUTES),
+                         'Being geometry measurements must be canonically truncated')
             occlusion=data.get('visual_occlusion')
             _require(occlusion is None or type(occlusion) is VisualOcclusion,
                      'unsupported optional Being visual-occlusion value')

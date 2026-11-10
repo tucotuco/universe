@@ -127,7 +127,7 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'being.BeingInstance': {
-        "allowed": '_arena_perception_ledger _atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "allowed": '_arena_initial_profile _arena_perception_ledger _atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
         "required": '_posture _skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry hex_facing name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
     },
     'conditional_attributes.ConditionalAttributes': {
@@ -561,7 +561,7 @@ RUN_SPOT_FIELD_CLOSURE = {
                           'effective_fitness', 'exertion', 'skill_experience',
                           'skill_use_history', '_skill_practice_baselines',
                           'personal_history', '_atomic_target_history',
-                          '_arena_perception_ledger'),
+                          '_arena_perception_ledger', '_arena_initial_profile'),
         'derived': ('type',),
         'optional_values': {
             'spatial_state': ('null', 'spatial.SpatialState'),
@@ -574,6 +574,8 @@ RUN_SPOT_FIELD_CLOSURE = {
             'personal_history': ('null-only-in-this-subset',),
             '_arena_perception_ledger': ('absent-for-non-Arena',
                                          'arena_perception-ledger/1'),
+            '_arena_initial_profile': ('absent-for-non-Arena',
+                                       'npcgen-arena-initial-profile/1'),
         },
         'unsupported_optional': ('alignment', 'current_armor_class'),
     },
