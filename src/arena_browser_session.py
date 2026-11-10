@@ -252,11 +252,150 @@ class GeneratedArenaSession:
         with self._lock:
             return self._active
 
+    def save_encounter_bytes(self):
+        """Capture the native graph and its Arena session sidecar atomically."""
+        from checkpoint_envelope import assemble_native_run_spot_envelope
+        from checkpoint_wire import encode_run_spot_envelope
+        from arena_persistence import encode
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before saving")
+            try:
+                envelope=assemble_native_run_spot_envelope(self._active.universe,
+                    self._active.encounter,quiescent=True,rng_scope='exclusive_encounter',
+                    rng_owner=self._rng_cursor)
+                native_wire=encode_run_spot_envelope(envelope)
+                return encode(self,native_wire)
+            except (TypeError,ValueError,RuntimeError) as exc:
+                raise ArenaBrowserRequestError(
+                    "This Arena state cannot be saved yet; native checkpoint validation refused it: "
+                    +str(exc)) from exc
+
+    def load_encounter_bytes(self, wire):
+        """Validate and atomically replace this session from a portable native file."""
+        import base64
+        import hashlib
+        from arena_persistence import decode
+        from checkpoint_reconstruction import (reconstruct_initial_run_spot,
+            _admit_pristine_arena_reconstruction)
+        from arena_initialization import (ArenaInitializationCandidate,ArenaMap,
+            ArenaWorldPremise,ArenaParticipant,ArenaPlacement)
+        from arena_hex_map import ArenaHexLayout
+        from arena_ground_objects import ArenaGroundObject
+        from npcgen_arena_adapter import ArenaNativeBeing
+        from spatial.state import CartesianPosition
+        from arena_movement_plan_checkpoint import decode as decode_plan
+
+        try:
+            data=decode(wire)
+            private=reconstruct_initial_run_spot(data['decoded_native'])
+            universe,encounter,rng_owner=_admit_pristine_arena_reconstruction(private)
+            meta=data['session']
+            if (len(encounter.being_list)!=2 or meta['player_id']!=encounter.being_list[0]
+                    or meta['opponent_id']!=encounter.being_list[1]
+                    or meta['starting_experience']!=universe.get_object_by_id(meta['player_id']).original.experience):
+                raise ArenaBrowserRequestError(
+                    "Saved Arena participant order or starting experience disagrees with native state")
+            width,height=meta['map']
+            layout=ArenaHexLayout.rectangle(width,height)
+            premise_data=meta['world_premise']
+            if (type(premise_data) is not list or len(premise_data)!=6
+                    or premise_data[:2]!=['Plains','Road']
+                    or premise_data[2:4]!=[float(1.0).hex(),float(1.0).hex()]
+                    or premise_data[4:]!=[True,False]):
+                raise ArenaBrowserRequestError("Saved Arena movement premise is unsupported")
+            premise=ArenaWorldPremise(premise_data[0],premise_data[1],
+                float.fromhex(premise_data[2]),float.fromhex(premise_data[3]),
+                premise_data[4],premise_data[5])
+            participants=[]
+            source_rows={row[1]:row for row in meta['source_beings']}
+            for index,being_id in enumerate(encounter.being_list):
+                row=source_rows.get(being_id)
+                if (type(row) is not list or len(row)!=6
+                        or row[0]!=('player_controlled' if index==0 else 'arena_controlled')):
+                    raise ArenaBrowserRequestError("Saved Arena source provenance is incomplete")
+                source=base64.b64decode(row[2],validate=True)
+                if hashlib.sha256(source).hexdigest()!=row[3]:
+                    raise ArenaBrowserRequestError("Saved Arena source record digest is invalid")
+                being=universe.get_object_by_id(being_id)
+                position=being.get_position()
+                address=layout.cell_at_position(position)
+                if address is None:
+                    raise ArenaBrowserRequestError("Saved Being position lies outside its recorded Arena map")
+                native=ArenaNativeBeing(being,source,row[3],row[4],row[5])
+                placement=ArenaPlacement(row[0],being_id,address.column,address.row,position)
+                participants.append(ArenaParticipant(row[0],native,placement,0,0,
+                    "restored from native checkpoint", "restored from native checkpoint"))
+            ground=[]
+            for row in meta['ground_objects']:
+                if type(row) is not list or len(row)!=8 or row[1] not in encounter.non_being_object_list:
+                    raise ArenaBrowserRequestError("Saved ground Object source mapping is malformed")
+                point=CartesianPosition(*(float.fromhex(value) for value in row[7]))
+                ground.append(ArenaGroundObject(row[0],row[1],row[2],row[3],row[4],
+                    row[5],row[6],point))
+            candidate=ArenaInitializationCandidate(universe,encounter,
+                ArenaMap(width,height,layout),premise,meta['starting_experience'],
+                meta['root_seed'],meta['placement_seed'],
+                participants[0].native.engine_identity,tuple(participants),(),tuple(ground),
+                tuple((row.source_item_id,row.native_object_id) for row in ground),
+                layout,0,())
+            plan_wire=(None if meta['movement_plan_base64'] is None else
+                base64.b64decode(meta['movement_plan_base64'],validate=True))
+            plan_data=None if plan_wire is None else decode_plan(plan_wire)
+            plan=(None if plan_data is None else _MovementPlan(
+                plan_data.decision_id, CartesianPosition(*plan_data.destination),
+                HexAddress(*plan_data.cell), plan_data.rate, plan_data.facing_policy))
+            if plan_data is not None:
+                if (plan_data.universe_id!=universe.id or plan_data.encounter_id!=encounter.id
+                        or plan_data.actor_id!=meta['player_id'] or plan_data.checkpoint_boundary!=encounter.time
+                        or (encounter.arena_movement_activation is not None
+                            and plan_data.decision_id!=encounter.arena_movement_activation.movement_decision_id)):
+                    raise ArenaBrowserRequestError("Saved movement plan disagrees with native activation state")
+        except ArenaBrowserRequestError:
+            raise
+        except (TypeError,ValueError,RuntimeError,KeyError,IndexError) as exc:
+            raise ArenaBrowserRequestError(f"Saved Arena file was refused: {exc}") from exc
+
+        with self._lock:
+            old=(self._active,self._encounter_name,self._player_name,self._rng_cursor,
+                 self._movement_plan,self._movement_sequence,self._display_names,
+                 self._view_handles,self._selected_entity_handle,self._movement_outcome,
+                 self._player_action_id,self._player_action_outcome,self._pickup_action_id,
+                 self._pickup_action_outcome,self._ready_weapon_action_id,
+                 self._ready_weapon_action_outcome,self._ready_weapon_end_time)
+            try:
+                self._active=candidate;self._encounter_name=meta['encounter_name']
+                self._player_name=meta['player_name'];self._rng_cursor=rng_owner
+                self._movement_plan=plan;self._movement_sequence=meta['movement_sequence']
+                self._display_names=dict(meta['display_names']);self._view_handles={}
+                self._selected_entity_handle=None;self._movement_outcome=None
+                self._player_action_id=None;self._player_action_outcome=None
+                self._pickup_action_id=None;self._pickup_action_outcome=None
+                self._ready_weapon_action_id=None;self._ready_weapon_action_outcome=None
+                self._ready_weapon_end_time=None
+                result=self._view_unlocked()
+                selected_id=meta['selected_entity_id']
+                if selected_id is not None:
+                    self._selected_entity_handle=self._view_handles.get(selected_id)
+                    if self._selected_entity_handle is None:
+                        raise ArenaBrowserRequestError("Saved selected Entity is not in current observer evidence")
+                    result=self._view_unlocked()
+                return result
+            except BaseException:
+                (self._active,self._encounter_name,self._player_name,self._rng_cursor,
+                 self._movement_plan,self._movement_sequence,self._display_names,
+                 self._view_handles,self._selected_entity_handle,self._movement_outcome,
+                 self._player_action_id,self._player_action_outcome,self._pickup_action_id,
+                 self._pickup_action_outcome,self._ready_weapon_action_id,
+                 self._ready_weapon_action_outcome,self._ready_weapon_end_time)=old
+                raise
+
     def _view_unlocked(self):
         if self._active is None:
             return {
                 "state": "empty",
-                "load_available": False,
+                "save_available": False,
+                "load_available": True,
                 "spot_available": False,
                 "spot_reason": _SPOT_DISABLED,
                 "run_available": False,
@@ -337,7 +476,8 @@ class GeneratedArenaSession:
             candidate, player.native.being, selected, supported_actions)
         return {
             "state": "active",
-            "load_available": False,
+            "save_available": True,
+            "load_available": True,
             "encounter_name": self._encounter_name,
             "time_seconds": candidate.encounter.time,
             "map": {"width_cells": candidate.arena_map.width_cells,
@@ -884,6 +1024,9 @@ class GeneratedArenaSession:
                     candidate.participants[0].native.being.name or "Player")
                 from arena_perception import refresh_candidate_names
                 refresh_candidate_names(encounter)
+                # Keep the Encounter legacy until real Arena activation; the
+                # session cursor is captured explicitly for a time-zero save.
+                rng_cursor = RNGCursor(random.Random(candidate.root_seed).getstate())
             except ArenaInitializationRefusal as exc:
                 refusal = exc.details.get("refusal", {})
                 message = refusal.get("message", exc.message) if type(refusal) is dict else exc.message
@@ -897,7 +1040,7 @@ class GeneratedArenaSession:
             self._active = candidate
             self._encounter_name = encounter.name
             self._player_name = candidate.participants[0].native.being.name
-            self._rng_cursor = RNGCursor(random.Random(candidate.root_seed).getstate())
+            self._rng_cursor = rng_cursor
             self._player_action_id = None
             self._player_action_outcome = None
             self._pickup_action_id = None

@@ -114,8 +114,15 @@ def _movement_activation_state(encounter):
              'Arena activation-enabled flag must be an explicit native Boolean')
     record = encounter.arena_movement_activation
     if record is None:
-        _require(not enabled,
-                 'Arena activation-enabled Encounter lacks its movement activation record')
+        if enabled:
+            _require(encounter.initiated is False and encounter.arena_activation is None
+                     and encounter.initiation is None and encounter.time==encounter.start_time
+                     and encounter.last_processed_boundary==math.floor(encounter.start_time)
+                     and not encounter.pending_action_list and not encounter.finished_action_list
+                     and not encounter.cancelled_action_list
+                     and not encounter.__dict__.get('_atomic_interval_history')
+                     and not encounter._choice_book._choices,
+                     'unactivated Arena state contains incompatible activation or progression data')
         return None
     _require(enabled and encounter.initiated is True
              and encounter.arena_activation is None and encounter.initiation is None,
@@ -155,10 +162,11 @@ def _ledger_records(ledger):
 class NativeInventory(_Inventory):
     types = _TYPES | {ConditionalAttributes}
 
-    def __init__(self, world, encounter, bindings):
+    def __init__(self, world, encounter, bindings, *, rng_owner=None):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
+        self.rng_owner=rng_owner
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -405,7 +413,7 @@ class NativeInventory(_Inventory):
                     _require(branch in spec['conditional_cdfs'],'missing conditional parent branch');cdfs=[spec['conditional_cdfs'][branch]]
                 _require(any(type(v)is type(value) and v==value for cdf in cdfs for v,_ in cdf),'impossible committed conditional value')
 
-    def _bounded_run_spot_closure(self,world,encounter,rng_role):
+    def _bounded_run_spot_closure(self,world,encounter,rng_role,rng_owner=None):
         """Prove the native Arena Being and ground/carried Object subset."""
         from library import Library
         from being import BeingDictionary
@@ -458,9 +466,19 @@ class NativeInventory(_Inventory):
                      and not set(policy.get('transient',()))-set(adapter['allowed'])
                      and not (set(adapter['required'])-set(adapter['allowed'])),
                      'Run/Spot A/D/T/U field policy does not exactly cover the native closed-field adapter: '+tag)
-        _require(type(rng_role) is str and rng_role=='caller_cursor' and binding is not None
-                 and binding.encounter() is encounter and type(binding.rng_owner) is RNGCursor,
-                 'Run/Spot closure requires the exclusive caller-owned RNGCursor represented by 5D2C2')
+        pristine=(encounter.arena_activation_enabled is True and not encounter.initiated
+            and encounter.time==encounter.start_time and not encounter._choice_book._choices
+            and not encounter.pending_action_list and not encounter.finished_action_list
+            and not encounter.cancelled_action_list
+            and not encounter.__dict__.get('_atomic_interval_history'))
+        selected_owner=(binding.rng_owner if binding is not None
+            and binding.encounter() is encounter else rng_owner)
+        _require(type(rng_role) is str and rng_role=='caller_cursor'
+                 and type(selected_owner) is RNGCursor
+                 and ((binding is not None and binding.encounter() is encounter
+                       and binding.rng_owner is selected_owner)
+                      or (binding is None and pristine)),
+                 'Run/Spot closure requires the private bound cursor or a pristine Arena session cursor')
         _require(not self.bindings,'external recipient bindings are outside the Run/Spot subset')
         _require(type(encounter.being_list) is list and encounter.being_list
                  and len(encounter.being_list)==len(set(encounter.being_list))
@@ -530,8 +548,10 @@ class NativeInventory(_Inventory):
         receipts=();receipt_descriptor_data=()
         history=encounter.__dict__.get('_atomic_interval_history',())
         if movement_activation is not None:
-            _require(type(history) is list and history,
-                     'movement-activated Arena has no committed boundary history')
+            _require((history is None or history == () or type(history) is list) and
+                     (history or (encounter.time==encounter.start_time
+                                  and encounter.last_processed_boundary==math.floor(encounter.start_time))),
+                     'movement activation without receipts must remain at its exact pre-boundary cursor')
         if history:
             try:
                 receipt_descriptor=describe_committed_receipt_chain(world,encounter,
@@ -887,7 +907,7 @@ class NativeInventory(_Inventory):
                                               observer.id,data[0]))
         body=super().build(world,encounter,rng_role,rng_state,rng_scope)
         try:
-            bounded=self._bounded_run_spot_closure(world,encounter,rng_role)
+            bounded=self._bounded_run_spot_closure(world,encounter,rng_role,self.rng_owner)
         except CheckpointRejected as exc:
             self.issue('bounded_run_spot_closure_refused',('encounter',encounter.id),'*',str(exc))
             bounded=None

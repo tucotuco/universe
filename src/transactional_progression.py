@@ -549,7 +549,14 @@ def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
     role,identity,_=_rng_input(encounter,None,rng_owner)
     if role not in ('module','native_random','caller_cursor'):
         raise TransactionalProgressionError('facade RNG ownership is outside native programmatic progression (5C3B)')
-    _all_declarations(encounter,ed['last_processed_boundary']+1,rng_owner)
+    unactivated_arena=(ed.get('arena_activation_enabled') is True
+        and ed.get('initiated') is False and ed['time']==ed['start_time']
+        and not ed.get('_atomic_interval_history') and not ed['pending_action_list']
+        and not ed['finished_action_list'] and not ed['cancelled_action_list']
+        and not ed['_choice_book']._choices and not ed['_choice_book']._drafts
+        and not ed['_choice_book']._registered)
+    if not unactivated_arena:
+        _all_declarations(encounter,ed['last_processed_boundary']+1,rng_owner)
     descriptor=ProgressionMode('transactional',id(encounter),role,identity)
     key=id(encounter)
     binding=_Binding(weakref.ref(encounter,lambda ref:_BINDINGS.pop(key,None)),descriptor,rng_owner,threading.Lock())

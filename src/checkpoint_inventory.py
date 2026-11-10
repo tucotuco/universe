@@ -271,7 +271,7 @@ def _candidate_seal(candidate):
     return _digest((candidate.schema,candidate.envelope,diagnostics,candidate.content_digest,False,False,False))
 
 
-def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,bindings=()):
+def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,bindings=(),rng_owner=None):
     from universe import Universe
     from encounter import Encounter
     from transactional_progression import _BINDINGS,_all_declarations
@@ -290,18 +290,42 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
     _require(rng_scope is None or type(rng_scope)is str and rng_scope=='exclusive_encounter', 'unsupported RNG scope assertion')
     _require(type(world) is Universe and type(encounter) is Encounter,'native Universe/Encounter roots required')
     _require(object.__getattribute__(encounter,'__dict__')['universe'] is world,'foreign Encounter root')
-    _idle(encounter)
     with coordinated_access(world):
-        _idle(encounter)
+        pristine_arena=(encounter.arena_activation_enabled is True
+            and encounter.initiated is False and encounter.time==encounter.start_time
+            and not encounter.__dict__.get('_atomic_interval_history')
+            and not encounter.pending_action_list
+            and not encounter.finished_action_list and not encounter.cancelled_action_list
+            and not encounter._choice_book._choices and not encounter._choice_book._drafts
+            and not encounter._choice_book._registered)
+        if pristine_arena:
+            import atomic_publication as publication
+            _require(not publication._ACTIVE and not publication._PUBLISHING
+                     and not any(encounter.__dict__.get(key) for key in
+                         ('_advancing','_dispatching','_running'))
+                     and encounter.__dict__.get('boundary_fault') is None,
+                     'pristine Arena capture requires idle native scheduling/publication')
+        else:
+            _idle(encounter)
         _require(world.event_history.get(encounter.id)is encounter,'Encounter registry identity changed')
         _require(len(world._choice_books)==1,'multi-Encounter closure has no reviewed ownership adapter')
         _require(encounter.end_time is None or encounter.time<encounter.end_time,
                  'terminal Encounter checkpoint predicate is not adapted; no next-boundary preflight is possible')
         before_source=_compatibility();before=_read_set(encounter)
-        owner=_BINDINGS[id(encounter)].rng_owner
-        _preflight(encounter,encounter.last_processed_boundary+1)
+        binding=_BINDINGS.get(id(encounter))
+        owner=(binding.rng_owner if binding is not None and binding.encounter() is encounter
+               else rng_owner)
+        _require(owner is not None,
+                 'unbound Encounter checkpoint requires an explicitly supplied private RNG cursor')
+        if binding is None or binding.encounter() is not encounter:
+            _require(pristine_arena,
+                     'only a pristine unactivated Arena may supply its session-owned RNG cursor')
+        unactivated_arena=pristine_arena
+        if not unactivated_arena:
+            _preflight(encounter,encounter.last_processed_boundary+1)
         encounter._choice_book.assert_accepted()
-        _all_declarations(encounter,encounter.last_processed_boundary+1,owner)
+        if not unactivated_arena:
+            _all_declarations(encounter,encounter.last_processed_boundary+1,owner)
         if encounter.time!=encounter.start_time or encounter.__dict__.get('_atomic_interval_history'):
             encounter.inspect_committed()
         for aid,event in world.event_history.items():
@@ -314,7 +338,7 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
             _require(not any(b.encounter() is not encounter and b.encounter() is not None and b.rng_owner is owner for b in _BINDINGS.values()),'RNG is shared with another Encounter')
         if native_adapters:
             from checkpoint_adapters import NativeInventory
-            inventory=NativeInventory(world,encounter,bindings)
+            inventory=NativeInventory(world,encounter,bindings,rng_owner=owner)
         else:
             inventory=_Inventory()
         body=inventory.build(world,encounter,role,rng,rng_scope)
@@ -327,13 +351,13 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
         return envelope,tuple(inventory.diagnostics),stamp
 
 
-def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=None,native_adapters=False,bindings=()):
+def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=None,native_adapters=False,bindings=(),rng_owner=None):
     """Return an inactive partial inventory; all readiness flags remain false.
 
     rng_scope is an explicit caller assertion, not evidence of global privacy.
     No binding IDs are invented for externally owned recipients.
     """
-    envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,rng_scope=rng_scope,native_adapters=native_adapters,bindings=bindings)
+    envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,rng_scope=rng_scope,native_adapters=native_adapters,bindings=bindings,rng_owner=rng_owner)
     candidate=CheckpointCandidate(SCHEMA,envelope,diagnostics,_digest(envelope))
     key=id(candidate)
     _ISSUED[key]=(weakref.ref(candidate,lambda ref,key=key:_ISSUED.pop(key,None)),weakref.ref(world),weakref.ref(encounter),stamp,_candidate_seal(candidate),rng_scope,native_adapters,bindings)

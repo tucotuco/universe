@@ -278,7 +278,7 @@ class _DiagnosticView:
 
 
 def assemble_native_run_spot_envelope(world, encounter, *, quiescent=False,
-                                      rng_scope=None):
+                                      rng_scope=None, rng_owner=None):
     """Capture and assemble one inactive, detached Run/Spot envelope.
 
     The existing inventory capture owns the coordinated read, RNG ownership
@@ -290,7 +290,7 @@ def assemble_native_run_spot_envelope(world, encounter, *, quiescent=False,
              'explicit quiescent ownership and exclusive Encounter RNG scope are required')
     source = capture_checkpoint_candidate(
         world, encounter, quiescent=True, rng_scope=rng_scope,
-        native_adapters=True, bindings=(),
+        native_adapters=True, bindings=(), rng_owner=rng_owner,
     )
     envelope = _make(source)
     _validate_shape(envelope)

@@ -49,6 +49,9 @@ _SUPPORTED_TAGS = frozenset({
     'event.Event', 'action_choice.ChoiceBook',
     'object.ObjectRegistry', 'actiondictionary.ActionDictionary',
     'armor.ArmorDictionary', 'object.ObjectDictionary', 'weapon.WeaponDictionary',
+    'object.ObjectDefinition', 'object.ObjectInstance',
+    'weapon.WeaponDefinition', 'weapon.WeaponInstance',
+    'armor.ArmorDefinition', 'armor.ArmorInstance',
     'abilities.Abilities', 'speeds.Speed',
     'skill.Skills', 'states.States', 'strategy.Strategy', 'exertion.Exertion',
     'physical_fatigue.PhysicalFatigueState', 'spatial.state.CartesianPosition',
@@ -67,6 +70,8 @@ _SUPPORTED_TAGS = frozenset({
     'encounter_inspection.CommittedBoundaryRecord',
     'encounter_inspection.EntityInspection',
     'interval_staging.QueueProjection',
+    'arena_perception.ArenaPerceptionEvidence',
+    'arena_perception.ArenaPerceptionLedger',
 })
 
 
@@ -196,6 +201,9 @@ class _Graph:
         values = {key: self.value(value) for key, value in raw.items()}
         from abilities import Abilities
         from being import BeingDefinition
+        from object import ObjectDefinition, ObjectInstance
+        from weapon import WeaponDefinition, WeaponInstance
+        from armor import ArmorDefinition, ArmorInstance
         from exertion import Exertion
         from physical_fatigue import PhysicalFatigueState
         from spatial.geometry import Sphere
@@ -212,6 +220,7 @@ class _Graph:
         from action_evaluation import (IdentifiedEffect, EffectIdentity,
                                        AwarenessEffect, PracticeEffect)
         from observer_proposals import LifecycleEffect, ActionOutcomeEffect
+        from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger
         if tag == 'abilities.Abilities':
             table = values['abilities']
             names = {'STR': 'strength', 'DEX': 'dexterity', 'CON': 'constitution',
@@ -229,6 +238,13 @@ class _Graph:
         elif tag == 'spatial.state.SpatialState': obj = SpatialState(**values)
         elif tag == 'spatial.geometry.Sphere': obj = Sphere(**values)
         elif tag == 'spatial.occlusion.VisualOcclusion': obj = VisualOcclusion(**values)
+        elif tag == 'arena_perception.ArenaPerceptionEvidence':
+            obj = ArenaPerceptionEvidence(**values)
+        elif tag == 'arena_perception.ArenaPerceptionLedger':
+            obj = ArenaPerceptionLedger(values['observer_id'])
+            obj.environment = values['environment']
+            obj._current = values['_current']
+            obj._history = values['_history']
         elif tag == 'exertion.Exertion':
             obj = Exertion(start_time=values['start_time'], end_time=values['end_time'],
                 activity_level=values['activity_level'], fatigue_level=values['fatigue_level'],
@@ -237,6 +253,46 @@ class _Graph:
                   'Exertion definition differs from the native reconstruction contract')
         elif tag == 'being.BeingDefinition':
             obj = BeingDefinition(**values)
+        elif tag == 'object.ObjectDefinition':
+            obj = ObjectDefinition(**values)
+        elif tag == 'weapon.WeaponDefinition':
+            attacks=values['attacks']
+            obj=WeaponDefinition(values['obj_type'],values['length'],values['weight'],
+                values['cost'],values['hardness'],values['hit_points'],
+                attacks['R']['t'],attacks['R']['d'],attacks['R']['p'],
+                attacks['S']['t'],attacks['S']['d'],attacks['S']['p'],
+                attacks['T']['t'],attacks['T']['d'],attacks['T']['p'],
+                values['weapon_size'],width=values['width'],height=values['height'],
+                is_magical=values['is_magical'],tags=values['tags'],
+                weapon_categories=values['weapon_categories'])
+            obj.discovery_dc=values['discovery_dc']
+        elif tag == 'armor.ArmorDefinition':
+            defenses=values['defenses']
+            obj=ArmorDefinition(values['obj_type'],values['cost'],values['weight'],
+                defenses['B']['h'],defenses['P']['h'],defenses['S']['h'],
+                defenses['B']['d'],defenses['P']['d'],defenses['S']['d'],
+                values['armor_check_penalty'],values['dexterity_check_penalty'],
+                values['hit_points'],length=values['length'],width=values['width'],
+                height=values['height'],hardness=values['hardness'],
+                is_magical=values['is_magical'],tags=values['tags'],
+                weapon_categories=values['weapon_categories'])
+            obj.discovery_dc=values['discovery_dc']
+        elif tag in ('object.ObjectInstance','weapon.WeaponInstance','armor.ArmorInstance'):
+            constructors={'object.ObjectInstance':ObjectInstance,
+                'weapon.WeaponInstance':WeaponInstance,'armor.ArmorInstance':ArmorInstance}
+            obj=constructors[tag](values['original'],name=values['name'])
+            from identifiable import Identifiable
+            Identifiable.__init__(obj,values['name'],id=values['id'])
+            obj.original=values['original']
+            obj.current=values['current']
+            for name in ('top_facing','front_facing','parent_container_id'):
+                if name in values:setattr(obj,name,values[name])
+            for name,setter in (('spatial_state','set_spatial_state'),
+                                ('geometry','set_geometry'),
+                                ('visual_occlusion','set_visual_occlusion')):
+                if name in values:getattr(obj,setter)(values[name])
+            if '_atomic_target_history' in values:
+                obj._atomic_target_history=values['_atomic_target_history']
         elif tag == 'observer_proposals.ObserverProjection':
             obj = ObserverProjection(**values)
         elif tag == 'frozen_practice.PracticeProjection': obj = PracticeProjection(**values)
@@ -440,9 +496,12 @@ def reconstruct_initial_run_spot(decoded):
         native_dictionary = constructor()
         dictionary_fields = graph.fields(dictionary_ref)[1]
         for attr, encoded in dictionary_fields.items():
-            setattr(native_dictionary, attr, graph.data(encoded))
-        for attr, value in object.__getattribute__(native_dictionary, '__dict__').items():
-            _need(value == {} or value == [], f'nonempty unsupported definition catalog: {field}.{attr}')
+            value=(graph.mapping(encoded,native_values=True) if attr=='objects'
+                   and tag!='actiondictionary.ActionDictionary' else graph.data(encoded))
+            setattr(native_dictionary, attr, value)
+        if tag=='actiondictionary.ActionDictionary':
+            _need(type(native_dictionary.actions) is dict,
+                  'native Action catalog did not reconstruct as a data mapping')
         setattr(native_library, field, native_dictionary)
 
     universe_fields = graph.fields(universe_ref)[1]
@@ -458,8 +517,18 @@ def reconstruct_initial_run_spot(decoded):
     registry_fields = graph.fields(registry_ref)[1]
     registry_data = graph.raw_mapping(registry_fields['object_instances'])
     _need(type(registry_data) is dict, 'ObjectRegistry must be a native ordered map')
+    start_time = graph.data(graph.fields(encounter_ref)[1]['start_time'])
+    being_registry={key:value for key,value in registry_data.items()
+        if graph.nodes[graph.raw_ref(value)][0]=='being.BeingInstance'}
+    referenced_types=set()
+    for raw in being_registry.values():
+        instance_fields=graph.fields(graph.raw_ref(raw),'being.BeingInstance')[1]
+        original_fields=graph.fields(graph.raw_ref(instance_fields['original']),
+                                     'being.BeingDefinition')[1]
+        referenced_types.add(graph.data(original_fields['obj_type']))
     _templates, template_refs, definition_kinds = _validate_being_definition_bindings(
-        graph, registry_data, graph.raw_mapping(bd_fields['objects']))
+        graph, being_registry, {name:graph.raw_mapping(bd_fields['objects'])[name]
+                                for name in referenced_types})
     _need(set(registry_data) == {row[0][1] for row in nodes
           if type(row[0]) is tuple and len(row[0]) == 2 and row[0][0] == 'object'},
           'ObjectRegistry keys and logical Object IDs disagree')
@@ -471,7 +540,14 @@ def reconstruct_initial_run_spot(decoded):
               'ObjectRegistry entry does not use the reviewed Being reference form')
         instance_ref = object_to_ref[object_id]
         instance_tag, fields = graph.fields(instance_ref)
-        _need(instance_tag == 'being.BeingInstance', 'only native Beings are supported participants')
+        if instance_tag in ('object.ObjectInstance','weapon.WeaponInstance','armor.ArmorInstance'):
+            instance=graph.native(instance_ref)
+            _need(type(instance.id) is str and instance.id==object_id,
+                  'native Object logical identity was not preserved')
+            native_world.add_object(instance)
+            native_objects[object_id]=instance
+            continue
+        _need(instance_tag == 'being.BeingInstance', 'ObjectRegistry contains an unsupported native Entity')
         _need(graph.data(fields['personal_history']) is None,
               'personal-history reconstruction is unsupported')
         _need(graph.data(fields['skill_use_history']) == [],
@@ -490,6 +566,22 @@ def reconstruct_initial_run_spot(decoded):
                       '_skill_practice_baselines', 'possessions', 'weapons'):
             if field in fields:
                 setattr(instance, field, graph.value(fields[field]))
+        if fields.get('_arena_perception_ledger') != ('absent-for-non-Arena',):
+            ledger_value=fields.get('_arena_perception_ledger')
+            _need(type(ledger_value) is tuple and len(ledger_value)==2
+                  and ledger_value[0]=='arena-perception-ledger',
+                  'Arena observer evidence has an unsupported checkpoint adapter')
+            from checkpoint_arena_perception import decode_arena_perception_ledger
+            encoded_ledger=ledger_value[1]
+            current_rows=encoded_ledger[3]
+            try:
+                instance._arena_perception_ledger=decode_arena_perception_ledger(
+                    encoded_ledger,observer_id=object_id,
+                    entity_ids=tuple(sorted(registry_data)),
+                    visible_entity_ids=tuple(row[0] for row in current_rows),
+                    boundary=0,time=start_time)
+            except (TypeError,ValueError) as exc:
+                raise ReconstructionRejected(f'Arena observer evidence refused: {exc}') from exc
         instance.set_hex_facing(graph.data(fields['hex_facing']))
         instance.set_posture(graph.data(fields['_posture']))
         for field, setter in (('spatial_state', 'set_spatial_state'),
@@ -536,8 +628,11 @@ def reconstruct_initial_run_spot(decoded):
     _need(graph.nodes[source_choice_book][0] == 'action_choice.ChoiceBook' and
           graph.raw_ref(graph.fields(source_choice_book)[1]['encounter']) == encounter_ref,
           'ChoiceBook/Encounter ownership references are inconsistent')
-    for field in ('being_list', 'non_being_object_list', 'awareness'):
+    for field in ('being_list', 'non_being_object_list', 'awareness',
+                  'arena_activation_enabled'):
         setattr(encounter, field, graph.data(enc_fields[field]))
+    for field in ('arena_activation','arena_movement_activation','initiation'):
+        setattr(encounter, field, graph.value(enc_fields[field]))
     for being_id in encounter.being_list:
         _need(being_id in native_objects, 'Encounter references an unowned Being')
     for field in ('_coordinator_time', '_interval_start'):
@@ -635,6 +730,45 @@ def reconstruct_initial_run_spot(decoded):
     result = QuarantinedReconstruction(RECONSTRUCTION_SCHEMA, view, True)
     _NATIVE_GRAPHS[result] = (native_world, encounter, rng_owner)
     return result
+
+
+def _admit_pristine_arena_reconstruction(result):
+    """Release only a fully checked time-zero Arena into ordinary browser play."""
+    if type(result) is not QuarantinedReconstruction or result.quarantined is not True:
+        raise ReconstructionRejected('exact quarantined native reconstruction is required')
+    native=_NATIVE_GRAPHS.get(result)
+    if type(native) is not tuple or len(native)!=3:
+        raise ReconstructionRejected('reconstructed native Arena graph is unavailable')
+    world,encounter,rng_owner=native
+    from transactional_progression import (_BINDINGS,_QUARANTINED,mode_of)
+    binding=_BINDINGS.get(id(encounter))
+    movement_started=(encounter.initiated is True
+        and encounter.arena_movement_activation is not None
+        and encounter.arena_activation is None and encounter.initiation is None)
+    pristine=(encounter.initiated is False
+        and encounter.arena_movement_activation is None
+        and encounter.arena_activation is None and encounter.initiation is None)
+    if (binding is None or binding.encounter() is not encounter
+            or binding.rng_owner is not rng_owner or mode_of(encounter)!='transactional'
+            or not encounter.arena_activation_enabled or encounter.time!=encounter.start_time
+            or not (pristine or movement_started)
+            or encounter.pending_action_list or encounter.finished_action_list
+            or encounter.cancelled_action_list or encounter._choice_book._choices
+            or encounter.__dict__.get('_atomic_interval_history')):
+        raise ReconstructionRejected('only a pristine or time-zero movement-activated native Arena can enter ordinary play')
+    # A pristine Encounter still selects transactional mode at real activation.
+    # A movement-activated one retains its native cursor binding and accepted
+    # plan so its first interval can proceed through Encounter.step normally.
+    if pristine:
+        _BINDINGS.pop(id(encounter),None)
+        object.__getattribute__(encounter,'__dict__').pop('_transactional_mode',None)
+    _QUARANTINED.discard(encounter);_QUARANTINED.discard(world)
+    object.__getattribute__(encounter,'__dict__').pop('_checkpoint_quarantined',None)
+    object.__getattribute__(world,'__dict__').pop('_checkpoint_quarantined',None)
+    for value in world.object_registry.object_instances.values():
+        _QUARANTINED.discard(value)
+        object.__getattribute__(value,'__dict__').pop('_checkpoint_quarantined',None)
+    return world,encounter,rng_owner
 
 
 def _rebuild_future_choices(graph, choices, world, encounter, native_objects):
@@ -866,10 +1000,27 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
         tag, values = graph.fields(ref)
         _need(tag in _SUPPORTED_TAGS, f'unsupported Library definition adapter: {tag}')
         if tag == 'actiondictionary.ActionDictionary':
-            _need(graph.data(values['actions']) == {}, 'nonempty Action definitions are unsupported')
+            actions=graph.data(values['actions'])
+            _need(type(actions) is dict and all(type(key) is str and key
+                and type(row) is dict and tuple(row)==('target_type','required_skill','is_melee')
+                and type(row['target_type']) is str and type(row['required_skill']) is str
+                and row['is_melee'] in ('True','False') for key,row in actions.items()),
+                'native Action catalog is not in the closed Library data contract')
         else:
-            _need(graph.data(values['objects']) == {} and graph.data(values['object_categories']) == {},
-                  f'nonempty {name} definitions are unsupported')
+            rows=graph.raw_mapping(values['objects'])
+            categories=graph.data(values['object_categories'])
+            expected={'armor_dictionary':('armor.ArmorDefinition','armor.ArmorInstance'),
+                      'weapon_dictionary':('weapon.WeaponDefinition','weapon.WeaponInstance'),
+                      'object_dictionary':('object.ObjectDefinition','object.ObjectInstance')}[name]
+            _need(type(categories) is dict and all(type(key) is str for key in categories),
+                  f'{name} categories are not closed native data')
+            for key, raw in rows.items():
+                definition_ref=graph.raw_ref(raw)
+                definition_tag,definition_fields=graph.fields(definition_ref)
+                _need(type(key) is str and key and definition_tag==expected[0]
+                      and graph.data(definition_fields['obj_type'])==key,
+                      f'{name} has a mismatched native definition identity')
+                graph.native(definition_ref)
 
     event_history = graph.raw_mapping(universe_fields['event_history'])
     _need(set(event_history) == {'0', encounter_id},
@@ -898,17 +1049,35 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
     registry_ref = graph.raw_ref(universe_fields['object_registry'])
     registry_fields = graph.fields(registry_ref, 'object.ObjectRegistry')[1]
     registry = graph.raw_mapping(registry_fields['object_instances'])
-    object_refs = {ref[1]: ref for ref in by_tag.get('being.BeingInstance', ())
+    native_entity_tags=('being.BeingInstance','object.ObjectInstance',
+                        'weapon.WeaponInstance','armor.ArmorInstance')
+    object_refs = {ref[1]: ref for tag in native_entity_tags
+                   for ref in by_tag.get(tag, ())
                    if type(ref) is tuple and len(ref) == 2 and ref[0] == 'object'}
     _need(set(registry) == set(object_refs), 'ObjectRegistry contains unsupported entity families')
     being_dictionary_ref = graph.raw_ref(library_fields['being_dictionary'])
     being_dictionary_fields = graph.fields(being_dictionary_ref, 'being.BeingDictionary')[1]
     definitions_encoded = graph.raw_mapping(being_dictionary_fields['objects'])
+    being_registry={logical_id:encoded for logical_id,encoded in registry.items()
+        if graph.nodes[graph.raw_ref(encoded)][0]=='being.BeingInstance'}
+    used_definition_names=set()
+    for encoded in being_registry.values():
+        instance_fields=graph.fields(graph.raw_ref(encoded),'being.BeingInstance')[1]
+        original_fields=graph.fields(graph.raw_ref(instance_fields['original']),
+                                     'being.BeingDefinition')[1]
+        used_definition_names.add(graph.data(original_fields['obj_type']))
     _templates, _template_refs, _definition_kinds = _validate_being_definition_bindings(
-        graph, registry, definitions_encoded)
+        graph, being_registry, {name:definitions_encoded[name] for name in used_definition_names})
     for logical_id, encoded_ref in registry.items():
         ref = graph.raw_ref(encoded_ref)
         _need(ref == object_refs[logical_id], 'ObjectRegistry logical identity mismatch')
+        entity_tag,values = graph.fields(ref)
+        if entity_tag in ('object.ObjectInstance','weapon.WeaponInstance','armor.ArmorInstance'):
+            _need(graph.data(values['id'])==logical_id
+                  and graph.data(values['type'])==entity_tag.rsplit('.',1)[1],
+                  'Object logical identity or native type field is inconsistent')
+            continue
+        _need(entity_tag=='being.BeingInstance','unsupported registered native Entity family')
         values = graph.fields(ref, 'being.BeingInstance')[1]
         _need(graph.data(values['id']) == logical_id and
               graph.data(values['type']) == 'BeingInstance',
@@ -931,9 +1100,13 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
               'legacy prone state conflicts with standing/crouching posture')
         _need(graph.data(values['personal_history']) is None,
               'personal-history reconstruction is unsupported')
-        for name in ('skill_use_history', 'possessions', 'weapons'):
+        for name in ('skill_use_history', 'weapons'):
             _need(graph.data(values[name]) == [],
                   f'unsupported initial ownership/history state: {name}')
+        possessions=graph.data(values['possessions'])
+        _need(type(possessions) is list and all(item in object_refs for item in possessions)
+              and len(possessions)==len(set(possessions)),
+              'initial Being possession references are malformed')
         _need(graph.data(values['parent_container_id']) is None,
               'contained Being references are outside the initial subset')
         _need(graph.data(values['physiology_id']) is None,
@@ -954,13 +1127,27 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
     _need(type(arena_enabled) is bool,
           'Arena activation-enabled state is not a native Boolean')
     _need(encounter_fields['arena_activation'] == ('null',),
-          'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
-    _need(encounter_fields['arena_movement_activation'] == ('null',),
-          'movement-activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+          'Action-activated Arena Encounter is outside the initial reconstruction path')
     _need(encounter_fields['initiation'] == ('null',),
           'target-directed Encounter initiation is outside the bounded checkpoint subset')
-    _need(not arena_enabled,
-          'Arena activation-enabled Encounter is outside the initiated Run/Spot checkpoint subset')
+    movement_activation_value=encounter_fields['arena_movement_activation']
+    movement_activation=(None if movement_activation_value == ('null',)
+                         else graph.value(movement_activation_value))
+    if movement_activation is not None:
+        from encounter import ArenaMovementActivation
+        _need(type(movement_activation) is ArenaMovementActivation
+              and movement_activation.encounter_id == encounter_id
+              and movement_activation.actor_id in graph.data(encounter_fields['being_list'])
+              and movement_activation.time == graph.data(encounter_fields['start_time'])
+              and movement_activation.activation_kind == 'first_player_movement'
+              and type(movement_activation.movement_decision_id) is str
+              and movement_activation.movement_decision_id,
+              'movement activation record differs from its native Arena identity')
+    if arena_enabled:
+        _need(graph.data(encounter_fields['initiated']) is (movement_activation is not None)
+              and encounter_fields['arena_activation'] == ('null',)
+              and encounter_fields['initiation'] == ('null',),
+              'initial Arena activation fields are inconsistent')
     _need(graph.data(encounter_fields['id']) == encounter_id,
           'Encounter logical identity mismatch')
     start = graph.data(encounter_fields['start_time'])
@@ -971,11 +1158,20 @@ def _preflight_initial_graph(graph, by_tag, universe_id, encounter_id, choices):
                  'fatigue_frame_history'):
         _need(graph.data(encounter_fields[name]) == [],
               f'historical Encounter field is unsupported: {name}')
-    _need(graph.data(encounter_fields['non_being_object_list']) == [],
-          'Encounter non-Being Objects are outside the supported subset')
     entity_ids = set(registry)
-    for being_id in graph.data(encounter_fields['being_list']):
-        _need(being_id in entity_ids, 'Encounter contains a dangling Being reference')
+    being_ids=graph.data(encounter_fields['being_list'])
+    object_ids=graph.data(encounter_fields['non_being_object_list'])
+    _need(type(being_ids) is list and len(being_ids)==len(set(being_ids))
+          and set(being_ids)<=entity_ids
+          and all(graph.nodes[graph.raw_ref(registry[being_id])][0]=='being.BeingInstance'
+                  for being_id in being_ids),
+          'Encounter contains a dangling or non-Being participant reference')
+    _need(type(object_ids) is list and len(object_ids)==len(set(object_ids))
+          and set(object_ids)<=entity_ids-set(being_ids)
+          and all(graph.nodes[graph.raw_ref(registry[object_id])][0] in
+                  ('object.ObjectInstance','weapon.WeaponInstance','armor.ArmorInstance')
+                  for object_id in object_ids),
+          'Encounter contains a dangling or unsupported Object reference')
     awareness = graph.data(encounter_fields['awareness'])
     _need(type(awareness) is dict and set(awareness) <= entity_ids and
           all(type(targets) is set and targets <= entity_ids for targets in awareness.values()),

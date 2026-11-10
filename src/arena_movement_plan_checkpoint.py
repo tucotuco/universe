@@ -57,7 +57,7 @@ def capture_accepted_plan(session):
             raise MovementPlanRejected("an accepted, still-pending Arena movement plan is required")
         encounter = candidate.encounter
         activation = encounter.arena_movement_activation
-        if (type(encounter.time) is not int or not 1 <= encounter.time <= 4096
+        if (type(encounter.time) is not int or not 0 <= encounter.time <= 4096
                 or encounter.last_processed_boundary != encounter.time
                 or not encounter.initiated or encounter.progression_mode != "transactional"
                 or type(activation) is not ArenaMovementActivation
@@ -164,7 +164,7 @@ def _validate(row):
         raise MovementPlanRejected("movement-plan identity is malformed")
     if (type(row.accepted_at) not in (int, float) or not math.isfinite(row.accepted_at)
             or row.accepted_at != 0 or type(row.checkpoint_boundary) is not int
-            or row.checkpoint_boundary < 1 or row.checkpoint_boundary > 4096
+            or row.checkpoint_boundary < 0 or row.checkpoint_boundary > 4096
             or type(row.movement_sequence) is not int
             or row.movement_sequence < 1):
         raise MovementPlanRejected("movement-plan chronology is unsupported")

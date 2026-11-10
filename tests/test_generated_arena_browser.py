@@ -209,10 +209,14 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         self.assertIn("GM / developer Reality view", result["body"])
 
-    def test_empty_page_and_state_are_empty_with_real_disabled_load_affordance(self):
+    def test_empty_page_and_state_offer_native_load_without_an_active_encounter(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn('id="load" disabled', page)
+        self.assertIn('id="saveFile" disabled', page)
+        self.assertIn('id="loadFile"', page)
+        self.assertIn('id="saveFileInput"', page)
+        self.assertIn('/api/generated/save', page)
+        self.assertIn('/api/generated/load', page)
         self.assertIn('id="generate" disabled', page)
         self.assertIn('id="spot" disabled', page)
         self.assertIn('id="rate"', page)
@@ -226,10 +230,111 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         status, state = self.request("/api/generated/state")
         self.assertEqual(status, 200)
         self.assertEqual(state["state"], "empty")
-        self.assertFalse(state["load_available"])
+        self.assertFalse(state["save_available"])
+        self.assertTrue(state["load_available"])
         self.assertFalse(state["spot_available"])
         self.assertIsNone(self.session.active_candidate)
         self.assertEqual(self.request("/api/gm")[0], 404)
+
+    def test_pristine_arena_portable_save_load_and_native_activation(self):
+        generated = self.session.generate({"starting_experience": "10000",
+            "width_cells": "5", "height_cells": "5"})
+        source = self.session.active_candidate
+        source_player = source.participants[0].native.being
+        source_opponent = source.participants[1].native.being
+        wire = self.session.save_encounter_bytes()
+        from arena_browser_session import GeneratedArenaSession
+        restored = GeneratedArenaSession(root_seed_factory=lambda: 1)
+        restored_view = restored.load_encounter_bytes(wire)
+        target = restored.active_candidate
+        target_player = target.participants[0].native.being
+        target_opponent = target.participants[1].native.being
+        self.assertEqual(restored_view["time_seconds"], 0)
+        self.assertEqual((target_player.id, target_opponent.id),
+                         (source_player.id, source_opponent.id))
+        from checkpoint_reconstruction import _projection
+        self.assertEqual(_projection(target_player.current), _projection(source_player.current))
+        self.assertEqual(_projection(target_player.original), _projection(source_player.original))
+        self.assertEqual(target_player.get_position(), source_player.get_position())
+        self.assertEqual(target.encounter.awareness, source.encounter.awareness)
+        self.assertEqual(target_player._arena_perception_ledger.history,
+                         source_player._arena_perception_ledger.history)
+        self.assertEqual(restored._rng_cursor.state, self.session._rng_cursor.state)
+        self.assertEqual(restored_view["entities"][0]["name"], generated["entities"][0]["name"])
+
+        start = target_player.get_position()
+        destination = max(target.arena_map.layout.addresses(), key=lambda cell:
+            math.dist(target.arena_map.layout.center_position(cell, z=start.z).as_tuple(),
+                      start.as_tuple()))
+        restored.choose_destination({"column": destination.column, "row": destination.row,
+                                     "rate": "walk", "facing_policy": "turn"})
+        self.assertTrue(target.encounter.initiated)
+        self.assertEqual(target.encounter.progression_mode, "transactional")
+        activation_wire = restored.save_encounter_bytes()
+        resumed = GeneratedArenaSession(root_seed_factory=lambda: 2)
+        resumed.load_encounter_bytes(activation_wire)
+        resumed_view = resumed.advance_one_second()
+        self.session.choose_destination({"column": destination.column, "row": destination.row,
+                                         "rate": "walk", "facing_policy": "turn"})
+        uninterrupted_view = self.session.advance_one_second()
+        resumed_player = resumed.active_candidate.participants[0].native.being
+        uninterrupted_player = self.session.active_candidate.participants[0].native.being
+        self.assertEqual(resumed_view["time_seconds"], uninterrupted_view["time_seconds"])
+        self.assertEqual(resumed_player.get_position(), uninterrupted_player.get_position())
+        self.assertEqual(resumed_player.hex_facing, uninterrupted_player.hex_facing)
+        self.assertEqual(resumed._rng_cursor.state, self.session._rng_cursor.state)
+        self.assertGreater(len(resumed.save_encounter_bytes()), 0)
+
+    def test_http_save_and_load_use_binary_portable_file_and_atomic_replacement(self):
+        self.session.generate({"starting_experience": "10000",
+            "width_cells": "5", "height_cells": "5"})
+        handler_type = make_handler(self.session)
+        save_handler = object.__new__(handler_type)
+        save_handler.path = "/api/generated/save"
+        save_handler.server = type("FakeServer", (), {"server_port": 8000})()
+        save_handler.wfile = io.BytesIO()
+        saved = {}
+        save_handler._send = lambda status, body, content_type="application/json; charset=utf-8", extra_headers=None: saved.update(
+            status=status, body=body, content_type=content_type, headers=extra_headers)
+        save_handler.do_GET()
+        self.assertEqual(saved["status"], 200)
+        self.assertEqual(saved["content_type"], "application/octet-stream")
+        wire = saved["body"]
+        self.assertTrue(wire.startswith(b'{'))
+
+        replacement = GeneratedArenaSession(root_seed_factory=lambda: 1)
+        replacement.generate({"starting_experience": "10000",
+            "width_cells": "5", "height_cells": "5"})
+        original_candidate = replacement.active_candidate
+        load_handler = object.__new__(make_handler(replacement))
+        load_handler.path = "/api/generated/load"
+        load_handler.server = type("FakeServer", (), {"server_port": 8000})()
+        load_handler.wfile = io.BytesIO()
+        load_handler.rfile = io.BytesIO(wire)
+        load_handler.headers = {"Content-Length": str(len(wire)),
+                                "Content-Type": "application/octet-stream"}
+        result = {}
+        load_handler._send = lambda status, body, content_type="application/json; charset=utf-8", extra_headers=None: result.update(
+            status=status, body=body, content_type=content_type)
+        load_handler.do_POST()
+        self.assertEqual(result["status"], 200)
+        self.assertIsNot(replacement.active_candidate, original_candidate)
+        self.assertEqual(result["body"]["time_seconds"], 0)
+
+        bad_handler = object.__new__(make_handler(replacement))
+        bad_handler.path = "/api/generated/load"
+        bad_handler.server = type("FakeServer", (), {"server_port": 8000})()
+        bad_handler.wfile = io.BytesIO()
+        bad_handler.rfile = io.BytesIO(b"not a save")
+        bad_handler.headers = {"Content-Length": "10",
+                               "Content-Type": "application/octet-stream"}
+        rejected = {}
+        bad_handler._send = lambda status, body, content_type="application/json; charset=utf-8", extra_headers=None: rejected.update(
+            status=status, body=body)
+        candidate_before_bad_load = replacement.active_candidate
+        bad_handler.do_POST()
+        self.assertEqual(rejected["status"], 409)
+        self.assertIs(replacement.active_candidate, candidate_before_bad_load)
 
     def test_generated_page_is_marked_and_not_reused_from_browser_cache(self):
         handler_type = make_handler(self.session)
