@@ -20,6 +20,7 @@ from atomic_publication import RNGCursor
 from arena_hex_map import HexAddress
 from movement_intent import MovementIntent, MovementRateConditions
 from arena_ui_trace import ArenaUITerminalTrace
+from measured_values import truncate_measurement
 
 
 _DECIMAL = re.compile(r"[0-9]+\Z")
@@ -313,6 +314,11 @@ class GeneratedArenaSession:
                 if hashlib.sha256(source).hexdigest()!=row[3]:
                     raise ArenaBrowserRequestError("Saved Arena source record digest is invalid")
                 being=universe.get_object_by_id(being_id)
+                from npcgen_arena_adapter import validate_arena_initial_profile
+                profile=object.__getattribute__(being, "__dict__").get("_arena_initial_profile")
+                if not validate_arena_initial_profile(profile, source):
+                    raise ArenaBrowserRequestError(
+                        "Saved Arena initial Age/Class/skill provenance is inconsistent")
                 position=being.get_position()
                 address=layout.cell_at_position(position)
                 if address is None:
@@ -425,6 +431,7 @@ class GeneratedArenaSession:
                 "advance_available": False,
                 "movement_available": False,
                 "movement_reason": _MOVEMENT_DISABLED,
+                "starter_ground_equipment_available": self._ground_loadout_profile is not None,
             }
         candidate = self._active
         from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction
@@ -493,12 +500,15 @@ class GeneratedArenaSession:
             })
         selected = next((row for row in perceived
                          if row["handle"] == self._selected_entity_handle), None)
+        selected_being = (self._observer_being_sheet_unlocked(candidate, selected)
+                          if selected is not None and selected["category"] == "being" else None)
         character = self._player_character_sheet_unlocked(
             candidate, player, position, cell, movement_plan)
         action_catalog = self._action_catalog_unlocked(
             candidate, player.native.being, selected, supported_actions)
         return {
             "state": "active",
+            "starter_ground_equipment_available": self._ground_loadout_profile is not None,
             "save_available": True,
             "load_available": True,
             "encounter_name": self._encounter_name,
@@ -515,6 +525,7 @@ class GeneratedArenaSession:
                        "cell": cell,
                        "position_meters": {"x": position.x, "y": position.y, "z": position.z}},
             "character": character,
+            "selected_being": selected_being,
             "player_action": action,
             "pickup_action": pickup_action,
             "ready_weapon_action": ready_weapon_action,
@@ -743,34 +754,58 @@ class GeneratedArenaSession:
                     or any(type(key) is not str or type(value) not in (int, float)
                            or not math.isfinite(value) for key, value in abilities.items())):
                 raise ArenaBrowserRequestError("native player abilities cannot be projected safely")
-            skill_groups = []
+            initial_profile = object.__getattribute__(being, "__dict__").get(
+                "_arena_initial_profile")
+            if type(initial_profile) is not dict or initial_profile.get("schema_version") != 1:
+                raise ArenaBrowserRequestError("native initial Age/Class/skill provenance is unavailable")
+            initial_skills = initial_profile.get("initial_skills")
+            if type(initial_skills) is not dict:
+                raise ArenaBrowserRequestError("native initial skill provenance is malformed")
             skill_experience = being.skill_experience
             if type(skill_experience) is not dict:
                 raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
-            for group_name, rank_map in (("ordinary", current.skills.skills),
-                                         ("weapon", current.skills.weapon_skills)):
-                if type(rank_map) is not dict:
-                    raise ArenaBrowserRequestError("native skill ranks cannot be projected safely")
-                rows = []
-                for name, rank in sorted(rank_map.items()):
-                    if (type(name) is not str or not name
-                            or type(rank) not in (int, float) or not math.isfinite(rank)
-                            or rank < 0):
-                        raise ArenaBrowserRequestError("native skill ranks cannot be projected safely")
-                    practice = skill_experience.get(name, 0)
-                    if type(practice) is not int or practice < 0:
-                        raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
-                    rows.append({"name": name, "rank": rank,
-                                 "practice_experience": practice})
-                skill_groups.append({"kind": group_name, "skills": rows})
+            ordinary_explicit = initial_skills.get("ordinary")
+            weapons_explicit = initial_skills.get("weapons")
+            if type(ordinary_explicit) is not tuple or type(weapons_explicit) is not tuple:
+                raise ArenaBrowserRequestError("explicit initial skill ranks are malformed")
+            ordinary_map = dict(ordinary_explicit)
+            weapon_map = dict(weapons_explicit)
+            current_ordinary = current.skills.skills
+            current_weapons = current.skills.weapon_skills
+            if type(current_ordinary) is not dict or type(current_weapons) is not dict:
+                raise ArenaBrowserRequestError("native effective skill ranks are malformed")
+            derived_weapons = {name: rank for name, rank in current_weapons.items()
+                               if name not in weapon_map and rank > 0}
+            practice_names = (set(ordinary_map) | set(weapon_map)
+                              | set(current_ordinary) | set(current_weapons)
+                              | set(skill_experience))
             for name, practice in skill_experience.items():
                 if type(name) is not str or not name or type(practice) is not int or practice < 0:
                     raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
-                if not any(row["name"] == name for group in skill_groups for row in group["skills"]):
-                    skill_groups[0]["skills"].append({"name": name, "rank": 0,
-                                                       "practice_experience": practice})
-            for group in skill_groups:
-                group["skills"].sort(key=lambda row: row["name"])
+
+            def rank_rows(rank_map, *, derived=False):
+                rows = []
+                for name, rank in sorted(rank_map.items()):
+                    if (type(name) is not str or not name
+                            or type(rank) not in (int, float) or not math.isfinite(rank) or rank < 0):
+                        raise ArenaBrowserRequestError("native skill ranks cannot be projected safely")
+                    rows.append({"name": name, "rank": rank,
+                                 "practice_experience": skill_experience.get(name, 0),
+                                 "individually_acquired": not derived})
+                return rows
+
+            practice_rows = []
+            for name in sorted(practice_names):
+                practice = skill_experience.get(name, 0)
+                if type(practice) is not int or practice < 0:
+                    raise ArenaBrowserRequestError("native skill-practice state cannot be projected safely")
+                practice_rows.append({"name": name, "experience": practice})
+            skill_groups = [
+                {"kind": "initial_ordinary", "skills": rank_rows(ordinary_map)},
+                {"kind": "initial_weapon", "skills": rank_rows(weapon_map)},
+                {"kind": "effective_category_weapon", "skills": rank_rows(derived_weapons, derived=True)},
+                {"kind": "earned_practice", "skills": practice_rows},
+            ]
 
             experience = being.get_experience()
             hit_points = being.get_hit_points()
@@ -797,6 +832,8 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("native player fatigue cannot be projected safely")
 
             inventory = self._native_inventory_projection(candidate, being)
+            inventory["carried_weight_pounds"] = truncate_measurement(
+                inventory["carried_weight_pounds"])
             anatomy = self._native_hand_projection(being, inventory)
             movement = {
                 "position_meters": {"x": position.x, "y": position.y, "z": position.z},
@@ -815,22 +852,25 @@ class GeneratedArenaSession:
                     "remaining_distance_meters": movement_plan["remaining_distance_meters"],
                 }
 
+            class_allocations = [dict(row) for row in initial_profile["class_allocations"]]
             return {
                 "identity": {
                     "display_name": self._player_name,
                     "native_type": current.obj_type,
                     "race": current.race,
-                    "age": None,
-                    "age_status": "Age is not represented in the native Being state.",
-                    "class_levels": None,
-                    "class_levels_status": "Generator class/level allocations are not imported into native Being state.",
+                    "age": initial_profile["age_years"],
+                    "age_category": initial_profile["age_category"],
+                    "age_status": None,
+                    "class_levels": class_allocations,
+                    "class_levels_status": None,
                     "stature_inches": float(stature_inches),
                     "body_weight_pounds": float(body_weight_pounds),
                 },
                 "experience": {
                     "total": experience,
-                    "class_allocation": None,
-                    "class_allocation_status": "Native class-specific XP allocation is not represented.",
+                    "initial_total": initial_profile["initial_total_experience"],
+                    "class_allocation": class_allocations,
+                    "class_allocation_status": None,
                 },
                 "abilities": [{"name": name, "score": score}
                               for name, score in sorted(abilities.items())],
@@ -843,12 +883,57 @@ class GeneratedArenaSession:
                     "physical_fatigue_reserves": {"q": fatigue.q, "b": fatigue.b,
                                                   "profile_status": "resolved" if being.physiology_id else "unresolved"},
                     "posture": being.posture,
-                    "states": dict(sorted(states.items())),
+                    "conditions": self._condition_labels(states),
                 },
                 "anatomy": anatomy,
                 "movement": movement,
                 "inventory": inventory,
             }
+
+    @staticmethod
+    def _condition_labels(states):
+        labels = {
+            "prone": "Prone", "unconscious": "Unconscious", "helpless": "Helpless",
+            "sleeping": "Sleeping", "stunned": "Stunned", "paralyzed": "Paralyzed",
+            "blinded": "Blinded", "deafened": "Deafened", "grappled": "Grappled",
+            "restrained": "Restrained", "exhausted": "Exhausted", "dead": "Dead",
+        }
+        active = []
+        for name, value in sorted(states.items()):
+            if value:
+                label = labels.get(name.casefold(), name.replace("_", " ").strip().capitalize())
+                active.append(label)
+        return active
+
+    @staticmethod
+    def _observer_being_sheet_unlocked(candidate, evidence):
+        """Same character-sheet schema, populated only from player evidence."""
+        unknown = "Unknown from player-authorized evidence."
+        position = evidence.get("position_meters")
+        return {
+            "identity": {"display_name": evidence["name"],
+                "native_type": evidence["type"], "race": None,
+                "age": None, "age_category": None, "age_status": unknown,
+                "class_levels": None, "class_levels_status": unknown,
+                "stature_inches": None, "body_weight_pounds": None},
+            "experience": {"total": None, "initial_total": None,
+                "class_allocation": None, "class_allocation_status": unknown},
+            "abilities": [{"name": name, "score": None} for name in (
+                "Strength", "Constitution", "Dexterity", "Fitness",
+                "Intelligence", "Wisdom", "Charisma")],
+            "skills": [{"kind": kind, "skills": [], "status": "unknown"} for kind in (
+                "initial_ordinary", "initial_weapon", "effective_category_weapon", "earned_practice")],
+            "condition": {"hit_points_current": None, "hit_points_maximum": None,
+                "hit_points_maximum_status": unknown, "legacy_fatigue_level": None,
+                "physical_fatigue_reserves": None, "posture": None,
+                "conditions": None, "status": unknown},
+            "anatomy": {"status": "unknown", "hands": []},
+            "movement": {"position_meters": position, "cell": evidence.get("cell"),
+                "hex_facing": None, "posture": None, "selected_plan": None,
+                "speed": None, "speed_status": unknown},
+            "inventory": {"status": "unavailable", "items": [],
+                "carried_weight_pounds": None, "encumbrance_status": unknown},
+        }
 
     @staticmethod
     def _native_hand_projection(being, inventory):
@@ -1020,12 +1105,25 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def generate(self, payload):
-        if type(payload) is not dict or set(payload) != {
-                "starting_experience", "width_cells", "height_cells"}:
-            raise ArenaBrowserRequestError("Generate requires exactly starting_experience, width_cells, and height_cells")
+        expected = {"starting_experience", "width_cells", "height_cells"}
+        if (type(payload) is not dict or set(payload) not in
+                (expected, expected | {"ground_equipment"})):
+            raise ArenaBrowserRequestError("Generate requires XP, dimensions, and optional ground_equipment")
         starting_experience = _parse_decimal(payload, "starting_experience", 0)
         width_cells = _parse_decimal(payload, "width_cells", 5)
         height_cells = _parse_decimal(payload, "height_cells", 5)
+        equipment_choice = payload.get("ground_equipment")
+        if equipment_choice not in (None, "starter", "none"):
+            raise ArenaBrowserRequestError("ground_equipment must be starter or none")
+        loadout_profile = self._ground_loadout_profile
+        item_descriptions = self._ground_item_descriptions
+        if equipment_choice == "starter":
+            if loadout_profile is None:
+                raise ArenaBrowserRequestError("the checked-in starter equipment profile is unavailable")
+            item_descriptions = None
+        elif equipment_choice == "none":
+            loadout_profile = None
+            item_descriptions = None
 
         # Serialize generation with all session edits/reads. The prior candidate
         # stays active until a complete new candidate and native RNG owner exist.
@@ -1036,8 +1134,8 @@ class GeneratedArenaSession:
             try:
                 candidate = initialize_two_being_arena(
                     starting_experience, width_cells, height_cells, root_seed,
-                    ground_item_descriptions=self._ground_item_descriptions,
-                    ground_loadout_profile=self._ground_loadout_profile)
+                    ground_item_descriptions=item_descriptions,
+                    ground_loadout_profile=loadout_profile)
                 if self._authored_draw_scenario is not None:
                     from arena_authored_draw_scenario import author_scenario
                     author_scenario(candidate, self._authored_draw_scenario)
@@ -1077,6 +1175,31 @@ class GeneratedArenaSession:
             self._view_handles = {}
             self._selected_entity_handle = None
             self._display_names = {}
+            opponent = candidate.participants[1].native.being
+            if opponent.name == self._player_name:
+                # NPC Generator can give both independently generated Beings
+                # the same display name. Preserve both native names and
+                # identities while making map and popup selection unambiguous.
+                self._display_names[opponent.id] = f"{opponent.name} (Arena)"
+            return self._view_unlocked()
+
+    def new_encounter(self, payload):
+        if type(payload) is not dict or payload:
+            raise ArenaBrowserRequestError("New Encounter accepts an empty request")
+        with self._lock:
+            self._active = None
+            self._encounter_name = self._player_name = None
+            self._rng_cursor = None
+            self._player_action_id = self._player_action_outcome = None
+            self._pickup_action_id = self._pickup_action_outcome = None
+            self._ready_weapon_action_id = self._ready_weapon_action_outcome = None
+            self._ready_weapon_end_time = None
+            self._movement_plan = None
+            self._movement_sequence = 0
+            self._movement_outcome = None
+            self._display_names = {}
+            self._view_handles = {}
+            self._selected_entity_handle = None
             return self._view_unlocked()
 
     def choose_destination(self, payload):
@@ -1104,6 +1227,8 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError(_MOVEMENT_DISABLED)
             current = player.get_position()
             destination = layout.center_position(address, z=current.z)
+            from measured_values import truncate_position
+            destination = truncate_position(destination)
             if destination == current:
                 self._movement_plan = None
                 self._movement_outcome = "already_at_destination"

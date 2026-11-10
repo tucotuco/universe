@@ -23,6 +23,7 @@ from attention_intent import accept_spot_attention
 from arena_hex_map import HexAddress
 from spatial.state import CartesianPosition
 from hex_facing import nearest_facing
+from measured_values import truncate_position
 
 
 class TestGeneratedArenaBrowser(unittest.TestCase):
@@ -486,7 +487,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             status, view = self.request("/api/generated/advance", {"seconds": 1})
             self.assertEqual(status, 200)
             self.assertNotIn(hidden.id, json.dumps(view))
-        self.assertEqual(player.get_position(), target)
+        self.assertEqual(player.get_position(), truncate_position(target))
         self.assertIn("event=canvas_hex_selected", stream.getvalue())
         self.assertIn("event=rate_selected rate=walk", stream.getvalue())
         self.assertIn("action=generate status=accepted http=200 xp=0 map=5x5", stream.getvalue())
@@ -553,7 +554,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         _, page = self.request("/")
         self.assertNotIn('id="characterPanel"', page)
         self.assertIn('id="entityDialog"', page)
-        self.assertIn('id="characterButton"', page)
+        self.assertNotIn('id="characterButton"', page)
+        self.assertIn('function openCharacterPopup(trigger)', page)
         state = self.session.generate({
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
         player = self.session.active_candidate.participants[0].native.being
@@ -642,8 +644,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("Renamed Dagger", inventory_output)
         self.assertIn("carried; not readied", inventory_output)
         character_text = json.dumps(result["characterSummary"])
-        for label in ("Fitness", "Total native XP", "Hit points", "Skills and recorded practice",
-                      "Position and movement", "Age is not represented", "Class XP"):
+        for label in ("Fitness", "Current total native XP", "Hit points", "Earned practice XP",
+                      "Position and movement", "Age:", "Class XP"):
             self.assertIn(label, character_text)
         self.assertIn("Represented carried weight", character_text)
         self.assertEqual([call["body"]["facing_policy"] for call in destination_requests],
@@ -900,14 +902,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         for forbidden in ("source_sha256", "source_record", "native_id", "awareness",
                           "target_id", "action_id", "participants"):
             self.assertNotIn(forbidden, encoded)
-        self.assertIsNone(state["character"]["identity"]["class_levels"])
-        self.assertIsNone(state["character"]["experience"]["class_allocation"])
+        self.assertEqual(state["character"]["identity"]["class_levels"],
+                         state["character"]["experience"]["class_allocation"])
+        self.assertEqual(state["character"]["experience"]["class_allocation"][0]["id"], 1)
         self.assertEqual(state["character"]["experience"]["total"], 0)
         self.assertNotIn(other_participant.native.being.id, encoded)
         self.assertEqual(len(state["entities"]), 1)
         self.assertEqual(state["entities"][0]["category"], "being")
         self.assertEqual(state["entities"][0]["type"], "Being")
-        self.assertEqual(state["entities"][0]["name"], other_participant.native.being.name)
+        # npcgen can produce duplicate names for the independently generated pair.
+        # The Arena distinguishes the opponent in its player-facing projection only.
+        self.assertEqual(state["entities"][0]["name"],
+                         f"{other_participant.native.being.name} (Arena)")
         hidden_position = other_participant.native.being.get_position()
         self.assertEqual(state["entities"][0]["position_meters"], {
             "x": hidden_position.x, "y": hidden_position.y, "z": hidden_position.z})
@@ -976,8 +982,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(character["identity"]["display_name"], state["player"]["name"])
         self.assertEqual(character["identity"]["native_type"], player.current.obj_type)
         self.assertEqual(character["identity"]["race"], player.current.race)
-        self.assertIsNone(character["identity"]["age"])
-        self.assertIsNone(character["identity"]["class_levels"])
+        self.assertIsInstance(character["identity"]["age"], float)
+        self.assertTrue(character["identity"]["class_levels"])
         self.assertEqual(character["identity"]["stature_inches"], player.current.length)
         self.assertEqual(character["identity"]["body_weight_pounds"], player.current.weight)
         self.assertEqual(character["experience"]["total"], player.get_experience())
@@ -1038,7 +1044,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                                  moving["player"]["position_meters"])
         expected_destination = self.session.active_candidate.arena_map.layout.center_position(
             HexAddress(cell["column"], cell["row"]))
-        self.assertEqual(player.get_position(), expected_destination)
+        self.assertEqual(player.get_position(), truncate_position(expected_destination))
         if not self.session.active_candidate.encounter.initiated:
             self.assertEqual(self.request("/api/generated/run", {})[0], 200)
             self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
@@ -1130,7 +1136,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(len(moving["character"]["inventory"]["items"]), 1)
         self.assertEqual(moving["character"]["inventory"]["items"][0]["name"], "Carried Dagger")
         valid_weight = native.current.weight
-        native.current.weight = math.nan
+        object.__setattr__(native.current, "weight", math.nan)
         invalid_inventory = self.session.public_view()["character"]["inventory"]
         self.assertEqual(invalid_inventory["status"], "unavailable")
         self.assertEqual(invalid_inventory["items"], [])
@@ -1671,9 +1677,11 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                 self.assertEqual(being.hex_facing, expected_facing)
         final = self.session.public_view()
         self.assertGreater(len(committed), 1)
-        self.assertEqual(being.get_position(), target)
+        self.assertEqual(being.get_position(), truncate_position(target))
+        committed_target = truncate_position(target)
         self.assertEqual(final["player"]["position_meters"],
-                         {"x": target.x, "y": target.y, "z": target.z})
+                         {"x": committed_target.x, "y": committed_target.y,
+                          "z": committed_target.z})
         self.assertEqual(final["player"]["cell"], {
             "column": target_address.column, "row": target_address.row})
         self.assertEqual(final["movement_outcome"], "arrived")

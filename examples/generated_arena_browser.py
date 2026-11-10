@@ -52,6 +52,12 @@ def main():
             draw_scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             parser.error(f"authored Draw scenario fixture is not readable JSON: {exc}")
+    if profile is None and draw_scenario is None:
+        starter_path = ROOT / "examples" / "arena_profiles" / "starter-ground-equipment.json"
+        try:
+            profile = json.loads(starter_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            parser.error(f"checked-in starter equipment profile is not readable JSON: {exc}")
     trace_ui = args.trace_ui or os.environ.get("ARENA_TRACE_UI") == "1"
     if trace_ui:
         print("Arena UI terminal tracing enabled.", flush=True)
