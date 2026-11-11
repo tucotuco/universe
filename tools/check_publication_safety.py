@@ -143,6 +143,12 @@ def _scan_history(base: str, tip: str) -> int:
     tip_oid = _git(["rev-parse", tip]).decode().strip()
     revision_args = [tip, "^" + base] if base else [tip]
     commits = _git(["rev-list", "--reverse", "--topo-order", *revision_args]).decode().splitlines()
+    base_object_ids: set[str] = set()
+    if base:
+        base_object_ids = {
+            row.split(b" ", 1)[0].decode("ascii")
+            for row in _git(["rev-list", "--objects", base]).splitlines()
+        }
     findings = 0
     pathnames: set[bytes] = set()
     for commit in commits:
@@ -158,8 +164,9 @@ def _scan_history(base: str, tip: str) -> int:
             # the version introduced by every commit in the range, not only
             # objects that are globally new to the range.
             path_text = os.fsdecode(path)
-            content = _git(["cat-file", "blob", f"{commit}:{path_text}"], check=False)
-            if content:
+            object_id = _git(["rev-parse", "--verify", f"{commit}:{path_text}"], check=False).decode().strip()
+            if object_id and object_id in base_object_ids:
+                content = _git(["cat-file", "blob", object_id])
                 label = _relative_label(path)
                 findings += _print_findings(
                     f"commit {commit[:12]} content {label}", inspect_bytes(content)
