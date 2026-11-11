@@ -366,6 +366,9 @@ class BeingInstance(ObjectInstance):
         # Posture is unknown until an authoritative world condition or native
         # Action establishes it. A missing legacy prone flag is not standing.
         self._posture = None
+        # Encounter size is unknown unless the world/template author supplies
+        # an adopted size category. Dimensions are not converted implicitly.
+        self.size_category = None
         self.possessions = []
         self.weapons = []
         self.strategy = Strategy()
@@ -412,8 +415,8 @@ class BeingInstance(ObjectInstance):
 
     @staticmethod
     def validate_posture(value):
-        if value is not None and value not in ("standing", "crouching", "lying"):
-            raise ValueError("posture must be unknown, standing, crouching, or lying")
+        if value is not None and value not in ("standing", "crouching", "kneeling", "lying"):
+            raise ValueError("posture must be unknown, standing, crouching, kneeling, or lying")
         if value is not None and type(value) is not str:
             raise ValueError("posture must be a native posture string or unknown")
         return value

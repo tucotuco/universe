@@ -11,7 +11,7 @@ FIELD_ADAPTERS = {
         "required": 'abilities'.split(),
     },
     'action.Action': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id break_motion break_weapon_id canceled_at cancellation_reason coup_motion disarm_motion disarm_weapon_id end_time event_type feint_motion feint_source_action_id grab_hand grapple_id grip_id id instrument_id location name object_motion parent_event_id reach resolution start_position start_time strategy target_id threat_at_schedule touch_action_id type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id break_motion break_weapon_id canceled_at cancellation_reason coup_motion disarm_motion disarm_weapon_id end_time event_type feint_motion feint_source_action_id grab_hand grapple_id grapple_position grip_id id instrument_id location name object_motion parent_event_id reach resolution start_position start_time strategy target_id threat_at_schedule touch_action_id trip_defender_ability trip_size_categories trip_source_action_id type universe'.split(),
         "required": 'actor_id end_time event_type instrument_id location name parent_event_id resolution start_time strategy target_id type universe'.split(),
     },
     'action_choice.ChoiceBook': {
@@ -55,7 +55,7 @@ FIELD_ADAPTERS = {
         "required": 'owner_id position source_action_id target_id'.split(),
     },
     'action_evaluation.GrappleStateEffect': {
-        "allowed": 'actor_id hand kind next_check operation source_action_id state_id target_id'.split(),
+        "allowed": 'actor_id hand kind next_check operation position source_action_id state_id target_id'.split(),
         "required": 'actor_id hand kind next_check operation source_action_id state_id target_id'.split(),
     },
     'action_evaluation.DefenseEffect': {
@@ -135,7 +135,7 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'being.BeingInstance': {
-        "allowed": '_arena_initial_profile _arena_perception_ledger _atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
+        "allowed": '_arena_initial_profile _arena_perception_ledger _atomic_target_history _posture _skill_practice_baselines alignment current current_armor_class effective_fitness exertion fatigue_level front_facing geometry hex_facing id name original parent_container_id personal_history physical_fatigue physiology_id possessions size_category skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
         "required": '_posture _skill_practice_baselines current effective_fitness exertion fatigue_level front_facing geometry hex_facing name original parent_container_id personal_history physical_fatigue physiology_id possessions skill_experience skill_use_history spatial_state strategy top_facing type visual_occlusion weapons'.split(),
     },
     'conditional_attributes.ConditionalAttributes': {

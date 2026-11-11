@@ -305,8 +305,11 @@ def evaluate_movement_rate(being, rate: str,
     except Exception as exc:
         raise MovementIntentRefusal(
             "invalid_native_snapshot", "movement posture is unavailable in the common Being snapshot") from exc
-    if posture not in ("standing", "crouching", "lying"):
+    if posture not in ("standing", "crouching", "kneeling", "lying"):
         raise MovementIntentRefusal("unknown_posture", "native Being posture is unknown")
+    if posture == "kneeling":
+        raise MovementIntentRefusal("kneeling_rate_unmodeled",
+            "adopted movement rates do not specify locomotion while kneeling")
     direction = conditions.direction
     if direction not in ("forward", "backward", "sideways", "non_forward"):
         raise MovementIntentRefusal(
@@ -481,6 +484,12 @@ def validate_grip_relative_movement(prepared_rows, snapshot):
     remain governed by the ordinary movement rules.
     """
     by_actor = {row.intent.actor_id: row for row in prepared_rows}
+    for control in snapshot.grapple_controls:
+        if len(control) > 6 and control[6] in ('pin_top', 'pin_bottom'):
+            mover = by_actor.get(control[2])
+            if mover is not None:
+                raise MovementIntentRefusal('pinned',
+                    'a Being in an adopted native Grapple pin cannot move before the control position changes')
     for grip in snapshot.physical_grips:
         _, holder, held, *_ = grip
         holder_pos, held_pos = snapshot.entity(holder).position, snapshot.entity(held).position

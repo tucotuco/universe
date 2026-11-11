@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -451,6 +451,13 @@ def _make_plan(encounter,candidate,rng_owner):
     for key,pos in changes['positions'].items():
         if pos is not None and objects[key].spatial_state.position!=pos:
             plan.attr('movement',objects[key].spatial_state,'position',pos)
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is GrappleStateEffect and effect.kind == 'posture':
+            being=objects.get(effect.target_id)
+            if type(being) is not BeingInstance or effect.operation != 'set' or effect.position not in ('lying','kneeling'):
+                raise PublicationRejected('native posture effect is unsupported or not a participating Being')
+            plan.attr('targets',being,'_posture','lying')
     for key,facing in changes['facings'].items():
         if key not in encounter.being_list or type(objects.get(key)) is not BeingInstance:
             raise PublicationRejected('facing update recipient is not a participating Being')

@@ -141,6 +141,8 @@ class TestActionEvaluation(unittest.TestCase):
         self.a.current.body_parts['right hand'] = None
         self.a.current.skills.skills['improved grapple'] = 3
         self.b.current.skills.skills['improved grapple'] = 0
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.size_category = self.b.size_category = 'medium'
         self.b.current.skills.skills['escape artist'] = 12
         self.b.set_ability('strength',18)
         self.enc.enable_transactional_progression(quiescent=True)
@@ -187,7 +189,28 @@ class TestActionEvaluation(unittest.TestCase):
         # the same prerequisite grip; it neither creates a second grip nor
         # merges physical Hold and control identities.
         self.assertEqual(len(active_contact_state(self.enc)[0]),1)
-        escape = Action(self.world,17,23,'grapple escape',self.b.id,self.a.id,None)
+        takedown = Action(self.world,17,23,'takedown',self.a.id,self.b.id,None)
+        takedown.grapple_id=grapple.id; takedown.grapple_position='prone'
+        self.assertEqual(resolve(takedown,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(self.b.get_posture(),'lying')
+        self.assertEqual(active_contact_state(self.enc)[1][0][6], 'advantaged_takedown_top')
+        pin = Action(self.world,23,29,'pin',self.a.id,self.b.id,None)
+        pin.grapple_id=grapple.id; pin.grapple_position='pin_bottom'
+        self.assertEqual(resolve(pin,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[1][0][6], 'pin_bottom')
+        reverse = Action(self.world,29,35,'reverse',self.a.id,self.b.id,None)
+        reverse.grapple_id=grapple.id
+        self.assertEqual(resolve(reverse,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[1][0][6], 'pin_top')
+        escape = Action(self.world,35,41,'grapple escape',self.b.id,self.a.id,None)
+        escape.grapple_id=grapple.id
+        self.assertEqual(resolve(escape,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[1][0][6], 'advantaged_takedown_top')
+        escape = Action(self.world,41,47,'grapple escape',self.b.id,self.a.id,None)
+        escape.grapple_id=grapple.id
+        self.assertEqual(resolve(escape,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[1][0][6], 'standing')
+        escape = Action(self.world,47,53,'grapple escape',self.b.id,self.a.id,None)
         escape.grapple_id=grapple.id
         self.assertEqual(resolve(escape,6,[6,6,6,1,1,1]).facts.outcome,'success')
         self.assertEqual(active_contact_state(self.enc)[1],())
@@ -248,6 +271,63 @@ class TestActionEvaluation(unittest.TestCase):
                   and effect.operation=='release']
         self.assertEqual({effect.state_id for effect in releases},{grab_b.id,grab_d.id})
         self.assertEqual(len(active_contact_state(self.enc)[0]),0)
+
+    def test_native_trip_uses_touch_identity_contest_and_commits_prone_posture(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        touch.end_time=1; self.enc.schedule_action(touch)
+        values=iter([15,1])
+        def roll(ctx,dice):
+            value=next(values);ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        trip=Action(self.world,1,3,'trip',self.a.id,self.b.id,None)
+        trip.trip_source_action_id=touch.id; trip.trip_defender_ability='DEX'; trip.end_time=3
+        self.enc.schedule_action(trip)
+        values=iter([6,6,6,1,1,1])
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(2)
+        self.assertEqual(self.enc.inspect_committed(3).action(trip.id).facts.outcome,'success')
+        self.assertEqual(self.b.get_posture(),'lying')
+
+    def test_failed_initial_grapple_still_atomically_maintains_its_prerequisite_grip(self):
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.skills.skills['improved grapple'] = 100
+        self.b.current.skills.skills['improved grapple'] = 100
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        def resolve(action,duration,rolls):
+            action.end_time=action.start_time+duration; self.enc.schedule_action(action)
+            values=iter(rolls)
+            def scripted(ctx,dice):
+                value=next(values);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value));return value
+            with patch.object(_ProvisionalRandom,'roll',scripted):self.enc.step(duration)
+            return self.enc.inspect_committed(self.enc.last_processed_boundary).action(action.id)
+
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch,1,[15,1]).facts.outcome,'touched')
+        grab=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grab.touch_action_id=touch.id;grab.grab_hand='left hand'
+        self.assertEqual(resolve(grab,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.a.current.skills.skills['improved grapple'] = 0
+        grapple=Action(self.world,2,8,'grapple',self.a.id,self.b.id,None)
+        grapple.grip_id=grab.id; grapple.end_time=8
+        self.enc.schedule_action(grapple)
+        self.enc.step(5)
+        values=iter([1,1,1,6,6,6])
+        def scripted(ctx,dice):
+            value=next(values);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',scripted):self.enc.step(1)
+        result=self.enc.inspect_committed(8).action(grapple.id)
+        self.assertEqual(result.facts.outcome,'failed')
+        self.assertEqual(len(active_contact_state(self.enc)[1]),0)
+        self.assertEqual(active_contact_state(self.enc)[0][0][5],14)
 
     def test_native_strike_object_applies_hardness_and_publishes_object_hp(self):
         from object import ObjectDefinition, ObjectInstance

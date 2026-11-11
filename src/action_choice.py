@@ -105,7 +105,8 @@ def declaration(action, *, _initialization=None):
              'max_distance', 'spotting_conditions', 'declared_roll', 'episode_time', 'topic', 'generate',
              'substituted_claim', 'received_accounts', 'seed', 'random_key',
              'observer', 'interpreter', 'ledger', 'experience_policy', 'focus_category')
-    names += ('grab_hand', 'touch_action_id', 'grip_id', 'grapple_id')
+    names += ('grab_hand', 'touch_action_id', 'grip_id', 'grapple_id',
+              'grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories')
     names += ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m')
     names += ('group_fully_visible', 'location_ledger', 'object_ledger')
     names += ('map_width_cells', 'map_height_cells')

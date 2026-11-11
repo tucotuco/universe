@@ -105,7 +105,7 @@ _OUTCOMES = {
                          'unsupported_contents', 'contested', 'success')),
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
-    'grappling': frozenset(('touched_required','out_of_reach','blocked','uncertain_path',
+    'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','blocked','uncertain_path',
         'unavailable','failed','success','grip_lost','no_control')),
 }
 _METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
@@ -164,9 +164,13 @@ def _effect(effect):
         for value in values['position']:_number(value)
     if type(effect) is GrappleStateEffect:
         _identity(values['actor_id']); _identity(values['state_id'])
-        _require(values['kind'] in ('grip','control')
-                 and values['operation'] in ('establish','maintain','release'),
+        _require(values['kind'] in ('grip','control','posture')
+                 and values['operation'] in ('establish','maintain','release','transition','set'),
                  'invalid native Grapple state transition')
+        if values['position'] is not None:
+            _require(values['position'] in ('standing','advantaged_takedown_top',
+                'disadvantaged_takedown_bottom','pin_top','pin_bottom','kneeling','prone','lying'),
+                'invalid Grapple position/posture value')
         if values['hand'] is not None:
             _require(values['hand'] in ('left hand','right hand'), 'unsupported physical grip hand')
         if values['next_check'] is not None:
@@ -298,7 +302,11 @@ def _copy_proposal(proposal, actions, entities):
         expected_effects = (2 if event == 'grapple' and proposal.outcome == 'success'
             else 1 if ((event in ('hold','grapple escape') and proposal.outcome in ('success','failed'))
                        or (event in ('grab','break hold') and proposal.outcome == 'success')
-                       or (event == 'grapple' and proposal.outcome == 'failed')) else 0)
+                       or (event == 'grapple' and proposal.outcome == 'failed')
+                       or (event == 'trip' and proposal.outcome == 'success')) else
+            2 if event == 'pin' and proposal.outcome == 'success' else
+            2 if event in ('takedown','pin') and proposal.outcome == 'success' else
+            1 if event == 'reverse' and proposal.outcome == 'success' else 0)
         _require(len(state_effects) == expected_effects,
                  'physical-contact state effect must match the successful native Action')
         _require(len(proposal.effects) == len(state_effects) and not proposal.defenses,
@@ -364,15 +372,42 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             and event_type in ('swing','thrust')
             and proposal.outcome in ('normal','critical','fatal')
             and effect.kind == 'grip' and effect.operation == 'release')
+        is_failed_initial_grapple_maintenance = (
+            action.family == 'grappling' and event_type == 'grapple'
+            and proposal.outcome == 'failed' and effect.kind == 'grip'
+            and effect.operation == 'maintain'
+            and effect.state_id == action.data.get('grip_id')
+            and effect.actor_id == action.actor_id
+            and effect.target_id == action.target_id
+            and effect.next_check == snapshot.boundary + 6)
         _require((action.family == 'grappling'
                  and (proposal.outcome == 'success'
-                      or (event_type == 'hold' and proposal.outcome == 'failed'))
+                      or (event_type == 'hold' and proposal.outcome == 'failed')
+                      or is_failed_initial_grapple_maintenance)
                  or is_damage_release)
                  and recipient.category == 'being'
                  and effect.target_id in participants
                  and entities[effect.target_id].category == 'being',
                  'Grapple state effect requires a native Being contact Action')
-        if is_damage_release:
+        if action.family == 'grappling' and event_type in ('takedown','reverse','pin'):
+            if effect.kind == 'control':
+                _require(effect.operation == 'transition' and proposal.outcome == 'success'
+                    and effect.state_id == action.data.get('grapple_id')
+                    and effect.actor_id == action.actor_id and effect.target_id == action.target_id
+                    and effect.next_check == snapshot.boundary+6 and effect.position is not None,
+                    'position transition must replace the next existing Grapple check')
+            else:
+                _require(effect.kind == 'posture' and effect.operation == 'set'
+                    and proposal.outcome == 'success' and effect.target_id == action.target_id
+                    and effect.position in ('lying','kneeling')
+                    and (event_type != 'takedown' or effect.position == ('lying' if action.data.get('grapple_position')=='prone' else 'kneeling')),
+                    'position Action posture must match its declared native outcome')
+        elif action.family == 'grappling' and event_type == 'trip':
+            _require(effect.kind == 'posture' and effect.operation == 'set'
+                and effect.target_id == action.target_id and effect.position == 'lying'
+                and proposal.outcome == 'success' and action.data.get('trip_contact_verified') is True,
+                'Trip requires its recorded successful Touch and prone effect')
+        elif is_damage_release:
             grip = next((r for r in snapshot.physical_grips if r[0] == effect.state_id),None)
             body_id = action.actor_id if proposal.outcome == 'hit self' else action.target_id
             actual = sum(row.amount for row in proposal.effects if type(row) is DamageEffect
@@ -431,8 +466,10 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
                 and effect.actor_id == action.target_id,
                 'Grapple Escape must refer to its established control')
             if proposal.outcome == 'success':
-                _require(effect.operation == 'release' and effect.next_check is None,
-                         'successful Escape must release control only')
+                _require((effect.operation == 'release' and effect.next_check is None)
+                         or (effect.operation == 'transition' and effect.next_check == snapshot.boundary+6
+                             and effect.position in ('advantaged_takedown_top','disadvantaged_takedown_bottom','standing')),
+                         'successful Escape must apply its adopted position-specific result')
             else:
                 _require(proposal.outcome == 'failed' and effect.operation == 'maintain'
                          and effect.next_check == snapshot.boundary+6,

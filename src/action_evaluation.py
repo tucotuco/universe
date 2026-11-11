@@ -250,7 +250,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'hold', 'break hold', 'grapple', 'grapple escape', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'hold', 'break hold', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -279,18 +279,22 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
         family = ('disarm' if type(action) is Action and ad['event_type']=='disarm' else
                   'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
-                  'grappling' if type(action) is Action and ad['event_type'] in ('grab','hold','break hold','grapple','grapple escape') else
+                  'grappling' if type(action) is Action and ad['event_type'] in ('grab','hold','break hold','grapple','grapple escape','takedown','reverse','pin','trip') else
                   'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
                   else families[type(action)])
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','grip_id','grapple_id'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories'):
             if key in ad:
                 selected[key] = freeze(ad[key])
         if type(action) is Action and ad['event_type'] == 'grab':
             from physical_contact import successful_touch
             selected['contact_verified'] = successful_touch(encounter,ad.get('touch_action_id'),
                 ad.get('actor_id'),ad.get('target_id'))
+        if type(action) is Action and ad['event_type'] == 'trip':
+            from physical_contact import successful_touch
+            selected['trip_contact_verified'] = successful_touch(encounter,
+                ad.get('trip_source_action_id'),ad.get('actor_id'),ad.get('target_id'))
         prepared_id = ad.get('prepared_defense_action_id')
         if prepared_id is not None:
             source = wd['event_history'].get(prepared_id)
@@ -446,6 +450,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 race=freeze(cd.get('race')),
                 abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
                 posture=freeze(obj.get_posture()),
+                size_category=freeze(object.__getattribute__(obj, '__dict__').get('size_category')),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
                 height=freeze(cd.get('height')), length=freeze(cd.get('length')),
                 body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),
@@ -690,6 +695,7 @@ class GrappleStateEffect:
     operation: str
     hand: str | None
     next_check: int | None
+    position: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1096,7 +1102,7 @@ def _grappling(snapshot, action, rng):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     event_type = action.data['event_type']
     effects = []
-    if event_type in ('grab', 'hold', 'break hold', 'grapple'):
+    if event_type in ('grab', 'hold', 'break hold', 'grapple','takedown','reverse','pin','trip'):
         distance = snapshot.distance(actor.id, target.id)
         if actor.position is None or target.position is None or distance is None:
             return ActionProposal(action.id, actor.id, (target.id,), 'unavailable')
@@ -1169,16 +1175,82 @@ def _grappling(snapshot, action, rng):
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
             'control','establish',None,action.boundary+6))
         return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
-    control = next((row for row in snapshot.grapple_controls
+    if event_type == 'trip':
+        source=action.data.get('trip_source_action_id')
+        if not action.data.get('trip_contact_verified'):
+            return ActionProposal(action.id,actor.id,(target.id,),'touch_required')
+        order=('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+        a_size,t_size=actor.data.get('size_category'),target.data.get('size_category')
+        if a_size not in order or t_size not in order:
+            return ActionProposal(action.id,actor.id,(target.id,),'size_category_unknown')
+        attacker_modifier=(actor.data['abilities'].get('STR',10)-10)//2+4*(order.index(a_size)-order.index(t_size))
+        if any(row[1]==actor.id and row[2]==target.id for row in snapshot.physical_grips):
+            attacker_modifier+=2
+        defender_ability=action.data.get('trip_defender_ability')
+        defender_modifier=(target.data['abilities'].get(defender_ability,10)-10)//2+4*(order.index(t_size)-order.index(a_size))
+        attacker=sum(rng.roll('1d6') for _ in range(3))+attacker_modifier
+        defender=sum(rng.roll('1d6') for _ in range(3))+defender_modifier
+        if attacker<=defender:
+            return ActionProposal(action.id,actor.id,(target.id,),'failed')
+        effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
+            'posture','set',None,None,'lying'))
+        return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
+    if event_type in ('takedown','reverse','pin'):
+        control = next((row for row in snapshot.grapple_controls
+                    if row[0] == action.data['grapple_id'] and row[1] == actor.id
+                    and row[2] == target.id),None)
+    else:
+        control = next((row for row in snapshot.grapple_controls
                     if row[0] == action.data['grapple_id'] and row[1] == target.id
                     and row[2] == actor.id),None)
     if control is None: return ActionProposal(action.id,actor.id,(target.id,),'no_control')
     if control[5] != action.boundary: return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
+    if event_type in ('takedown','reverse','pin'):
+        position=control[6] if len(control)>6 else 'standing'
+        if event_type=='takedown':
+            if position!='standing':return ActionProposal(action.id,actor.id,(target.id,),'wrong_position')
+            goal='advantaged_takedown_top'
+        elif event_type=='reverse':
+            if position not in ('disadvantaged_takedown_bottom','pin_bottom'):
+                return ActionProposal(action.id,actor.id,(target.id,),'wrong_position')
+            goal='advantaged_takedown_top' if position=='disadvantaged_takedown_bottom' else 'pin_top'
+        else:
+            if position!='advantaged_takedown_top':return ActionProposal(action.id,actor.id,(target.id,),'wrong_position')
+            goal=action.data['grapple_position']
+        if event_type in ('takedown','reverse'):
+            order=('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+            sizes=(actor.data.get('size_category'),target.data.get('size_category'))
+            if any(value not in order for value in sizes):
+                return ActionProposal(action.id,actor.id,(target.id,),'size_category_unknown')
+            if order.index(sizes[1])-order.index(sizes[0])>1:
+                return ActionProposal(action.id,actor.id,(target.id,),'size_limit')
+        if _grapple_roll(rng,actor)<=_grapple_roll(rng,target):
+            return ActionProposal(action.id,actor.id,(target.id,),'failed')
+        effects.append(GrappleStateEffect(action.id,target.id,actor.id,control[0],
+            'control','transition',None,action.boundary+6,goal))
+        if event_type=='takedown':
+            effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
+                'posture','set',None,None,'lying' if action.data.get('grapple_position')=='prone' else 'kneeling'))
+        if event_type=='pin':
+            effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
+                'posture','set',None,None,'lying'))
+        return ActionProposal(action.id,actor.id,(target.id,), 'success',tuple(effects))
     escape = _grapple_roll(rng,actor,escape=True)
     resist = _grapple_roll(rng,target)
     if escape > resist:
-        effects.append(GrappleStateEffect(action.id,actor.id,target.id,control[0],
-            'control','release',None,None))
+        position=control[6] if len(control)>6 else 'standing'
+        if position == 'pin_top':
+            effects.append(GrappleStateEffect(action.id,actor.id,target.id,control[0],
+                'control','transition',None,action.boundary+6,'advantaged_takedown_top'))
+        elif position == 'pin_bottom':
+            effects.append(GrappleStateEffect(action.id,actor.id,target.id,control[0],
+                'control','transition',None,action.boundary+6,'disadvantaged_takedown_bottom'))
+        elif position == 'advantaged_takedown_top':
+            effects.append(GrappleStateEffect(action.id,actor.id,target.id,control[0],
+                'control','transition',None,action.boundary+6,'standing'))
+        else:
+            effects.append(GrappleStateEffect(action.id,actor.id,target.id,control[0],
+                'control','release',None,None))
         return ActionProposal(action.id,actor.id,tuple(sorted((actor.id,target.id))),
             'success',tuple(effects))
     effects.append(GrappleStateEffect(action.id,actor.id,target.id,control[0],

@@ -16,7 +16,7 @@ def _history_effects(being):
             effect = getattr(identified, 'effect', None)
             if type(effect) is GrappleStateEffect:
                 rows.append((record.boundary, identified.identity, effect))
-    precedence = {'establish': 0, 'maintain': 1, 'release': 2}
+    precedence = {'establish': 0, 'transition': 1, 'maintain': 2, 'set': 3, 'release': 4}
     return tuple(sorted(rows, key=lambda row: (row[0], row[2].kind,
         row[2].state_id, precedence[row[2].operation], row[1])))
 
@@ -32,15 +32,27 @@ def active_contact_state(encounter):
         for boundary, identity, effect in _history_effects(being):
             if effect.target_id != target_id:
                 raise ValueError('Grapple effect is stored under a different Target')
+            if effect.kind == 'posture':
+                continue
             table = grips if effect.kind == 'grip' else controls
             if effect.operation == 'establish':
                 table[effect.state_id] = (effect.state_id, effect.actor_id,
                     effect.target_id, effect.hand, boundary, effect.next_check)
+                if effect.kind == 'control':
+                    table[effect.state_id] += (effect.position or 'standing',)
             elif effect.operation == 'maintain':
                 prior = table.get(effect.state_id)
                 if prior is None:
                     raise ValueError('maintenance effect has no established native state')
                 table[effect.state_id] = (*prior[:5], effect.next_check)
+                if effect.kind == 'control':
+                    table[effect.state_id] += (effect.position if effect.position is not None
+                        else (prior[6] if len(prior)>6 else 'standing'),)
+            elif effect.operation == 'transition':
+                prior = table.get(effect.state_id)
+                if prior is None or effect.kind != 'control' or effect.position is None:
+                    raise ValueError('position transition has no established Grapple control')
+                table[effect.state_id] = (*prior[:5], effect.next_check, effect.position)
             elif effect.operation == 'release':
                 table.pop(effect.state_id, None)
             else:

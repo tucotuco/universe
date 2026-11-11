@@ -280,7 +280,8 @@ class Action(Event):
             if not math.isclose(reach,effective_melee_reach_meters(actor.current,weapon.current),rel_tol=1e-12,abs_tol=1e-12):
                 raise ValueError('Disarm reach differs from native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
-        if self.event_type in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape'):
+        if self.event_type in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape',
+                               'takedown', 'reverse', 'pin', 'trip'):
             from encounter import Encounter
             from physical_contact import active_contact_state, successful_touch
             if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
@@ -327,7 +328,7 @@ class Action(Event):
                 grip = next(r for r in grips if r[0] == state_id)
                 if grip[5] != self.end_time:
                     raise ValueError('Grapple check must coincide with the prerequisite Grip maintenance boundary')
-            else:
+            elif self.event_type == 'grapple escape':
                 state_id = data.get('grapple_id')
                 if not any(r[0] == state_id and r[1] == target.id and r[2] == actor.id
                            for r in controls):
@@ -337,6 +338,49 @@ class Action(Event):
                 control = next(r for r in controls if r[0] == state_id)
                 if self.end_time != control[5]:
                     raise ValueError('Grapple Escape must resolve at the established control check boundary')
+            elif self.event_type in ('takedown','reverse','pin'):
+                control_id = data.get('grapple_id')
+                control = next((r for r in controls if r[0] == control_id
+                    and r[1] == actor.id and r[2] == target.id), None)
+                if control is None or self.end_time != control[5] or self.end_time-self.start_time != 6:
+                    raise ValueError('position transition requires the established control’s next six-second check')
+                source_position = control[6] if len(control)>6 else 'standing'
+                if self.event_type == 'takedown':
+                    if source_position != 'standing' or actor.get_posture() != 'standing' or target.get_posture() != 'standing':
+                        raise ValueError('Takedown requires standing Grapple control and two standing participants')
+                    sizes = (getattr(actor,'size_category',None),getattr(target,'size_category',None))
+                    order = ('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+                    if any(value not in order for value in sizes):
+                        raise ValueError('Takedown requires explicit native size categories for both Beings')
+                    if order.index(sizes[1])-order.index(sizes[0]) > 1:
+                        raise ValueError('target is more than one size category larger')
+                    if data.get('grapple_position') not in ('kneeling','prone'):
+                        raise ValueError('Takedown must declare kneeling or prone outcome')
+                elif self.event_type == 'reverse':
+                    if source_position not in ('disadvantaged_takedown_bottom','pin_bottom'):
+                        raise ValueError('Reverse requires a disadvantaged takedown or pin-from-below position')
+                    sizes=(getattr(actor,'size_category',None),getattr(target,'size_category',None))
+                    order=('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+                    if any(value not in order for value in sizes):
+                        raise ValueError('Reverse requires explicit native size categories for both Beings')
+                    if order.index(sizes[1])-order.index(sizes[0]) > 1:
+                        raise ValueError('Reverse target is more than one size category larger')
+                elif source_position != 'advantaged_takedown_top' or data.get('grapple_position') not in ('pin_top','pin_bottom'):
+                    raise ValueError('Pin requires advantaged takedown control and a declared top/bottom position')
+                if self.instrument_id is not None:
+                    raise ValueError('Grapple position transitions are unarmed Actions')
+            else:
+                touch_id=data.get('trip_source_action_id')
+                from physical_contact import successful_touch
+                if (not successful_touch(encounter,touch_id,actor.id,target.id)
+                        or self.end_time-self.start_time != 2 or self.instrument_id is not None):
+                    raise ValueError('Trip requires this actor’s successful Touch and two-second unarmed timing')
+                if data.get('trip_defender_ability') not in ('STR','DEX'):
+                    raise ValueError('Trip requires the defender’s Strength or Dexterity choice')
+                sizes=(getattr(actor,'size_category',None),getattr(target,'size_category',None))
+                order=('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+                if any(value not in order for value in sizes):
+                    raise ValueError('Trip requires explicit native size categories for both Beings')
             return PreparedSchedule.from_action(self)
         if self.instrument_id is not None and self.event_type not in ('swing', 'thrust'):
             if encounter.universe.get_object_by_id(self.instrument_id) is None:
