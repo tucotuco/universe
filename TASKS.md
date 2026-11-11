@@ -1,6 +1,6 @@
 # Universe — Current State, Tasks, and Ideas
 
-> **Reconciled:** 2026-11-11. This register was reconciled against the actual checkout through `1237897` and the U-ARENA-018 report. It is a current-state document, **not a development log**. Repository reports record evidence but do not independently re-execute it.
+> **Reconciled:** 2026-11-11 through U-REPO-008C. This register reflects the sanitized public `main`, the fresh clean continuation clone, and the U-ARENA-018 report. It is a current-state document, **not a development log**. Repository reports record evidence but do not independently re-execute it.
 >
 > **Single point of departure:** **All significant completed capabilities, active work, open tasks, blocked dependencies, deferred tasks, and future ideas live here.** Reports, assignments, Git history, design notes, and archived experiments remain evidence/detail, **not competing task or idea registers**. New ideas are appended here even when not authorized for implementation. See [development process](docs/DEVELOPMENT-PROCESS.md).
 
@@ -20,11 +20,11 @@
 - **Current executable center:** local generated Arena using independently maintained `npcgen` as initial-Being specification; native one-second transactional Encounter; continuous metric positions and one-yard regular-hex presentation; movement, initial equipment, observer-owned visibility, attacks/defenses, Object interactions, bounded physical Grapple and fresh-process Save/Load. See [Universe 8→9 handoff](docs/handoffs/universe-8-to-9.md) and [U-ARENA-018 report](docs/reports/U-ARENA-018-report.md).
 - **Current incompleteness:** U-ARENA-018 remains partial; its report enumerates close-contact lifecycle, same-second cancellation/conflict, Action variants and browser gaps. Other open areas include remaining Combat Action entries/variants, general sensory perception, multi-Action scheduling, occupied-space/forced movement, targeted projectiles, physical work/fatigue, and general world persistence. Browser success and native test success are tracked separately.
 - **Non-Arena progress:** deterministic ReproductionGroup/ancestry generation and partial membership; aggregate StatisticalGroup evidence and one counted member's realization; spatial examples and observer evidence. These are *bounded independent demonstrations*, not a unified general world-history generator.
-- **Repository status:** U-REPO-007B previously published a sanitized range; the later Universe 8→9 audit reported many unpushed Arena commits and potentially revealing machine-local paths in historical committed reports. **No automatic push, force push, or history rewrite.** Confirm current branch, upstream, and status before drawing a newer conclusion.
+- **Repository status:** U-REPO-008C reviewed the existing public findings as benign legacy content, sanitized and normally published the unpublished descendant range, and established a fresh clean continuation clone. The original dirty checkout remains on its old unsanitized lineage and is preserved; use the clean clone for future Arena work. Future publication still requires explicit authorization.
 
 ## ACTIVE — current implementation program
 
-- [ ] **U-REPO-008 — ACTIVE / publication candidate ready.** Public findings were reviewed as benign legacy content at the verified `origin/main` baseline; only 158 unpublished descendant commits were rewritten. The descendant-range audit now passes with zero findings. The normal fast-forward push and fresh safe continuation clone are still pending independent verification. See [U-REPO-008C report](docs/reports/U-REPO-008C-report.md).
+**No implementation assignment is active.** U-ARENA-018 remains the next candidate for continuation; it is not currently authorized.
 
 ## NEXT — candidate capability programs (ordered for discussion; not automatically authorized)
 
@@ -59,7 +59,9 @@
 - [x] **U-REL-001 — DONE for the approved bounded ReproductionGroup generation program (V1–V12).** Seeded parent/offspring and reverse-ancestor realization, nonempty group invariants, one-parent reproduction, partial parent membership, consistency, collision/merge and versioned checkpoints demonstrated. Historical distributions are hypotheses, **not adopted species biology**. Broader kinship remains U-REL-002.
 - [x] **U-WORLD-001A — DONE (bounded): one individual conserved across genealogy, counted population, native Being, place and Encounter.** One authored Human fixture, not arbitrary world integration.
 - [x] **U-WORLD-001B — DONE (bounded): independent observer can Spot that same Being.** Explicit authored target/geometry, not general unprompted discovery.
-- [x] **U-REPO-001–007B — DONE for specifically verified documentation/repository repairs and sanitized historical push.** Current remote publication of newer work is separately OPEN under U-OPS-006. [Universe 7→8 handoff](docs/handoffs/universe-7-to-8.md).
+- [x] **U-REPO-001–007B — DONE for specifically verified documentation/repository repairs and sanitized historical push.** [Universe 7→8 handoff](docs/handoffs/universe-7-to-8.md).
+- [x] **U-REPO-008 — DONE: reviewed the published legacy baseline, sanitized only the 158 unpublished history commits, and published the resulting 162-commit descendant range by ordinary fast-forward.** The new range has zero unreviewed findings; previously published benign findings remain and are documented without a path or filename waiver. A fresh clean clone now tracks the verified remote tip. The original dirty checkout was preserved. See [U-REPO-008C report](docs/reports/U-REPO-008C-report.md).
+- [x] **U-OPS-006 — DONE for the specifically authorized U-REPO-008C publication and continuation setup.** This does not authorize future pushes or history rewrites.
 
 ### Generated Arena and NPC integration
 
@@ -121,7 +123,6 @@
 - [ ] **U-CAP-010 — OPEN: broader Being practice, skills and learning.** General skill eligibility/progression beyond bounded native exercises, actual practice-to-ability improvement, training/teaching, changing skill rank/aptitude, cost and fatigue from performed Actions. Independent initial NPC age-based ranks remain generator-owned.
 - [ ] **U-CAP-011 — OPEN: richer Arena inspection, controls, replay and accessibility.** Genuine observer-appropriate Action explanations, status of Action preparations/retained effects, keyboard/navigation, perception losses, deterministic replay, and ordinary user testing.
 - [ ] **U-CAP-012 — OPEN: save/replay compatibility, schema and version migration policy.** Authenticated authoritative provenance where required, preserved file transparency, schema-validated imports and carefully bounded compatibility; avoid database/online service by default.
-- [ ] **U-OPS-006 — OPEN / verified push pending.** The exact published baseline findings were reviewed as benign; the 158-commit unpublished range was sanitized and currently passes its scoped audit. Complete only the authorized normal fast-forward and establish the clean continuation checkout; this does not grant general future push/rewrite authority.
 - [ ] **U-OPS-007 — OPEN: full-suite confidence and regression/environment triage.** Prefer focused test suites per assignment; full HTTP-inclusive suite at meaningful milestones, record legitimate environment failures, and compare to independently tested baseline. No claim of full-suite green for recent Arena work.
 - [ ] **U-DOC-003 — OPEN: consolidate authoritative Encounter ES issue status.** Use *current* rule README + issue register, correct obsolete r60-only task links, and preserve unverified/blocked issues without false closure.
 
