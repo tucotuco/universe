@@ -151,6 +151,10 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(receipt.facts.outcome, 'normal')
         self.assertTrue(any(type(effect).__name__ == 'DamageEffect'
                             for effect in receipt.facts.effects))
+        repeated = self.strike()
+        repeated.feint_source_action_id = action.id
+        with self.assertRaisesRegex(ValueError, 'forfeited or consumed'):
+            repeated.prepare_schedule(self.enc)
 
     def test_armed_feint_requires_advanced_weapon_skill_before_choice_mutation(self):
         self.enc.enable_transactional_progression(quiescent=True)
