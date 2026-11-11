@@ -21,7 +21,7 @@ MAX_BYTES = 64 * 1024 * 1024
 # Beings, typed ground/carry Objects, Run, Pick up, Draw, Dagger strikes, their Choice and
 # committed inspection records, and observer-owned Arena evidence.
 _ARENA_TAGS = frozenset({
-    'universe.Universe','library.Library','event.Event','encounter.Encounter',
+    'universe.Universe','library.Library','event.Event','action.Action','encounter.Encounter',
     'encounter.ArenaActionActivation','encounter.ArenaMovementActivation',
     'encounter.EncounterInitiation','action_choice.ChoiceBook','action_choice.ChoiceMember',
     'action_choice.ChoiceView','action_choice._Accepted','action_choice.Reservation',

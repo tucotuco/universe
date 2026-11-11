@@ -94,6 +94,21 @@ class Action(Event):
         Encounter invokes only reviewed native implementations. The Encounter
         argument is read-only during preparation, never an extension sandbox.
         """
+        if self.event_type == 'touch':
+            from encounter import Encounter
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Touch requires the native transactional Encounter pathway')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            if (actor is None or target is None or actor is target
+                    or self.actor_id not in encounter.being_list
+                    or self.target_id not in encounter.being_list):
+                raise ValueError('Touch requires two distinct participating Beings')
+            if not encounter.is_aware(self.actor_id, self.target_id):
+                raise ValueError('Touch requires current native awareness of the target')
+            if (self.instrument_id is not None
+                    or self.end_time - self.start_time != 1):
+                raise ValueError('Touch is a one-second unarmed Action')
+            return PreparedSchedule.from_action(self)
         if self.instrument_id is not None and self.event_type not in ('swing', 'thrust'):
             if encounter.universe.get_object_by_id(self.instrument_id) is None:
                 raise ValueError('action instrument must be an existing Object')

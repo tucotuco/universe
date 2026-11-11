@@ -248,7 +248,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -414,7 +414,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
                 posture=freeze(obj.get_posture()),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
-                height=freeze(cd.get('height')),
+                height=freeze(cd.get('height')), length=freeze(cd.get('length')),
                 body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),
                 fatigue_level=freeze(od['fatigue_level']),
                 exertion=freeze(native_data(od['exertion'], (Exertion,))),
@@ -804,6 +804,27 @@ def _combat(snapshot, action, rng, dependencies):
     meta = []
     attempted = False
     outcome = None
+    if action.family == 'combat' and action.data['event_type'] == 'touch':
+        distance = snapshot.distance(actor.id, target.id)
+        if actor.position is None or target.position is None or distance is None:
+            outcome = 'unplaced'
+        else:
+            from melee_combat import reference_arm_length_inches, INCHES_TO_METERS
+            try:
+                reach = reference_arm_length_inches(
+                    height_inches=actor.data.get('height'),
+                    length_inches=actor.data.get('length')) * INCHES_TO_METERS
+            except ValueError:
+                outcome = 'unsupported_reach'
+            if outcome is None and distance > reach:
+                outcome = 'out_of_reach'
+            if outcome is None:
+                attack_total = rng.roll('1d20') + actor.data['strategy']['attack']
+                defense_total = rng.roll('1d20') + target.data['strategy']['defense']
+                outcome = 'touched' if attack_total > defense_total else 'missed'
+        metadata = () if distance is None else (('distance', distance),)
+        return ActionProposal(action.id, actor.id, (target.id,), outcome,
+            (), (), metadata)
     if action.family == 'melee':
         status, distance = snapshot.melee_status(action)
         meta.append(('distance', distance))

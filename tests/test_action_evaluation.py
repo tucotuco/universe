@@ -94,6 +94,25 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertIsNone(action.defended_by)
         self.assertIsNone(action.resolution)
 
+    def test_native_one_second_touch_uses_opposed_attack_totals_without_damage(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        action = Action(self.world, 0, 1, 'touch', self.a.id, self.b.id, None)
+        action.end_time = 1
+        self.enc.schedule_action(action)
+        iterator = iter([15, 10])
+        def roll(ctx, dice):
+            value = next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice, int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(1)
+        committed = self.enc.inspect_committed(1).action(action.id)
+        self.assertEqual((committed.facts.outcome, committed.facts.target_ids),
+                         ('touched', (self.b.id,)))
+        self.assertFalse(committed.facts.effects)
+        self.assertEqual(committed.facts.metadata, (('distance', .2),))
+
     def test_nested_views_frozen_and_detached(self):
         self.schedule(self.strike()); s = self.snapshot()
         a = s.entity(self.a.id)

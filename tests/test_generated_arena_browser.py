@@ -183,6 +183,81 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(defense.parry_motion, "thrust")
         self.assertEqual(accepted["defense_action"]["duration_seconds"], max(1, weapon.Tt() - 1))
 
+    def test_touch_uses_native_choice_http_route_and_survives_pending_save_load(self):
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("function submitTouch(handle)", page)
+        self.assertIn("/api/generated/touch", page)
+        self.assertIn("actionTouch", page)
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261107,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200)
+        player_id = self.session.active_candidate.participants[0].native.being.id
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        status, activated = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        target_id = self.session.active_candidate.participants[1].native.being.id
+        target = next(row for row in activated["entities"]
+                      if row["category"] == "being"
+                      and self.session._view_handles[target_id] == row["handle"])
+        status, selected = self.request("/api/generated/inspect", {"handle": target["handle"]})
+        self.assertEqual(status, 200)
+        touch = next(row for row in selected["action_catalog"]["entries"]
+                     if row["name"] == "touch being")
+        self.assertEqual(touch["status"], "available")
+        choices_before = self.session.active_candidate.encounter.choice_state
+        rng_before = self.session._rng_cursor.state
+        rejected_status, rejected = self.request("/api/generated/touch", {
+            "handle": "not-a-currently-perceived-being"})
+        self.assertEqual(rejected_status, 409)
+        self.assertIn("opposing Being", rejected["error"])
+        self.assertEqual(self.session.active_candidate.encounter.choice_state, choices_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
+        status, accepted = self.request("/api/generated/touch", {"handle": target["handle"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted["touch_action"]["status"], "executing")
+        native_touch = self.session._player_touch_action(
+            self.session.active_candidate,
+            self.session.active_candidate.participants[0].native.being)
+        self.assertNotIn(native_touch.id, json.dumps(accepted))
+        self.assertNotIn(target_id, json.dumps(accepted))
+        rng_before_resolution = self.session._rng_cursor.state
+        pending_wire = self.session.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "pending-arena.json"
+            save_path.write_bytes(pending_wire)
+            script = (
+                "import json,sys; import tests.test_generated_arena_browser; "
+                "from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:2); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "v=s.advance_one_second(); "
+                "print(json.dumps({'time_seconds':v['time_seconds'],"
+                "'touch_action':v['touch_action'],'position':v['player']['position_meters'],"
+                "'rng_state':s._rng_cursor.state}))")
+            process = subprocess.run([sys.executable, "-c", script, str(save_path)],
+                cwd=ROOT, check=True, capture_output=True, text=True)
+            cross_process = json.loads(process.stdout)
+        completed = self.session.advance_one_second()
+        self.assertEqual(cross_process["time_seconds"], 2)
+        self.assertEqual(cross_process["touch_action"], completed["touch_action"])
+        self.assertEqual(cross_process["position"], completed["player"]["position_meters"])
+        self.assertEqual(cross_process["rng_state"], json.loads(json.dumps(self.session._rng_cursor.state)))
+        self.assertEqual(completed["time_seconds"], 2)
+        self.assertEqual(completed["touch_action"]["status"], "completed")
+        self.assertEqual(completed["touch_action"]["outcome"], "out_of_reach")
+        self.assertEqual(self.session._rng_cursor.state, rng_before_resolution)
+        completed_wire = self.session.save_encounter_bytes()
+        restored = GeneratedArenaSession(root_seed_factory=lambda: 3)
+        after_load = restored.load_encounter_bytes(completed_wire)
+        self.assertEqual(after_load["touch_action"], completed["touch_action"])
+        self.assertEqual(after_load["time_seconds"], 2)
+
     def test_attack_only_browser_requests_drive_native_approach_and_thrust(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
         self.session = GeneratedArenaSession(

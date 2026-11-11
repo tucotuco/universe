@@ -86,7 +86,8 @@ _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss',
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
     'history_request': frozenset(('unplaced', 'out_of_range', 'not_aware', 'heard')),
-    'combat': _ATTACK_OUTCOMES | {'weapon_unavailable'},
+    'combat': _ATTACK_OUTCOMES | {'weapon_unavailable', 'touched', 'missed',
+        'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'unsupported_reach'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'},
     'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
@@ -99,7 +100,7 @@ _OUTCOMES = {
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
 }
-_METADATA = {'combat': (), 'melee': ('distance',), 'defense': (), 'run': ('displacement',),
+_METADATA = {'combat': ('distance',), 'melee': ('distance',), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
                       'racial_action_bonus', 'effective_dc', 'observation_id',
                       'objective_key', 'evidence_kind', 'visible_count'),
@@ -207,6 +208,17 @@ def _copy_proposal(proposal, actions, entities):
     _require(len(set(targets)) == len(targets) and all(k in entities for k in targets), 'invalid affected Target reference')
     metadata = freeze(_tuple(proposal.metadata))
     _require(all(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is str for pair in metadata), 'invalid outcome metadata')
+    if action.family == 'combat' and action.data.get('event_type') == 'touch':
+        touch_outcomes = {'touched', 'missed', 'unplaced', 'out_of_reach', 'unsupported_reach'}
+        _require(proposal.outcome in touch_outcomes
+                 and not proposal.effects and not proposal.defenses,
+                 'Touch must resolve only its opposed contact result')
+        if proposal.outcome == 'unplaced':
+            _require(metadata == (), 'unplaced Touch must not claim a distance')
+        else:
+            _require(len(metadata) == 1 and metadata[0][0] == 'distance',
+                     'Touch must record only its bounded target distance')
+            _number(metadata[0][1], nonnegative=True)
     names = tuple(pair[0] for pair in metadata)
     _require(len(set(names)) == len(names) and set(names).issubset(_METADATA[action.family]), 'unsupported metadata (no Target HP on Actions)')
     effects = tuple(_effect(e) for e in _tuple(proposal.effects))

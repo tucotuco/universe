@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from action import Action
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
 from activities import RunAction, ReadyWeaponAction
 from melee_combat import MeleeStrike, effective_melee_reach_meters
@@ -562,6 +563,8 @@ class GeneratedArenaSession:
                 "duration_seconds": duration, "seconds_remaining": remaining}
         melee_action = self._melee_action_view(candidate, player.native.being)
         melee_pending = (melee_action is not None and melee_action["status"] == "executing")
+        touch_action = self._touch_action_view(candidate, player.native.being)
+        touch_pending = touch_action is not None and touch_action["status"] == "executing"
         opponent = candidate.participants[1].native.being
         opponent_melee_action = self._opponent_melee_action_view(
             candidate, opponent, player.native.being)
@@ -588,7 +591,7 @@ class GeneratedArenaSession:
             }
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
-            for action_type in (RunAction, SpotAction, PickUpAction, ReadyWeaponAction,
+            for action_type in (Action, RunAction, SpotAction, PickUpAction, ReadyWeaponAction,
                                 MeleeStrike, MeleeDefense)
         }
         perceived = []
@@ -645,6 +648,7 @@ class GeneratedArenaSession:
             "pickup_action": pickup_action,
             "ready_weapon_action": ready_weapon_action,
             "melee_action": melee_action,
+            "touch_action": touch_action,
             "opponent_melee_action": opponent_melee_action,
             "defense_action": defense_action,
             "opponent_defense_action": opponent_defense_action,
@@ -666,6 +670,7 @@ class GeneratedArenaSession:
                                    or (self._ready_weapon_action_id is not None
                                        and self._ready_weapon_action_outcome is None)
                                    or melee_pending
+                                   or touch_pending
                                    or opponent_melee_pending
                                    or (defense_action is not None
                                        and defense_action["status"] in ("accepted", "preparing", "committed"))
@@ -856,6 +861,43 @@ class GeneratedArenaSession:
                 "duration_seconds": action.end_time - action.start_time,
                 "seconds_remaining": 0, "target_name": target_name,
                 "impact_distance_meters": distance}
+
+    @staticmethod
+    def _player_touch_action(candidate, player):
+        event_by_id = dict(candidate.universe.event_history)
+        committed_ids = (set(candidate.encounter.pending_action_list)
+                         | set(candidate.encounter.finished_action_list)
+                         | set(candidate.encounter.cancelled_action_list))
+        for choice in candidate.encounter._choice_book._choices.values():
+            if choice.view.state not in ("accepted", "executing", "finished"):
+                continue
+            committed_ids.update(choice.view.action_ids)
+            for member in choice.members:
+                if type(member.action) is Action and member.action.event_type == "touch":
+                    event_by_id[member.action.id] = member.action
+        actions = [event for event in event_by_id.values()
+                   if type(event) is Action and event.event_type == "touch"
+                   and event.actor_id == player.id and event.id in committed_ids]
+        return max(actions, key=lambda action: (action.start_time, action.id), default=None)
+
+    def _touch_action_view(self, candidate, player):
+        action = self._player_touch_action(candidate, player)
+        if action is None:
+            return None
+        if self._melee_action_pending(candidate, action):
+            return {"name": "Touch", "status": "executing", "outcome": None,
+                    "seconds_remaining": max(0, math.ceil(action.end_time-candidate.encounter.time))}
+        if action.id in candidate.encounter.cancelled_action_list:
+            return {"name": "Touch", "status": "cancelled", "outcome": None,
+                    "seconds_remaining": 0}
+        try:
+            record = candidate.encounter.inspect_committed(
+                int(math.ceil(action.end_time))).action(action.id)
+        except (ValueError, KeyError, AttributeError):
+            return {"name": "Touch", "status": "completed", "outcome": "unavailable",
+                    "seconds_remaining": 0}
+        return {"name": "Touch", "status": "completed", "outcome": record.facts.outcome,
+                "seconds_remaining": 0}
 
     @staticmethod
     def _opponent_melee_action(candidate, opponent):
@@ -1298,6 +1340,58 @@ class GeneratedArenaSession:
                 "duration_seconds": action.end_time-action.start_time,
                 "seconds_remaining": 0}
 
+    def _touch_preflight(self, candidate, player, entity_id, evidence, supported=True):
+        if not supported or not _has_native_transactional_action_contract(Action):
+            raise ArenaBrowserRequestError("The native one-second Touch Action contract is unavailable.")
+        if evidence is None or evidence.category != "being" or evidence.present_state != "present":
+            raise ArenaBrowserRequestError("Select a currently perceived opposing Being first.")
+        encounter = candidate.encounter
+        target = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if (target is None or entity_id not in encounter.being_list
+                or target.id == player.id or not encounter.is_aware(player.id, target.id)):
+            raise ArenaBrowserRequestError("Touch requires an aware participating opposing Being.")
+        if not encounter.initiated or encounter.progression_mode != "transactional":
+            raise ArenaBrowserRequestError("Activate the native Encounter before choosing Touch.")
+        if (encounter._choice_book.actor_planned_now(player.id)
+                or self._melee_action_pending(candidate, self._player_melee_action(candidate, player))
+                or self._melee_action_pending(candidate, self._player_touch_action(candidate, player))):
+            raise ArenaBrowserRequestError("The player already has an accepted Action resolving.")
+        action = Action(candidate.universe, encounter.time, encounter.time + 1,
+                        "touch", player.id, target.id, None)
+        action.end_time = encounter.time + 1
+        prepared = encounter.prepare_action(action)
+        return action, prepared
+
+    def choose_touch(self, payload):
+        if type(payload) is not dict or set(payload) != {"handle"}:
+            raise ArenaBrowserRequestError("Touch requires one currently perceived Being handle")
+        handle = payload["handle"]
+        if type(handle) is not str:
+            raise ArenaBrowserRequestError("Touch target handle must be text")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Touch")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key, value in self._view_handles.items()
+                              if value == handle), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            action, prepared = self._touch_preflight(
+                candidate, player, entity_id, evidence, supported=True)
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Touch Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = handle
+            self._trace.native_advance(None, None,
+                f"action=touch opposed=true duration={prepared.end_time-prepared.start_time:g}s")
+            return self._view_unlocked()
+
     def _melee_strike_preflight(self, candidate, player, entity_id, evidence, motion,
                                 supported=True):
         if motion not in ("swing", "thrust"):
@@ -1679,6 +1773,33 @@ class GeneratedArenaSession:
         catalog_rows = []
         for source_row in _native_action_catalog():
             name = source_row["name"]
+            if name.casefold() == "touch being":
+                status, reason, duration = "unavailable", "Select a perceived opposing Being first.", None
+                target_view = (None if selected is None else {"handle": handle,
+                    "name": selected["name"], "type": selected["type"],
+                    "present_state": selected["present_state"]})
+                if supported_actions.get(Action, False):
+                    try:
+                        _, prepared = self._touch_preflight(
+                            candidate, player, entity_id, evidence)
+                        status = "available"
+                        duration = prepared.end_time - prepared.start_time
+                        reason = ("One-second opposed Touch. Personal reach and both native d20 totals "
+                                  "resolve at the boundary; an out-of-reach attempt makes no contact and "
+                                  "Touch deals no damage.")
+                    except ArenaBrowserRequestError as exc:
+                        reason = str(exc)
+                else:
+                    reason = "The native Action scheduler or Touch resolver contract is unavailable."
+                catalog_rows.append({
+                    "name": name, "group": "Being targets", "target_type": "being",
+                    "required_skill": source_row["required_skill"],
+                    "is_melee": source_row["is_melee"], "status": status,
+                    "display_name": f"Touch ({duration:g} s)" if duration is not None else "Touch",
+                    "reason": reason, "target": target_view,
+                    "duration_seconds": duration,
+                })
+                continue
             if name.casefold() in ("swing at being", "thrust at being"):
                 motion = "swing" if name.casefold().startswith("swing") else "thrust"
                 reason = "Select an aware opposing Being. Native reach and path are checked at impact."
@@ -2732,6 +2853,8 @@ class GeneratedArenaSession:
             accepted_plan = self._movement_plan
             melee_action = self._player_melee_action(candidate, player)
             melee_pending = self._melee_action_pending(candidate, melee_action)
+            touch_action = self._player_touch_action(candidate, player)
+            touch_pending = self._melee_action_pending(candidate, touch_action)
             player_defense = self._latest_melee_defense(candidate, player)
             player_defense_view = self._defense_action_view(candidate, player)
             player_defense_pending = (self._melee_defense_pending(candidate, player_defense)
@@ -2744,6 +2867,7 @@ class GeneratedArenaSession:
             self._opponent_attack_refusal = opponent_decision["reason"]
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
+                    and not touch_pending
                     and not player_defense_pending
                     and not opponent_melee_pending and not opponent_can_act
                     and self._movement_plan is None):
@@ -2756,6 +2880,7 @@ class GeneratedArenaSession:
                     and not (self._ready_weapon_action_id is not None
                              and self._ready_weapon_action_outcome is None)
                     and not melee_pending and not player_defense_pending
+                    and not touch_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
@@ -2766,11 +2891,13 @@ class GeneratedArenaSession:
                     and not (self._ready_weapon_action_id is not None
                              and self._ready_weapon_action_outcome is None)
                     and not melee_pending and not player_defense_pending
+                    and not touch_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             if (self._movement_plan is None and self._ready_weapon_action_id is not None
                     and self._ready_weapon_action_outcome is not None and not melee_pending
                     and not melee_pending and not player_defense_pending
+                    and not touch_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
@@ -2839,6 +2966,11 @@ class GeneratedArenaSession:
                         self._ready_weapon_action_outcome = result.facts.outcome
                         self._trace.native_advance(trace_request_id, trace_client_sequence,
                             f"action=ready_weapon outcome={self._ready_weapon_action_outcome}")
+                if touch_action is not None and touch_action.end_time <= candidate.encounter.time:
+                    touch_result = candidate.encounter.inspect_committed(
+                        int(candidate.encounter.time)).action(touch_action.id)
+                    self._trace.native_advance(trace_request_id, trace_client_sequence,
+                        f"action=touch outcome={touch_result.facts.outcome}")
             except Exception as exc:
                 after_time = candidate.encounter.time
                 after_position = player.get_position()
