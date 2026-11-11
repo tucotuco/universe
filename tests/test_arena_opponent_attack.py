@@ -267,6 +267,44 @@ class TestArenaOpponentAttack(unittest.TestCase):
         self.assertEqual(native_continuation_state(source),
                          native_continuation_state(after_restore))
 
+    def test_defense_only_opponent_uses_only_an_actually_equipped_timing_eligible_shield(self):
+        source, candidate, player, opponent, _ = create_session(
+            seed=20261107, strategy="defense_only")
+        # Explicit authored test equipment: the normal generated Arena profile
+        # does not imply a shield. Medium shield size 3 matches the observed
+        # Dagger thrust's remaining three seconds at the policy decision.
+        shield_id = candidate.universe.make_weapon_for_being(
+            opponent.id, "Medium shield", "Authored defense-policy shield")
+        candidate.universe.arm_being(opponent.id, shield_id, "shield hand")
+        source.choose_run()
+        view = source.advance_one_second()
+        layout = candidate.arena_map.layout
+        player_cell = layout.cell_at_position(player.get_position())
+        opponent_cell = layout.cell_at_position(opponent.get_position())
+        destinations = [address for address in layout.neighbors(opponent_cell)
+                        if layout.contains(address) and address != player_cell]
+        destination = min(destinations, key=lambda address: math.dist(
+            player.get_position().as_tuple(),
+            layout.center_position(address).as_tuple()))
+        source.choose_destination({"column": destination.column, "row": destination.row,
+                                   "rate": "sprint", "facing_policy": "turn"})
+        source.advance_one_second()
+        handle = next(row["handle"] for row in source.public_view()["entities"]
+                      if row["category"] == "being")
+        source.inspect_entity({"handle": handle})
+        source.choose_melee_strike({"handle": handle, "motion": "thrust"})
+        strike = source._player_melee_action(candidate, player)
+        source.advance_one_second()
+        decision = source._opponent_defense_decision(candidate)
+        self.assertEqual(decision["kind"], "defend")
+        self.assertEqual(decision["action"].kind, "block")
+        self.assertEqual(decision["action"].instrument_id, shield_id)
+        self.assertEqual(decision["prepared"].end_time, strike.end_time)
+        view = source.advance_one_second()
+        self.assertEqual(view["opponent_defense_action"]["name"], "Block")
+        self.assertEqual(source._latest_melee_defense(candidate, opponent).instrument_id,
+                         shield_id)
+
     def test_targeted_dodge_refuses_when_two_seconds_cannot_fit_before_impact(self):
         source, candidate, player, opponent, _ = create_session(seed=20261107)
         source.choose_run()

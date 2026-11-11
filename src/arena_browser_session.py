@@ -1024,6 +1024,18 @@ class GeneratedArenaSession:
         strike = self._visible_incoming_strike(candidate, opponent, player, ledger)
         if strike is None:
             return {"kind": "none", "reason": "no_observed_incoming_strike"}
+        # Prefer a legal shield Block only when the opponent's actual native
+        # equipment supplies one and its adopted timing reaches this strike.
+        for shield_id in sorted(opponent.shielded_with(candidate.universe).values()):
+            defense = MeleeDefense(encounter, opponent.id, player.id,
+                                   kind="block", target_action_id=strike.id,
+                                   weapon_id=shield_id)
+            try:
+                prepared = encounter.prepare_action(defense)
+            except (TypeError, ValueError, RuntimeError):
+                continue
+            return {"kind": "defend", "reason": "observed_strike_native_block",
+                    "strike": strike, "action": defense, "prepared": prepared}
         defense = MeleeDefense(encounter, opponent.id, player.id,
                                kind="dodge", target_action_id=strike.id)
         try:
@@ -1040,7 +1052,7 @@ class GeneratedArenaSession:
         encounter = candidate.encounter
         sequence = 1 + sum(row.actor_id == action.actor_id
                            for row in self._all_melee_defenses(candidate))
-        action.id = f"{encounter.id}/arena-opponent-dodge/{sequence}"
+        action.id = f"{encounter.id}/arena-opponent-{action.kind}/{sequence}"
         try:
             prepared = encounter.prepare_action(action)
             encounter.schedule_action(action)
@@ -1048,7 +1060,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError(
                 "native opponent Dodge was not accepted; Arena state is unchanged") from exc
         self._trace.native_advance(None, None,
-            f"action=opponent_defense kind=dodge preparation="
+            f"action=opponent_defense kind={action.kind} preparation="
             f"{dict(prepared.initialization)['ready_at']-prepared.start_time:g}s")
         return action
 
