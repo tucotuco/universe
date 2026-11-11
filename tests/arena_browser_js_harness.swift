@@ -214,7 +214,7 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   if(!body.includes('Identity and experience')||!body.includes('Initially acquired ordinary skills')||!body.includes('No items carried'))throw Error('native character projection missing from player popup');
   if(!body.includes('Age:')||!body.includes('Class XP'))throw Error('unsupported native fields are not labeled');
   const actionDisclosure=__find(__element('dialogBody'),'actionSelector');
-  if(!actionDisclosure||!__text(actionDisclosure).includes('57 potential'))throw Error('native Action catalog is not displayed in the player popup');
+  if(!actionDisclosure||!__text(actionDisclosure).includes('58 potential'))throw Error('native Action catalog is not displayed in the player popup');
   actionDisclosure.open=true;actionDisclosure.listeners.toggle();
   if(!__find(__element('dialogBody'),'actionReadyWeapon').disabled)throw Error('unsupported Ready weapon was enabled');
   if(!__find(__element('dialogBody'),'actionPickup').disabled)throw Error('Pick up was enabled without an authorized target');

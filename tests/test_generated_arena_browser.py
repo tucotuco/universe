@@ -99,6 +99,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("/api/generated/dodge", page)
         self.assertIn("actionDodge", page)
         self.assertIn("Native two-second Dodge accepted", page)
+        self.assertIn("function submitBlock(handle,shieldHandle)", page)
+        self.assertIn("/api/generated/block", page)
+        self.assertIn("actionBlock", page)
 
         self.session = GeneratedArenaSession(
             root_seed_factory=lambda: 20261107,
@@ -124,6 +127,11 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                      if row["name"] == "Dodge")
         self.assertEqual(dodge["status"], "available")
         self.assertNotIn("target_action_id", json.dumps(dodge))
+        block = next(row for row in selected["action_catalog"]["entries"]
+                     if row["name"] == "Block")
+        self.assertEqual(block["status"], "unavailable")
+        self.assertIn("No native shield is equipped", block["reason"])
+        self.assertEqual(block["shields"], [])
         status, accepted = self.request("/api/generated/dodge", {"handle": handle})
         self.assertEqual(status, 200)
         self.assertEqual(accepted["defense_action"]["status"], "accepted")

@@ -1377,6 +1377,60 @@ class GeneratedArenaSession:
                 f"{dict(prepared.initialization)['ready_at']-prepared.start_time:g}s")
             return self._view_unlocked()
 
+    def _player_block_preflight(self, candidate, player, entity_id, evidence, shield_id):
+        if not _has_native_transactional_action_contract(MeleeDefense):
+            raise ArenaBrowserRequestError("The native MeleeDefense scheduler or resolver contract is unavailable.")
+        if evidence is None or evidence.category != "being" or evidence.present_state != "present":
+            raise ArenaBrowserRequestError("Select a currently perceived attacking Being first.")
+        encounter = candidate.encounter
+        attacker = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if attacker is None or attacker.id == player.id or not encounter.is_aware(player.id, attacker.id):
+            raise ArenaBrowserRequestError("The selected Entity is not an aware participating attacker.")
+        shields = player.shielded_with(candidate.universe)
+        if type(shield_id) is not str or shield_id not in shields.values():
+            raise ArenaBrowserRequestError("Block requires an actually equipped native shield.")
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        strike = self._visible_incoming_strike(candidate, player, attacker, ledger)
+        if strike is None:
+            raise ArenaBrowserRequestError("No currently perceived, pending native strike is available to Block.")
+        action = MeleeDefense(encounter, player.id, attacker.id, kind="block",
+                              target_action_id=strike.id, weapon_id=shield_id)
+        try:
+            prepared = encounter.prepare_action(action)
+        except Exception as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
+        return action, prepared, strike
+
+    def choose_block(self, payload):
+        if type(payload) is not dict or set(payload) != {"handle", "shield_handle"}:
+            raise ArenaBrowserRequestError("Block requires a perceived attacker and an equipped shield handle")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Block")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key, value in self._view_handles.items()
+                              if value == payload["handle"]), None)
+            shield_id = next((key for key, value in self._view_handles.items()
+                              if value == payload["shield_handle"]), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            action, prepared, strike = self._player_block_preflight(
+                candidate, player, entity_id, evidence, shield_id)
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Block Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = payload["handle"]
+            self._trace.native_advance(None, None,
+                f"action=player_defense kind=block shield_size={action.get_instrument().get_weapon_size()} "
+                f"impact={strike.end_time:g}s")
+            return self._view_unlocked()
+
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction
 
@@ -1525,6 +1579,28 @@ class GeneratedArenaSession:
         arena_rows.append({"name": "Dodge", "group": "Attack responses",
                            "status": dodge_status, "reason": dodge_reason,
                            "target": dodge_target})
+        shield_options = []
+        block_status, block_reason = "unavailable", "No native shield is equipped in a functioning arm."
+        shields = player.shielded_with(candidate.universe)
+        for _slot, shield_id in sorted(shields.items()):
+            shield_handle = self._view_handles.get(shield_id)
+            shield = candidate.universe.get_object_by_id(shield_id)
+            if shield_handle is not None and shield is not None:
+                shield_options.append({"handle": shield_handle, "name": shield.name,
+                                       "size": shield.get_weapon_size()})
+                if entity_id is not None and evidence is not None:
+                    try:
+                        self._player_block_preflight(candidate, player, entity_id,
+                                                     evidence, shield_id)
+                        block_status = "available"
+                        block_reason = (f"Native Block with {shield.name}; its {shield.get_weapon_size()}-second "
+                                        "shield-size timing completes at the observed strike boundary.")
+                        break
+                    except ArenaBrowserRequestError as exc:
+                        block_reason = str(exc)
+        arena_rows.append({"name": "Block", "group": "Attack responses",
+                           "status": block_status, "reason": block_reason,
+                           "target": dodge_target, "shields": shield_options})
         return {"catalog_source": "native Action catalog", "entries": catalog_rows + arena_rows}
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
