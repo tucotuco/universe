@@ -89,7 +89,7 @@ _OUTCOMES = {
     'combat': _ATTACK_OUTCOMES | {'weapon_unavailable'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'},
-    'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed')),
+    'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
     'throw': frozenset(('unplaced', 'unavailable', 'released')),
@@ -238,10 +238,14 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         _require(strike.family == 'melee' and strike.actor_id == action.target_id
             and strike.target_id == action.actor_id and strike.nominal_end == action.nominal_end,
             'contradictory designated defense relationship')
-        _require(effect.kind == action.data['kind'] and effect.kind in ('parry', 'dodge'), 'invalid defense kind')
+        _require(effect.kind == action.data['kind'] and effect.kind in ('parry', 'dodge', 'block'), 'invalid defense kind')
         _require(type(effect.eligible) is bool and type(effect.success) is bool and (effect.eligible or not effect.success), 'invalid defense eligibility/success')
-        expected = ('deflected' if effect.kind == 'parry' else 'evaded') if effect.success else 'failed' if effect.eligible else None
+        expected = ('blocked' if effect.kind == 'block' else
+                    'deflected' if effect.kind == 'parry' else 'evaded') if effect.success else 'failed' if effect.eligible else None
         _require(proposal.outcome == expected if expected is not None else proposal.outcome in ('no_threat', 'unable_to_defend'), 'defense outcome contradicts dependency')
+        if effect.kind == 'block' and effect.eligible and effect.success:
+            _require(action.instrument_id in actor.data.get('shields', ()),
+                     'Block does not use the actor’s actually equipped shield')
         if effect.eligible:
             _require(strike.lifecycle == 'pending', 'eligible defense designates interrupted strike')
         return action.actor_id, ('defense', action.id, effect.strike_id)
@@ -346,7 +350,7 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             _require(effect.skill == 'spot', 'invalid Group observation practice')
             _require(proposal.outcome in ('success', 'failure'), 'ineligible observation practice')
         elif action.family == 'defense':
-            _require(proposal.outcome in ('deflected', 'evaded', 'failed'), 'ineligible defense practice')
+            _require(action.data['kind'] in ('parry', 'dodge') and proposal.outcome in ('deflected', 'evaded', 'failed'), 'ineligible defense practice')
             skill = entities[action.instrument_id].data['original_type'] if action.data['kind'] == 'parry' else 'tumble'
             _require(effect.skill == skill, 'invalid defense practice skill')
         else:
@@ -387,7 +391,8 @@ def _validate_complete_outcome(proposal, action, entities):
     if action.lifecycle == 'pending':
         if action.family == 'melee' and proposal.outcome in _ATTACK_OUTCOMES | {'parried', 'dodged'}:
             expected_practice = (entities[action.instrument_id].data['original_type'], 10)
-        elif action.family == 'defense' and proposal.defenses[0].eligible:
+        elif (action.family == 'defense' and action.data['kind'] in ('parry', 'dodge')
+              and proposal.defenses[0].eligible):
             skill = entities[action.instrument_id].data['original_type'] if action.data['kind'] == 'parry' else 'tumble'
             expected_practice = (skill, 10)
         elif action.family == 'observe_group' and proposal.outcome in ('success', 'failure'):
@@ -563,11 +568,12 @@ def reconcile_boundary(snapshot, result):
             and actions[pid].lifecycle == 'pending' for d in owner.defenses if d.strike_id == aid]
         _require(Counter(_signature(d) for d in p.defenses) == Counter(_signature(d) for d in expected), 'missing/contradictory designated defense dependency')
         successes = [d for d in expected if d.eligible and d.success]
-        if successes:
+        combat_defenses = [d for d in successes if d.kind in ('parry', 'dodge')]
+        if combat_defenses:
             _require(p.outcome not in _ATTACK_OUTCOMES and not any(type(e) in (DamageEffect, FatalEffect, ProtectionEffect) for e in p.effects), 'successful defense conflicts with attack effects')
         if p.outcome in ('parried', 'dodged'):
             kind = 'parry' if p.outcome == 'parried' else 'dodge'
-            _require(any(d.kind == kind for d in successes), 'defended outcome lacks successful dependency')
+            _require(any(d.kind == kind for d in combat_defenses), 'defended outcome lacks successful dependency')
     # Canonical presentation order never establishes effect precedence.
     sorted_rows = sorted(rows.values(), key=lambda pair: (order(pair[0].identity.source_action_id), pair[0].identity.channel, pair[0].identity.slot))
     incoming = {key: [] for key in entities}

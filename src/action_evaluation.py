@@ -248,7 +248,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'block', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -489,7 +489,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         for key in (a.target_id, a.instrument_id):
             if key is not None:
                 snapshot.entity(key)
-        if a.family == 'defense' and a.data['target_action_id'] not in actions:
+        if (a.family == 'defense' and a.data['target_action_id'] is not None
+                and a.data['target_action_id'] not in actions):
             raise EvaluationIntegrityError('missing designated strike')
     return snapshot
 
@@ -676,12 +677,14 @@ def _helpless(actor):
 
 def _defense(snapshot, action, rng):
     actor, attacker = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
-    strike = snapshot.actions[action.data['target_action_id']]
     kind = action.data['kind']
+    strike = snapshot.actions[action.data['target_action_id']]
     eligible = False
     success = False
     effects = ()
     if _helpless(actor) or (kind == 'parry' and action.instrument_id not in actor.data['held']):
+        outcome = 'unable_to_defend'
+    elif kind == 'block' and action.instrument_id not in actor.data['shields']:
         outcome = 'unable_to_defend'
     elif (strike.family != 'melee' or strike.lifecycle != 'pending' or
           strike.actor_id != attacker.id or strike.target_id != actor.id or
@@ -695,6 +698,11 @@ def _defense(snapshot, action, rng):
         if not eligible:
             outcome = 'no_threat'
         else:
+            if kind == 'block':
+                success = True
+                outcome = 'blocked'
+                dependency = DefenseEffect(action.id, strike.id, kind, True, True)
+                return ActionProposal(action.id, actor.id, (attacker.id,), outcome, (), (dependency,))
             skill = snapshot.entity(action.instrument_id).data['original_type'] if kind == 'parry' else 'tumble'
             rank = (actor.data['weapon_skills'] if kind == 'parry' else actor.data['skills']).get(skill, 0) or 0
             if status != 'in_reach':
@@ -728,8 +736,9 @@ def _combat(snapshot, action, rng, dependencies):
             outcome = 'weapon_unavailable'
         elif status != 'in_reach':
             outcome = status
-        elif any(d.eligible and d.success for d in dependencies):
-            first = next(d for d in dependencies if d.eligible and d.success)
+        elif any(d.eligible and d.success and d.kind in ('parry', 'dodge') for d in dependencies):
+            first = next(d for d in dependencies if d.eligible and d.success
+                         and d.kind in ('parry', 'dodge'))
             outcome = 'parried' if first.kind == 'parry' else 'dodged'
             attempted = True
     if outcome is None:
@@ -754,8 +763,15 @@ def _combat(snapshot, action, rng, dependencies):
                                  source_position.y - target_position.y,
                                  source_position.z - target_position.z)):
                                 target_defense = 0
-                return attack_hits(roll, actor.data['weapon_skills'].get(weapon.obj_type, 0) + actor.data['strategy']['attack'],
-                    target_defense, dc - adjustment)
+                parry_bonus = sum(2 for dependency in dependencies
+                    if dependency.kind == 'parry' and dependency.eligible
+                    and dependency.success)
+                block_penalty = 4 if any(dependency.kind == 'block'
+                    and dependency.eligible and dependency.success
+                    for dependency in dependencies) else 0
+                return attack_hits(roll - block_penalty,
+                    actor.data['weapon_skills'].get(weapon.obj_type, 0) + actor.data['strategy']['attack'],
+                    target_defense + parry_bonus, dc - adjustment)
             def save(being, dc):
                 return saving_throw(rng.roll('1d20'), dc,
                     saving_throw_experience_modifier(experience_level(being.data['experience'])))
@@ -768,11 +784,18 @@ def _combat(snapshot, action, rng, dependencies):
             potential = weapon.data['attacks']['S' if action.data['event_type'] == 'swing' else 'T']['d']
             penetration = weapon.data['attacks']['S' if action.data['event_type'] == 'swing' else 'T']['p']
             def shield(damage):
-                sid = rng.choose_shield(recipient.data.get('shields', ()))
+                blocks = [d for d in dependencies if d.kind == 'block'
+                          and d.eligible and d.success]
+                sid = (snapshot.actions[blocks[0].source_action_id].instrument_id
+                       if blocks else rng.choose_shield(recipient.data.get('shields', ())))
                 if sid is None:
                     return damage
                 item = snapshot.entity(sid)
-                intercepted, through = shield_impact(damage, item.data['size'], rng.roll('1d10+0'))
+                blocked = bool(blocks)
+                shield_size = int(item.data['size']) + (1 if blocked else 0)
+                intercepted, through = shield_impact(damage, shield_size, rng.roll('1d10+0'))
+                if intercepted and blocked:
+                    through = max(0, damage - shield_size - 2)
                 effects.append(ProtectionEffect(action.id, sid, 'shield', damage, through, intercepted))
                 if intercepted:
                     effects.append(DamageEffect(action.id, sid, damage, 'shield'))

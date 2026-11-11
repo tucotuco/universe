@@ -1,7 +1,8 @@
-"""Attack-specific, timed parry and dodge in the one-on-one Encounter.
+"""Transactional, timed melee defenses against one designated incoming strike.
 
-The defender selects one pending strike. A reaction must be ready when that
-strike resolves; neither a later strike nor an unspecified attacker is protected.
+The Block adapter uses an actually equipped native shield and the adopted
+shield-size timing. Dodge/Parry retain their older targeted implementation
+pending the adopted preparation and strategy-rule reconciliation.
 """
 
 from transactional_progression import guard_legacy_action
@@ -20,8 +21,8 @@ class MeleeDefense(Action):
     resolution_priority = -1
 
     def __init__(self, encounter, actor_id, attacker_id, *, kind, target_action_id, weapon_id=None):
-        if kind not in ('parry', 'dodge'):
-            raise ValueError('defensive reaction must be parry or dodge')
+        if kind not in ('parry', 'dodge', 'block'):
+            raise ValueError('defensive reaction must be parry, dodge, or block')
         self.encounter = encounter
         self.kind = kind
         self.defended_action_ids = ()
@@ -53,6 +54,11 @@ class MeleeDefense(Action):
             if not isinstance(weapon, WeaponInstance) or (
                     self.instrument_id not in actor.armed_with(encounter.universe).values()):
                 raise ValueError('parry requires a held weapon')
+        if self.kind == 'block':
+            shield = self.get_instrument()
+            if (type(shield) is not WeaponInstance
+                    or self.instrument_id not in actor.shielded_with(encounter.universe).values()):
+                raise ValueError('block requires an actually equipped native shield')
         target_action_id = self.target_action_id if target_action_id is None else target_action_id
         proposed_actions = proposed_actions or {}
         strike = proposed_actions.get(target_action_id) or encounter.universe.get_event_by_id(target_action_id)
@@ -72,9 +78,14 @@ class MeleeDefense(Action):
             times = [t for t in (weapon.St(), weapon.Tt()) if t is not None]
             preparation = max(1, min(times) - 1)
         else:
-            preparation = 2
+            preparation = 2 if self.kind == 'dodge' else int(self.get_instrument().get_weapon_size())
+            if self.kind == 'block' and preparation < 1:
+                raise ValueError('block requires a positive native shield-size duration')
         ready_at = self.start_time + preparation
-        if ready_at > strike.end_time:
+        if self.kind == 'block':
+            if ready_at != strike.end_time:
+                raise ValueError('Block must complete its shield-size timing at the incoming strike boundary')
+        elif ready_at > strike.end_time:
             raise ValueError('defense cannot be ready before the designated attack impacts')
         # Remain committed to this strike until its impact, even if prepared
         # earlier. The action is not a reusable defense against other strikes.
@@ -106,6 +117,10 @@ class MeleeDefense(Action):
             (self.kind == 'dodge' and (strike.id, True) in self.threat_at_schedule)) else []
         if not threatened:
             self.result = 'no_threat'
+            return ActionResolution(self.result)
+        if self.kind == 'block':
+            self.success = True
+            self.result = 'blocked'
             return ActionResolution(self.result)
         skill = (self.get_instrument().original.obj_type if self.kind == 'parry'
                  else 'tumble')

@@ -16,6 +16,7 @@ from action_evaluation import (capture_snapshot, evaluate_snapshot, UnsupportedE
     ProtectionEffect, ActionProposal, _ProvisionalRandom, RandomDraw, future_reality_request)
 from activities import RunAction, SpotAction
 from encounter import Encounter
+from action_settlement import reconcile_boundary
 from library import Library
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
@@ -373,6 +374,61 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual([sum(x.amount for x in p.effects if isinstance(x,DamageEffect) and x.target_id==shield.id)
                           for p in result.proposals],[4,4])
         self.assertEqual(shield.hit_points(),s.entity(shield.id).hp)
+
+    def test_native_block_applies_hit_penalty_and_adopted_shield_stopping_bonus(self):
+        shield = self.shield(self.b)
+        strike = self.strike()
+        strike.end_time = 2  # Small shield: two seconds, exactly to impact.
+        block = MeleeDefense(self.enc, self.b.id, self.a.id, kind='block',
+                             target_action_id='incoming', weapon_id=shield.id)
+        draft = self.enc.propose_choice([ChoiceMember('block', block, 'incoming'),
+                                         ChoiceMember('incoming', strike)])
+        checked = self.enc.validate_choice(draft)
+        self.assertTrue(checked.valid, checked.diagnostics)
+        choice = self.enc.accept_valid_choice(checked)
+        self.enc.publish_choice(choice)
+        self.enc.time = 2
+        snapshot = capture_snapshot(self.enc, 2)
+
+        # A 13 would hit at the native DC, but the adopted Block -4 makes it miss.
+        missed_result = self.scripted(snapshot, [13])
+        self.assertEqual(missed_result.proposals[0].outcome, 'blocked')
+        self.assertEqual(missed_result.proposals[1].outcome, 'miss')
+        reconcile_boundary(snapshot, missed_result)
+
+        # Reset the snapshot's RNG for a higher hit roll; Small shield size 2
+        # becomes effective size 3 and stops 2 additional damage.
+        hit_result = self.scripted(snapshot, [15, 4, 1])
+        self.assertEqual(hit_result.proposals[1].outcome, 'normal')
+        reconcile_boundary(snapshot, hit_result)
+        impact = next(row for row in hit_result.proposals[1].effects if isinstance(row, ProtectionEffect))
+        self.assertEqual((impact.target_id, impact.incoming, impact.passed, impact.intercepted),
+                         (shield.id, 4, 0, True))
+
+    def test_native_block_refuses_wrong_timing_and_unshielded_actor(self):
+        shield = self.shield(self.b)
+        strike = self.strike()
+        strike.end_time = 3
+        block = MeleeDefense(self.enc, self.b.id, self.a.id, kind='block',
+                             target_action_id='incoming', weapon_id=shield.id)
+        draft = self.enc.propose_choice([ChoiceMember('block', block, 'incoming'),
+                                         ChoiceMember('incoming', strike)])
+        validation = self.enc.validate_choice(draft)
+        self.assertFalse(validation.valid)
+        self.assertIn('Block must complete its shield-size timing',
+                      ' '.join(row.reason for row in validation.diagnostics))
+        self.assertEqual(self.enc.pending_action_list, [])
+
+        self.b.current.body_parts['shield hand'] = None
+        strike.end_time = 2
+        validation = self.enc.validate_choice(self.enc.propose_choice([
+            ChoiceMember('block', MeleeDefense(self.enc, self.b.id, self.a.id,
+                kind='block', target_action_id='incoming', weapon_id=shield.id), 'incoming'),
+            ChoiceMember('incoming', strike)]))
+        self.assertFalse(validation.valid)
+        self.assertIn('equipped native shield',
+                      ' '.join(row.reason for row in validation.diagnostics))
+        self.assertEqual(self.enc.pending_action_list, [])
 
     def test_common_geometry_blocker_is_frozen(self):
         action=self.strike();self.schedule(action)
