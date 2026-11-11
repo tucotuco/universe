@@ -567,6 +567,12 @@ class GeneratedArenaSession:
         touch_pending = touch_action is not None and touch_action["status"] == "executing"
         feint_action = self._feint_action_view(candidate, player.native.being)
         feint_pending = feint_action is not None and feint_action["status"] == "executing"
+        coup_de_grace_action = self._named_base_action_view(candidate, player.native.being, "coup de grace", "Coup de grace")
+        coup_de_grace_pending = coup_de_grace_action is not None and coup_de_grace_action["status"] == "executing"
+        object_strike_action = self._named_base_action_view(candidate, player.native.being, "strike object", "Strike an object")
+        object_strike_pending = object_strike_action is not None and object_strike_action["status"] == "executing"
+        disarm_action = self._named_base_action_view(candidate, player.native.being, "disarm", "Disarm")
+        disarm_pending = disarm_action is not None and disarm_action["status"] == "executing"
         opponent = candidate.participants[1].native.being
         opponent_melee_action = self._opponent_melee_action_view(
             candidate, opponent, player.native.being)
@@ -652,6 +658,9 @@ class GeneratedArenaSession:
             "melee_action": melee_action,
             "touch_action": touch_action,
             "feint_action": feint_action,
+            "coup_de_grace_action": coup_de_grace_action,
+            "object_strike_action": object_strike_action,
+            "disarm_action": disarm_action,
             "opponent_melee_action": opponent_melee_action,
             "defense_action": defense_action,
             "opponent_defense_action": opponent_defense_action,
@@ -675,6 +684,9 @@ class GeneratedArenaSession:
                                    or melee_pending
                                    or touch_pending
                                    or feint_pending
+                                   or coup_de_grace_pending
+                                   or object_strike_pending
+                                   or disarm_pending
                                    or opponent_melee_pending
                                    or (defense_action is not None
                                        and defense_action["status"] in ("accepted", "preparing", "committed"))
@@ -920,6 +932,41 @@ class GeneratedArenaSession:
                    if type(event) is Action and event.event_type == "feint"
                    and event.actor_id == player.id and event.id in committed_ids]
         return max(actions, key=lambda action: (action.start_time, action.id), default=None)
+
+    @staticmethod
+    def _player_base_action(candidate, player, event_type):
+        event_by_id=dict(candidate.universe.event_history)
+        ids=(set(candidate.encounter.pending_action_list)|set(candidate.encounter.finished_action_list)
+             |set(candidate.encounter.cancelled_action_list))
+        for choice in candidate.encounter._choice_book._choices.values():
+            if choice.view.state not in ("accepted","executing","finished"):continue
+            ids.update(choice.view.action_ids)
+            for member in choice.members:
+                if type(member.action) is Action and member.action.event_type==event_type:
+                    event_by_id[member.action.id]=member.action
+        rows=[event for event in event_by_id.values() if type(event) is Action
+            and event.actor_id==player.id and event.event_type==event_type and event.id in ids]
+        return max(rows,key=lambda action:(action.start_time,action.id),default=None)
+
+    @staticmethod
+    def _named_base_action_view(candidate, player, event_type, label):
+        from action_evaluation import ActionProposal
+        action=GeneratedArenaSession._player_base_action(candidate,player,event_type)
+        if action is None:return None
+        if GeneratedArenaSession._melee_action_pending(candidate,action):
+            return {"name":label,"status":"executing","outcome":None,
+                "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time))}
+        if action.id in candidate.encounter.cancelled_action_list:
+            return {"name":label,"status":"cancelled","outcome":None,"seconds_remaining":0}
+        try:receipt=candidate.encounter.inspect_committed(int(math.ceil(action.end_time))).action(action.id)
+        except (ValueError,KeyError,AttributeError):
+            return {"name":label,"status":"completed","outcome":"unavailable","seconds_remaining":0}
+        result={"name":label,"status":"completed","outcome":receipt.facts.outcome,"seconds_remaining":0}
+        if event_type=='disarm':
+            metadata=dict(receipt.facts.metadata)
+            result.update({"margin":metadata.get('margin'),
+                "maximum_landing_hexes":metadata.get('maximum_landing_hexes')})
+        return result
 
     def _feint_action_view(self, candidate, player):
         action = self._player_feint_action(candidate, player)
@@ -1504,6 +1551,179 @@ class GeneratedArenaSession:
         distance = encounter.distance_between_beings(player.id, target.id)
         return action, weapon, prepared, distance, reach
 
+    def _object_strike_preflight(self, candidate, player, entity_id, evidence, motion,
+                                 supported=True):
+        if motion not in ('swing', 'thrust'):
+            raise ArenaBrowserRequestError('Choose the native Swing or Thrust motion.')
+        if not supported or not _has_native_transactional_action_contract(Action):
+            raise ArenaBrowserRequestError('The native Object-strike scheduler or resolver is unavailable.')
+        if evidence is None or evidence.category not in ('object','weapon','armor') or evidence.present_state not in ('ground','present'):
+            raise ArenaBrowserRequestError('Select a currently perceived Object first.')
+        encounter = candidate.encounter
+        target = candidate.universe.get_object_by_id(entity_id) if type(entity_id) is str else None
+        from object import ObjectInstance
+        from weapon import WeaponInstance
+        from armor import ArmorInstance
+        if type(target) not in (ObjectInstance, WeaponInstance, ArmorInstance) or not encounter.is_aware(player.id, target.id):
+            raise ArenaBrowserRequestError('The selected target is not an observer-authorized native Object.')
+        if target.parent_container_id is not None:
+            raise ArenaBrowserRequestError('This first native branch supports unattended ground Objects only.')
+        if type(target.current.hardness) not in (int,float) or target.current.hardness < 0 or target.current.hit_points <= 0:
+            raise ArenaBrowserRequestError('The Object has no supported material hardness and positive hit points.')
+        if not encounter.initiated or encounter.progression_mode != 'transactional':
+            raise ArenaBrowserRequestError('Activate the native Encounter before striking an Object.')
+        weapon_id = self._initial_ready_dagger_id(candidate, player)
+        weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
+        from weapon import WeaponInstance
+        if (type(weapon) is not WeaponInstance or weapon.current.hit_points <= 0
+                or weapon.id not in player.armed_with(candidate.universe).values()
+                or weapon.parent_container_id != player.id or weapon.get_position() is not None):
+            raise ArenaBrowserRequestError('Strike an Object requires a usable held and readied Dagger.')
+        if motion not in weapon.get_melee_types():
+            raise ArenaBrowserRequestError(f'The native Dagger does not support {motion}.')
+        from melee_combat import effective_melee_reach_meters
+        reach = effective_melee_reach_meters(player.current, weapon.current)
+        action = Action(candidate.universe, encounter.time, encounter.time + 1,
+                        'strike object', player.id, target.id, weapon.id)
+        action.object_motion = motion
+        action.reach = reach
+        native_timing = weapon.St() if motion == 'swing' else weapon.Tt()
+        action.end_time = encounter.time + max(1, native_timing - action.strategy.timing_adjustment())
+        try:
+            prepared = encounter.prepare_action(action)
+        except Exception as exc:
+            raise ArenaBrowserRequestError('Native Strike an object Choice is unavailable.') from exc
+        distance = (None if player.get_position() is None or target.get_position() is None
+                    else math.dist(player.get_position().as_tuple(),target.get_position().as_tuple()))
+        return action, prepared, distance, reach
+
+    def choose_object_strike(self, payload):
+        if type(payload) is not dict or set(payload) != {'handle','motion'}:
+            raise ArenaBrowserRequestError('Strike an object requires one perceived target handle and motion.')
+        handle, motion = payload['handle'], payload['motion']
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError('Generate an Encounter before striking an Object.')
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key,value in self._view_handles.items() if value == handle), None)
+            ledger = object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError('Player perception evidence is unavailable.')
+            evidence = None if entity_id is None else next((row for row in ledger.current if row.entity_id == entity_id),None)
+            action, prepared, distance, reach = self._object_strike_preflight(candidate,player,entity_id,evidence,motion)
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError('Native Strike an object Choice was refused; Arena state is unchanged.') from exc
+            self._selected_entity_handle = handle
+            self._trace.native_advance(None,None,
+                f'action=strike_object motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
+            return self._view_unlocked()
+
+    def _disarm_preflight(self,candidate,player,entity_id,evidence,motion):
+        if motion not in ('swing','thrust') or evidence is None or evidence.category!='object' or evidence.present_state!='carried':
+            raise ArenaBrowserRequestError('Select a perceived weapon held by the opposing Being.')
+        owner_id=evidence.owner_id
+        encounter=candidate.encounter
+        defender=encounter.get_being(owner_id) if type(owner_id) is str else None
+        weapon=candidate.universe.get_object_by_id(entity_id) if type(entity_id) is str else None
+        from weapon import WeaponInstance
+        if (defender is None or defender is player or type(weapon) is not WeaponInstance
+                or weapon.id not in defender.armed_with(candidate.universe).values()):
+            raise ArenaBrowserRequestError('The selected Object is not an opposing Being\'s currently held weapon.')
+        if not encounter.initiated or encounter.progression_mode!='transactional':
+            raise ArenaBrowserRequestError('Activate the native Encounter before Disarm.')
+        attacking_id=self._initial_ready_dagger_id(candidate,player)
+        attacking=candidate.universe.get_object_by_id(attacking_id) if type(attacking_id) is str else None
+        if (type(attacking) is not WeaponInstance or attacking.current.hit_points<=0
+                or attacking.id not in player.armed_with(candidate.universe).values()):
+            raise ArenaBrowserRequestError('Disarm requires a usable weapon actually held by the player.')
+        if (player.current.skills.weapon_skills.get(attacking.original.obj_type,0)<=1
+                or motion not in attacking.get_melee_types()):
+            raise ArenaBrowserRequestError('Armed Disarm requires advanced native skill and a supported motion.')
+        action=Action(candidate.universe,encounter.time,encounter.time+1,'disarm',player.id,defender.id,attacking.id)
+        action.disarm_weapon_id=weapon.id;action.disarm_motion=motion
+        from melee_combat import effective_melee_reach_meters
+        action.reach=effective_melee_reach_meters(player.current,attacking.current)
+        timing=attacking.St() if motion=='swing' else attacking.Tt()
+        action.end_time=encounter.time+max(1,timing-action.strategy.timing_adjustment())
+        try:prepared=encounter.prepare_action(action)
+        except Exception as exc:raise ArenaBrowserRequestError('Native Disarm prerequisites are not satisfied.') from exc
+        return action,prepared,defender
+
+    def choose_disarm(self,payload):
+        if type(payload) is not dict or set(payload)!={'handle','motion'}:
+            raise ArenaBrowserRequestError('Disarm requires a perceived held-weapon handle and attack motion.')
+        handle,motion=payload['handle'],payload['motion']
+        with self._lock:
+            if self._active is None:raise ArenaBrowserRequestError('Generate an Encounter first.')
+            candidate=self._active;player=candidate.participants[0].native.being
+            entity_id=next((key for key,value in self._view_handles.items() if value==handle),None)
+            ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
+            if ledger is None or ledger.observer_id!=player.id:raise ArenaBrowserRequestError('Player perception evidence is unavailable.')
+            evidence=None if entity_id is None else next((row for row in ledger.current if row.entity_id==entity_id),None)
+            action,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion)
+            try:candidate.encounter.schedule_action(action)
+            except Exception as exc:raise ArenaBrowserRequestError('Native Disarm Choice refused; Arena state is unchanged.') from exc
+            self._selected_entity_handle=handle
+            self._trace.native_advance(None,None,f'action=disarm motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
+            return self._view_unlocked()
+
+    def _break_weapon_preflight(self,candidate,player,entity_id,evidence):
+        if evidence is None or evidence.category!='being' or evidence.present_state!='present':
+            raise ArenaBrowserRequestError('Select a perceived opposing Being first.')
+        encounter=candidate.encounter
+        defender=encounter.get_being(entity_id) if type(entity_id) is str else None
+        if defender is None or defender is player or not encounter.is_aware(player.id,defender.id):
+            raise ArenaBrowserRequestError('Break weapon requires an aware opposing Being.')
+        ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
+        strike=self._visible_incoming_strike(candidate,player,defender,ledger)
+        if strike is None:
+            raise ArenaBrowserRequestError('No currently perceived pending attack by this Being targets the player.')
+        weapon_evidence=None if ledger is None else next(
+            (row for row in ledger.current if row.entity_id==strike.instrument_id),None)
+        if (weapon_evidence is None or weapon_evidence.category!='weapon'
+                or weapon_evidence.present_state!='carried'
+                or weapon_evidence.owner_id!=defender.id):
+            raise ArenaBrowserRequestError('The attacking weapon is not currently identified in player-owned perception.')
+        attacking_id=self._initial_ready_dagger_id(candidate,player)
+        attacking=candidate.universe.get_object_by_id(attacking_id) if type(attacking_id) is str else None
+        from weapon import WeaponInstance
+        if (type(attacking) is not WeaponInstance or attacking.current.hit_points<=0
+                or attacking.id not in player.armed_with(candidate.universe).values()
+                or player.current.skills.weapon_skills.get(attacking.original.obj_type,0)<=1):
+            raise ArenaBrowserRequestError('Break weapon requires an actually held, usable weapon with advanced skill.')
+        if 'swing' not in attacking.get_melee_types():
+            raise ArenaBrowserRequestError('The held weapon does not support the adopted Break weapon swing.')
+        from melee_combat import effective_melee_reach_meters
+        action=Action(candidate.universe,encounter.time,encounter.time+1,'break weapon',
+                      player.id,defender.id,attacking.id)
+        action.break_weapon_id=strike.instrument_id;action.break_motion='swing'
+        action.reach=effective_melee_reach_meters(player.current,attacking.current)
+        action.end_time=encounter.time+max(1,attacking.St()-action.strategy.timing_adjustment())
+        try:prepared=encounter.prepare_action(action)
+        except Exception as exc:raise ArenaBrowserRequestError(str(exc)) from exc
+        return action,prepared,strike
+
+    def choose_break_weapon(self,payload):
+        if type(payload) is not dict or set(payload)!={'handle'} or type(payload['handle']) is not str:
+            raise ArenaBrowserRequestError('Break weapon accepts one currently perceived opponent handle.')
+        with self._lock:
+            if self._active is None:raise ArenaBrowserRequestError('Generate an Encounter first.')
+            candidate=self._active;player=candidate.participants[0].native.being
+            entity_id=next((key for key,value in self._view_handles.items() if value==payload['handle']),None)
+            ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
+            if ledger is None or ledger.observer_id!=player.id:raise ArenaBrowserRequestError('Player perception evidence is unavailable.')
+            evidence=None if entity_id is None else next((row for row in ledger.current if row.entity_id==entity_id),None)
+            action,prepared,strike=self._break_weapon_preflight(candidate,player,entity_id,evidence)
+            try:candidate.encounter.schedule_action(action)
+            except Exception as exc:raise ArenaBrowserRequestError('Native Break weapon Choice refused; Arena state is unchanged.') from exc
+            self._selected_entity_handle=payload['handle']
+            self._trace.native_advance(None,None,
+                f'action=break_weapon weapon={strike.instrument_id} duration={prepared.end_time-prepared.start_time:g}s')
+            return self._view_unlocked()
+
     def _feint_preflight(self, candidate, player, entity_id, evidence, motion,
                          supported=True):
         if motion not in ("swing", "thrust"):
@@ -1581,6 +1801,53 @@ class GeneratedArenaSession:
             self._selected_entity_handle = handle
             self._trace.native_advance(None, None,
                 f"action=feint motion={motion} duration={prepared.end_time-prepared.start_time:g}s")
+            return self._view_unlocked()
+
+    def _coup_de_grace_preflight(self, candidate, player, entity_id, evidence, motion):
+        if motion not in ('swing','thrust') or evidence is None or evidence.category != 'being' or evidence.present_state != 'present':
+            raise ArenaBrowserRequestError('Choose a perceived helpless Being and a supported weapon motion.')
+        encounter = candidate.encounter
+        target = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if target is None or target is player or not encounter.is_aware(player.id,target.id):
+            raise ArenaBrowserRequestError('Coup de grace requires an aware opposing Being.')
+        if not encounter.initiated or encounter.progression_mode != 'transactional':
+            raise ArenaBrowserRequestError('Activate the native Encounter before choosing Coup de grace.')
+        if not target.is_helpless() or player.is_helpless():
+            raise ArenaBrowserRequestError('Coup de grace requires a helpless target and an able Actor.')
+        weapon_id = self._initial_ready_dagger_id(candidate,player)
+        from weapon import WeaponInstance
+        weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
+        if (type(weapon) is not WeaponInstance or weapon.current.hit_points <= 0
+                or weapon.id not in player.armed_with(candidate.universe).values()):
+            raise ArenaBrowserRequestError('Coup de grace requires a usable, actually held Dagger.')
+        if motion not in weapon.get_melee_types():
+            raise ArenaBrowserRequestError(f'The native Dagger does not support {motion}.')
+        from melee_combat import effective_melee_reach_meters
+        action = Action(candidate.universe, encounter.time, encounter.time+1,
+                        'coup de grace',player.id,target.id,weapon.id)
+        action.coup_motion = motion
+        action.reach = effective_melee_reach_meters(player.current,weapon.current)
+        timing = weapon.St() if motion == 'swing' else weapon.Tt()
+        action.end_time = encounter.time + max(1,timing-action.strategy.timing_adjustment())
+        try: prepared = encounter.prepare_action(action)
+        except Exception as exc: raise ArenaBrowserRequestError('Native Coup de grace prerequisites are not satisfied.') from exc
+        return action,prepared
+
+    def choose_coup_de_grace(self,payload):
+        if type(payload) is not dict or set(payload) != {'handle','motion'}:
+            raise ArenaBrowserRequestError('Coup de grace requires a perceived target handle and motion.')
+        handle,motion=payload['handle'],payload['motion']
+        with self._lock:
+            if self._active is None: raise ArenaBrowserRequestError('Generate an Encounter first.')
+            candidate=self._active;player=candidate.participants[0].native.being
+            entity_id=next((key for key,value in self._view_handles.items() if value==handle),None)
+            ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
+            evidence=None if ledger is None else next((row for row in ledger.current if row.entity_id==entity_id),None)
+            action,prepared=self._coup_de_grace_preflight(candidate,player,entity_id,evidence,motion)
+            try:candidate.encounter.schedule_action(action)
+            except Exception as exc:raise ArenaBrowserRequestError('Native Coup de grace Choice refused; state unchanged.') from exc
+            self._selected_entity_handle=handle
+            self._trace.native_advance(None,None,f'action=coup_de_grace motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
             return self._view_unlocked()
 
     def choose_melee_strike(self, payload):
@@ -1947,6 +2214,23 @@ class GeneratedArenaSession:
                     "duration_seconds": duration,
                 })
                 continue
+            if name.casefold() == "coup de grace":
+                status,reason="unavailable","Select a perceived helpless opponent; use a native held weapon."
+                target_view=(None if selected is None else {"handle":handle,"name":selected["name"],
+                    "type":selected["type"],"present_state":selected["present_state"]})
+                motions=[]
+                if supported_actions.get(Action,False):
+                    for motion in ('swing','thrust'):
+                        try:
+                            _,prepared=self._coup_de_grace_preflight(candidate,player,entity_id,evidence,motion)
+                            motions.append({"motion":motion,"duration_seconds":prepared.end_time-prepared.start_time})
+                        except ArenaBrowserRequestError as exc:reason=str(exc)
+                    if motions:status="available";reason="Native helpless-target Coup de grace; automatic critical, ordinary weapon timing and damage, then Fortitude save at DC 10 + damage."
+                catalog_rows.append({"name":name,"group":"Being targets","target_type":"being",
+                    "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
+                    "status":status,"display_name":"Coup de grace","reason":reason,
+                    "target":target_view,"motions":motions,"duration_seconds":None if not motions else motions[0]["duration_seconds"]})
+                continue
             if name.casefold() == "feint (armed)":
                 reason = "Select a perceived opposing Being; armed Feint requires advanced skill with a held weapon."
                 status, duration = "unavailable", None
@@ -2015,6 +2299,70 @@ class GeneratedArenaSession:
                     "target": target_view, "motion": motion,
                     "duration_seconds": duration,
                 })
+                continue
+            if name.casefold() in ("swing at object", "thrust at object"):
+                motion = "swing" if name.casefold().startswith("swing") else "thrust"
+                status, reason, duration = "unavailable", "Select a perceived, unattended Object with known hardness first.", None
+                object_view = (None if selected is None else {"handle": handle,
+                    "name": selected["name"], "type": selected["type"],
+                    "present_state": selected["present_state"]})
+                if supported_actions.get(Action, False):
+                    try:
+                        _, prepared, distance, reach = self._object_strike_preflight(
+                            candidate, player, entity_id, evidence, motion)
+                        status = "available"
+                        duration = prepared.end_time - prepared.start_time
+                        reason = (f"Native Strike an object; center distance {distance:.2f} m, "
+                                  f"weapon reach {reach:.2f} m. The authored hardness and hit points "
+                                  "resolve in the common Action batch.")
+                    except ArenaBrowserRequestError as exc:
+                        reason = str(exc)
+                else:
+                    reason = "The native Object-strike resolver is unavailable."
+                catalog_rows.append({"name":name,"group":"Object targets","target_type":"object",
+                    "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
+                    "status":status,"display_name":f"Dagger {motion.title()} at Object"+
+                        (f" ({duration:g} s)" if duration is not None else ""),
+                    "reason":reason,"target":object_view,"motion":motion,
+                    "duration_seconds":duration})
+                continue
+            elif name.casefold()=="disarm (armed)":
+                status,reason="unavailable","Select a perceived opponent-held weapon; an advanced skill with your attacking weapon is required."
+                motions=[]
+                target_view=(None if selected is None else {"handle":handle,"name":selected["name"],
+                    "type":selected["type"],"present_state":selected["present_state"]})
+                if supported_actions.get(Action,False):
+                    for motion in ('swing','thrust'):
+                        try:
+                            _,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion)
+                            motions.append({"motion":motion,"duration_seconds":prepared.end_time-prepared.start_time})
+                        except ArenaBrowserRequestError as exc:reason=str(exc)
+                    if motions:
+                        status="available"
+                        reason="Native opposed Disarm; success releases this exact weapon in the defender's occupied hex."
+                catalog_rows.append({"name":name,"group":"Held Object actions","target_type":"weapon",
+                    "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
+                    "status":status,"display_name":"Disarm held weapon","reason":reason,
+                    "target":target_view,"motions":motions,
+                    "duration_seconds":None if not motions else motions[0]["duration_seconds"]})
+                continue
+            elif name.casefold()=="break weapon (armed)":
+                status,reason,duration='unavailable',(
+                    'Select an aware opponent with a currently perceived pending attack that resolves one second after your native weapon Swing.'),None
+                target_view=(None if selected is None else {"handle":handle,"name":selected["name"],
+                    "type":selected["type"],"present_state":selected["present_state"]})
+                if supported_actions.get(Action,False):
+                    try:
+                        _,prepared,_=self._break_weapon_preflight(candidate,player,entity_id,evidence)
+                        status='available';duration=prepared.end_time-prepared.start_time
+                        reason=('Native Break weapon Swing is evaluated before the already scheduled attack; '
+                                'a broken weapon is unavailable only to later-boundary Actions.')
+                    except ArenaBrowserRequestError as exc:reason=str(exc)
+                catalog_rows.append({"name":name,"group":"Held Object actions","target_type":"being",
+                    "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
+                    "status":status,"display_name":"Break weapon"+
+                    (f" ({duration:g} s)" if duration is not None else ""),"reason":reason,
+                    "target":target_view,"duration_seconds":duration})
                 continue
             elif name.casefold() == "grab object":
                 reason = ("The legacy Grab object catalog Action is not admitted for this use. "
@@ -3038,6 +3386,12 @@ class GeneratedArenaSession:
             touch_pending = self._melee_action_pending(candidate, touch_action)
             feint_action = self._player_feint_action(candidate, player)
             feint_pending = self._melee_action_pending(candidate, feint_action)
+            coup_pending = self._melee_action_pending(candidate,
+                self._player_base_action(candidate,player,"coup de grace"))
+            object_strike_pending = self._melee_action_pending(candidate,
+                self._player_base_action(candidate,player,"strike object"))
+            disarm_pending = self._melee_action_pending(candidate,
+                self._player_base_action(candidate,player,"disarm"))
             player_defense = self._latest_melee_defense(candidate, player)
             player_defense_view = self._defense_action_view(candidate, player)
             player_defense_pending = (self._melee_defense_pending(candidate, player_defense)
@@ -3052,6 +3406,8 @@ class GeneratedArenaSession:
                     and self._ready_weapon_action_id is None and not melee_pending
                     and not touch_pending
                     and not feint_pending
+                    and not coup_pending and not object_strike_pending
+                    and not disarm_pending
                     and not player_defense_pending
                     and not opponent_melee_pending and not opponent_can_act
                     and self._movement_plan is None):
@@ -3066,6 +3422,8 @@ class GeneratedArenaSession:
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
                     and not feint_pending
+                    and not coup_pending and not object_strike_pending
+                    and not disarm_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
@@ -3078,6 +3436,8 @@ class GeneratedArenaSession:
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
                     and not feint_pending
+                    and not coup_pending and not object_strike_pending
+                    and not disarm_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             if (self._movement_plan is None and self._ready_weapon_action_id is not None
@@ -3085,6 +3445,8 @@ class GeneratedArenaSession:
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
                     and not feint_pending
+                    and not coup_pending and not object_strike_pending
+                    and not disarm_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
