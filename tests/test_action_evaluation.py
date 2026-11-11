@@ -173,6 +173,49 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(dict(self.world.event_history), history_before)
         self.assertEqual(random.getstate(), rng_before)
 
+    def test_native_coup_de_grace_automatically_criticals_and_makes_fortitude_save(self):
+        from states import StatesList
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        states = StatesList()
+        states.load_states(str(ROOT / 'src/config/states.tsv'))
+        self.b.stun(states)
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon = self.world.get_object_by_id(self.w1)
+        from melee_combat import effective_melee_reach_meters
+        action = Action(self.world, 0, 1, 'coup de grace', self.a.id, self.b.id, self.w1)
+        action.coup_motion = 'thrust'
+        action.reach = effective_melee_reach_meters(self.a.current, weapon.current)
+        action.end_time = weapon.Tt()
+        self.enc.schedule_action(action)
+        iterator = iter([2, 3, 20])
+        def roll(ctx, dice):
+            value = next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(math.ceil(weapon.Tt()))
+        receipt = self.enc.inspect_committed(math.ceil(weapon.Tt())).action(action.id)
+        self.assertEqual(receipt.facts.outcome, 'critical')
+        self.assertTrue(any(type(effect).__name__ == 'DamageEffect'
+                            and effect.component == 'critical_bypass'
+                            for effect in receipt.facts.effects))
+        self.assertFalse(any(type(effect).__name__ == 'FatalEffect'
+                             for effect in receipt.facts.effects))
+        fatal = Action(self.world, self.enc.time, self.enc.time + 1,
+                       'coup de grace', self.a.id, self.b.id, self.w1)
+        fatal.coup_motion = 'thrust'
+        fatal.reach = effective_melee_reach_meters(self.a.current, weapon.current)
+        fatal.end_time = fatal.start_time + weapon.Tt()
+        self.enc.schedule_action(fatal)
+        iterator = iter([2, 3, 1])
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(math.ceil(fatal.end_time) - self.enc.time)
+        fatal_receipt = self.enc.inspect_committed(math.ceil(fatal.end_time)).action(fatal.id)
+        self.assertEqual(fatal_receipt.facts.outcome, 'fatal')
+        self.assertTrue(any(type(effect).__name__ == 'FatalEffect'
+                            for effect in fatal_receipt.facts.effects))
+
     def test_nested_views_frozen_and_detached(self):
         self.schedule(self.strike()); s = self.snapshot()
         a = s.entity(self.a.id)

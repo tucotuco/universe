@@ -128,6 +128,37 @@ class Action(Event):
             if not math.isclose(reach, expected_reach, rel_tol=1e-12, abs_tol=1e-12):
                 raise ValueError('Feint reach does not match native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
+        if self.event_type == 'coup de grace':
+            from encounter import Encounter
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Coup de grace requires the native transactional Encounter pathway')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            weapon = self.get_instrument()
+            motion = object.__getattribute__(self, '__dict__').get('coup_motion')
+            reach = object.__getattribute__(self, '__dict__').get('reach')
+            if (actor is None or target is None or actor is target
+                    or self.actor_id not in encounter.being_list
+                    or self.target_id not in encounter.being_list):
+                raise ValueError('Coup de grace requires two distinct participating Beings')
+            if not encounter.is_aware(self.actor_id, self.target_id):
+                raise ValueError('Coup de grace requires current native awareness of its target')
+            if actor.is_helpless() or not target.is_helpless():
+                raise ValueError('Coup de grace requires an able Actor and helpless target')
+            if (weapon is None or self.instrument_id not in actor.armed_with(encounter.universe).values()
+                    or motion not in ('swing', 'thrust')
+                    or motion not in weapon.get_melee_types()):
+                raise ValueError('Coup de grace requires an actually held weapon and supported motion')
+            native_timing = weapon.St() if motion == 'swing' else weapon.Tt()
+            if (type(native_timing) not in (int, float) or not math.isfinite(native_timing)
+                    or native_timing <= 0
+                    or self.end_time - self.start_time != max(1, native_timing - self.strategy.timing_adjustment())
+                    or type(reach) not in (int, float) or not math.isfinite(reach) or reach <= 0):
+                raise ValueError('Coup de grace timing or native reach declaration is invalid')
+            from melee_combat import effective_melee_reach_meters
+            expected_reach = effective_melee_reach_meters(actor.current, weapon.current)
+            if not math.isclose(reach, expected_reach, rel_tol=1e-12, abs_tol=1e-12):
+                raise ValueError('Coup de grace reach does not match native Being/weapon dimensions')
+            return PreparedSchedule.from_action(self)
         if self.event_type == 'touch':
             from encounter import Encounter
             if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':

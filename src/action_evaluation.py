@@ -248,7 +248,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -275,10 +275,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if not cancelled and math.ceil(end) < boundary:
             raise EvaluationIntegrityError('stale pending Action')
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
-        family = ('melee' if type(action) is Action and ad['event_type'] == 'feint'
+        family = ('melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
                   else families[type(action)])
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
-        for key in ('reach','feint_motion','feint_source_action_id','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','feint_motion','feint_source_action_id','coup_motion','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool'):
             if key in ad:
                 selected[key] = freeze(ad[key])
@@ -345,6 +345,12 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                     or type(ad.get('reach')) not in (int, float)
                     or not math.isfinite(ad['reach']) or ad['reach'] <= 0):
                 raise EvaluationIntegrityError('native Feint declaration is incomplete')
+        if type(action) is Action and ad['event_type'] == 'coup de grace':
+            if (ad.get('coup_motion') not in ('swing', 'thrust')
+                    or ad.get('instrument_id') is None
+                    or type(ad.get('reach')) not in (int, float)
+                    or not math.isfinite(ad['reach']) or ad['reach'] <= 0):
+                raise EvaluationIntegrityError('native Coup de grace declaration is incomplete')
         feint_source = ad.get('feint_source_action_id')
         if type(action) is MeleeStrike and feint_source is not None:
             source = wd['event_history'].get(feint_source)
@@ -848,7 +854,7 @@ def _combat(snapshot, action, rng, dependencies):
         meta.append(('distance', distance))
         if actor.hp <= 0 or actor.data['fatigue_level'] >= 5:
             outcome = 'unable_to_act'
-        elif target.hp <= 0:
+        elif target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
         elif action.instrument_id not in actor.data['held']:
             outcome = 'weapon_unavailable'
@@ -914,8 +920,16 @@ def _combat(snapshot, action, rng, dependencies):
             def save(being, dc):
                 return saving_throw(rng.roll('1d20'), dc,
                     saving_throw_experience_modifier(experience_level(being.data['experience'])))
-            outcome = hit_outcome(snapshot.difficulty, rng.roll, hits,
-                lambda dc: save(target, dc), lambda dc: save(actor, dc))
+            coup_de_grace = (action.family == 'melee'
+                             and action.data['event_type'] == 'coup de grace')
+            if coup_de_grace:
+                if not _helpless(target):
+                    return ActionProposal(action.id, actor.id, (target.id,),
+                        'ineligible_target', (), tuple(dependencies), (('distance', distance),))
+                outcome = 'critical'
+            else:
+                outcome = hit_outcome(snapshot.difficulty, rng.roll, hits,
+                    lambda dc: save(target, dc), lambda dc: save(actor, dc))
             attempted = True
             recipient = actor if outcome == 'hit self' else target
             if outcome == 'fatal':
@@ -955,6 +969,15 @@ def _combat(snapshot, action, rng, dependencies):
                 if outcome == 'critical':
                     effects.append(DamageEffect(action.id, recipient.id, critical, 'critical_bypass'))
             damage_path(outcome, potential, action.data['strategy']['extra_damage'], rng.roll, shield, armor, body)
+            if coup_de_grace:
+                damage_dealt = sum(effect.amount for effect in effects
+                    if type(effect) is DamageEffect and effect.target_id == target.id
+                    and effect.component in ('body', 'critical_bypass'))
+                if target.hp - damage_dealt > -10:
+                    saved = save(target, 10 + damage_dealt)
+                    if not saved:
+                        outcome = 'fatal'
+                        effects.append(FatalEffect(action.id, target.id))
     if attempted and action.family == 'melee':
         effects.append(PracticeEffect(action.id, actor.id, weapon.data['original_type'], 10))
     affected = tuple(dict.fromkeys((target.id,) + tuple(e.target_id for e in effects if hasattr(e, 'target_id'))))

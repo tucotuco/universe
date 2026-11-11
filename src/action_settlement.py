@@ -90,7 +90,7 @@ _OUTCOMES = {
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'unsupported_reach'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
-        'parried', 'dodged', 'success', 'failure'},
+        'parried', 'dodged', 'success', 'failure', 'ineligible_target'},
     'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
@@ -208,8 +208,13 @@ def _copy_proposal(proposal, actions, entities):
         allowed = (allowed & {'success', 'failure', 'unable_to_act', 'target_down',
                               'weapon_unavailable', 'unplaced', 'out_of_reach',
                               'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'}
-                   if action.data.get('event_type') == 'feint'
-                   else allowed - {'success', 'failure'})
+                   if action.data.get('event_type') == 'feint' else
+                   allowed & {'normal', 'critical', 'fatal', 'hit self', 'miss',
+                              'spectacular miss', 'drop weapon', 'unable_to_act',
+                              'target_down', 'weapon_unavailable', 'unplaced',
+                              'out_of_reach', 'not_facing', 'blocked',
+                              'uncertain_path', 'parried', 'dodged',
+                              'ineligible_target'})
     _require(proposal.outcome in allowed, 'outcome contradicts native Action family/lifecycle')
     targets = tuple(_identity(k) for k in _tuple(proposal.target_ids))
     _require(len(set(targets)) == len(targets) and all(k in entities for k in targets), 'invalid affected Target reference')
@@ -238,6 +243,20 @@ def _copy_proposal(proposal, actions, entities):
             _require(len(metadata) == 1 and metadata[0][0] == 'distance',
                      'Feint must record only its bounded target distance')
             _number(metadata[0][1], nonnegative=True)
+    if action.family == 'melee' and action.data.get('event_type') == 'coup de grace':
+        _require(proposal.outcome in ('critical', 'fatal', 'ineligible_target',
+                    'unable_to_act', 'target_down', 'weapon_unavailable', 'unplaced',
+                    'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
+                    'parried', 'dodged'), 'unsupported Coup de grace outcome')
+        if proposal.outcome == 'unplaced':
+            _require(metadata == (), 'unplaced Coup de grace must not claim a distance')
+        else:
+            _require(len(metadata) == 1 and metadata[0][0] == 'distance',
+                     'Coup de grace must record only its bounded target distance')
+            _number(metadata[0][1], nonnegative=True)
+        if proposal.outcome == 'ineligible_target':
+            _require(not proposal.effects and not proposal.defenses,
+                     'ineligible Coup de grace has no effects')
     names = tuple(pair[0] for pair in metadata)
     _require(len(set(names)) == len(names) and set(names).issubset(_METADATA[action.family]), 'unsupported metadata (no Target HP on Actions)')
     effects = tuple(_effect(e) for e in _tuple(proposal.effects))
