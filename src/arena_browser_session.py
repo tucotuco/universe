@@ -582,13 +582,14 @@ class GeneratedArenaSession:
                 other = candidate.encounter.get_being(holder_id)
                 contact_status.append(f"{self._display_names.get(holder_id, other.name)} holds you")
         for row in active_controls:
-            _, controller_id, controlled_id, _, _, _ = row
+            _, controller_id, controlled_id, _, _, _, *position_detail = row
+            position_label = position_detail[0] if position_detail else "standing"
             if controller_id == player.native.being.id:
                 other = candidate.encounter.get_being(controlled_id)
-                contact_status.append(f"You have Grapple control of {self._display_names.get(controlled_id, other.name)}")
+                contact_status.append(f"You have Grapple control of {self._display_names.get(controlled_id, other.name)} ({position_label})")
             elif controlled_id == player.native.being.id:
                 other = candidate.encounter.get_being(controller_id)
-                contact_status.append(f"{self._display_names.get(controller_id, other.name)} has Grapple control of you")
+                contact_status.append(f"{self._display_names.get(controller_id, other.name)} has Grapple control of you ({position_label})")
         feint_action = self._feint_action_view(candidate, player.native.being)
         feint_pending = feint_action is not None and feint_action["status"] == "executing"
         coup_de_grace_action = self._named_base_action_view(candidate, player.native.being, "coup de grace", "Coup de grace")
@@ -669,6 +670,7 @@ class GeneratedArenaSession:
                     "world_premise": candidate.world_premise.public_view(),
                     **candidate.arena_map.public_geometry()},
             "player": {"name": self._player_name,
+                       "size_category": player.native.being.size_category,
                        "hex_facing": player.native.being.hex_facing,
                        "posture": player.native.being.posture,
                        "posture_source": player.posture_provenance,
@@ -933,18 +935,19 @@ class GeneratedArenaSession:
             return None
         if self._melee_action_pending(candidate, action):
             return {"name": "Touch", "status": "executing", "outcome": None,
-                    "seconds_remaining": max(0, math.ceil(action.end_time-candidate.encounter.time))}
+                    "seconds_remaining": max(0, math.ceil(action.end_time-candidate.encounter.time)),
+                    "end_time": action.end_time}
         if action.id in candidate.encounter.cancelled_action_list:
             return {"name": "Touch", "status": "cancelled", "outcome": None,
-                    "seconds_remaining": 0}
+                    "seconds_remaining": 0, "end_time": action.end_time}
         try:
             record = candidate.encounter.inspect_committed(
                 int(math.ceil(action.end_time))).action(action.id)
         except (ValueError, KeyError, AttributeError):
             return {"name": "Touch", "status": "completed", "outcome": "unavailable",
-                    "seconds_remaining": 0}
+                    "seconds_remaining": 0, "end_time": action.end_time}
         return {"name": "Touch", "status": "completed", "outcome": record.facts.outcome,
-                "seconds_remaining": 0}
+                "seconds_remaining": 0, "end_time": action.end_time}
 
     @staticmethod
     def _grappling_action_view(candidate, player):
@@ -965,21 +968,24 @@ class GeneratedArenaSession:
         actions = [event_by_id.get(action_id) for action_id in accepted]
         actions = [action for action in actions if type(action) is Action
                    and action.actor_id == player.id and action.event_type in
-                   ("grab", "hold", "break hold", "grapple", "grapple escape")]
+                   ("grab", "hold", "break hold", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
         action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
         if action is None:
             return None
         label = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold",
-                 "grapple":"Grapple", "grapple escape":"Grapple Escape"}[action.event_type]
+                 "grapple":"Grapple", "grapple escape":"Grapple Escape",
+                 "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip"}[action.event_type]
         if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
             return {"name":label,"status":"executing","outcome":None,
-                    "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time))}
+                    "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time)),
+                    "end_time":action.end_time}
         try:
             record = candidate.encounter.inspect_committed(int(action.end_time)).action(action.id)
         except (ValueError, KeyError, AttributeError):
-            return {"name":label,"status":"completed","outcome":"unavailable","seconds_remaining":0}
+            return {"name":label,"status":"completed","outcome":"unavailable","seconds_remaining":0,
+                    "end_time":action.end_time}
         return {"name":label,"status":"completed","outcome":record.facts.outcome,
-                "seconds_remaining":0}
+                "seconds_remaining":0,"end_time":action.end_time}
 
     @staticmethod
     def _player_feint_action(candidate, player):
@@ -1538,7 +1544,10 @@ class GeneratedArenaSession:
         action = Action(candidate.universe, encounter.time, encounter.time + 1,
                         "touch", player.id, target.id, None)
         action.end_time = encounter.time + 1
-        prepared = encounter.prepare_action(action)
+        try:
+            prepared = encounter.prepare_action(action)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
         return action, prepared
 
     def choose_touch(self, payload):
@@ -1572,7 +1581,7 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _grappling_preflight(self, candidate, player, entity_id, evidence,
-                             event_type, hand=None):
+                             event_type, hand=None, position=None):
         """Prepare one supported physical-contact Action from player evidence."""
         from physical_contact import active_contact_state, successful_touch
         encounter = candidate.encounter
@@ -1630,6 +1639,32 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("Grapple Escape resolves at the established control's next six-second check.")
             action_data["grapple_id"] = matching[0][0]
             duration = 6
+        elif event_type in ("takedown", "reverse", "pin"):
+            matching = [row for row in controls if row[1] == player.id
+                        and row[2] == target.id and row[5] == encounter.time + 6]
+            if len(matching) != 1:
+                raise ArenaBrowserRequestError("A position transition requires your established Grapple at its next native check.")
+            action_data["grapple_id"] = matching[0][0]
+            if event_type in ("takedown", "pin"):
+                allowed = ("kneeling", "prone") if event_type == "takedown" else ("pin_top", "pin_bottom")
+                if position not in allowed:
+                    raise ArenaBrowserRequestError("Choose one adopted Takedown or Pin position.")
+                action_data["grapple_position"] = position
+            duration = 6
+        elif event_type == "trip":
+            order = ("diminutive", "tiny", "small", "medium", "large", "huge", "gargantuan", "colossal")
+            if (getattr(player, "size_category", None) not in order
+                    or getattr(target, "size_category", None) not in order):
+                raise ArenaBrowserRequestError(
+                    "Trip requires explicitly represented size categories for both Beings.")
+            touch = self._player_touch_action(candidate, player)
+            if (touch is None or touch.target_id != target.id
+                    or not successful_touch(encounter, touch.id, player.id, target.id)):
+                raise ArenaBrowserRequestError("Trip requires this player's committed successful Touch of the selected Being.")
+            if position not in ("STR", "DEX"):
+                raise ArenaBrowserRequestError("Choose the defender's Strength or Dexterity Trip defense.")
+            action_data.update(trip_source_action_id=touch.id, trip_defender_ability=position)
+            duration = 2
         else:
             raise ArenaBrowserRequestError("Unsupported native physical-contact Action.")
         if (encounter._choice_book.actor_planned_now(player.id)
@@ -1643,14 +1678,18 @@ class GeneratedArenaSession:
         for name, value in action_data.items():
             setattr(action, name, value)
         action.end_time = encounter.time + duration
-        prepared = encounter.prepare_action(action)
+        try:
+            prepared = encounter.prepare_action(action)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
         return action, prepared
 
     def choose_grappling(self, payload):
-        if (type(payload) is not dict or set(payload) - {"handle", "action", "hand"}
+        if (type(payload) is not dict or set(payload) - {"handle", "action", "hand", "position"}
                 or not {"handle", "action"}.issubset(payload)
                 or type(payload.get("handle")) is not str
-                or payload.get("action") not in ("grab", "hold", "break hold", "grapple", "grapple escape")
+                or payload.get("action") not in ("grab", "hold", "break hold", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")
+                or ("position" in payload and payload["position"] not in ("kneeling","prone","pin_top","pin_bottom","STR","DEX"))
                 or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))):
             raise ArenaBrowserRequestError("Physical-contact Action request is malformed.")
         with self._lock:
@@ -1666,7 +1705,7 @@ class GeneratedArenaSession:
             evidence = None if entity_id is None else next(
                 (row for row in ledger.current if row.entity_id == entity_id), None)
             action, prepared = self._grappling_preflight(
-                candidate, player, entity_id, evidence, payload["action"], payload.get("hand"))
+                candidate, player, entity_id, evidence, payload["action"], payload.get("hand"), payload.get("position"))
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -2536,13 +2575,15 @@ class GeneratedArenaSession:
                     (f" ({duration:g} s)" if duration is not None else ""),"reason":reason,
                     "target":target_view,"duration_seconds":duration})
                 continue
-            elif name.casefold() in ("grab being", "hold being", "break hold", "grapple", "grapple escape"):
+            elif name.casefold() in ("grab being", "hold being", "break hold", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip"):
                 event_type = {"grab being":"grab", "hold being":"hold",
                               "break hold":"break hold", "grapple":"grapple",
-                              "grapple escape":"grapple escape"}[name.casefold()]
+                              "grapple escape":"grapple escape", "takedown":"takedown",
+                              "reverse":"reverse", "pin from above":"pin", "pin from below":"pin", "trip":"trip"}[name.casefold()]
                 display = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold",
-                           "grapple":"Grapple", "grapple escape":"Grapple Escape"}[event_type]
-                duration = 6 if event_type in ("grapple", "grapple escape") else 1
+                           "grapple":"Grapple", "grapple escape":"Grapple Escape",
+                           "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip"}[event_type]
+                duration = 6 if event_type in ("grapple", "grapple escape","takedown","reverse","pin") else 2 if event_type=="trip" else 1
                 target_view = (None if selected is None else {"handle":handle,
                     "name":selected["name"],"type":selected["type"],
                     "present_state":selected["present_state"]})
@@ -2562,6 +2603,12 @@ class GeneratedArenaSession:
                                 raise ArenaBrowserRequestError("No explicitly represented free native hand is available.")
                             _, prepared = self._grappling_preflight(
                                 candidate, player, entity_id, evidence, event_type, hands[0])
+                        elif event_type == "trip":
+                            _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type,position="STR")
+                        elif event_type in ("takedown","pin"):
+                            default_position = ("prone" if event_type == "takedown" else
+                                "pin_top" if name.casefold() == "pin from above" else "pin_bottom")
+                            _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type,position=default_position)
                         else:
                             _, prepared = self._grappling_preflight(
                                 candidate, player, entity_id, evidence, event_type)
@@ -2573,6 +2620,10 @@ class GeneratedArenaSession:
                             "break hold":"One-second opposed 3d6 + Strength contest against this Being's Grip on you.",
                             "grapple":"Six-second initial Grapple check at the prerequisite Grip's next maintenance boundary.",
                             "grapple escape":"Six-second opposed Escape check at the existing Grapple control boundary; Escape Artist adds to your check.",
+                            "takedown":"One opposed Grapple check at the next control boundary. Requires explicit size categories and standing control.",
+                            "reverse":"One opposed Grapple check at the next control boundary from a disadvantaged position; requires explicit size categories.",
+                            "pin":"One opposed Grapple check at the next control boundary; target becomes prone and immobilized.",
+                            "trip":"Two-second Strength versus defender-chosen Strength/Dexterity contest after this player's successful Touch; size category is required.",
                         }[event_type]
                     except ArenaBrowserRequestError as exc:
                         reason = str(exc)
@@ -3283,7 +3334,8 @@ class GeneratedArenaSession:
 
     def generate(self, payload):
         expected = {"starting_experience", "width_cells", "height_cells"}
-        allowed_keys = expected | {"ground_equipment", "equipment_mode", "opponent_strategy"}
+        allowed_keys = expected | {"ground_equipment", "equipment_mode", "opponent_strategy",
+                                  "root_seed", "size_categories"}
         if (type(payload) is not dict or not expected <= set(payload)
                 or set(payload) - allowed_keys):
             raise ArenaBrowserRequestError("Generate requires XP, dimensions, and supported Arena options")
@@ -3293,6 +3345,14 @@ class GeneratedArenaSession:
         starting_experience = _parse_decimal(payload, "starting_experience", 0)
         width_cells = _parse_decimal(payload, "width_cells", 5)
         height_cells = _parse_decimal(payload, "height_cells", 5)
+        size_categories = payload.get("size_categories", {"player": None, "opponent": None})
+        categories = ("diminutive","tiny","small","medium","large","huge","gargantuan","colossal")
+        if (type(size_categories) is not dict or set(size_categories) != {"player","opponent"}
+                or any(value is not None and value not in categories for value in size_categories.values())):
+            raise ArenaBrowserRequestError("size_categories must explicitly name supported categories or null for both participants")
+        requested_seed = payload.get("root_seed")
+        if requested_seed is not None and (type(requested_seed) is not str or _DECIMAL.fullmatch(requested_seed) is None):
+            raise ArenaBrowserRequestError("root_seed must be a nonnegative decimal integer string")
         equipment_choice = payload.get("ground_equipment")
         if equipment_choice not in (None, "starter", "none"):
             raise ArenaBrowserRequestError("ground_equipment must be starter or none")
@@ -3315,7 +3375,7 @@ class GeneratedArenaSession:
         # Serialize generation with all session edits/reads. The prior candidate
         # stays active until a complete new candidate and native RNG owner exist.
         with self._lock:
-            root_seed = self._root_seed_factory()
+            root_seed = self._root_seed_factory() if requested_seed is None else int(requested_seed, 10)
             if type(root_seed) is not int or root_seed < 0:
                 raise ArenaBrowserRequestError("host root seed source must return a nonnegative integer")
             try:
@@ -3324,6 +3384,8 @@ class GeneratedArenaSession:
                     ground_item_descriptions=item_descriptions,
                     ground_loadout_profile=loadout_profile,
                     equipment_mode=equipment_mode)
+                candidate.participants[0].native.being.size_category=size_categories["player"]
+                candidate.participants[1].native.being.size_category=size_categories["opponent"]
                 self._validate_initial_equipment_provenance(candidate)
                 if self._authored_draw_scenario is not None:
                     from arena_authored_draw_scenario import author_scenario
@@ -3764,7 +3826,8 @@ class GeneratedArenaSession:
                     before_time, before_position, before_cell, accepted_plan,
                     "rolled_back" if rolled_back else "failed_after_state_change",
                     reason=(movement_refusal["category"] if movement_refusal
-                            else type(exc).__name__))
+                            else (type(exc.__cause__).__name__
+                                  if exc.__cause__ is not None else type(exc).__name__)))
                 if movement_refusal is not None:
                     raise ArenaBrowserRequestError(
                         movement_refusal["message"],

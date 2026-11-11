@@ -93,6 +93,30 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         invalid = b'{"format":"wrong","schema_version":1}'
         self.assertEqual(self.raw_request("/api/generated/profile-upload", invalid)[0], 409)
 
+    def test_generate_accepts_reproducible_seed_and_explicit_optional_size_facts(self):
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn('id="rootSeed"', page)
+        self.assertIn('id="playerSize"', page)
+        self.assertIn('id="opponentSize"', page)
+        status, view = self.request("/api/generated/generate", {
+            "starting_experience": "1000", "width_cells": "5", "height_cells": "5",
+            "root_seed": "20261107", "size_categories": {"player":"medium","opponent":"medium"}})
+        self.assertEqual(status, 200)
+        candidate=self.session.active_candidate
+        self.assertEqual(candidate.root_seed,20261107)
+        self.assertEqual(candidate.participants[0].native.being.size_category,"medium")
+        self.assertEqual(candidate.participants[1].native.being.size_category,"medium")
+        wire=self.session.save_encounter_bytes()
+        restored=GeneratedArenaSession(root_seed_factory=lambda:99)
+        restored.load_encounter_bytes(wire)
+        self.assertEqual(restored.active_candidate.participants[0].native.being.size_category,"medium")
+        self.assertEqual(restored.active_candidate.participants[1].native.being.size_category,"medium")
+        bad=self.request("/api/generated/generate", {
+            "starting_experience":"1000","width_cells":"5","height_cells":"5",
+            "size_categories":{"player":"medium","opponent":"invalid"}})
+        self.assertEqual(bad[0],409)
+
     def test_target_free_dodge_preparation_http_route_and_shipped_browser_controls(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
@@ -281,7 +305,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def test_grab_selector_http_receipt_and_fresh_process_hold_continuation(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn("function submitGrappling(action,handle,hand=null)", page)
+        self.assertIn("function submitGrappling(action,handle,hand=null,position=null)", page)
         self.assertIn("/api/generated/grappling", page)
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 7)
         status, generated = self.request("/api/generated/generate", {
@@ -386,7 +410,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "'contact':active_contact_state(s.active_candidate.encounter),"
             "'save':base64.b64encode(s.save_encounter_bytes()).decode()}))")
         resolved_grapple = subprocess.run([sys.executable,"-c",resolve_grapple,str(pending_path)],
-            cwd=ROOT,check=True,capture_output=True,text=True)
+            cwd=ROOT,check=False,capture_output=True,text=True)
+        self.assertEqual(resolved_grapple.returncode, 0, resolved_grapple.stderr)
         grapple_result = json.loads(resolved_grapple.stdout)
         self.assertEqual(grapple_result["time"],15)
         self.assertEqual(grapple_result["action"]["outcome"],"success")
