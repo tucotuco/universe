@@ -197,7 +197,6 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
             "equipment_mode": "unequipped", "opponent_strategy": "none"})
         self.assertEqual(status, 200)
-        player_id = self.session.active_candidate.participants[0].native.being.id
         self.assertEqual(self.request("/api/generated/run", {})[0], 200)
         status, activated = self.request("/api/generated/advance", {"seconds": 1})
         self.assertEqual(status, 200)
@@ -232,14 +231,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             save_path = Path(directory) / "pending-arena.json"
             save_path.write_bytes(pending_wire)
             script = (
-                "import json,sys; import tests.test_generated_arena_browser; "
+                "import base64,json,sys; import tests.test_generated_arena_browser; "
                 "from arena_browser_session import GeneratedArenaSession; "
                 "s=GeneratedArenaSession(root_seed_factory=lambda:2); "
                 "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
                 "v=s.advance_one_second(); "
                 "print(json.dumps({'time_seconds':v['time_seconds'],"
                 "'touch_action':v['touch_action'],'position':v['player']['position_meters'],"
-                "'rng_state':s._rng_cursor.state}))")
+                "'rng_state':s._rng_cursor.state,'completed_save':"
+                "base64.b64encode(s.save_encounter_bytes()).decode('ascii')}))")
             process = subprocess.run([sys.executable, "-c", script, str(save_path)],
                 cwd=ROOT, check=True, capture_output=True, text=True)
             cross_process = json.loads(process.stdout)
@@ -252,7 +252,25 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(completed["touch_action"]["status"], "completed")
         self.assertEqual(completed["touch_action"]["outcome"], "out_of_reach")
         self.assertEqual(self.session._rng_cursor.state, rng_before_resolution)
-        completed_wire = self.session.save_encounter_bytes()
+        completed_wire = __import__("base64").b64decode(cross_process["completed_save"])
+        with tempfile.TemporaryDirectory() as directory:
+            completed_path = Path(directory) / "completed-arena.json"
+            completed_path.write_bytes(completed_wire)
+            restore_code = (
+                "import json,sys; import tests.test_generated_arena_browser; "
+                "from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:3); "
+                "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "print(json.dumps({'time_seconds':v['time_seconds'],"
+                "'touch_action':v['touch_action'],'position':v['player']['position_meters'],"
+                "'rng_state':s._rng_cursor.state}))")
+            completed_restore = subprocess.run([sys.executable, "-c", restore_code,
+                str(completed_path)], cwd=ROOT, check=True, capture_output=True, text=True)
+        restored_result = json.loads(completed_restore.stdout)
+        self.assertEqual(restored_result["time_seconds"], 2)
+        self.assertEqual(restored_result["touch_action"], completed["touch_action"])
+        self.assertEqual(restored_result["position"], completed["player"]["position_meters"])
+        self.assertEqual(restored_result["rng_state"], json.loads(json.dumps(self.session._rng_cursor.state)))
         restored = GeneratedArenaSession(root_seed_factory=lambda: 3)
         after_load = restored.load_encounter_bytes(completed_wire)
         self.assertEqual(after_load["touch_action"], completed["touch_action"])
