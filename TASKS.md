@@ -24,7 +24,7 @@
 
 ## ACTIVE — current implementation program
 
-**No active implementation assignment.** U-DOC-001 is complete. U-ARENA-018 produced a substantial partial implementation and a report, but its remaining work is not authorized as the active task after this documentation assignment.
+- [ ] **U-REPO-008 — ACTIVE / BLOCKED at the publication gate.** Recovery bundle and isolated clone are verified; the reusable offline scanner and process policy are implemented and tested. The unpublished 156-commit range still needs sanitization. The verified published ancestor also contains machine-temporary-path findings, and U-REPO-008 requires a user decision before any rewrite or push proceeds.
 
 ## NEXT — candidate capability programs (ordered for discussion; not automatically authorized)
 
@@ -121,7 +121,7 @@
 - [ ] **U-CAP-010 — OPEN: broader Being practice, skills and learning.** General skill eligibility/progression beyond bounded native exercises, actual practice-to-ability improvement, training/teaching, changing skill rank/aptitude, cost and fatigue from performed Actions. Independent initial NPC age-based ranks remain generator-owned.
 - [ ] **U-CAP-011 — OPEN: richer Arena inspection, controls, replay and accessibility.** Genuine observer-appropriate Action explanations, status of Action preparations/retained effects, keyboard/navigation, perception losses, deterministic replay, and ordinary user testing.
 - [ ] **U-CAP-012 — OPEN: save/replay compatibility, schema and version migration policy.** Authenticated authoritative provenance where required, preserved file transparency, schema-validated imports and carefully bounded compatibility; avoid database/online service by default.
-- [ ] **U-OPS-006 — OPEN / publication hold: publish reviewed local changes safely.** Recheck branch/upstream and disclose/resolve machine-specific paths in unpublished commits only with explicit authorization for any history rewrite; earlier sanitized publication is a distinct completed milestone. No implicit push.
+- [ ] **U-OPS-006 — OPEN / publication hold: publish reviewed local changes safely.** Current audit found local-path disclosures in both unpublished history and already-published history. No push until the published-history finding is resolved by explicit user direction; any rewrite remains limited to specifically authorized scope.
 - [ ] **U-OPS-007 — OPEN: full-suite confidence and regression/environment triage.** Prefer focused test suites per assignment; full HTTP-inclusive suite at meaningful milestones, record legitimate environment failures, and compare to independently tested baseline. No claim of full-suite green for recent Arena work.
 - [ ] **U-DOC-003 — OPEN: consolidate authoritative Encounter ES issue status.** Use *current* rule README + issue register, correct obsolete r60-only task links, and preserve unverified/blocked issues without false closure.
 

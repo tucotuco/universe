@@ -38,6 +38,17 @@ Universe is a long-running, multi-conversation engineering and simulation-design
 - **No unauthorized publication/history rewrite:** never push, force-push, rebase, rewrite/sanitize historical commits, or publish private paths/data without explicit user authorization. Local commits are not equivalent to remote backups. Apply safety checks before any approved publication.
 - **Inspectability:** prefer ordinary readable, version-controlled files and reproducible commands to premature database/service infrastructure.
 
+### Publication safety and repository identity
+
+- A configured remote name is not proof of destination identity. Before any approved push, verify the exact remote URL, intended repository and visibility, branch/refspec, tracking configuration, live remote tip, and fast-forward ancestry. Fetch the remote; stop if the destination moved or diverged.
+- Ordinary feature, documentation, and handoff assignments do **not** authorize push or history rewrite. Rewrite only unpublished commits when the current user explicitly authorizes that scope. Published history requires separate, specific authorization. Never force-push by default.
+- Preserve dirty/untracked user files, ignored local data, sibling repositories and private archives. For an authorized history rewrite, first create and verify a private recovery bundle/clone outside the worktree, then transform an isolated clean clone. Do not push backups or backup refs.
+- Protect local resource paths, machine/user identifiers, credentials, local session/world data, and unreviewed artifacts. A `.gitignore` change does not remove committed data. Do not put actual sensitive strings in reports, task state, commit messages, or ordinary scanner output; report safe file locations, categories, and counts.
+- Before **every commit**, inspect the explicit staged file list and run `python tools/check_publication_safety.py --staged` (or a documented equivalent). This covers staged text/path names and refuses actionable findings. It intentionally does not scan arbitrary untracked files.
+- Before **every separately authorized push**, verify the exact proposed range and run `python tools/check_publication_safety.py --range <verified-upstream>..<proposed-tip>`. Review all newly reachable commit metadata, every changed path and every blob version, including content removed before the tip. Also inspect secrets and large/sensitive artifacts. Require zero unreviewed findings; a clean HEAD grep or `git diff --check` is not a history audit.
+- Review findings in context. The checker recognizes explicit `<PLACEHOLDER>` illustrations and repository-relative paths; do not add broad or undocumented allowlists. If real credentials, already-published disclosures, or ambiguous high-sensitivity material appears, stop publication and obtain a specific user decision.
+- Every engineering report records the staged scan result and whether publication was authorized. If pushed, it records the verified range, history-audit result, exact normal refspec, push type, and independently confirmed remote tip. Handoffs identify unpublished commits and any publication hold or required sanitized continuation. A local hook alone is not a shared control.
+
 ## 3. `TASKS.md`: required shape and maintenance
 
 ### What a state entry means
@@ -104,6 +115,10 @@ The following clause is the default **required** content in `docs/assignments/<I
 > - At each meaningful validated capability boundary and before final report, update the affected `TASKS.md` entries to reflect **actual outcomes and remaining limits**; move the one ACTIVE marker only as authorized by current priority. Mark DONE only for exact tested bounded acceptance, leave partial/blocked work explicit, and update links to the report/design where helpful. Do not append a chronological log of steps/tests/commits.
 > - Review the task-register diff and stage only reviewed files; include `TASKS.md` in the relevant scoped commit (or immediately adjacent documentation commit). In `docs/reports/<ID>-report.md`, list **Task IDs before → after**, any ideas captured, and whether the root register was actually committed. If it could not be safely reconciled, say so explicitly and leave it unchanged rather than overwrite conflicting state.
 
+Every future assignment must also include this publication-safety clause:
+
+> Before committing, audit staged reports, handoffs, source, tests, configuration, and paths for local/private resource paths, secrets, and unintended files with `python tools/check_publication_safety.py --staged` or a documented equivalent. This checks the staged change, not history. A push or history rewrite still requires separate explicit user authorization. If publication is separately authorized, verify the live destination and audit all newly reachable commits, metadata, changed paths, and object versions with `python tools/check_publication_safety.py --range <verified-upstream>..<proposed-tip>`; stop on unresolved findings or upstream movement. Never force-push or rewrite published history under an ordinary assignment.
+
 ### Other required assignment elements
 
 - **Identity:** stable assignment ID, intended repository path and required report path; exact paste prompt.
@@ -124,8 +139,9 @@ An ordinary report is concise but source-grounded. Recommended order:
 4. **Reproduction:** exact executable test/demo command, input/seed/initial conditions, observed Action boundaries and authoritative results; browser clicks if claimed.
 5. **Verification:** exact commands, counts, times; new vs baseline failures; fresh-process continuation; native/HTTP/Chrome distinction; full-suite status stated explicitly.
 6. **`TASKS.md` transitions:** impacted IDs and before→after, added IDEA/dependency IDs, the active marker or explicit no-active state, and confirmation of committed state or outstanding reconciliation.
-7. **Commits and safety:** hashes, staged paths, worktree status, no unapproved push, notable unresolved environment or security concerns.
-8. **Remaining gaps:** exact next demonstrable outcome and genuinely unresolved rule decisions—not a broad re-inventory of already accepted work.
+7. **Publication audit:** staged-content scan command/result and findings count. If a push was separately authorized, state verified destination/range, history-level audit result, exact non-force refspec, and independently checked remote tip. Clearly distinguish “not pushed” from “audited and safe to push.”
+8. **Commits and safety:** hashes, staged paths, worktree status, no unapproved push, notable unresolved environment or security concerns.
+9. **Remaining gaps:** exact next demonstrable outcome and genuinely unresolved rule decisions—not a broad re-inventory of already accepted work.
 
 A failing pre-existing test still matters; demonstrate its baseline if claiming it predates an assignment. Do not weaken checkpoint integrity merely to silence the failure.
 
