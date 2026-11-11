@@ -4,7 +4,7 @@ Capture only at a caller-owned post-movement/pre-action integer fence. Nothing
 here advances time, dispatches live resolvers, publishes effects, or commits RNG.
 Exact native adapters are deliberate: this is not a Python extension sandbox.
 """
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 import math
 import random
 from types import MappingProxyType
@@ -277,9 +277,38 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         for key in ('reach','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool'):
             if key in ad:
                 selected[key] = freeze(ad[key])
+        prepared_id = ad.get('prepared_defense_action_id')
+        if prepared_id is not None:
+            source = wd['event_history'].get(prepared_id)
+            if type(source) is not MeleeDefense:
+                raise EvaluationIntegrityError('retained defense source is not a native MeleeDefense Action')
+            source_data = native_data(source, (MeleeDefense,))
+            source_resolution = source_data.get('resolution')
+            if (source_data['id'] not in ed['finished_action_list']
+                    or type(source_resolution) is not ActionProposal
+                    or source_resolution.outcome != 'ready'
+                    or source_data.get('target_action_id') is not None
+                    or source_data.get('actor_id') != ad.get('actor_id')
+                    or source_data.get('kind') != ad.get('kind')
+                    or type(source_data.get('ready_at')) not in (int, float)
+                    or source_data['ready_at'] > boundary):
+                raise EvaluationIntegrityError('retained defense source is not ready for this boundary')
+            if any(type(other) is MeleeDefense and
+                   object.__getattribute__(other, '__dict__').get('prepared_defense_action_id') == prepared_id
+                   for other_id, other in wd['event_history'].items() if other_id != aid):
+                raise EvaluationIntegrityError('one retained defense cannot be committed more than once')
+            selected['prepared_defense'] = freeze({
+                'id': source_data['id'], 'kind': source_data['kind'],
+                'actor_id': source_data['actor_id'],
+                'instrument_id': source_data.get('instrument_id'),
+                'ready_at': source_data['ready_at'],
+                'strategy': native_data(source_data['strategy'], (Strategy,)),
+                'parry_motion': source_data.get('parry_motion'),
+                'strategy_pool': source_data.get('strategy_pool'),
+            })
         if type(action) is SpotAction:
             selected['group_fully_visible'] = freeze(ad['group_fully_visible'])
         if type(action) is RunAction:
@@ -679,9 +708,43 @@ def _helpless(actor):
 
 
 def _defense(snapshot, action, rng):
-    actor, attacker = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    actor = snapshot.entity(action.actor_id)
     kind = action.data['kind']
+    if action.data.get('target_action_id') is None:
+        if kind not in ('parry', 'dodge') or action.target_id is not None:
+            raise EvaluationIntegrityError('only Dodge and Parry can be prepared without a target')
+        if action.data.get('ready_at') != action.nominal_end:
+            raise EvaluationIntegrityError('target-free defense preparation must end when ready')
+        return ActionProposal(action.id, actor.id, (), 'ready')
+    attacker = snapshot.entity(action.target_id)
     strike = snapshot.actions[action.data['target_action_id']]
+    prepared = action.data.get('prepared_defense')
+    if prepared is not None:
+        if (kind not in ('parry', 'dodge') or prepared['kind'] != kind
+                or prepared['actor_id'] != actor.id
+                or prepared['ready_at'] > strike.nominal_end
+                or strike.family != 'melee' or strike.lifecycle != 'pending'
+                or strike.actor_id != attacker.id or strike.target_id != actor.id
+                or strike.nominal_end != action.nominal_end):
+            raise EvaluationIntegrityError('invalid retained-defense assignment')
+        if _helpless(actor):
+            return ActionProposal(action.id, actor.id, (attacker.id,), 'unable_to_defend')
+        if attacker.id not in snapshot.awareness.get(actor.id, ()):
+            return ActionProposal(action.id, actor.id, (attacker.id,), 'no_threat')
+        if kind == 'parry':
+            if prepared['instrument_id'] not in actor.data['held']:
+                return ActionProposal(action.id, actor.id, (attacker.id,), 'unable_to_defend')
+            parrying_weapon = snapshot.entity(prepared['instrument_id'])
+            incoming_weapon = snapshot.entity(strike.instrument_id)
+            if (parrying_weapon.data.get('weight') is None
+                    or incoming_weapon.data.get('weight') is None
+                    or incoming_weapon.data['weight'] > 3 * parrying_weapon.data['weight']
+                    or actor.data['weapon_skills'].get(parrying_weapon.data['original_type'], 0) <= 1):
+                return ActionProposal(action.id, actor.id, (attacker.id,), 'unable_to_defend')
+        if snapshot.melee_status(strike)[0] != 'in_reach':
+            return ActionProposal(action.id, actor.id, (attacker.id,), 'no_threat')
+        dependency = DefenseEffect(action.id, strike.id, kind, True, False)
+        return ActionProposal(action.id, actor.id, (attacker.id,), 'assigned', (), (dependency,))
     eligible = False
     success = False
     effects = ()
@@ -781,7 +844,14 @@ def _combat(snapshot, action, rng, dependencies):
                                 target_defense = 0
                 parry_bonus = sum(2 for dependency in dependencies
                     if dependency.kind == 'parry' and dependency.eligible
-                    and dependency.success)
+                    and (dependency.success or snapshot.actions[dependency.source_action_id].data.get('prepared_defense') is not None))
+                dodge_dependencies = [dependency for dependency in dependencies
+                    if dependency.kind == 'dodge' and dependency.eligible
+                    and snapshot.actions[dependency.source_action_id].data.get('prepared_defense') is not None]
+                if dodge_dependencies:
+                    dodge = snapshot.actions[dodge_dependencies[0].source_action_id].data['prepared_defense']
+                    target_defense = (dodge['strategy']['defense']
+                                      + (target.data['skills'].get('tumble', 0) or 0) // 4)
                 block_penalty = 4 if any(dependency.kind == 'block'
                     and dependency.eligible and dependency.success
                     for dependency in dependencies) else 0
@@ -1131,6 +1201,35 @@ def evaluate_snapshot(snapshot, action_ids=None):
         else:
             proposal = _activity(snapshot, action, rng)
         proposals.append(proposal)
+    # Preparation is retained until the defender assigns it. Assignment is
+    # fixed before the roll; its result follows the ordinary shared attack
+    # result and both records publish in the same atomic boundary.
+    by_id = {proposal.action_id: proposal for proposal in proposals}
+    for defense_action in selected:
+        if (defense_action.family != 'defense'
+                or defense_action.lifecycle != 'pending'
+                or defense_action.data.get('prepared_defense') is None):
+            continue
+        defense_proposal = by_id.get(defense_action.id)
+        if defense_proposal is None or not defense_proposal.defenses:
+            continue
+        strike_id = defense_action.data['target_action_id']
+        strike_proposal = by_id.get(strike_id)
+        if strike_proposal is None:
+            raise EvaluationIntegrityError('retained defense assignment lacks its same-boundary attack result')
+        landed = strike_proposal.outcome in ('normal', 'critical', 'fatal')
+        success = not landed
+        outcome = ('deflected' if defense_action.data['kind'] == 'parry' else 'evaded') if success else 'failed'
+        effect = replace(defense_proposal.defenses[0], success=success)
+        skill = (snapshot.entity(defense_action.instrument_id).data['original_type']
+                 if defense_action.data['kind'] == 'parry' else 'tumble')
+        practice = PracticeEffect(defense_action.id, defense_action.actor_id, skill, 10)
+        by_id[defense_action.id] = replace(defense_proposal,
+            outcome=outcome, effects=(practice,), defenses=(effect,))
+        attack_effects = tuple(effect if old.source_action_id == defense_action.id else old
+                               for old in strike_proposal.defenses)
+        by_id[strike_id] = replace(strike_proposal, defenses=attack_effects)
+    proposals = [by_id[proposal.action_id] for proposal in proposals]
     return bind_evaluation_result(snapshot, tuple(proposals), tuple(rng.trace), rng.rng.getstate())
 
 

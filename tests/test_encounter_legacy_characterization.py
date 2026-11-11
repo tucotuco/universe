@@ -269,7 +269,7 @@ class TestLegacyChoiceAndHooks(LegacyEncounterFixture):
         incoming = MeleeStrike(self.enc, self.b.id, self.a.id, other_blade, motion='thrust', reach=2)
         self.enc.schedule_action(own)
         self.enc.schedule_action(incoming)
-        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry',
+        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry', parry_motion='swing',
                                target_action_id=incoming.id, weapon_id=self.blade)
         with self.assertRaisesRegex(ValueError, 'actively reserved'):
             self.enc.schedule_action(defense)

@@ -842,10 +842,12 @@ class Encounter(Event):
         for name, value in prepared.initialization:
             if name == '_encounter' and value is not self:
                 raise ValueError("prepared binding must refer to this Encounter")
+            readiness_start = (0 if getattr(action, 'prepared_defense_action_id', None) is not None
+                               else prepared.start_time)
             if name == 'ready_at' and (isinstance(value, bool)
                     or not isinstance(value, (int, float)) or not math.isfinite(value)
-                    or not prepared.start_time <= value <= prepared.end_time):
-                raise ValueError("prepared readiness must lie within the finalized Action")
+                    or not readiness_start <= value <= prepared.end_time):
+                raise ValueError("prepared readiness must be valid for the finalized Action")
 
     def propose_choice(self, actions):
         planning_entry(self)

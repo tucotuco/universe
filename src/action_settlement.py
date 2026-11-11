@@ -89,7 +89,7 @@ _OUTCOMES = {
     'combat': _ATTACK_OUTCOMES | {'weapon_unavailable'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'},
-    'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
+    'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
     'throw': frozenset(('unplaced', 'unavailable', 'released')),
@@ -401,7 +401,8 @@ def _validate_complete_outcome(proposal, action, entities):
     if action.lifecycle == 'pending':
         if action.family == 'melee' and proposal.outcome in _ATTACK_OUTCOMES | {'parried', 'dodged'}:
             expected_practice = (entities[action.instrument_id].data['original_type'], 10)
-        elif (action.family == 'defense' and action.data['kind'] in ('parry', 'dodge')
+        elif (action.family == 'defense' and action.data.get('target_action_id') is not None
+              and action.data['kind'] in ('parry', 'dodge')
               and proposal.defenses[0].eligible):
             skill = entities[action.instrument_id].data['original_type'] if action.data['kind'] == 'parry' else 'tumble'
             expected_practice = (skill, 10)
@@ -506,7 +507,10 @@ def reconcile_boundary(snapshot, result):
     for aid, p in proposals.items():
         action = actions[aid]
         if action.family == 'defense' and action.lifecycle == 'pending':
-            _require(len(p.defenses) == 1 and p.defenses[0].source_action_id == aid, 'missing owned defense result')
+            preparing = action.data.get('target_action_id') is None and p.outcome == 'ready'
+            _require((not p.defenses if preparing else
+                      len(p.defenses) == 1 and p.defenses[0].source_action_id == aid),
+                     'missing or unexpected owned defense result')
         elif action.family not in ('melee', 'combat'):
             _require(not p.defenses, 'unexpected defense dependency')
         owned[(aid, 'effect')] = p.effects

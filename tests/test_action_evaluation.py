@@ -20,6 +20,7 @@ from action_settlement import reconcile_boundary
 from library import Library
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
+from strategy import Strategy
 from spatial.state import CartesianPosition
 from spatial.geometry import Sphere, AxisAlignedBox
 from spatial.occlusion import VisualOcclusion
@@ -203,7 +204,7 @@ class TestActionEvaluation(unittest.TestCase):
 
     def test_multiple_designated_defenses_all_retained_no_stacking(self):
         attack = self.strike()
-        parry = MeleeDefense(self.enc, self.b.id, self.a.id, kind='parry', target_action_id=attack.id, weapon_id=self.w3)
+        parry = MeleeDefense(self.enc, self.b.id, self.a.id, kind='parry', parry_motion='swing', target_action_id=attack.id, weapon_id=self.w3)
         dodge = MeleeDefense(self.enc, self.b.id, self.a.id, kind='dodge', target_action_id=attack.id)
         self.schedule(attack, parry, dodge)
         s = self.snapshot()
@@ -405,6 +406,32 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual((impact.target_id, impact.incoming, impact.passed, impact.intercepted),
                          (shield.id, 4, 0, True))
 
+    def test_revision61_dodge_can_be_prepared_without_an_attack_and_uses_dexterity_pool(self):
+        self.b.set_ability('DEX', 14)
+        self.b.set_skill_level(self.world.get_skill_dictionary(), 'tumble', 4)
+        action = MeleeDefense(self.enc, self.b.id, kind='dodge',
+                              strategy=Strategy(defense=5, timing=1))
+        packet = self.enc.prepare_action(action)
+        self.assertEqual((packet.start_time, packet.end_time), (0, 1))
+        self.assertEqual(action.strategy_pool, 6)
+        self.enc.schedule_action(action)
+        result = self.scripted(self.snapshot(1), [])
+        self.assertEqual(result.proposals[0].outcome, 'ready')
+        reconcile_boundary(result.snapshot, result)
+
+    def test_revision61_parry_uses_explicit_defender_weapon_motion_timing(self):
+        weapon_id = self.world.make_weapon_for_being(self.b.id, 'Longsword', 'Parry timing sword')
+        self.world.arm_being(self.b.id, weapon_id, 'right hand')
+        self.b.set_weapon_skill_level(self.world.get_weapon_dictionary(), 'Longsword', 2)
+        weapon = self.world.get_object_by_id(weapon_id)
+        self.assertNotEqual(weapon.St(), weapon.Tt())
+        swing = MeleeDefense(self.enc, self.b.id, kind='parry', weapon_id=weapon_id,
+                             parry_motion='swing')
+        thrust = MeleeDefense(self.enc, self.b.id, kind='parry', weapon_id=weapon_id,
+                              parry_motion='thrust')
+        self.assertEqual(self.enc.prepare_action(swing).end_time, weapon.St() - 1)
+        self.assertEqual(self.enc.prepare_action(thrust).end_time, weapon.Tt() - 1)
+
     def test_native_block_refuses_wrong_timing_and_unshielded_actor(self):
         shield = self.shield(self.b)
         strike = self.strike()
@@ -534,7 +561,7 @@ class TestActionEvaluation(unittest.TestCase):
 
     def test_defense_metadata_and_equipment_detached(self):
         attack=self.strike()
-        defense=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',target_action_id=attack.id,weapon_id=self.w3)
+        defense=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',parry_motion='swing',target_action_id=attack.id,weapon_id=self.w3)
         self.schedule(attack,defense);s=self.snapshot()
         defense.target_action_id='corrupted';self.b.body_part_remove_object('right hand')
         self.world.get_object_by_id(self.w3).current.obj_type='corrupted'
@@ -629,8 +656,8 @@ class TestActionEvaluation(unittest.TestCase):
         other=self.world.make_weapon_for_being(self.b.id,'Dagger','Other parry knife')
         self.world.arm_being(self.b.id,other,'left hand')
         attack=self.strike()
-        one=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',target_action_id=attack.id,weapon_id=self.w3)
-        two=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',target_action_id=attack.id,weapon_id=other)
+        one=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',parry_motion='swing',target_action_id=attack.id,weapon_id=self.w3)
+        two=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',parry_motion='swing',target_action_id=attack.id,weapon_id=other)
         self.schedule(attack,one,two)
         result=self.scripted(self.snapshot(),[1,20,20,1])
         self.assertEqual([p.outcome for p in result.proposals],['failed','deflected','parried'])

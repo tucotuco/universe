@@ -202,7 +202,7 @@ class TestActionChoices(unittest.TestCase):
         incoming = self.strike(self.w3, self.b, self.a)
         self.enc.schedule_action(incoming)
         own = self.strike(self.w1)
-        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry',
+        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry', parry_motion='swing',
                                target_action_id=incoming.id, weapon_id=self.w1)
         token = self.unchanged(lambda: self.enc.validate_choice(self.enc.propose_choice([own, defense])))
         self.assertFalse(token.valid)
@@ -323,7 +323,7 @@ class TestActionChoices(unittest.TestCase):
 
     def test_same_set_defense_local_key_resolves_without_early_registration(self):
         attack = self.strike(self.w3, self.b, self.a)
-        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry',
+        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry', parry_motion='swing',
                                target_action_id='incoming', weapon_id=self.w1)
         draft = self.enc.propose_choice([ChoiceMember('defense', defense, 'incoming'),
                                          ChoiceMember('incoming', attack)])
@@ -343,7 +343,7 @@ class TestActionChoices(unittest.TestCase):
         self.assertEqual(self.b.get_skill_experience('Dagger'), 10)
 
     def test_invalid_same_set_reference_is_editable_without_partial_registration(self):
-        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry',
+        defense = MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry', parry_motion='swing',
                                target_action_id='missing', weapon_id=self.w1)
         draft = self.enc.propose_choice([ChoiceMember('defense', defense, 'missing')])
         token = self.unchanged(lambda: self.enc.validate_choice(draft))
@@ -752,7 +752,7 @@ class TestActionChoices(unittest.TestCase):
     def test_distinct_valid_parries_keep_both_designated_practice_records(self):
         incoming = self.strike(self.w3, self.b, self.a)
         self.enc.schedule_action(incoming)
-        defenses = [MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry',
+        defenses = [MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry', parry_motion='swing',
                      target_action_id=incoming.id, weapon_id=weapon) for weapon in (self.w1, self.w2)]
         self.enc.schedule_choice(defenses)
         with patch('melee_defense.roll_dice', side_effect=[20, 1, 20, 1]):
