@@ -463,7 +463,7 @@ def validate_action_contract(encounter,action,*,_force=False):
             or 'on_completed' in data or inspect.getattr_static(type(action),'on_completed',None) is not _NATIVE_HOOKS.get(type(action))
             or any(callable(value) for key,value in data.items() if key!='generate')):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
-    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace'):
+    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
     if type(action) is Action and data['event_type'] == 'touch' and (
             data.get('instrument_id') is not None
@@ -477,6 +477,16 @@ def validate_action_contract(encounter,action,*,_force=False):
         if (data.get('instrument_id') is None or data.get('target_id') is None
                 or data.get('coup_motion') not in ('swing', 'thrust')):
             raise TransactionalProgressionError('native Coup de grace requires its target, weapon, and attack motion')
+    if type(action) is Action and data['event_type'] == 'break weapon':
+        if (data.get('instrument_id') is None or data.get('target_id') is None
+                or type(data.get('break_weapon_id')) is not str
+                or data.get('break_motion') != 'swing'):
+            raise TransactionalProgressionError('native Break weapon requires both weapon identities and swing motion')
+    if type(action) is Action and data['event_type'] == 'disarm':
+        if (data.get('instrument_id') is None or data.get('target_id') is None
+                or type(data.get('disarm_weapon_id')) is not str
+                or data.get('disarm_motion') not in ('swing','thrust')):
+            raise TransactionalProgressionError('native Disarm requires two weapon identities and attack motion')
     if type(action) is ThrowAction:
         if (data.get('event_type') != 'throw' or data.get('target_id') is not None
                 or type(data.get('instrument_id')) is not str

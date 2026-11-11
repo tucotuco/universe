@@ -87,7 +87,7 @@ _CATALOG = {
     'scheduling':'PreparedSchedule', 'action_settlement':'TargetCandidate',
     'atomic_publication':'PublishedInterval TargetIntervalRecord ObjectiveCommitProvenance',
     'encounter_inspection':'CommittedBoundaryRecord EntityInspection',
-    'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect',
+    'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect',
     'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectiveUse',
     'interval_staging':'AuthorityReference StartFence RegistrationIntent QueueProjection',
 }

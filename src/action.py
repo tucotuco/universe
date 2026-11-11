@@ -174,6 +174,112 @@ class Action(Event):
                     or self.end_time - self.start_time != 1):
                 raise ValueError('Touch is a one-second unarmed Action')
             return PreparedSchedule.from_action(self)
+        if self.event_type == 'strike object':
+            from encounter import Encounter
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Strike an object requires the native transactional Encounter pathway')
+            actor = encounter.get_being(self.actor_id)
+            target = encounter.universe.get_object_by_id(self.target_id)
+            weapon = self.get_instrument()
+            motion = object.__getattribute__(self, '__dict__').get('object_motion')
+            reach = object.__getattribute__(self, '__dict__').get('reach')
+            if actor is None or self.actor_id not in encounter.being_list or target is None or target is actor:
+                raise ValueError('Strike an object requires a participating Being and a native Object target')
+            if not encounter.is_aware(self.actor_id, self.target_id):
+                raise ValueError('Strike an object requires current native awareness of its target')
+            if weapon is None or self.instrument_id not in actor.armed_with(encounter.universe).values():
+                raise ValueError('Strike an object requires an actually held weapon')
+            if motion not in ('swing', 'thrust') or motion not in weapon.get_melee_types():
+                raise ValueError('Strike an object requires a supported weapon motion')
+            native_timing = weapon.St() if motion == 'swing' else weapon.Tt()
+            if (type(native_timing) not in (int, float) or not math.isfinite(native_timing)
+                    or native_timing <= 0 or self.end_time - self.start_time !=
+                    max(1, native_timing - self.strategy.timing_adjustment())
+                    or type(reach) not in (int, float) or not math.isfinite(reach) or reach <= 0):
+                raise ValueError('Strike an object timing or reach declaration is invalid')
+            from melee_combat import effective_melee_reach_meters
+            expected_reach = effective_melee_reach_meters(actor.current, weapon.current)
+            if not math.isclose(reach, expected_reach, rel_tol=1e-12, abs_tol=1e-12):
+                raise ValueError('Strike an object reach does not match native Being/weapon dimensions')
+            return PreparedSchedule.from_action(self)
+        if self.event_type == 'break weapon':
+            from encounter import Encounter
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Break weapon requires the native transactional Encounter pathway')
+            actor, defender = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            weapon, victim_weapon = self.get_instrument(), encounter.universe.get_object_by_id(
+                object.__getattribute__(self,'__dict__').get('break_weapon_id'))
+            motion = object.__getattribute__(self,'__dict__').get('break_motion')
+            reach = object.__getattribute__(self,'__dict__').get('reach')
+            if (actor is None or defender is None or actor is defender
+                    or self.actor_id not in encounter.being_list or self.target_id not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id,self.target_id)):
+                raise ValueError('Break weapon requires two aware participating Beings')
+            if (weapon is None or self.instrument_id not in actor.armed_with(encounter.universe).values()
+                    or victim_weapon is None or victim_weapon.id not in defender.armed_with(encounter.universe).values()):
+                raise ValueError('Break weapon requires the actual held weapons of both Beings')
+            if motion != 'swing' or motion not in weapon.get_melee_types():
+                raise ValueError('Break weapon uses a supported swing with the attacking weapon')
+            timing = weapon.St()
+            if (type(timing) not in (int,float) or timing <= 0
+                    or self.end_time-self.start_time != max(1,timing-self.strategy.timing_adjustment())
+                    or type(reach) not in (int,float) or reach <= 0):
+                raise ValueError('Break weapon timing or reach is invalid')
+            from melee_combat import effective_melee_reach_meters
+            expected = effective_melee_reach_meters(actor.current,weapon.current)
+            if not math.isclose(reach,expected,rel_tol=1e-12,abs_tol=1e-12):
+                raise ValueError('Break weapon reach differs from native Being/weapon dimensions')
+            from melee_combat import MeleeStrike
+            # A legal response may be chosen against an opponent's accepted
+            # but not yet started Action. Choices are authoritative scheduler
+            # state; checking only pending_action_list incorrectly rejected
+            # that interval before its first one-second activation boundary.
+            declarations=[encounter.universe.get_event_by_id(aid)
+                          for aid in encounter.pending_action_list]
+            book=encounter._choice_book
+            for choice in book._choices.values():
+                if choice.view.state not in ('accepted','executing'):
+                    continue
+                declarations.extend(member.action for member in choice.members
+                                    if type(member.action) is MeleeStrike)
+            declarations={row.id:row for row in declarations if type(row) is MeleeStrike}.values()
+            attacks=[row for row in declarations if type(row) is MeleeStrike
+                and row.actor_id==defender.id and row.target_id==actor.id
+                and row.instrument_id==victim_weapon.id
+                and math.ceil(row.end_time)==math.ceil(self.end_time)+1]
+            if len(attacks)!=1:
+                raise ValueError('Break weapon must resolve in the second before the targeted weapon attack')
+            return PreparedSchedule.from_action(self)
+        if self.event_type == 'disarm':
+            from encounter import Encounter
+            if type(encounter) is not Encounter or encounter.progression_mode!='transactional':
+                raise ValueError('Disarm requires the native transactional Encounter pathway')
+            actor,defender=encounter.get_being(self.actor_id),encounter.get_being(self.target_id)
+            from weapon import WeaponInstance
+            weapon=self.get_instrument()
+            target_weapon=encounter.universe.get_object_by_id(object.__getattribute__(self,'__dict__').get('disarm_weapon_id'))
+            motion=object.__getattribute__(self,'__dict__').get('disarm_motion')
+            reach=object.__getattribute__(self,'__dict__').get('reach')
+            if (actor is None or defender is None or actor is defender
+                    or self.actor_id not in encounter.being_list or self.target_id not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id,self.target_id)):
+                raise ValueError('Disarm requires two aware participating Beings')
+            if (type(weapon) is not WeaponInstance or weapon.id not in actor.armed_with(encounter.universe).values()
+                    or type(target_weapon) is not WeaponInstance
+                    or target_weapon.id not in defender.armed_with(encounter.universe).values()):
+                raise ValueError('Disarm requires an attacking held weapon and a specifically held target weapon')
+            if (actor.current.skills.weapon_skills.get(weapon.original.obj_type,0)<=1
+                    or motion not in ('swing','thrust') or motion not in weapon.get_melee_types()):
+                raise ValueError('armed Disarm requires advanced weapon skill and a supported attack motion')
+            timing=weapon.St() if motion=='swing' else weapon.Tt()
+            if (type(timing) not in (int,float) or timing<=0
+                    or self.end_time-self.start_time!=max(1,timing-self.strategy.timing_adjustment())
+                    or type(reach) not in (int,float) or not math.isfinite(reach) or reach<=0):
+                raise ValueError('Disarm timing or reach is invalid')
+            from melee_combat import effective_melee_reach_meters
+            if not math.isclose(reach,effective_melee_reach_meters(actor.current,weapon.current),rel_tol=1e-12,abs_tol=1e-12):
+                raise ValueError('Disarm reach differs from native Being/weapon dimensions')
+            return PreparedSchedule.from_action(self)
         if self.instrument_id is not None and self.event_type not in ('swing', 'thrust'):
             if encounter.universe.get_object_by_id(self.instrument_id) is None:
                 raise ValueError('action instrument must be an existing Object')

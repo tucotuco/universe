@@ -113,6 +113,144 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertFalse(committed.facts.effects)
         self.assertEqual(committed.facts.metadata, (('distance', .2),))
 
+    def test_touch_uses_one_yard_hex_occupancy_without_requiring_facing(self):
+        from arena_hex_map import ArenaHexLayout,HexAddress,encounter_map_descriptor
+        layout=ArenaHexLayout.rectangle(4,4)
+        self.enc.map=encounter_map_descriptor(layout)
+        center=layout.center_position(HexAddress(1,1))
+        self.a.set_position(CartesianPosition(center.x-.1,center.y,0))
+        self.b.set_position(CartesianPosition(center.x+.1,center.y,0))
+        self.a.hex_facing=0
+        self.enc.enable_transactional_progression(quiescent=True)
+        action=Action(self.world,0,1,'touch',self.a.id,self.b.id,None);action.end_time=1
+        self.enc.schedule_action(action)
+        iterator=iter([15,1])
+        def roll(ctx,dice):
+            value=next(iterator);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(1)
+        facts=self.enc.inspect_committed(1).action(action.id).facts
+        self.assertEqual(facts.outcome,'touched')
+        self.assertAlmostEqual(facts.metadata[0][1],.2)
+
+    def test_native_strike_object_applies_hardness_and_publishes_object_hp(self):
+        from object import ObjectDefinition, ObjectInstance
+        target = ObjectInstance(ObjectDefinition('authored hardwood target', 12, 12, 12,
+            20, 1, 2, 6), name='Hardwood test target')
+        target.set_position(CartesianPosition(.5, 0, 0))
+        self.world.add_object(target)
+        self.enc.add_object(target.id)
+        self.enc.mark_aware(self.a.id, target.id)
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon = self.world.get_object_by_id(self.w1)
+        action = Action(self.world, 0, 1, 'strike object', self.a.id, target.id, self.w1)
+        action.object_motion = 'thrust'
+        from melee_combat import effective_melee_reach_meters
+        action.reach = effective_melee_reach_meters(self.a.current, weapon.current)
+        action.end_time = max(1, math.ceil(weapon.Tt()))
+        self.enc.schedule_action(action)
+        # Critical confirmation, then ordinary and critical damage dice.
+        iterator = iter([20, 20, 4, 4])
+        def roll(ctx, dice):
+            value = next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(action.end_time)
+        receipt = self.enc.inspect_committed(action.end_time).action(action.id)
+        self.assertEqual(receipt.facts.outcome, 'critical')
+        object_damage = next(effect.amount for effect in receipt.facts.effects
+                             if type(effect) is DamageEffect and effect.component == 'object')
+        self.assertEqual(object_damage, 6)
+        self.assertEqual(target.hit_points(), 0)
+
+    def test_simultaneous_object_strikes_apply_hardness_per_blow_and_sum_atomically(self):
+        from object import ObjectDefinition, ObjectInstance
+        target=ObjectInstance(ObjectDefinition('test copper plate',12,12,12,20,1,1,20),
+                              name='test copper plate')
+        target.set_position(CartesianPosition(1.0,0,0));self.world.add_object(target)
+        self.enc.add_object(target.id)
+        for being in (self.a,self.b):self.enc.mark_aware(being.id,target.id)
+        self.enc.enable_transactional_progression(quiescent=True)
+        actions=[]
+        for actor,weapon_id in ((self.a,self.w1),(self.b,self.w3)):
+            weapon=self.world.get_object_by_id(weapon_id)
+            action=Action(self.world,0,1,'strike object',actor.id,target.id,weapon_id)
+            action.object_motion='thrust'
+            from melee_combat import effective_melee_reach_meters
+            action.reach=effective_melee_reach_meters(actor.current,weapon.current)
+            action.end_time=math.ceil(weapon.Tt());self.enc.schedule_action(action);actions.append(action)
+        def roll(ctx,dice):
+            value=15 if dice=='1d20' else 3
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(max(math.ceil(a.end_time) for a in actions))
+        inspected=self.enc.inspect_committed(max(math.ceil(a.end_time) for a in actions))
+        impacts=[effect for action in actions for effect in inspected.action(action.id).effects
+                 if type(effect.effect) is DamageEffect and effect.effect.component=='object']
+        self.assertEqual([row.effect.amount for row in impacts],[2,2])
+        self.assertEqual(target.hit_points(),16)
+
+    def test_native_disarm_releases_same_weapon_into_defender_hex_atomically(self):
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon=self.world.get_object_by_id(self.w1)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
+        action.disarm_weapon_id=self.w3
+        action.disarm_motion='thrust'
+        from melee_combat import effective_melee_reach_meters
+        action.reach=effective_melee_reach_meters(self.a.current,weapon.current)
+        action.end_time=weapon.Tt()
+        self.enc.schedule_action(action)
+        iterator=iter([20,1])
+        def roll(ctx,dice):
+            value=next(iterator);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(action.end_time)
+        receipt=self.enc.inspect_committed(action.end_time).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertEqual(self.b.current.body_parts['right hand'],None)
+        self.assertNotIn(self.w3,self.b.weapons)
+        dropped=self.world.get_object_by_id(self.w3)
+        self.assertIsNone(dropped.parent_container_id)
+        self.assertEqual(dropped.get_position(),self.b.get_position())
+        self.assertIs(dropped,self.world.get_object_by_id(self.w3))
+
+    def test_native_break_weapon_uses_pending_attack_motion_and_disables_it_next_boundary(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.enc.enable_transactional_progression(quiescent=True)
+        from melee_combat import effective_melee_reach_meters
+        attacking=self.world.get_object_by_id(self.w1)
+        victim=self.world.get_object_by_id(self.w3)
+        # Test-authored durability makes the adopted break threshold explicit.
+        victim.current.hit_points=1; victim.current.hardness=0
+        duration=max(1,math.ceil(attacking.St()))
+        follow=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,motion='thrust',reach=2)
+        follow.end_time=duration+1
+        self.enc.schedule_action(follow)
+        breaker=Action(self.world,0,1,'break weapon',self.a.id,self.b.id,self.w1)
+        breaker.break_weapon_id=self.w3; breaker.break_motion='swing'
+        breaker.reach=effective_melee_reach_meters(self.a.current,attacking.current)
+        breaker.end_time=duration
+        self.enc.schedule_action(breaker)
+        iterator=iter([15,4,4])
+        def roll(ctx,dice):
+            value=next(iterator);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):
+            self.enc.step(math.ceil(breaker.end_time))
+        receipt=self.enc.inspect_committed(math.ceil(breaker.end_time)).action(breaker.id)
+        self.assertEqual(receipt.facts.outcome,'broken')
+        self.assertEqual(victim.hit_points(),0)
+        # Breaking is committed in an earlier second. The already scheduled
+        # attack then resolves normally as unavailable due to its broken weapon.
+        self.enc.step(math.ceil(follow.end_time))
+        later=self.enc.inspect_committed(math.ceil(follow.end_time)).action(follow.id)
+        self.assertEqual(later.facts.outcome,'weapon_unavailable')
+
     def test_native_armed_feint_is_half_timing_nondamaging_and_bonus_is_one_followup(self):
         self.b.set_position(CartesianPosition(.2, 0, 0))
         self.a.current.skills.weapon_skills['Dagger'] = 2
@@ -215,6 +353,32 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(fatal_receipt.facts.outcome, 'fatal')
         self.assertTrue(any(type(effect).__name__ == 'FatalEffect'
                             for effect in fatal_receipt.facts.effects))
+
+    def test_coup_and_helpless_targets_already_scheduled_attack_resolve_simultaneously(self):
+        from states import StatesList
+        self.b.set_position(CartesianPosition(.2,0,0))
+        states=StatesList();states.load_states(str(ROOT/'src/config/states.tsv'));self.b.stun(states)
+        self.enc.enable_transactional_progression(quiescent=True)
+        from melee_combat import effective_melee_reach_meters
+        defender_weapon=self.world.get_object_by_id(self.w3)
+        incoming=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,motion='thrust',reach=2)
+        self.enc.schedule_action(incoming)
+        weapon=self.world.get_object_by_id(self.w1)
+        coup=Action(self.world,0,1,'coup de grace',self.a.id,self.b.id,self.w1)
+        coup.coup_motion='thrust';coup.reach=effective_melee_reach_meters(self.a.current,weapon.current)
+        coup.end_time=weapon.Tt();self.enc.schedule_action(coup)
+        def roll(ctx,dice):
+            value=(15 if ctx.action_id==incoming.id and dice=='1d20' else
+                   2 if dice.startswith('1d') else 1)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(math.ceil(coup.end_time))
+        receipt=self.enc.inspect_committed(math.ceil(coup.end_time))
+        self.assertEqual(receipt.action(coup.id).facts.outcome,'fatal')
+        self.assertIn(incoming.id,receipt.actions)
+        self.assertEqual(receipt.action(incoming.id).facts.outcome,'normal')
+        self.assertTrue(any(type(effect).__name__=='FatalEffect'
+                            for effect in receipt.action(coup.id).facts.effects))
 
     def test_nested_views_frozen_and_detached(self):
         self.schedule(self.strike()); s = self.snapshot()

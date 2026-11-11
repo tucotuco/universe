@@ -115,13 +115,12 @@ def _distance_to_hex_prism(position, center, vertex_offsets):
     return math.hypot(planar, position.z - center.z)
 
 
-def melee_hex_path_status(source, target, reach, path, layout, facing=None):
-    """Resolve Being targetability by positive overlap with its occupied hex.
+def melee_hex_occupancy_path_status(source, target, reach, path, layout):
+    """Check reach to an occupied Being hex without imposing facing.
 
-    The occupied address comes from the target's authoritative impact-time
-    point and the native finite layout's deterministic edge-tie policy. The
-    reach envelope must penetrate the hex interior: exact tangency is out of
-    reach. This changes no intervening-path, defense, or hit rules.
+    Touch uses the native hex occupancy boundary, but revision 61 does not
+    make Touch directional. Exact tangency is out of reach and path uncertainty
+    remains conservative.
     """
     from spatial.state import CartesianPosition
     from arena_hex_map import HexAddress
@@ -138,20 +137,28 @@ def melee_hex_path_status(source, target, reach, path, layout, facing=None):
                                         layout.vertex_offsets_meters)
     if not separation < reach:
         return 'out_of_reach', distance
-    if facing is None:
-        return 'unplaced', distance
-    try:
-        from hex_facing import FacingSector, classify_vector, validate_facing
-        validate_facing(facing)
-        if classify_vector(facing, (target.x - source.x,
-                                    target.y - source.y, target.z - source.z)) is not FacingSector.FRONT:
-            return 'not_facing', distance
-    except ValueError:
-        return 'not_facing', distance
     if path is None:
         return ('uncertain_path' if source == target else 'unplaced'), distance
     if path.intersections:
         return 'blocked', distance
     if path.unmodeled_entity_ids:
         return 'uncertain_path', distance
+    return 'in_reach', distance
+
+
+def melee_hex_path_status(source, target, reach, path, layout, facing=None):
+    """Resolve Being melee targetability by occupied hex, then facing."""
+    from spatial.state import CartesianPosition
+    from hex_facing import FacingSector, classify_vector, validate_facing
+    status, distance = melee_hex_occupancy_path_status(source,target,reach,path,layout)
+    if status != 'in_reach':
+        return status, distance
+    if facing is None:
+        return 'unplaced', distance
+    try:
+        validate_facing(facing)
+        if classify_vector(facing,(target.x-source.x,target.y-source.y,target.z-source.z)) is not FacingSector.FRONT:
+            return 'not_facing', distance
+    except ValueError:
+        return 'not_facing', distance
     return 'in_reach', distance

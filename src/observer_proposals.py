@@ -518,9 +518,9 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
         PostCommitNotificationIntent, AwarenessEffect, PracticeEffect)
     # Core combat effects have already been validated by native reconciliation.
     from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect,
-        DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect)
+        DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect)
     accepted += (DamageEffect, FatalEffect, ProtectionEffect, DefenseEffect,
-                 ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect)
+                 ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect)
     for row in rows:
         _check(type(row) is IdentifiedEffect and type(row.identity) is EffectIdentity, 'invalid staged effect')
         key = row.identity

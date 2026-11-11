@@ -65,6 +65,7 @@ _SUPPORTED_TAGS = frozenset({
     'experience.BatchSkillUse', 'action_evaluation.IdentifiedEffect',
     'action_evaluation.EffectIdentity', 'action_evaluation.AwarenessEffect',
     'action_evaluation.PracticeEffect', 'observer_proposals.LifecycleEffect',
+    'action_evaluation.DropObjectEffect',
     'observer_proposals.ActionOutcomeEffect',
     'action_settlement.TargetCandidate',
     'encounter_inspection.CommittedBoundaryRecord',
@@ -218,7 +219,7 @@ class _Graph:
                                      CandidateSkillTransition)
         from experience import SkillUse, BatchSkillUse
         from action_evaluation import (IdentifiedEffect, EffectIdentity,
-                                       AwarenessEffect, PracticeEffect)
+                                       AwarenessEffect, PracticeEffect, DropObjectEffect)
         from observer_proposals import LifecycleEffect, ActionOutcomeEffect
         from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger
         if tag == 'abilities.Abilities':
@@ -301,6 +302,7 @@ class _Graph:
         elif tag == 'experience.SkillUse': obj = SkillUse(**values)
         elif tag == 'experience.BatchSkillUse': obj = BatchSkillUse(**values)
         elif tag == 'action_evaluation.IdentifiedEffect': obj = IdentifiedEffect(**values)
+        elif tag == 'action_evaluation.DropObjectEffect': obj = DropObjectEffect(**values)
         elif tag == 'action_evaluation.EffectIdentity': obj = EffectIdentity(**values)
         elif tag == 'action_evaluation.AwarenessEffect': obj = AwarenessEffect(**values)
         elif tag == 'action_evaluation.PracticeEffect': obj = PracticeEffect(**values)

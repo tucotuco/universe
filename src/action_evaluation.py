@@ -248,7 +248,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -275,10 +275,12 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if not cancelled and math.ceil(end) < boundary:
             raise EvaluationIntegrityError('stale pending Action')
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
-        family = ('melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
+        family = ('disarm' if type(action) is Action and ad['event_type']=='disarm' else
+                  'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
+                  'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
                   else families[type(action)])
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
-        for key in ('reach','feint_motion','feint_source_action_id','coup_motion','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool'):
             if key in ad:
                 selected[key] = freeze(ad[key])
@@ -540,6 +542,12 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
             raise UnsupportedEvaluation('non-Being combat target lacks a native saving-throw contract')
+        if (a.family == 'object_strike' and a.data['event_type'] == 'strike object'
+                and snapshot.entity(a.target_id).category == 'being'):
+            raise EvaluationIntegrityError('Strike an object requires an Object target')
+        if (a.family == 'object_strike' and a.data['event_type'] == 'break weapon'
+                and snapshot.entity(a.target_id).category != 'being'):
+            raise EvaluationIntegrityError('Break weapon requires its aware Being opponent')
         if snapshot.entity(a.actor_id).category != 'being':
             raise EvaluationIntegrityError('Action actor must be a Being')
         for key in (a.target_id, a.instrument_id):
@@ -629,6 +637,15 @@ class ReadyWeaponEffect:
     target_id: str  # acting Being
     object_id: str
     hand: str
+
+
+@dataclass(frozen=True)
+class DropObjectEffect:
+    """Release an exact native Object to an explicitly resolved ground point."""
+    source_action_id: str
+    target_id: str
+    owner_id: str
+    position: tuple
 
 
 @dataclass(frozen=True)
@@ -840,8 +857,16 @@ def _combat(snapshot, action, rng, dependencies):
                     length_inches=actor.data.get('length')) * INCHES_TO_METERS
             except ValueError:
                 outcome = 'unsupported_reach'
-            if outcome is None and distance > reach:
-                outcome = 'out_of_reach'
+            if outcome is None:
+                from arena_hex_map import layout_from_encounter_map
+                layout = layout_from_encounter_map(snapshot.encounter_map)
+                if layout is None:
+                    if distance > reach: outcome = 'out_of_reach'
+                else:
+                    from action_calculations import melee_hex_occupancy_path_status
+                    status, _ = melee_hex_occupancy_path_status(actor.position, target.position,
+                        reach, snapshot.physical_path(actor.id,target.id), layout)
+                    if status != 'in_reach': outcome = status
             if outcome is None:
                 attack_total = rng.roll('1d20') + actor.data['strategy']['attack']
                 defense_total = rng.roll('1d20') + target.data['strategy']['defense']
@@ -856,7 +881,7 @@ def _combat(snapshot, action, rng, dependencies):
             outcome = 'unable_to_act'
         elif target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
-        elif action.instrument_id not in actor.data['held']:
+        elif action.instrument_id not in actor.data['held'] or weapon is None or weapon.hp <= 0:
             outcome = 'weapon_unavailable'
         elif status != 'in_reach':
             outcome = status
@@ -982,6 +1007,142 @@ def _combat(snapshot, action, rng, dependencies):
         effects.append(PracticeEffect(action.id, actor.id, weapon.data['original_type'], 10))
     affected = tuple(dict.fromkeys((target.id,) + tuple(e.target_id for e in effects if hasattr(e, 'target_id'))))
     return ActionProposal(action.id, actor.id, affected, outcome, tuple(effects), tuple(dependencies), tuple(meta))
+
+
+def _object_strike(snapshot, action, rng):
+    """Resolve the adopted immobile, nonmagical Object branch transactionally."""
+    actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    weapon = snapshot.entity(action.instrument_id)
+    if action.data['event_type'] == 'break weapon':
+        defender = target
+        victim_weapon = snapshot.entity(action.data['break_weapon_id'])
+        following = [row for row in snapshot.actions.values()
+            if row.family == 'melee' and row.actor_id == defender.id
+            and row.target_id == actor.id and row.instrument_id == victim_weapon.id
+            and row.boundary == action.boundary + 1]
+        if len(following) != 1:
+            return ActionProposal(action.id,actor.id,(defender.id,),
+                'no_prior_second_attack',metadata=())
+        distance=snapshot.distance(actor.id,defender.id)
+        metadata=() if distance is None else (('distance',distance),)
+        if actor.hp<=0 or actor.data['fatigue_level']>=5:
+            return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=metadata)
+        if (victim_weapon.id not in defender.data['held'] or weapon.id not in actor.data['held']
+                or weapon.hp<=0 or victim_weapon.hp<=0):
+            return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=metadata)
+        status,distance=snapshot.melee_status(action)
+        if status!='in_reach':
+            return ActionProposal(action.id,actor.id,(defender.id,),status,metadata=metadata)
+        hardness=victim_weapon.data.get('hardness')
+        source_hardness=weapon.data.get('hardness')
+        if any(type(x) not in (int,float) or x<0 for x in (hardness,source_hardness)):
+            return ActionProposal(action.id,actor.id,(defender.id,),'unsupported_object',metadata=metadata)
+        motion='S'; attack_die=weapon.data['attacks'][motion]['d']
+        following_motion = following[0].data['event_type']
+        defender_die=victim_weapon.data['attacks']['S' if following_motion == 'swing' else 'T']['d']
+        skill=actor.data['weapon_skills'].get(weapon.data['original_type'],0)
+        adjustment=actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
+        if adjustment is None:
+            return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=metadata)
+        def hits(roll,dc):
+            return attack_hits(roll,skill+actor.data['strategy']['attack']-defender.data['strategy']['attack'],0,dc-adjustment)
+        outcome=hit_outcome(snapshot.difficulty,rng.roll,hits,lambda dc:True,lambda dc:True)
+        effects=[]
+        if outcome in ('normal','critical'):
+            own_raw=rng.roll(f'1d{attack_die}')+action.data['strategy']['extra_damage']
+            if outcome=='critical':own_raw+=rng.roll(f'1d{attack_die}')
+            other_raw=(rng.roll(f'1d{defender_die}')
+                       +following[0].data['strategy']['extra_damage'])
+            total_raw=own_raw+other_raw
+            threshold=hardness+victim_weapon.hp
+            breaks=total_raw>=threshold
+            victim_loss=victim_weapon.hp if breaks else (total_raw-hardness if total_raw>hardness else 0)
+            effects.append(DamageEffect(action.id,victim_weapon.id,victim_loss,'object'))
+            own_threshold=source_hardness+weapon.hp
+            if breaks and own_threshold< threshold:
+                effects.append(DamageEffect(action.id,weapon.id,weapon.hp,'object'))
+            outcome='broken' if breaks else 'normal'
+        targets=tuple(sorted({defender.id,*(e.target_id for e in effects)}))
+        return ActionProposal(action.id,actor.id,targets,outcome,tuple(effects),metadata=metadata)
+    distance = snapshot.distance(actor.id, target.id)
+    metadata = () if distance is None else (('distance', distance),)
+    if actor.hp <= 0 or actor.data['fatigue_level'] >= 5:
+        return ActionProposal(action.id, actor.id, (target.id,), 'unable_to_act', metadata=metadata)
+    hardness = target.data.get('hardness')
+    if type(hardness) not in (int, float) or hardness < 0 or target.hp <= 0:
+        return ActionProposal(action.id, actor.id, (target.id,), 'unsupported_object', metadata=metadata)
+    # The first native adapter deliberately handles unattended, stationary,
+    # non-magical Objects. Attended/magic saving-throw branches need their
+    # subject-specific save rules and are rejected before any random draw.
+    if target.data.get('parent_container_id') is not None:
+        return ActionProposal(action.id, actor.id, (target.id,), 'attended_object', metadata=metadata)
+    if weapon.category != 'weapon' or weapon.hp <= 0 or action.instrument_id not in actor.data['held']:
+        return ActionProposal(action.id, actor.id, (target.id,), 'weapon_unavailable', metadata=metadata)
+    if distance is None or actor.position is None or target.position is None:
+        return ActionProposal(action.id, actor.id, (target.id,), 'unplaced')
+    if distance > action.data['reach']:
+        return ActionProposal(action.id, actor.id, (target.id,), 'out_of_reach', metadata=metadata)
+    path = snapshot.physical_path(actor.id, target.id)
+    if path is not None and path.intersections:
+        return ActionProposal(action.id, actor.id, (target.id,), 'blocked', metadata=metadata)
+    if path is not None and path.unmodeled_entity_ids:
+        return ActionProposal(action.id, actor.id, (target.id,), 'uncertain_path', metadata=metadata)
+    motion = action.data['object_motion']
+    attack = weapon.data['attacks']['S' if motion == 'swing' else 'T']['d']
+    adjustment = actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
+    if adjustment is None:
+        return ActionProposal(action.id, actor.id, (target.id,), 'unable_to_act', metadata=metadata)
+    skill = actor.data['weapon_skills'].get(weapon.data['original_type'], 0)
+    def hits(roll, dc):
+        return attack_hits(roll, skill + actor.data['strategy']['attack'], 0, dc - adjustment)
+    # An immobile unattended object has no independent save; doubled natural
+    # 20 uses the ordinary critical confirmation rule against that same DC.
+    outcome = hit_outcome(snapshot.difficulty, rng.roll, hits,
+                          lambda dc: True, lambda dc: True)
+    effects = ()
+    if outcome in ('normal', 'critical'):
+        potential = attack
+        raw = [0]
+        def collect(amount, critical): raw[0] += amount + critical
+        damage_path(outcome, potential, action.data['strategy']['extra_damage'], rng.roll,
+                    lambda amount: amount, lambda amount: amount, collect)
+        amount = raw[0] - hardness if raw[0] > hardness else 0
+        effects = (DamageEffect(action.id, target.id, amount, 'object'),)
+    return ActionProposal(action.id, actor.id, (target.id,), outcome,
+                          effects, metadata=metadata)
+
+
+def _disarm(snapshot, action, rng):
+    actor,defender=snapshot.entity(action.actor_id),snapshot.entity(action.target_id)
+    attacker_weapon=snapshot.entity(action.instrument_id)
+    target_weapon=snapshot.entity(action.data['disarm_weapon_id'])
+    distance=snapshot.distance(actor.id,defender.id)
+    metadata=[] if distance is None else [('distance',distance)]
+    if actor.hp<=0 or actor.data['fatigue_level']>=5:
+        return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
+    if (attacker_weapon.hp<=0 or action.instrument_id not in actor.data['held']
+            or target_weapon.hp<=0 or target_weapon.id not in defender.data['held']):
+        return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
+    status,distance=snapshot.melee_status(action)
+    if status!='in_reach':
+        return ActionProposal(action.id,actor.id,(defender.id,),status,metadata=tuple(metadata))
+    skill=actor.data['weapon_skills'].get(attacker_weapon.data['original_type'],0)
+    if skill<=1:
+        return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
+    adjustment=actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
+    if adjustment is None:
+        return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
+    attacker_total=rng.roll('1d20')+skill+actor.data['strategy']['attack']-adjustment
+    defender_total=rng.roll('1d20')+defender.data['strategy']['defense']+5
+    margin=attacker_total-defender_total
+    metadata.extend((('margin',margin),('maximum_landing_hexes',max(0,margin//3))))
+    if margin<=0:
+        return ActionProposal(action.id,actor.id,(defender.id,),'failure',metadata=tuple(metadata))
+    if defender.position is None:
+        return ActionProposal(action.id,actor.id,(defender.id,),'unplaced',metadata=tuple(metadata[:-1]))
+    effect=DropObjectEffect(action.id,target_weapon.id,defender.id,defender.position.as_tuple())
+    return ActionProposal(action.id,actor.id,tuple(sorted((defender.id,target_weapon.id))),
+        'disarmed',(effect,),metadata=tuple(metadata))
 
 
 def pickup_eligibility(snapshot, action):
@@ -1217,7 +1378,7 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    if any(a.family not in ('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon') for a in selected):
+    if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     pickup_status = {action.id: pickup_eligibility(snapshot, action)
                      for action in selected if action.lifecycle == 'pending'
@@ -1249,6 +1410,10 @@ def evaluate_snapshot(snapshot, action_ids=None):
             defense_effects.extend(proposal.defenses)
         elif action.family in ('combat', 'melee'):
             proposal = _combat(snapshot, action, rng, tuple(d for d in defense_effects if d.strike_id == action.id))
+        elif action.family == 'object_strike':
+            proposal = _object_strike(snapshot, action, rng)
+        elif action.family == 'disarm':
+            proposal = _disarm(snapshot,action,rng)
         elif action.family == 'pickup':
             status = pickup_status[action.id]
             if status is not None:

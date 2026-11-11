@@ -4,11 +4,11 @@ Reads require the same quiescent/coordinated closure as publication. Frozen
 receipt metadata supplies historical context; HP/practice remain Target-owned.
 No resolver, random generator, ledger realization or completion hook is called.
 """
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 import importlib
 
-from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation)
 from spatial.state import CartesianPosition
 
@@ -153,6 +153,9 @@ def _expected_body_parts(meta, target_id, initial):
         effect = row.effect
         if type(effect) is ReadyWeaponEffect and effect.target_id == target_id:
             expected[effect.hand] = effect.object_id
+        elif type(effect) is DropObjectEffect and effect.owner_id == target_id:
+            for slot,value in tuple(expected.items()):
+                if value==effect.target_id:expected[slot]=None
     return expected
 
 
@@ -161,7 +164,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',
@@ -237,6 +240,9 @@ def prepare_record(encounter, candidate, anchors, events):
             projectile_states[effect.target_id]=ProjectileBoundaryState(effect.source_action_id,
                 candidate.boundary,CartesianPosition(*effect.release_position),'in_flight',
                 effect.impact_time,source_identity)
+        elif type(effect) is DropObjectEffect:
+            entities[effect.target_id]=replace(entities[effect.target_id],
+                position=CartesianPosition(*effect.position))
     for update in candidate.projectile_updates:
         projectile_states[update.object_id]=update.state
     return detached(CommittedBoundaryRecord(candidate.start_checkpoint.start, candidate.boundary,
@@ -287,7 +293,10 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
         _require(detached(current['hit_points']) == target.projected_hp, 'unreceipted Target HP change')
         picked_up = any(type(row.effect) is PickupEffect and row.effect.object_id == key
                         for row in meta.effects.values())
+        dropped=next((row.effect for row in meta.effects.values()
+                      if type(row.effect) is DropObjectEffect and row.effect.target_id==key),None)
         expected_position=(None if picked_up else
+                           CartesianPosition(*dropped.position) if dropped is not None else
                            meta.projectile_states[key].position if key in meta.projectile_states
                            else meta.entities[key].position)
         _require(detached(None if obj.spatial_state is None else obj.spatial_state.position) == expected_position, 'unreceipted position change')
@@ -297,6 +306,12 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                 _require(actor is not None and key in actor.possessions
                     and obj.parent_container_id==actor.id and obj.spatial_state is None,
                     'unreceipted Pick up custody transfer')
+            if type(row.effect) is DropObjectEffect and row.effect.target_id==key:
+                owner=objects.get(row.effect.owner_id)
+                _require(owner is not None and key not in owner.weapons
+                    and key not in tuple(owner.current.body_parts.values())
+                    and obj.parent_container_id is None and obj.get_position()==CartesianPosition(*row.effect.position),
+                    'unreceipted native Disarm release')
         if key in meta.projectile_states:
             _require(obj.__dict__.get('_atomic_projectile_history',())[-1] == meta.projectile_states[key],
                      'unreceipted projectile boundary state')
@@ -504,9 +519,10 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
             copied=detached(row)
             _require(fingerprint(copied) == issued[2], 'committed receipt altered')
             copies.append(copied)
-        authorized_pickup_ids={row.effect.object_id
+        authorized_spatial_transition_ids={
+            row.effect.object_id if type(row.effect) is PickupEffect else row.effect.target_id
             for copied in copies for row in copied.inspection.effects.values()
-            if type(row.effect) is PickupEffect}
+            if type(row.effect) in (PickupEffect, DropObjectEffect)}
         if boundary is not None:
             _require(type(boundary) is int, 'integer committed boundary required')
         if receipt is not None:
@@ -603,8 +619,12 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
             for key, anchor in meta.target_anchors.items():
                 obj = objects.get(key)
                 native_data(obj, _OBJECTS)
+                # Custody transitions may replace an Object's native spatial
+                # record (ground -> carried, or held -> ground). Each such
+                # identity change must be backed by an issued receipt; the
+                # latest live position/custody is independently checked below.
                 spatial_identity_ok=(id(obj.spatial_state)==anchor[2]
-                    or (key in authorized_pickup_ids and obj.spatial_state is None))
+                    or key in authorized_spatial_transition_ids)
                 _require(detached(obj.id) == key and id(obj) == anchor[0] and id(obj.current) == anchor[1]
                     and spatial_identity_ok, 'Target identity changed')
                 storage = obj.__dict__.get('_atomic_target_history')

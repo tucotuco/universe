@@ -43,7 +43,7 @@ _ARENA_TAGS = frozenset({
     'action_evaluation.ActionView','action_evaluation.EffectIdentity',
     'action_evaluation.IdentifiedEffect','action_evaluation.DamageEffect',
     'action_evaluation.ProtectionEffect','action_evaluation.PickupEffect',
-    'action_evaluation.ReadyWeaponEffect','action_evaluation.PracticeEffect',
+    'action_evaluation.ReadyWeaponEffect','action_evaluation.DropObjectEffect','action_evaluation.PracticeEffect',
     'observer_proposals.ActionOutcomeEffect','observer_proposals.LifecycleEffect',
     'observer_proposals.ReservationReleaseEffect',
     'observer_proposals.ObserverProjection','frozen_practice.PracticeProjection',

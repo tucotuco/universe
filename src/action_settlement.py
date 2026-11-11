@@ -11,7 +11,7 @@ from types import MappingProxyType
 from spatial.state import CartesianPosition
 
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
-    EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect,
+    EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, EffectIdentity, IdentifiedEffect,
     RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
@@ -80,8 +80,8 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect)
-_FAMILIES = frozenset(('combat', 'melee', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'observe_group', 'history_request'))
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect)
+_FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
@@ -91,6 +91,11 @@ _OUTCOMES = {
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
         'parried', 'dodged', 'success', 'failure', 'ineligible_target'},
+    'object_strike': frozenset(('normal', 'critical', 'broken', 'miss', 'spectacular miss', 'drop weapon',
+        'weapon_unavailable', 'unable_to_act', 'unsupported_object', 'attended_object',
+        'unplaced', 'out_of_reach', 'blocked', 'uncertain_path','no_prior_second_attack')),
+    'disarm': frozenset(('disarmed','failure','unable_to_act','weapon_unavailable','unplaced',
+        'out_of_reach','not_facing','blocked','uncertain_path')),
     'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
@@ -101,7 +106,7 @@ _OUTCOMES = {
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
 }
-_METADATA = {'combat': ('distance',), 'melee': ('distance',), 'defense': (), 'run': ('displacement',),
+_METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
                       'racial_action_bonus', 'effective_dc', 'observation_id',
                       'objective_key', 'evidence_kind', 'visible_count'),
@@ -150,6 +155,11 @@ def _effect(effect):
     if type(effect) is ReadyWeaponEffect:
         _identity(values['object_id'])
         _require(values['hand'] in ('left hand', 'right hand'), 'unsupported native Ready weapon hand')
+    if type(effect) is DropObjectEffect:
+        _identity(values['owner_id'])
+        _require(type(values['position']) is tuple and len(values['position'])==3,
+                 'invalid native disarm landing position')
+        for value in values['position']:_number(value)
     for key in ('component', 'layer', 'skill', 'observed_id', 'basis', 'kind'):
         if key in values:
             _identity(values[key])
@@ -221,7 +231,7 @@ def _copy_proposal(proposal, actions, entities):
     metadata = freeze(_tuple(proposal.metadata))
     _require(all(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is str for pair in metadata), 'invalid outcome metadata')
     if action.family == 'combat' and action.data.get('event_type') == 'touch':
-        touch_outcomes = {'touched', 'missed', 'unplaced', 'out_of_reach', 'unsupported_reach'}
+        touch_outcomes = {'touched', 'missed', 'unplaced', 'out_of_reach', 'unsupported_reach', 'blocked', 'uncertain_path'}
         _require(proposal.outcome in touch_outcomes
                  and not proposal.effects and not proposal.defenses,
                  'Touch must resolve only its opposed contact result')
@@ -257,6 +267,19 @@ def _copy_proposal(proposal, actions, entities):
         if proposal.outcome == 'ineligible_target':
             _require(not proposal.effects and not proposal.defenses,
                      'ineligible Coup de grace has no effects')
+    if action.family == 'disarm':
+        _require(proposal.outcome in ('disarmed','failure','unable_to_act','weapon_unavailable',
+            'unplaced','out_of_reach','not_facing','blocked','uncertain_path'),
+            'unsupported Disarm outcome')
+        drops=[e for e in proposal.effects if type(e) is DropObjectEffect]
+        _require(len(drops)==int(proposal.outcome=='disarmed'),
+                 'Disarm custody effect does not match its opposed roll')
+        if proposal.outcome in ('disarmed','failure'):
+            values=dict(metadata)
+            _require(type(values.get('margin')) is int
+                     and values.get('maximum_landing_hexes')==max(0,values['margin']//3)
+                     and ((values['margin']>0) if proposal.outcome=='disarmed' else values['margin']<=0),
+                     'Disarm outcome contradicts opposed attack-roll margin')
     names = tuple(pair[0] for pair in metadata)
     _require(len(set(names)) == len(names) and set(names).issubset(_METADATA[action.family]), 'unsupported metadata (no Target HP on Actions)')
     effects = tuple(_effect(e) for e in _tuple(proposal.effects))
@@ -266,7 +289,7 @@ def _copy_proposal(proposal, actions, entities):
     if action.lifecycle == 'cancelled':
         _require(not effects and not defenses, 'interrupted Action may not propose active effects')
     expected_targets = set(() if action.target_id is None else (action.target_id,))
-    if action.family in ('combat', 'melee', 'throw'):
+    if action.family in ('combat', 'melee', 'object_strike', 'disarm', 'throw'):
         expected_targets.update(e.target_id for e in effects)
     if action.family == 'pickup':
         expected_targets.update(e.target_id for e in effects)
@@ -321,6 +344,16 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
                  and entities[effect.object_id].category in ('object', 'weapon', 'armor'),
                  'Pick up effect does not transfer its declared Object to its actor')
         return effect.target_id, ('pickup', action.id, effect.object_id)
+    if type(effect) is DropObjectEffect:
+        _identity(effect.owner_id)
+        _require(action.family=='disarm' and proposal.outcome=='disarmed'
+            and effect.owner_id==action.target_id and effect.target_id==action.data.get('disarm_weapon_id')
+            and recipient.category=='weapon' and entities[effect.owner_id].category=='being'
+            and effect.target_id in entities[effect.owner_id].data.get('held',())
+            and entities[effect.owner_id].position is not None
+            and effect.position==entities[effect.owner_id].position.as_tuple(),
+            'Disarm release differs from the frozen target weapon or legal defender hex')
+        return effect.target_id,('disarm_drop',action.id,effect.target_id,effect.owner_id)
     if type(effect) is ReadyWeaponEffect:
         _identity(effect.object_id)
         _require(action.family == 'ready_weapon' and proposal.outcome == 'success'
@@ -372,7 +405,10 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             'projectile release contradicts the adopted frozen launch calculation')
         return effect.target_id, ('projectile_release', action.id, effect.target_id)
     if type(effect) in (DamageEffect, FatalEffect, ProtectionEffect):
-        _require(action.family in ('combat', 'melee') and proposal.outcome in ('normal', 'critical', 'hit self', 'fatal'), 'damage/protection on an inapplicable Action')
+        allowed_damage_outcomes=('normal','critical','hit self','fatal')
+        if action.family=='object_strike' and action.data.get('event_type')=='break weapon':
+            allowed_damage_outcomes=allowed_damage_outcomes+('broken',)
+        _require(action.family in ('combat', 'melee', 'object_strike') and proposal.outcome in allowed_damage_outcomes, 'damage/protection on an inapplicable Action')
         body_id = action.actor_id if proposal.outcome == 'hit self' else action.target_id
         body = entities[body_id]
         if type(effect) is FatalEffect:
@@ -380,8 +416,20 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             return effect.target_id, ('fatal', action.id, effect.target_id)
         if type(effect) is DamageEffect:
             _number(effect.amount, nonnegative=True)
-            _require(effect.component in ('body', 'critical_bypass', 'shield', 'armor'), 'unsupported damage component')
+            _require(effect.component in ('body', 'critical_bypass', 'shield', 'armor', 'object'), 'unsupported damage component')
             layer = effect.component
+            if layer == 'object':
+                valid_target = (effect.target_id == action.target_id if action.data.get('event_type') == 'strike object'
+                    else action.data.get('event_type') == 'break weapon' and effect.target_id in
+                        (action.instrument_id,action.data.get('break_weapon_id'))
+                        and (effect.target_id in actor.data.get('held',()) or effect.target_id in body.data.get('held',())))
+                _require(action.family == 'object_strike' and proposal.outcome in ('normal','critical','broken')
+                         and valid_target
+                         and recipient.category in ('object','weapon','armor')
+                         and type(recipient.data.get('hardness')) in (int,float)
+                         and recipient.data['hardness'] >= 0,
+                         'Object damage lacks supported target hardness and strike provenance')
+                return effect.target_id, ('object_damage', action.id, effect.target_id)
             if layer in ('body', 'critical_bypass'):
                 _require(effect.target_id == body_id, 'body/self-hit recipient contradicts Action')
                 if layer == 'critical_bypass':
@@ -443,6 +491,9 @@ def _validate_complete_outcome(proposal, action, entities):
     ready = [e for e in effects if type(e) is ReadyWeaponEffect]
     _require(len(ready) == int(action.family == 'ready_weapon' and proposal.outcome == 'success'),
              'missing/extra native Ready weapon equipment effect')
+    drops=[e for e in effects if type(e) is DropObjectEffect]
+    _require(len(drops)==int(action.family=='disarm' and proposal.outcome=='disarmed'),
+             'missing/extra native Disarm custody release')
     releases = [e for e in effects if type(e) is ProjectileReleaseEffect]
     _require(len(releases) == int(action.family == 'throw' and proposal.outcome == 'released'),
              'missing/extra projectile release contribution')
@@ -469,6 +520,16 @@ def _validate_complete_outcome(proposal, action, entities):
     damage = [e for e in effects if type(e) is DamageEffect]
     fatals = [e for e in effects if type(e) is FatalEffect]
     _require(len(fatals) == int(proposal.outcome == 'fatal'), 'missing/extra fatal effect')
+    if action.family == 'object_strike':
+        object_impacts=[e for e in damage if e.component == 'object']
+        expected = int(proposal.outcome in ('normal','critical','broken'))
+        _require(len(object_impacts) >= expected and len(object_impacts) <= expected+1
+                 and len(effects) == len(object_impacts),
+                 'Object strike damage does not match its native outcome')
+    if action.family=='disarm' and proposal.outcome=='disarmed':
+        _require(dict(proposal.metadata).get('margin',0)>0
+                 and drops[0].target_id==action.data.get('disarm_weapon_id'),
+                 'Disarm does not release its specifically declared weapon')
     if action.family in ('combat', 'melee') and proposal.outcome in ('normal', 'critical', 'hit self'):
         _require(sum(e.component == 'body' for e in damage) == 1, 'missing body contribution')
         _require(sum(e.component == 'critical_bypass' for e in damage) == int(proposal.outcome == 'critical'), 'missing/extra critical bypass')
@@ -544,6 +605,10 @@ def reconcile_boundary(snapshot, result):
             _require(key is None or key in entities, 'unknown Action reference')
         if action.family in ('combat', 'melee'):
             _require(action.target_id is not None and entities[action.target_id].category == 'being', 'non-Being combat adapter remains unsupported')
+        if action.family == 'object_strike' and action.data.get('event_type') == 'strike object':
+            _require(action.target_id is not None and entities[action.target_id].category in ('object','weapon','armor'), 'Strike an object requires a native Object target')
+        if action.family == 'object_strike' and action.data.get('event_type') == 'break weapon':
+            _require(action.target_id is not None and entities[action.target_id].category == 'being', 'Break weapon requires a Being defender')
     due = {key for key, action in actions.items() if action.boundary == snapshot.boundary}
     _require(all(actions[key].start < snapshot.boundary for key in due), 'due Action has not started')
     proposals = {}

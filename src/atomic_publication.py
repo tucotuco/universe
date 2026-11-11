@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -556,6 +556,41 @@ def _make_plan(encounter,candidate,rng_owner):
         updated_tags=dict(obj.current.tags)
         updated_tags.pop(NATIVE_DRAW_LOCATION_TAG, None)
         plan.contents('targets',obj.current.tags,updated_tags)
+    disarm_drops=[row.effect for row in supported.boundary.effects.values()
+                  if type(row.effect) is DropObjectEffect]
+    if len({effect.target_id for effect in disarm_drops})!=len(disarm_drops):
+        raise PublicationRejected('simultaneous Disarm claims the same native weapon')
+    from spatial.state import SpatialState
+    dropped_spatial_states={}
+    by_owner={}
+    for effect in disarm_drops:
+        owner=objects.get(effect.owner_id);obj=objects.get(effect.target_id)
+        if (type(owner) is not BeingInstance or type(obj) is not WeaponInstance
+                or effect.target_id not in tuple(owner.current.body_parts.values())
+                or effect.target_id not in owner.weapons or obj.parent_container_id not in (None,owner.id)
+                or obj.spatial_state is not None):
+            raise PublicationRejected('Disarm target custody changed before atomic release')
+        slots=[slot for slot,value in owner.current.body_parts.items() if value==effect.target_id]
+        if len(slots)!=1:
+            raise PublicationRejected('Disarm target does not occupy exactly one native hand/body slot')
+        by_owner.setdefault(owner.id,[]).append((owner,obj,effect,slots[0]))
+        dropped_spatial_states[effect.target_id]=SpatialState(CartesianPosition(*effect.position))
+    for owner_id,rows in by_owner.items():
+        owner=objects[owner_id]
+        body_parts=dict(owner.current.body_parts)
+        weapons=list(owner.weapons)
+        possessions=list(owner.possessions)
+        for _owner,obj,effect,slot in rows:
+            body_parts[slot]=None
+            if weapons.count(effect.target_id)!=1:
+                raise PublicationRejected('Disarm weapon identity is not uniquely owned')
+            weapons.remove(effect.target_id)
+            if effect.target_id in possessions:possessions.remove(effect.target_id)
+            plan.attr('targets',obj,'parent_container_id',None)
+            plan.attr('targets',obj,'spatial_state',dropped_spatial_states[effect.target_id])
+        plan.contents('targets',owner.current.body_parts,body_parts)
+        plan.contents('targets',owner.weapons,weapons)
+        plan.contents('targets',owner.possessions,possessions)
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}
@@ -588,7 +623,8 @@ def _make_plan(encounter,candidate,rng_owner):
         if obj.current.hit_points!=target.projected_hp:plan.attr('targets',obj.current,'hit_points',target.projected_hp)
         record=TargetIntervalRecord(encounter.id,candidate.boundary,target)
         storage=plan.append('targets',obj,'_atomic_target_history',record)
-        expected_spatial_state=id(None) if key in picked_up_ids else id(obj.spatial_state)
+        expected_spatial_state=(id(None) if key in picked_up_ids else
+            id(dropped_spatial_states[key]) if key in dropped_spatial_states else id(obj.spatial_state))
         target_anchors[key]=(id(obj),id(obj.current),expected_spatial_state,id(storage),id(record),fingerprint(record))
         practice=target.practice_state
         if practice is not None:
