@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 
 
@@ -123,9 +124,20 @@ def _read_object_batch(object_ids: list[str]):
         return
     process = subprocess.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     assert process.stdin and process.stdout
-    for object_id in object_ids:
-        process.stdin.write(object_id.encode("ascii") + b"\n")
-    process.stdin.close()
+
+    def feed_object_ids():
+        try:
+            for object_id in object_ids:
+                process.stdin.write(object_id.encode("ascii") + b"\n")
+        except BrokenPipeError:
+            pass
+        finally:
+            process.stdin.close()
+
+    # Drain stdout as ids are written: filling both pipe buffers in sequence
+    # can deadlock on repositories with enough reachable objects.
+    writer = threading.Thread(target=feed_object_ids, daemon=True)
+    writer.start()
     for object_id in object_ids:
         header = process.stdout.readline().split()
         if len(header) != 3:

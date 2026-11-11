@@ -134,6 +134,17 @@ class PublicationSafetyTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("workspace-state-review", result.stdout)
 
+    def test_full_history_audit_streams_large_object_batches(self):
+        for index in range(1800):
+            (self.repo / f"fixture-{index:04d}.txt").write_text(f"relative record {index}\n")
+        tip = self.commit("large synthetic history fixture")
+        result = subprocess.run(
+            [sys.executable, str(CHECKER), "--history", tip], cwd=self.repo,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("result=PASS", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
