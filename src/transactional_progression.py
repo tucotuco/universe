@@ -463,7 +463,7 @@ def validate_action_contract(encounter,action,*,_force=False):
             or 'on_completed' in data or inspect.getattr_static(type(action),'on_completed',None) is not _NATIVE_HOOKS.get(type(action))
             or any(callable(value) for key,value in data.items() if key!='generate')):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
-    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm'):
+    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','hold','break hold','grapple','grapple escape'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
     if type(action) is Action and data['event_type'] == 'touch' and (
             data.get('instrument_id') is not None
@@ -487,6 +487,12 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or type(data.get('disarm_weapon_id')) is not str
                 or data.get('disarm_motion') not in ('swing','thrust')):
             raise TransactionalProgressionError('native Disarm requires two weapon identities and attack motion')
+    if type(action) is Action and data['event_type'] in ('grab','hold','break hold','grapple','grapple escape'):
+        expected = {'grab': ('touch_action_id','grab_hand'), 'hold': ('grip_id',),
+                    'break hold': ('grip_id',), 'grapple': ('grip_id',),
+                    'grapple escape': ('grapple_id',)}[data['event_type']]
+        if any(type(data.get(key)) is not str or not data[key] for key in expected):
+            raise TransactionalProgressionError('native physical-contact Action lacks its exact source identity or hand')
     if type(action) is ThrowAction:
         if (data.get('event_type') != 'throw' or data.get('target_id') is not None
                 or type(data.get('instrument_id')) is not str
@@ -702,6 +708,9 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                             prepared_rows.append((intent,prepare_movement_intent(
                                 encounter,intent,conditions,duration=duration,
                                 pre_action_snapshot=context.snapshot)))
+                        from movement_intent import validate_grip_relative_movement
+                        validate_grip_relative_movement(tuple(prepared for _,prepared in prepared_rows),
+                                                        context.snapshot)
                         motion={intent.actor_id:prepared.velocity_meters_per_second
                                 for intent,prepared in prepared_rows}
                         facing_updates={intent.actor_id:prepared.facing_update

@@ -11,7 +11,7 @@ FIELD_ADAPTERS = {
         "required": 'abilities'.split(),
     },
     'action.Action': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id break_motion break_weapon_id canceled_at cancellation_reason coup_motion disarm_motion disarm_weapon_id end_time event_type feint_motion feint_source_action_id id instrument_id location name object_motion parent_event_id reach resolution start_position start_time strategy target_id threat_at_schedule type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id break_motion break_weapon_id canceled_at cancellation_reason coup_motion disarm_motion disarm_weapon_id end_time event_type feint_motion feint_source_action_id grab_hand grapple_id grip_id id instrument_id location name object_motion parent_event_id reach resolution start_position start_time strategy target_id threat_at_schedule touch_action_id type universe'.split(),
         "required": 'actor_id end_time event_type instrument_id location name parent_event_id resolution start_time strategy target_id type universe'.split(),
     },
     'action_choice.ChoiceBook': {
@@ -53,6 +53,10 @@ FIELD_ADAPTERS = {
     'action_evaluation.DropObjectEffect': {
         "allowed": 'owner_id position source_action_id target_id'.split(),
         "required": 'owner_id position source_action_id target_id'.split(),
+    },
+    'action_evaluation.GrappleStateEffect': {
+        "allowed": 'actor_id hand kind next_check operation source_action_id state_id target_id'.split(),
+        "required": 'actor_id hand kind next_check operation source_action_id state_id target_id'.split(),
     },
     'action_evaluation.DefenseEffect': {
         "allowed": 'eligible kind source_action_id strike_id success'.split(),

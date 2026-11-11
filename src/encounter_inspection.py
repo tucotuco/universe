@@ -8,7 +8,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 import importlib
 
-from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation)
 from spatial.state import CartesianPosition
 
@@ -164,7 +164,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect GrappleStateEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',

@@ -470,3 +470,36 @@ def prepare_movement_intent(encounter, intent: MovementIntent,
     arrival_time = (distance / rate.meters_per_second
                     if distance <= rate.meters_per_second * duration else None)
     return PreparedMovementIntent(intent, start, velocity, rate, facing_update, arrival_time)
+
+
+def validate_grip_relative_movement(prepared_rows, snapshot):
+    """Refuse only destination plans that increase separation through a live Hold.
+
+    No body geometry or grip-force limit is adopted, so a movement plan that
+    lengthens the represented connection cannot be proven legal. Co-motion,
+    stationary partners, and movement that maintains/reduces their separation
+    remain governed by the ordinary movement rules.
+    """
+    by_actor = {row.intent.actor_id: row for row in prepared_rows}
+    for grip in snapshot.physical_grips:
+        _, holder, held, *_ = grip
+        holder_pos, held_pos = snapshot.entity(holder).position, snapshot.entity(held).position
+        if holder_pos is None or held_pos is None:
+            raise MovementIntentRefusal('grip_unplaced',
+                'movement through a physical Hold cannot be verified without both native positions')
+        before = math.dist(holder_pos.as_tuple(), held_pos.as_tuple())
+        after_positions = {holder: holder_pos, held: held_pos}
+        for actor_id in (holder, held):
+            row = by_actor.get(actor_id)
+            if row is None:
+                continue
+            if row.arrival_time_seconds is not None:
+                end = row.intent.destination
+            else:
+                end = CartesianPosition(*(value + velocity for value, velocity in
+                    zip(row.start_position.as_tuple(), row.velocity_meters_per_second)))
+            after_positions[actor_id] = end
+        after = math.dist(after_positions[holder].as_tuple(),after_positions[held].as_tuple())
+        if after > before + 1e-9:
+            raise MovementIntentRefusal('grip_limit',
+                'destination would increase separation across an active physical Hold; native geometry and force limits are unspecified')

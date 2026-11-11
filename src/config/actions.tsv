@@ -21,6 +21,8 @@ grab being	being	none	False
 grab object	object	none	False
 hold being	being	none	False
 hold object	object	none	False
+grapple	being	none	False
+grapple escape	being	none	False
 launch at being	being	none	True
 launch at object	object	none	False
 multiple action	none	multi-action	False

@@ -343,7 +343,10 @@ class TestNativeMovementIntent(unittest.TestCase):
                        "ready_weapon_action", "spot_available", "spot_reason",
                        "default_equipment_mode", "opponent_strategy", "opponent_melee_action",
                        "opponent_activity", "melee_action", "defense_action",
-                       "opponent_defense_action"}
+                       "opponent_defense_action", "touch_action", "grappling_action",
+                       "contact_wait_available", "contact_status", "contact_check_seconds",
+                       "feint_action", "coup_de_grace_action", "object_strike_action",
+                       "disarm_action"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)

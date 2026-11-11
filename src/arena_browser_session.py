@@ -565,6 +565,30 @@ class GeneratedArenaSession:
         melee_pending = (melee_action is not None and melee_action["status"] == "executing")
         touch_action = self._touch_action_view(candidate, player.native.being)
         touch_pending = touch_action is not None and touch_action["status"] == "executing"
+        grappling_action = self._grappling_action_view(candidate, player.native.being)
+        grappling_pending = grappling_action is not None and grappling_action["status"] == "executing"
+        from physical_contact import active_contact_state
+        active_grips, active_controls = active_contact_state(candidate.encounter)
+        contact_check_boundaries = tuple(row[5] for row in (*active_grips, *active_controls))
+        contact_wait_available = any(boundary >= candidate.encounter.time + 1
+                                     for boundary in contact_check_boundaries)
+        contact_status = []
+        for row in active_grips:
+            _, holder_id, held_id, hand, _, _ = row
+            if holder_id == player.native.being.id:
+                other = candidate.encounter.get_being(held_id)
+                contact_status.append(f"You hold {self._display_names.get(held_id, other.name)} with {hand}")
+            elif held_id == player.native.being.id:
+                other = candidate.encounter.get_being(holder_id)
+                contact_status.append(f"{self._display_names.get(holder_id, other.name)} holds you")
+        for row in active_controls:
+            _, controller_id, controlled_id, _, _, _ = row
+            if controller_id == player.native.being.id:
+                other = candidate.encounter.get_being(controlled_id)
+                contact_status.append(f"You have Grapple control of {self._display_names.get(controlled_id, other.name)}")
+            elif controlled_id == player.native.being.id:
+                other = candidate.encounter.get_being(controller_id)
+                contact_status.append(f"{self._display_names.get(controller_id, other.name)} has Grapple control of you")
         feint_action = self._feint_action_view(candidate, player.native.being)
         feint_pending = feint_action is not None and feint_action["status"] == "executing"
         coup_de_grace_action = self._named_base_action_view(candidate, player.native.being, "coup de grace", "Coup de grace")
@@ -657,6 +681,11 @@ class GeneratedArenaSession:
             "ready_weapon_action": ready_weapon_action,
             "melee_action": melee_action,
             "touch_action": touch_action,
+            "grappling_action": grappling_action,
+            "contact_wait_available": contact_wait_available,
+            "contact_status": contact_status,
+            "contact_check_seconds": (None if not contact_check_boundaries else
+                max(0, min(contact_check_boundaries)-candidate.encounter.time)),
             "feint_action": feint_action,
             "coup_de_grace_action": coup_de_grace_action,
             "object_strike_action": object_strike_action,
@@ -683,6 +712,8 @@ class GeneratedArenaSession:
                                        and self._ready_weapon_action_outcome is None)
                                    or melee_pending
                                    or touch_pending
+                                   or grappling_pending
+                                   or contact_wait_available
                                    or feint_pending
                                    or coup_de_grace_pending
                                    or object_strike_pending
@@ -914,6 +945,41 @@ class GeneratedArenaSession:
                     "seconds_remaining": 0}
         return {"name": "Touch", "status": "completed", "outcome": record.facts.outcome,
                 "seconds_remaining": 0}
+
+    @staticmethod
+    def _grappling_action_view(candidate, player):
+        event_by_id = dict(candidate.universe.event_history)
+        accepted = (set(candidate.encounter.pending_action_list)
+                    | set(candidate.encounter.finished_action_list)
+                    | set(candidate.encounter.cancelled_action_list))
+        active_choices = set()
+        for choice in candidate.encounter._choice_book._choices.values():
+            if choice.view.state not in ("accepted", "executing", "finished"):
+                continue
+            for member in choice.members:
+                if type(member.action) is Action:
+                    event_by_id[member.action.id] = member.action
+                    accepted.add(member.action.id)
+                    if choice.view.state in ("accepted", "executing"):
+                        active_choices.add(member.action.id)
+        actions = [event_by_id.get(action_id) for action_id in accepted]
+        actions = [action for action in actions if type(action) is Action
+                   and action.actor_id == player.id and action.event_type in
+                   ("grab", "hold", "break hold", "grapple", "grapple escape")]
+        action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
+        if action is None:
+            return None
+        label = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold",
+                 "grapple":"Grapple", "grapple escape":"Grapple Escape"}[action.event_type]
+        if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
+            return {"name":label,"status":"executing","outcome":None,
+                    "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time))}
+        try:
+            record = candidate.encounter.inspect_committed(int(action.end_time)).action(action.id)
+        except (ValueError, KeyError, AttributeError):
+            return {"name":label,"status":"completed","outcome":"unavailable","seconds_remaining":0}
+        return {"name":label,"status":"completed","outcome":record.facts.outcome,
+                "seconds_remaining":0}
 
     @staticmethod
     def _player_feint_action(candidate, player):
@@ -1503,6 +1569,112 @@ class GeneratedArenaSession:
             self._selected_entity_handle = handle
             self._trace.native_advance(None, None,
                 f"action=touch opposed=true duration={prepared.end_time-prepared.start_time:g}s")
+            return self._view_unlocked()
+
+    def _grappling_preflight(self, candidate, player, entity_id, evidence,
+                             event_type, hand=None):
+        """Prepare one supported physical-contact Action from player evidence."""
+        from physical_contact import active_contact_state, successful_touch
+        encounter = candidate.encounter
+        target = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if (evidence is None or evidence.category != "being"
+                or evidence.present_state != "present" or target is None
+                or target.id == player.id or not encounter.is_aware(player.id, target.id)):
+            raise ArenaBrowserRequestError("Select a currently perceived opposing Being.")
+        if not encounter.initiated or encounter.progression_mode != "transactional":
+            raise ArenaBrowserRequestError("Activate the native Encounter before physical-contact Actions.")
+        if not _has_native_transactional_action_contract(Action):
+            raise ArenaBrowserRequestError("The native transactional Action contract is unavailable.")
+        grips, controls = active_contact_state(encounter)
+        action_data = {}
+        duration = 1
+        if event_type == "grab":
+            touch = self._player_touch_action(candidate, player)
+            if (touch is None or touch.target_id != target.id
+                    or not successful_touch(encounter, touch.id, player.id, target.id)):
+                raise ArenaBrowserRequestError("Grab requires this player's committed successful Touch of the selected Being.")
+            slots = object.__getattribute__(player, "__dict__").get("current")
+            body_parts = getattr(slots, "body_parts", {}) if slots is not None else {}
+            occupied = {row[3] for row in grips if row[1] == player.id}
+            free_hands = [name for name in ("left hand", "right hand")
+                          if name in body_parts and not body_parts[name] and name not in occupied]
+            if hand not in free_hands:
+                raise ArenaBrowserRequestError("Choose an explicitly represented free native hand.")
+            action_data.update(grab_hand=hand, touch_action_id=touch.id)
+        elif event_type == "hold":
+            matching = [row for row in grips if row[1] == player.id
+                        and row[2] == target.id and row[5] == encounter.time + 1]
+            if len(matching) != 1:
+                raise ArenaBrowserRequestError("Hold maintenance is available only one second before this grip's six-second check.")
+            action_data["grip_id"] = matching[0][0]
+        elif event_type == "break hold":
+            matching = [row for row in grips if row[1] == target.id and row[2] == player.id]
+            if len(matching) != 1:
+                raise ArenaBrowserRequestError("Break hold requires exactly one identified physical grip on the player from this Being.")
+            action_data["grip_id"] = matching[0][0]
+        elif event_type == "grapple":
+            matching = [row for row in grips if row[1] == player.id and row[2] == target.id]
+            if len(matching) != 1:
+                raise ArenaBrowserRequestError("Grapple requires one established physical Grip on the selected Being.")
+            if any(row[2] == target.id for row in controls):
+                raise ArenaBrowserRequestError("This Being is already under an established Grapple control.")
+            if matching[0][5] != encounter.time + 6:
+                raise ArenaBrowserRequestError("Initial Grapple resolves at the prerequisite Grip's next six-second check.")
+            action_data["grip_id"] = matching[0][0]
+            duration = 6
+        elif event_type == "grapple escape":
+            matching = [row for row in controls if row[1] == target.id and row[2] == player.id]
+            if len(matching) != 1:
+                raise ArenaBrowserRequestError("Grapple Escape requires one established Grapple control by this Being.")
+            if matching[0][5] != encounter.time + 6:
+                raise ArenaBrowserRequestError("Grapple Escape resolves at the established control's next six-second check.")
+            action_data["grapple_id"] = matching[0][0]
+            duration = 6
+        else:
+            raise ArenaBrowserRequestError("Unsupported native physical-contact Action.")
+        if (encounter._choice_book.actor_planned_now(player.id)
+                or any(getattr(candidate.universe.get_event_by_id(action_id), "actor_id", None) == player.id
+                       for action_id in encounter.pending_action_list)
+                or self._melee_action_pending(candidate, self._player_melee_action(candidate, player))
+                or self._melee_action_pending(candidate, self._player_touch_action(candidate, player))):
+            raise ArenaBrowserRequestError("The player already has an accepted Action resolving.")
+        action = Action(candidate.universe, encounter.time, encounter.time + duration,
+                        event_type, player.id, target.id, None)
+        for name, value in action_data.items():
+            setattr(action, name, value)
+        action.end_time = encounter.time + duration
+        prepared = encounter.prepare_action(action)
+        return action, prepared
+
+    def choose_grappling(self, payload):
+        if (type(payload) is not dict or set(payload) - {"handle", "action", "hand"}
+                or not {"handle", "action"}.issubset(payload)
+                or type(payload.get("handle")) is not str
+                or payload.get("action") not in ("grab", "hold", "break hold", "grapple", "grapple escape")
+                or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))):
+            raise ArenaBrowserRequestError("Physical-contact Action request is malformed.")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing a physical-contact Action.")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key, value in self._view_handles.items()
+                              if value == payload["handle"]), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("Player-owned perception evidence is unavailable.")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            action, prepared = self._grappling_preflight(
+                candidate, player, entity_id, evidence, payload["action"], payload.get("hand"))
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "Native physical-contact Choice refused; Arena state is unchanged.") from exc
+            self._selected_entity_handle = payload["handle"]
+            self._trace.native_advance(None, None,
+                f"action={payload['action']} duration={prepared.end_time-prepared.start_time:g}s")
             return self._view_unlocked()
 
     def _melee_strike_preflight(self, candidate, player, entity_id, evidence, motion,
@@ -2363,6 +2535,53 @@ class GeneratedArenaSession:
                     "status":status,"display_name":"Break weapon"+
                     (f" ({duration:g} s)" if duration is not None else ""),"reason":reason,
                     "target":target_view,"duration_seconds":duration})
+                continue
+            elif name.casefold() in ("grab being", "hold being", "break hold", "grapple", "grapple escape"):
+                event_type = {"grab being":"grab", "hold being":"hold",
+                              "break hold":"break hold", "grapple":"grapple",
+                              "grapple escape":"grapple escape"}[name.casefold()]
+                display = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold",
+                           "grapple":"Grapple", "grapple escape":"Grapple Escape"}[event_type]
+                duration = 6 if event_type in ("grapple", "grapple escape") else 1
+                target_view = (None if selected is None else {"handle":handle,
+                    "name":selected["name"],"type":selected["type"],
+                    "present_state":selected["present_state"]})
+                status, reason = "unavailable", "Select a currently perceived opposing Being."
+                hands = []
+                if selected is not None and selected.get("category") == "being":
+                    try:
+                        if event_type == "grab":
+                            slots = object.__getattribute__(player, "__dict__").get("current")
+                            body_parts = getattr(slots, "body_parts", {}) if slots is not None else {}
+                            from physical_contact import active_contact_state
+                            active_grips, _ = active_contact_state(candidate.encounter)
+                            occupied = {row[3] for row in active_grips if row[1] == player.id}
+                            hands = [part for part in ("left hand", "right hand")
+                                     if part in body_parts and not body_parts[part] and part not in occupied]
+                            if not hands:
+                                raise ArenaBrowserRequestError("No explicitly represented free native hand is available.")
+                            _, prepared = self._grappling_preflight(
+                                candidate, player, entity_id, evidence, event_type, hands[0])
+                        else:
+                            _, prepared = self._grappling_preflight(
+                                candidate, player, entity_id, evidence, event_type)
+                        status = "available"
+                        duration = prepared.end_time - prepared.start_time
+                        reason = {
+                            "grab":"One-second opposed native Grab after this player's committed successful Touch; the selected free hand becomes one distinct Grip.",
+                            "hold":"One-second maintenance check for this Grip at its six-second due boundary.",
+                            "break hold":"One-second opposed 3d6 + Strength contest against this Being's Grip on you.",
+                            "grapple":"Six-second initial Grapple check at the prerequisite Grip's next maintenance boundary.",
+                            "grapple escape":"Six-second opposed Escape check at the existing Grapple control boundary; Escape Artist adds to your check.",
+                        }[event_type]
+                    except ArenaBrowserRequestError as exc:
+                        reason = str(exc)
+                catalog_rows.append({"name":name,"group":"Physical contact",
+                    "target_type":"being","required_skill":source_row["required_skill"],
+                    "is_melee":source_row["is_melee"],"status":status,
+                    "display_name":f"{display} ({duration:g} s)","reason":reason,
+                    "target":target_view,"hands":hands,"duration_seconds":duration,
+                    "event_type":event_type})
                 continue
             elif name.casefold() == "grab object":
                 reason = ("The legacy Grab object catalog Action is not admitted for this use. "
@@ -3384,6 +3603,13 @@ class GeneratedArenaSession:
             melee_pending = self._melee_action_pending(candidate, melee_action)
             touch_action = self._player_touch_action(candidate, player)
             touch_pending = self._melee_action_pending(candidate, touch_action)
+            grappling_action = self._grappling_action_view(candidate, player)
+            grappling_pending = (grappling_action is not None
+                                  and grappling_action["status"] == "executing")
+            from physical_contact import active_contact_state
+            active_grips, active_controls = active_contact_state(candidate.encounter)
+            contact_wait_pending = any(row[5] >= before_time + 1
+                                       for row in (*active_grips, *active_controls))
             feint_action = self._player_feint_action(candidate, player)
             feint_pending = self._melee_action_pending(candidate, feint_action)
             coup_pending = self._melee_action_pending(candidate,
@@ -3405,6 +3631,8 @@ class GeneratedArenaSession:
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
                     and not touch_pending
+                    and not grappling_pending
+                    and not contact_wait_pending
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
@@ -3421,6 +3649,8 @@ class GeneratedArenaSession:
                              and self._ready_weapon_action_outcome is None)
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
+                    and not grappling_pending
+                    and not contact_wait_pending
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
@@ -3435,6 +3665,8 @@ class GeneratedArenaSession:
                              and self._ready_weapon_action_outcome is None)
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
+                    and not grappling_pending
+                    and not contact_wait_pending
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
@@ -3444,6 +3676,8 @@ class GeneratedArenaSession:
                     and self._ready_weapon_action_outcome is not None and not melee_pending
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
+                    and not grappling_pending
+                    and not contact_wait_pending
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending

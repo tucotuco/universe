@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 sys.path.insert(0, str(ROOT / "src"))
 
 from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
+from action import Action
 from melee_defense import MeleeDefense
 from arena_web import ArenaSession, make_handler
 from atomic_publication import RNGCursor
@@ -258,7 +259,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             completed_path = Path(directory) / "completed-arena.json"
             completed_path.write_bytes(completed_wire)
             restore_code = (
-                "import json,sys; import tests.test_generated_arena_browser; "
+                "import base64,json,sys; import tests.test_generated_arena_browser; "
                 "from arena_browser_session import GeneratedArenaSession; "
                 "s=GeneratedArenaSession(root_seed_factory=lambda:3); "
                 "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
@@ -276,6 +277,189 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         after_load = restored.load_encounter_bytes(completed_wire)
         self.assertEqual(after_load["touch_action"], completed["touch_action"])
         self.assertEqual(after_load["time_seconds"], 2)
+
+    def test_grab_selector_http_receipt_and_fresh_process_hold_continuation(self):
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("function submitGrappling(action,handle,hand=null)", page)
+        self.assertIn("/api/generated/grappling", page)
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 7)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience":"10000","width_cells":"5","height_cells":"5",
+            "opponent_strategy":"none"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        opponent = candidate.participants[1].native.being
+        # Test-authored contact geometry: two explicitly generated Beings stand
+        # 10 cm apart within one Arena hex; this does not define production anatomy.
+        from spatial.state import CartesianPosition
+        player.current.skills.skills["improved grapple"] = 100
+        opponent.current.skills.skills["escape artist"] = 1000
+        p = player.get_position()
+        opponent.set_position(CartesianPosition(p.x + .1, p.y, p.z))
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        status, state = self.request("/api/generated/advance", {"seconds":1})
+        self.assertEqual(status, 200)
+        handle = next(row["handle"] for row in state["entities"]
+                      if row["category"] == "being")
+        status, selected = self.request("/api/generated/inspect", {"handle":handle})
+        self.assertEqual(status, 200)
+        status, accepted_touch = self.request("/api/generated/touch", {"handle":handle})
+        self.assertEqual(status, 200)
+        status, touched = self.request("/api/generated/advance", {"seconds":1})
+        self.assertEqual(status, 200)
+        self.assertEqual(touched["touch_action"]["outcome"], "touched")
+        row = next(item for item in touched["action_catalog"]["entries"]
+                   if item["name"] == "grab being")
+        self.assertEqual(row["status"], "available")
+        status, accepted = self.request("/api/generated/grappling", {
+            "action":"grab","handle":handle,"hand":"left hand"})
+        self.assertEqual(status, 200)
+        grab_action = next(member.action for choice in candidate.encounter._choice_book._choices.values()
+                           for member in choice.members
+                           if type(member.action) is Action and member.action.event_type == "grab")
+        self.assertNotIn(grab_action.id, json.dumps(accepted))
+        self.assertNotIn(opponent.id, json.dumps(accepted))
+        status, grabbed = self.request("/api/generated/advance", {"seconds":1})
+        self.assertEqual(status, 200)
+        self.assertEqual(grabbed["grappling_action"]["outcome"], "success")
+        from physical_contact import active_contact_state
+        grip_before = active_contact_state(candidate.encounter)[0]
+        self.assertEqual(len(grip_before), 1)
+        self.assertEqual(grip_before[0][3], "left hand")
+        wire = self.session.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            saved_path = Path(directory) / "arena-grip.json"
+            saved_path.write_bytes(wire)
+            continuation = (
+                "import base64,json,sys; import tests.test_generated_arena_browser; "
+                "from arena_browser_session import GeneratedArenaSession; "
+                "from physical_contact import active_contact_state; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:99); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "v=None; [ (v:=s.advance_one_second()) for _ in range(5) ]; "
+                "e=next(x for x in v['entities'] if x['category']=='being'); "
+                "s.inspect_entity({'handle':e['handle']}); "
+                "v=s._view_unlocked(); "
+                "r=next(x for x in v['action_catalog']['entries'] if x['name']=='hold being'); "
+                "assert r['status']=='available',r; "
+                "s.choose_grappling({'action':'hold','handle':e['handle']}); "
+                "v=s.advance_one_second(); "
+                "print(json.dumps({'time':v['time_seconds'],'action':v['grappling_action'],"
+                "'grips':active_contact_state(s.active_candidate.encounter)[0],"
+                "'rng':s._rng_cursor.state,'save':base64.b64encode(s.save_encounter_bytes()).decode()}))")
+            child = subprocess.run([sys.executable,"-c",continuation,str(saved_path)],
+                cwd=ROOT,check=True,capture_output=True,text=True)
+        continued = json.loads(child.stdout)
+        self.assertEqual(continued["time"], 9)
+        self.assertEqual(continued["action"]["outcome"], "success")
+        self.assertEqual(continued["grips"][0][0], grip_before[0][0])
+        self.assertEqual(continued["grips"][0][5], 15)
+        continuation_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, continuation_dir)
+        hold_path = continuation_dir / "arena-held.json"
+        hold_path.write_bytes(__import__("base64").b64decode(continued["save"]))
+        prepare_grapple = (
+            "import base64,json,sys; import tests.test_generated_arena_browser; "
+            "from arena_browser_session import GeneratedArenaSession; "
+            "s=GeneratedArenaSession(root_seed_factory=lambda:101); "
+            "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+            "v=s._view_unlocked(); e=next(x for x in v['entities'] if x['category']=='being'); "
+            "s.inspect_entity({'handle':e['handle']}); "
+            "r=next(x for x in s._view_unlocked()['action_catalog']['entries'] if x['name']=='grapple'); "
+            "assert r['status']=='available',r; "
+            "s.choose_grappling({'action':'grapple','handle':e['handle']}); "
+            "print(base64.b64encode(s.save_encounter_bytes()).decode())")
+        pending_grapple = subprocess.run([sys.executable,"-c",prepare_grapple,str(hold_path)],
+            cwd=ROOT,check=True,capture_output=True,text=True)
+        pending_path = continuation_dir / "arena-grapple-preparation.json"
+        pending_path.write_bytes(__import__("base64").b64decode(pending_grapple.stdout))
+        resolve_grapple = (
+            "import base64,json,sys; import tests.test_generated_arena_browser; "
+            "from arena_browser_session import GeneratedArenaSession; "
+            "from physical_contact import active_contact_state; "
+            "s=GeneratedArenaSession(root_seed_factory=lambda:102); "
+            "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+            "[ (v:=s.advance_one_second()) for _ in range(6) ]; "
+            "print(json.dumps({'time':v['time_seconds'],'action':v['grappling_action'],"
+            "'contact':active_contact_state(s.active_candidate.encounter),"
+            "'save':base64.b64encode(s.save_encounter_bytes()).decode()}))")
+        resolved_grapple = subprocess.run([sys.executable,"-c",resolve_grapple,str(pending_path)],
+            cwd=ROOT,check=True,capture_output=True,text=True)
+        grapple_result = json.loads(resolved_grapple.stdout)
+        self.assertEqual(grapple_result["time"],15)
+        self.assertEqual(grapple_result["action"]["outcome"],"success")
+        self.assertEqual(len(grapple_result["contact"][0]),1)
+        self.assertEqual(len(grapple_result["contact"][1]),1)
+        grapple_path = continuation_dir / "arena-grapple-established.json"
+        grapple_path.write_bytes(__import__("base64").b64decode(grapple_result["save"]))
+        restored_control = subprocess.run([sys.executable,"-c",
+            "import json,sys; import tests.test_generated_arena_browser; "
+            "from arena_browser_session import GeneratedArenaSession; "
+            "from physical_contact import active_contact_state; "
+            "s=GeneratedArenaSession(root_seed_factory=lambda:103);s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+            "g,c=active_contact_state(s.active_candidate.encounter); "
+            "print(json.dumps({'time':s.active_candidate.encounter.time,'grips':g,'controls':c}))",
+            str(grapple_path)],cwd=ROOT,check=True,capture_output=True,text=True)
+        control_result=json.loads(restored_control.stdout)
+        self.assertEqual(control_result["time"],15)
+        self.assertEqual(control_result["grips"][0][0],continued["grips"][0][0])
+        self.assertEqual(len(control_result["controls"]),1)
+        continue_to_escape = (
+            "import base64,json,sys; import tests.test_generated_arena_browser; "
+            "from arena_browser_session import GeneratedArenaSession; from action import Action; "
+            "from physical_contact import active_contact_state; "
+            "s=GeneratedArenaSession(root_seed_factory=lambda:104); "
+            "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+            "c=active_contact_state(s.active_candidate.encounter)[1][0]; "
+            "p=s.active_candidate.participants[0].native.being; o=s.active_candidate.participants[1].native.being; "
+            "e=Action(s.active_candidate.universe,15,21,'grapple escape',o.id,p.id,None);e.grapple_id=c[0];e.end_time=21; "
+            "s.active_candidate.encounter.schedule_action(e); "
+            "v=None; [(v:=s.advance_one_second()) for _ in range(5)]; "
+            "v=s._view_unlocked(); h=next(x['handle'] for x in v['entities'] if x['category']=='being'); "
+            "s.inspect_entity({'handle':h}); r=next(x for x in s._view_unlocked()['action_catalog']['entries'] if x['name']=='hold being'); "
+            "assert r['status']=='available',r; s.choose_grappling({'action':'hold','handle':h}); "
+            "print(base64.b64encode(s.save_encounter_bytes()).decode())")
+        escape_pending = subprocess.run([sys.executable,"-c",continue_to_escape,str(grapple_path)],
+            cwd=ROOT,check=False,capture_output=True,text=True)
+        self.assertEqual(escape_pending.returncode,0,escape_pending.stderr)
+        escape_path = continuation_dir / "arena-escape-and-hold-pending.json"
+        escape_path.write_bytes(__import__("base64").b64decode(escape_pending.stdout))
+        settle_escape = (
+            "import base64,json,sys; import tests.test_generated_arena_browser; "
+            "from arena_browser_session import GeneratedArenaSession; from action import Action; "
+            "from physical_contact import active_contact_state; "
+            "s=GeneratedArenaSession(root_seed_factory=lambda:105); "
+            "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read()); v=s.advance_one_second(); "
+            "c=active_contact_state(s.active_candidate.encounter); "
+            "e=next(s.active_candidate.universe.get_event_by_id(i) for i in s.active_candidate.encounter.finished_action_list "
+            "if type(s.active_candidate.universe.get_event_by_id(i)) is Action and s.active_candidate.universe.get_event_by_id(i).event_type=='grapple escape'); "
+            "f=s.active_candidate.encounter.inspect_committed(21).action(e.id); "
+            "print(json.dumps({'time':v['time_seconds'],'player_action':v['grappling_action'],"
+            "'escape':f.facts.outcome,'grips':c[0],'controls':c[1],"
+            "'save':base64.b64encode(s.save_encounter_bytes()).decode()}))")
+        settled = subprocess.run([sys.executable,"-c",settle_escape,str(escape_path)],
+            cwd=ROOT,check=True,capture_output=True,text=True)
+        escaped = json.loads(settled.stdout)
+        self.assertEqual(escaped["time"],21)
+        self.assertEqual(escaped["player_action"]["outcome"],"success")
+        self.assertEqual(escaped["escape"],"success")
+        self.assertEqual(len(escaped["grips"]),1)
+        self.assertEqual(escaped["grips"][0][5],27)
+        self.assertEqual(escaped["controls"],[])
+        escaped_path=continuation_dir/"arena-after-escape.json"
+        escaped_path.write_bytes(__import__("base64").b64decode(escaped["save"]))
+        restored_escape=subprocess.run([sys.executable,"-c",
+            "import json,sys; import tests.test_generated_arena_browser; "
+            "from arena_browser_session import GeneratedArenaSession; from physical_contact import active_contact_state; "
+            "s=GeneratedArenaSession(root_seed_factory=lambda:106);s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+            "g,c=active_contact_state(s.active_candidate.encounter);print(json.dumps({'time':s.active_candidate.encounter.time,'grips':g,'controls':c}))",
+            str(escaped_path)],cwd=ROOT,check=True,capture_output=True,text=True)
+        restored_after_escape=json.loads(restored_escape.stdout)
+        self.assertEqual(restored_after_escape["time"],21)
+        self.assertEqual(restored_after_escape["grips"][0][0],escaped["grips"][0][0])
+        self.assertEqual(restored_after_escape["controls"],[])
 
     def test_object_strike_has_shipped_selector_and_native_http_choice(self):
         status,page=self.request("/")

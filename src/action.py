@@ -280,6 +280,64 @@ class Action(Event):
             if not math.isclose(reach,effective_melee_reach_meters(actor.current,weapon.current),rel_tol=1e-12,abs_tol=1e-12):
                 raise ValueError('Disarm reach differs from native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
+        if self.event_type in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape'):
+            from encounter import Encounter
+            from physical_contact import active_contact_state, successful_touch
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('physical contact Actions require native transactional Encounter progression')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            if (actor is None or target is None or actor is target
+                    or self.actor_id not in encounter.being_list or self.target_id not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id, self.target_id)):
+                raise ValueError('physical contact requires two aware participating Beings')
+            if actor.is_helpless() or target.is_helpless():
+                raise ValueError('physical contact requires able participants')
+            grips, controls = active_contact_state(encounter)
+            data = object.__getattribute__(self, '__dict__')
+            if self.event_type == 'grab':
+                hand, touch_id = data.get('grab_hand'), data.get('touch_action_id')
+                if not successful_touch(encounter, touch_id, actor.id, target.id):
+                    raise ValueError('Grab requires a completed successful Touch by this actor against this target')
+                if hand not in ('left hand', 'right hand') or actor.current.body_parts.get(hand, 'missing') is not None:
+                    raise ValueError('Grab requires one explicitly represented free native hand')
+                if any(row[1] == actor.id and row[3] == hand for row in grips):
+                    raise ValueError('Grab requires a hand not maintaining another physical Grip')
+                if self.instrument_id is not None or self.end_time - self.start_time != 1:
+                    raise ValueError('Grab is a separate unarmed one-second Action')
+            elif self.event_type == 'hold':
+                state_id = data.get('grip_id')
+                row = next((r for r in grips if r[0] == state_id and r[1] == actor.id
+                            and r[2] == target.id), None)
+                if row is None or self.end_time - self.start_time != 1 or self.end_time != row[5]:
+                    raise ValueError('Hold maintenance must resolve at its individual six-second due boundary')
+            elif self.event_type == 'break hold':
+                state_id = data.get('grip_id')
+                if not any(r[0] == state_id and r[1] == target.id and r[2] == actor.id
+                           for r in grips):
+                    raise ValueError('Break hold requires one identifiable physical grip on the actor')
+                if self.instrument_id is not None or self.end_time - self.start_time != 1:
+                    raise ValueError('Break hold is a one-second unarmed Action')
+            elif self.event_type == 'grapple':
+                state_id = data.get('grip_id')
+                if not any(r[0] == state_id and r[1] == actor.id and r[2] == target.id
+                           for r in grips):
+                    raise ValueError('Grapple initiation requires an established physical Grab')
+                if self.instrument_id is not None or self.end_time - self.start_time != 6:
+                    raise ValueError('initial Grapple requires separate six-second preparation')
+                grip = next(r for r in grips if r[0] == state_id)
+                if grip[5] != self.end_time:
+                    raise ValueError('Grapple check must coincide with the prerequisite Grip maintenance boundary')
+            else:
+                state_id = data.get('grapple_id')
+                if not any(r[0] == state_id and r[1] == target.id and r[2] == actor.id
+                           for r in controls):
+                    raise ValueError('Grapple Escape requires an established control held over this Being')
+                if self.instrument_id is not None or self.end_time - self.start_time != 6:
+                    raise ValueError('Grapple Escape resolves at the next six-second control check')
+                control = next(r for r in controls if r[0] == state_id)
+                if self.end_time != control[5]:
+                    raise ValueError('Grapple Escape must resolve at the established control check boundary')
+            return PreparedSchedule.from_action(self)
         if self.instrument_id is not None and self.event_type not in ('swing', 'thrust'):
             if encounter.universe.get_object_by_id(self.instrument_id) is None:
                 raise ValueError('action instrument must be an existing Object')

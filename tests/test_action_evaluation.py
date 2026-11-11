@@ -133,6 +133,122 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(facts.outcome,'touched')
         self.assertAlmostEqual(facts.metadata[0][1],.2)
 
+    def test_native_touch_grab_hold_break_grapple_and_escape_use_separate_receipt_state(self):
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0,0,0))
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.body_parts['right hand'] = None
+        self.a.current.skills.skills['improved grapple'] = 3
+        self.b.current.skills.skills['improved grapple'] = 0
+        self.b.current.skills.skills['escape artist'] = 12
+        self.b.set_ability('strength',18)
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        def resolve(action, duration, rolls):
+            action.end_time = action.start_time + duration
+            self.enc.schedule_action(action)
+            values = iter(rolls)
+            def scripted(ctx, dice):
+                value = next(values)
+                ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value))
+                return value
+            with patch.object(_ProvisionalRandom,'roll',scripted):
+                self.enc.step(duration)
+            return self.enc.inspect_committed(self.enc.last_processed_boundary).action(action.id)
+
+        touch1 = Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch1,1,[15,1]).facts.outcome,'touched')
+        grab1 = Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grab1.touch_action_id=touch1.id;grab1.grab_hand='left hand'
+        self.assertEqual(resolve(grab1,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grab1.id,))
+        self.enc.step(5)  # The individual six-second maintenance boundary is second 8.
+        hold = Action(self.world,7,8,'hold',self.a.id,self.b.id,None);hold.grip_id=grab1.id
+        self.assertEqual(resolve(hold,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[0][0][5],14)
+        break_hold = Action(self.world,8,9,'break hold',self.b.id,self.a.id,None)
+        break_hold.grip_id=grab1.id
+        self.assertEqual(resolve(break_hold,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[0],())
+
+        touch2 = Action(self.world,9,10,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch2,1,[15,1]).facts.outcome,'touched')
+        grab2 = Action(self.world,10,11,'grab',self.a.id,self.b.id,None)
+        grab2.touch_action_id=touch2.id;grab2.grab_hand='right hand'
+        self.assertEqual(resolve(grab2,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        grapple = Action(self.world,11,17,'grapple',self.a.id,self.b.id,None)
+        grapple.grip_id=grab2.id
+        self.assertEqual(resolve(grapple,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        controls = active_contact_state(self.enc)[1]
+        self.assertEqual(tuple(row[0] for row in controls),(grapple.id,))
+        # The initial Grapple check substitutes for second-17 maintenance of
+        # the same prerequisite grip; it neither creates a second grip nor
+        # merges physical Hold and control identities.
+        self.assertEqual(len(active_contact_state(self.enc)[0]),1)
+        escape = Action(self.world,17,23,'grapple escape',self.b.id,self.a.id,None)
+        escape.grapple_id=grapple.id
+        self.assertEqual(resolve(escape,6,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(active_contact_state(self.enc)[1],())
+        self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grab2.id,))
+
+    def test_third_party_positive_hp_damage_releases_each_physical_grip_transactionally(self):
+        from physical_contact import active_contact_state
+        from spatial.state import CartesianPosition
+        global_rng_state=random.getstate();self.addCleanup(random.setstate,global_rng_state)
+        random.seed(7)
+        self.a.set_position(CartesianPosition(0,0,0))
+        self.b.set_position(CartesianPosition(.5,0,0))
+        self.a.current.body_parts['left hand']=None
+        self.a.current.body_parts['right hand']=None
+        self.a.current.skills.skills['improved grapple']=100
+        self.b.current.skills.skills['improved grapple']=0
+        third_id=self.world.make_being('Human','Third-party striker')
+        third=self.world.get_object_by_id(third_id)
+        third.set_position(CartesianPosition(-.5,0,0));third.set_geometry(Sphere(.25));third.set_hit_points(100)
+        third_weapon_id=self.world.make_weapon_for_being(third_id,'Dagger','Third-party Dagger')
+        self.world.arm_being(third_id,third_weapon_id,'right hand')
+        fourth_id=self.world.make_being('Human','Second held target')
+        fourth=self.world.get_object_by_id(fourth_id)
+        fourth.set_position(CartesianPosition(.5,.5,0));fourth.set_geometry(Sphere(.25));fourth.set_hit_points(100)
+        fourth.current.skills.skills['improved grapple']=0
+        self.enc.add_being(third_id);self.enc.add_being(fourth_id)
+        for other in (self.a,self.b,third,fourth):
+            for target in (self.a,self.b,third,fourth):
+                if other is not target:self.enc.mark_aware(other.id,target.id)
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        def resolve(action,duration,rolls):
+            action.end_time=action.start_time+duration;self.enc.schedule_action(action)
+            values=iter(rolls)
+            def scripted(ctx,dice):
+                value=next(values);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value));return value
+            with patch.object(_ProvisionalRandom,'roll',scripted):self.enc.step(duration)
+            return self.enc.inspect_committed(self.enc.last_processed_boundary).action(action.id)
+
+        touch_b=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch_b,1,[15,1]).facts.outcome,'touched')
+        grab_b=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grab_b.touch_action_id=touch_b.id;grab_b.grab_hand='left hand'
+        self.assertEqual(resolve(grab_b,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        touch_d=Action(self.world,2,3,'touch',self.a.id,fourth.id,None)
+        self.assertEqual(resolve(touch_d,1,[15,1]).facts.outcome,'touched')
+        grab_d=Action(self.world,3,4,'grab',self.a.id,fourth.id,None)
+        grab_d.touch_action_id=touch_d.id;grab_d.grab_hand='right hand'
+        self.assertEqual(resolve(grab_d,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(len(active_contact_state(self.enc)[0]),2)
+        self.a.set_hit_points(4)
+        strike=MeleeStrike(self.enc,third.id,self.a.id,third_weapon_id,motion='thrust',reach=2)
+        self.assertEqual(resolve(strike,1,[15,4]).facts.outcome,'normal')
+        receipt=self.enc.inspect_committed(self.enc.last_processed_boundary).action(strike.id)
+        releases=[effect for effect in receipt.facts.effects
+                  if type(effect).__name__=='GrappleStateEffect'
+                  and effect.operation=='release']
+        self.assertEqual({effect.state_id for effect in releases},{grab_b.id,grab_d.id})
+        self.assertEqual(len(active_contact_state(self.enc)[0]),0)
+
     def test_native_strike_object_applies_hardness_and_publishes_object_hp(self):
         from object import ObjectDefinition, ObjectInstance
         target = ObjectInstance(ObjectDefinition('authored hardwood target', 12, 12, 12,
