@@ -2,7 +2,7 @@
 
 ## Outcome
 
-This is a substantial native implementation increment, but **U-ARENA-018 is not complete**. Native positional Grapple transitions and Trip now resolve through the transactional Encounter engine, and the shipped Arena browser completed an authentic Touch and Grab against a naturally generated opponent. The required full Chrome sequence through Grapple and a new position transition, plus browser save/reload during that sequence, was not completed. Several explicit requirements below remain open.
+This is a substantial native implementation increment, but **U-ARENA-018 is not complete**. Native positional Grapple transitions and Trip now resolve through the transactional Encounter engine. The generated Arena browser completed Touch → Grab → Grapple → Takedown and a pending-Grapple browser Save/Load continuation in the in-app browser. A separate Chrome tab completed Touch and Grab. Other explicit lifecycle, simultaneous-action, and adjacent-Action requirements below remain open.
 
 No `npc-generator` files were changed and nothing was pushed. Changes were made only to Arena/native combat source and its focused tests. The worktree also contained unrelated tracked deletions, a `TASKS.md` edit, and untracked material; those were left unstaged.
 
@@ -18,7 +18,7 @@ No `npc-generator` files were changed and nothing was pushed. Changes were made 
 
 ## Actual Chrome evidence
 
-On the shipped Arena at `http://127.0.0.1:58011/`, I generated a normal Encounter with root seed `20261197`, 10,000 starting XP, explicit Medium size categories, unequipped start, and no autonomous opponent strategy. These were ordinary generation controls; no character statistics, roll results, Grip, or Grapple state were injected.
+On the shipped Arena in Chrome at `http://127.0.0.1:58011/`, I generated a normal Encounter with root seed `20261197`, 10,000 starting XP, explicit Medium size categories, unequipped start, and no autonomous opponent strategy. These were ordinary generation controls; no character statistics, roll results, Grip, or Grapple state were injected.
 
 | Native Encounter boundary | Browser interaction | Verified result |
 |---:|---|---|
@@ -29,7 +29,25 @@ On the shipped Arena at `http://127.0.0.1:58011/`, I generated a normal Encounte
 
 The opponent popup correctly showed unknown private characteristics because the player's observer evidence did not authorize those details. The browser remained observer-safe.
 
-I attempted to restart the Encounter and repeat the run with Grapple scheduled immediately after Grab. Chrome presented the app's normal discard confirmation; after accepting it, Chrome's control channel began timing out while reconnecting to the local page. I stopped the live-browser attempt there. Thus this is authentic browser evidence for Touch and Grab only; the browser did **not** demonstrate Grapple, Takedown/Reverse/Pin, or browser save/reload in this pass. The missing browser steps are not represented as passed by the HTTP or fixture results.
+The Chrome control session later stopped responding after its native discard-confirmation dialog, so the remaining steps were repeated through the same shipped page in Codex's isolated in-app browser. This is a separate real browser session, not an HTTP-handler or native-fixture simulation.
+
+## Isolated in-app browser evidence
+
+In a clean local browser tab, I generated the same seed (`20261197`, 10,000 XP, 5×5 map, Medium/Medium, unequipped, no autonomous strategy). Map clicks and the player popup drove these actual browser requests and boundaries:
+
+| Boundary | User action | Browser-visible native result |
+|---:|---|---|
+| 0 | Click hex `(4,0)` | Server accepted Walk/turn destination. |
+| 1 | Advance; select current hex center `(3,0)` | Committed position `(3.35, 1.02, 0)` m; new destination was accepted. |
+| 2 | Advance | Exact center `(2.9, 0.91, 0)` m reached. |
+| 2 → 3 | Select visible opponent, open player popup, choose Touch, Advance | `Touch resolved: touched.` |
+| 3 → 4 | Choose Grab with left hand, Advance | `Grab resolved: success.` Status showed the exact native Grip and next check in six seconds. |
+| 4 | Choose initial Grapple | Browser showed accepted six-second Grapple. Save Encounter produced a portable file. |
+| 4 | Load that downloaded file through **Load Encounter** | Browser reported `Encounter loaded. Native state and observer evidence restored.` At time 4 it still displayed the pending Grapple (6 seconds remaining) and same left-hand Grip. |
+| 4 → 10 | Advance six separate one-second boundaries | `Grapple resolved: success.` Status showed control at standing and the next native check. |
+| 10 | Choose Takedown with the offered `prone` position and Advance six boundaries | At time 16, `Takedown resolved: success.` Status showed `advantaged_takedown_top`; no size or geometry defaults were inferred. |
+
+This demonstrates a real generated Encounter browser Save/Load while the initial Grapple is pending, followed by ordinary restored chronology and a committed positional transition. It does not establish a Chrome (rather than in-app browser) Save/Load smoke, nor player selection of Escape/Break hold when the player is the eligible defender.
 
 ## Focused verification
 
@@ -37,6 +55,7 @@ Passed:
 
 - `PYTHONPATH=tests:src:examples .venv/bin/python -m unittest tests.test_action_evaluation.TestActionEvaluation.test_native_touch_grab_hold_break_grapple_and_escape_use_separate_receipt_state tests.test_action_evaluation.TestActionEvaluation.test_native_trip_uses_touch_identity_contest_and_commits_prone_posture tests.test_action_evaluation.TestActionEvaluation.test_failed_initial_grapple_still_atomically_maintains_its_prerequisite_grip` — 3 tests, 36.799 seconds, OK. The existing state-machine test includes successful Takedown, Pin, Reverse, and Escape position transitions.
 - `test_grab_selector_http_receipt_and_fresh_process_hold_continuation` and the generated-Arena seed/optional-size browser-handler test passed in the earlier focused run (4 total tests including the native Touch/Grab state-machine and Trip tests, 57 seconds, OK). This is HTTP/session and fresh-process evidence, not actual Chrome evidence.
+- Actual in-app browser run above: generated Arena, map movement, Touch, Grab, Grapple, pending-Action Save/Load, Grapple completion, and successful Takedown. No test-fixture state mutation was used.
 - `.venv/bin/python -m py_compile` on the modified Arena/native Python modules and `examples/arena_web.py` — passed.
 - `git diff --check` — passed.
 
@@ -67,4 +86,5 @@ Trip cancellation, voluntary Grip release, full browser Grapple flow and save/lo
 
 - `e219bfe` — Add native positional grappling and Trip.
 - `2bc7776` — Expose close-contact state in Arena UI.
-- The report is the remaining uncommitted task artifact. The unrelated `TASKS.md` edit, tracked documentation deletions, and other untracked content were not staged. No unrelated content was included in either commit.
+- `7d43cf1` — Document the initial close-contact increment.
+- This update adds the completed isolated-browser trace and is pending commit. The unrelated `TASKS.md` edit, tracked documentation deletions, and other untracked content remain untouched and unstaged.
