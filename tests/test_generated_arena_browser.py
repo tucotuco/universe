@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 sys.path.insert(0, str(ROOT / "src"))
 
 from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
+from melee_defense import MeleeDefense
 from arena_web import ArenaSession, make_handler
 from atomic_publication import RNGCursor
 from attention_intent import accept_spot_attention
@@ -90,7 +91,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         invalid = b'{"format":"wrong","schema_version":1}'
         self.assertEqual(self.raw_request("/api/generated/profile-upload", invalid)[0], 409)
 
-    def test_dodge_action_http_route_and_shipped_browser_controls(self):
+    def test_target_free_dodge_preparation_http_route_and_shipped_browser_controls(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
         self.assertIn('value="defense_only"', page)
@@ -98,11 +99,13 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("function submitDodge(handle)", page)
         self.assertIn("/api/generated/dodge", page)
         self.assertIn("actionDodge", page)
-        self.assertIn("Native two-second Dodge accepted", page)
+        self.assertIn("Retained native Dodge assigned", page)
+        self.assertIn("Native Dodge preparation accepted", page)
         self.assertIn("function submitBlock(handle,shieldHandle)", page)
         self.assertIn("/api/generated/block", page)
         self.assertIn("actionBlock", page)
         self.assertIn("function submitYield(handle)", page)
+        self.assertIn("/api/generated/parry", page)
         self.assertIn("/api/generated/yield", page)
         self.assertIn("actionYield", page)
 
@@ -112,17 +115,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                 (ROOT / "tests/fixtures/arena/empty.json").read_text()))
         status, generated = self.request("/api/generated/generate", {
             "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
-            "equipment_mode": "equipped", "opponent_strategy": "attack_only"})
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
         self.assertEqual(status, 200)
-        self.assertEqual(generated["opponent_strategy"], "attack_only")
+        self.assertEqual(generated["opponent_strategy"], "none")
         status, activated = self.request("/api/generated/run", {})
         self.assertEqual(status, 200)
         self.assertTrue(activated["advance_available"])
         self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
-        status, attacking = self.request("/api/generated/advance", {"seconds": 1})
-        self.assertEqual(status, 200)
-        self.assertEqual(attacking["opponent_melee_action"]["status"], "executing")
-        handle = next(row["handle"] for row in attacking["entities"]
+        active = activated
+        handle = next(row["handle"] for row in active["entities"]
                       if row["category"] == "being")
         status, selected = self.request("/api/generated/inspect", {"handle": handle})
         self.assertEqual(status, 200)
@@ -146,11 +147,41 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         yield_status, refusal = self.request("/api/generated/yield", {"handle": handle})
         self.assertEqual(yield_status, 409)
         self.assertIn("Choose a native destination away", refusal["error"])
-        status, accepted = self.request("/api/generated/dodge", {"handle": handle})
+        pool = MeleeDefense.dodge_strategy_pool(
+            self.session.active_candidate.participants[0].native.being,
+            self.session.active_candidate.universe)
+        status, accepted = self.request("/api/generated/dodge", {"defense": pool, "timing": 0})
         self.assertEqual(status, 200)
         self.assertEqual(accepted["defense_action"]["status"], "accepted")
         self.assertNotIn("target_action_id", json.dumps(accepted))
         self.assertNotIn("arena-opponent-dodge", json.dumps(accepted))
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        status, ready = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(ready["defense_action"]["status"], "ready")
+
+    def test_target_free_parry_preparation_uses_native_http_session_route(self):
+        status, view = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        weapon_id = next(iter(player.armed_with(candidate.universe).values()))
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        player.set_weapon_skill_level(candidate.universe.get_weapon_dictionary(),
+                                      weapon.original.obj_type, 2)
+        weapon_handle = self.session._view_handles[weapon_id]
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        status, accepted = self.request("/api/generated/parry", {
+            "weapon_handle": weapon_handle, "motion": "thrust"})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted["defense_action"]["status"], "accepted")
+        defense = self.session._latest_melee_defense(candidate, player)
+        self.assertIsNone(defense.target_action_id)
+        self.assertEqual(defense.parry_motion, "thrust")
+        self.assertEqual(accepted["defense_action"]["duration_seconds"], max(1, weapon.Tt() - 1))
 
     def test_attack_only_browser_requests_drive_native_approach_and_thrust(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
@@ -1104,7 +1135,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         action_entries = {row["name"]: row for row in catalog["entries"]}
         with (ROOT / "src/config/actions.tsv").open(encoding="utf-8") as source:
             source_names = {line.split("\t", 1)[0] for line in source.read().splitlines()[1:]}
-        self.assertTrue(source_names.issubset(action_entries))
+        self.assertTrue((source_names - {"parry (armed)", "parry (unarmed)"}).issubset(action_entries))
+        self.assertIn("Parry", action_entries)
         self.assertEqual(action_entries["Run"]["status"], "available")
         self.assertEqual(action_entries["Spot"]["status"], "unavailable")
         self.assertEqual(action_entries["Pick up"]["status"], "unavailable")

@@ -15,7 +15,10 @@ sys.path[:0] = [str(ROOT), str(ROOT / "src"), str(ROOT / "examples")]
 
 from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
 from melee_combat import MeleeStrike
+from melee_combat import effective_melee_reach_meters
 from melee_defense import MeleeDefense
+from spatial.state import CartesianPosition
+from hex_facing import nearest_facing
 
 
 EMPTY_PROFILE = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
@@ -59,6 +62,8 @@ def native_continuation_state(session):
             actions.append((event_id, type(action).__name__, action.actor_id, action.target_id,
                             action.instrument_id, action.start_time, action.end_time,
                             getattr(action, "kind", None), getattr(action, "target_action_id", None),
+                            getattr(action, "prepared_defense_action_id", None),
+                            getattr(action, "parry_motion", None),
                             getattr(action, "ready_at", None), getattr(action, "result", None),
                             getattr(action, "success", None),
                             tuple(getattr(action, "defended_action_ids", ())),
@@ -96,16 +101,81 @@ def continuation_digest(state):
 
 
 class TestArenaOpponentAttack(unittest.TestCase):
+    def test_retained_target_free_parry_uses_selected_defender_motion_and_native_resolution(self):
+        source, candidate, player, opponent, _ = create_session(seed=20261108, strategy="none")
+        player.set_position(CartesianPosition(2, 2, 0))
+        opponent.set_position(CartesianPosition(2.5, 2, 0))
+        player.set_hex_facing(0)
+        opponent.set_hex_facing(6)
+        weapon_id = next(iter(player.armed_with(candidate.universe).values()))
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        player.set_weapon_skill_level(candidate.universe.get_weapon_dictionary(),
+                                      weapon.original.obj_type, 2)
+        weapon_handle = source._view_handles[weapon_id]
+        source.choose_run()
+        source.advance_one_second()
+        accepted = source.choose_parry({"weapon_handle": weapon_handle, "motion": "swing"})
+        preparation = source._latest_melee_defense(candidate, player)
+        self.assertIsNone(preparation.target_action_id)
+        preparation_seconds = max(1, weapon.St() - 1)
+        for _ in range(preparation_seconds):
+            source.advance_one_second()
+        self.assertEqual(source._retained_defense(candidate, player, "parry", weapon_id),
+                         preparation)
+        opponent_weapon_id = source._initial_ready_dagger_id(candidate, opponent)
+        incoming_weapon = candidate.universe.get_object_by_id(opponent_weapon_id)
+        strike = MeleeStrike(candidate.encounter, opponent.id, player.id, incoming_weapon.id,
+            motion="thrust", reach=effective_melee_reach_meters(opponent.current, incoming_weapon.current))
+        candidate.encounter.schedule_action(strike)
+        self.assertEqual(strike._status(candidate.encounter)[0], "in_reach")
+        view = source.advance_one_second()
+        attacker_handle = next(row["handle"] for row in view["entities"]
+                               if row["category"] == "being")
+        source.choose_parry({"handle": attacker_handle,
+                             "weapon_handle": weapon_handle})
+        defense = source._latest_melee_defense(candidate, player)
+        self.assertEqual(defense.prepared_defense_action_id, preparation.id)
+        self.assertEqual(defense.target_action_id, strike.id)
+        self.assertEqual(defense.parry_motion, "swing")
+        wire = source.save_encounter_bytes()
+        restored = GeneratedArenaSession()
+        with mock.patch("npcgen.api.arena_ready_being",
+                        side_effect=AssertionError("Load must not regenerate Parry state")):
+            restored.load_encounter_bytes(wire)
+        remaining = strike.end_time - candidate.encounter.time
+        for _ in range(remaining):
+            source.advance_one_second()
+            restored.advance_one_second()
+            self.assertEqual(native_continuation_state(source),
+                             native_continuation_state(restored))
+        resolved = source._latest_melee_defense(source.active_candidate,
+            source.active_candidate.participants[0].native.being)
+        self.assertIn(resolved.resolution.outcome, ("deflected", "failed"))
+        self.assertEqual(resolved.resolution.defenses[0].kind, "parry")
+
     def test_player_native_dodge_waits_for_observed_strike_and_restores(self):
         trace = io.StringIO()
         source, candidate, player, opponent, _ = create_session(
-            seed=20261107, trace_ui=True, trace_stream=trace)
+            seed=20261107, strategy="none", trace_ui=True, trace_stream=trace)
+        player.set_position(CartesianPosition(2, 2, 0))
+        opponent.set_position(CartesianPosition(2.5, 2, 0))
+        player.set_hex_facing(nearest_facing((0.5, 0, 0)))
+        opponent.set_hex_facing(nearest_facing((-0.5, 0, 0)))
         source.choose_run()
         source.advance_one_second()
+        pool = MeleeDefense.dodge_strategy_pool(player, candidate.universe)
+        source.choose_dodge({"defense": pool, "timing": 0})
+        source.advance_one_second()
         view = source.advance_one_second()
-        strike = source._opponent_melee_action(candidate, opponent)
+        self.assertEqual(source.public_view()["defense_action"]["status"], "ready")
+        weapon_id = source._initial_ready_dagger_id(candidate, opponent)
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        strike = MeleeStrike(candidate.encounter, opponent.id, player.id, weapon.id,
+            motion="thrust", reach=effective_melee_reach_meters(opponent.current, weapon.current))
+        candidate.encounter.schedule_action(strike)
         self.assertIsInstance(strike, MeleeStrike)
-        self.assertEqual((strike.start_time, strike.end_time), (1, 5))
+        self.assertEqual((strike.start_time, strike.end_time), (3, 7))
+        view = source.advance_one_second()
         handle = next(row["handle"] for row in view["entities"]
                       if row["category"] == "being")
         view = source.inspect_entity({"handle": handle})
@@ -115,7 +185,6 @@ class TestArenaOpponentAttack(unittest.TestCase):
         self.assertNotIn(strike.id, str(dodge))
         accepted = source.choose_dodge({"handle": handle})
         self.assertEqual(accepted["defense_action"]["status"], "accepted")
-        self.assertEqual(accepted["defense_action"]["seconds_remaining"], 3)
         defense = source._latest_melee_defense(candidate, player)
         self.assertIsInstance(defense, MeleeDefense)
         self.assertEqual(defense.target_action_id, strike.id)
@@ -127,33 +196,23 @@ class TestArenaOpponentAttack(unittest.TestCase):
         with mock.patch("npcgen.api.arena_ready_being",
                         side_effect=AssertionError("Load must not regenerate Beings")):
             restored.load_encounter_bytes(wire)
-        for _ in range(2):
+        remaining = strike.end_time - source.active_candidate.encounter.time
+        for _ in range(remaining):
             source.advance_one_second()
             restored.advance_one_second()
             self.assertEqual(native_continuation_state(source),
                              native_continuation_state(restored))
-        self.assertEqual(subprocess_advance_checkpoint(wire, 2),
+        self.assertEqual(subprocess_advance_checkpoint(wire, remaining),
                          continuation_digest(native_continuation_state(source)))
         ready_view = source.public_view()
-        self.assertEqual(ready_view["defense_action"]["status"], "committed")
-        self.assertEqual(ready_view["defense_action"]["preparation_ready_at"], 4)
-        self.assertEqual(ready_view["time_seconds"], 4)
-        ready_wire = source.save_encounter_bytes()
-        ready_restore = GeneratedArenaSession()
-        with mock.patch("npcgen.api.arena_ready_being",
-                        side_effect=AssertionError("Load must not regenerate a ready Dodge")):
-            ready_restore.load_encounter_bytes(ready_wire)
-        source.advance_one_second()
-        ready_restore.advance_one_second()
-        self.assertEqual(native_continuation_state(source),
-                         native_continuation_state(ready_restore))
+        self.assertEqual(ready_view["time_seconds"], strike.end_time)
         result = source.public_view()
         self.assertEqual(result["defense_action"]["status"], "completed")
         self.assertIn(result["defense_action"]["outcome"],
                       ("evaded", "failed", "no_threat", "unable_to_defend"))
         native_defense = source._latest_melee_defense(source.active_candidate,
                                                       source.active_candidate.participants[0].native.being)
-        record = source.active_candidate.encounter.inspect_committed(5).action(native_defense.id)
+        record = source.active_candidate.encounter.inspect_committed(strike.end_time).action(native_defense.id)
         if record.facts.outcome in ("evaded", "failed"):
             self.assertEqual(player.skill_experience.get("tumble", 0), 10)
         else:
@@ -174,15 +233,18 @@ class TestArenaOpponentAttack(unittest.TestCase):
         source.choose_run()
         view = source.advance_one_second()
         self.assertEqual(source._opponent_decision(candidate)["kind"], "none")
+        preparation = source._latest_melee_defense(candidate, opponent)
+        self.assertIsInstance(preparation, MeleeDefense)
+        self.assertEqual(preparation.target_action_id, None)
         handle = next(row["handle"] for row in view["entities"]
                       if row["category"] == "being")
         view = source.inspect_entity({"handle": handle})
         no_threat = next(row for row in view["action_catalog"]["entries"]
                          if row["name"] == "Dodge")
-        self.assertEqual(no_threat["status"], "unavailable")
+        self.assertEqual(no_threat["status"], "available")
         before = (candidate.encounter.time, candidate.encounter.choice_state,
                   source._rng_cursor.state)
-        with self.assertRaisesRegex(ArenaBrowserRequestError, "No currently perceived"):
+        with self.assertRaisesRegex(ArenaBrowserRequestError, "Prepare a native Dodge first"):
             source.choose_dodge({"handle": handle})
         self.assertEqual((candidate.encounter.time, candidate.encounter.choice_state,
                           source._rng_cursor.state), before)
@@ -219,7 +281,7 @@ class TestArenaOpponentAttack(unittest.TestCase):
         player_strike = source._player_melee_action(candidate, player)
         self.assertIsInstance(player_strike, MeleeStrike)
         self.assertEqual(source._opponent_decision(candidate)["kind"], "none")
-        self.assertFalse(source._all_melee_defenses(candidate))
+        self.assertEqual(source._all_melee_defenses(candidate), [preparation])
         view = source.advance_one_second()
         self.assertEqual(view["time_seconds"], player_strike.start_time + 1)
         self.assertEqual(source._opponent_decision(candidate)["kind"], "defend")
@@ -228,11 +290,12 @@ class TestArenaOpponentAttack(unittest.TestCase):
         view = source.advance_one_second()
         self.assertEqual(view["time_seconds"], player_strike.start_time + 2)
         self.assertEqual(view["opponent_defense_action"]["name"], "Dodge")
-        self.assertEqual(view["opponent_defense_action"]["status"], "preparing")
+        self.assertEqual(view["opponent_defense_action"]["status"], "committed")
         defense = source._latest_melee_defense(candidate, opponent)
         self.assertEqual(defense.target_action_id, player_strike.id)
+        self.assertEqual(defense.prepared_defense_action_id, preparation.id)
         self.assertEqual([action for action in source._all_melee_defenses(candidate)
-                          if action.actor_id == opponent.id], [defense])
+                          if action.actor_id == opponent.id], [preparation, defense])
         self.assertFalse(any(action.actor_id == opponent.id
                              for action in source._all_melee_actions(candidate)))
 
@@ -241,17 +304,20 @@ class TestArenaOpponentAttack(unittest.TestCase):
         with mock.patch("npcgen.api.arena_ready_being",
                         side_effect=AssertionError("Load must not regenerate Defense-only Beings")):
             restored.load_encounter_bytes(wire)
-        for _ in range(2):
+        remaining = player_strike.end_time - candidate.encounter.time
+        for _ in range(remaining):
             source.advance_one_second()
             restored.advance_one_second()
             self.assertEqual(native_continuation_state(source),
                              native_continuation_state(restored))
-            self.assertEqual([action for action in source._all_melee_defenses(
+            opponent_defenses = [action for action in source._all_melee_defenses(
                 source.active_candidate)
-                if action.actor_id == source.active_candidate.participants[1].native.being.id],
-                [source._latest_melee_defense(source.active_candidate,
-                    source.active_candidate.participants[1].native.being)])
-        self.assertEqual(subprocess_advance_checkpoint(wire, 2),
+                if action.actor_id == source.active_candidate.participants[1].native.being.id]
+            self.assertEqual(len(opponent_defenses), 2)
+            self.assertIsNone(opponent_defenses[0].target_action_id)
+            self.assertEqual(opponent_defenses[1].prepared_defense_action_id,
+                             opponent_defenses[0].id)
+        self.assertEqual(subprocess_advance_checkpoint(wire, remaining),
                          continuation_digest(native_continuation_state(source)))
         completed = source.public_view()
         self.assertEqual(completed["opponent_defense_action"]["status"], "completed")
@@ -318,7 +384,7 @@ class TestArenaOpponentAttack(unittest.TestCase):
         before = (candidate.encounter.time, candidate.encounter.choice_state,
                   tuple(candidate.universe.event_history), source._rng_cursor.state,
                   tuple(candidate.encounter.pending_action_list))
-        with self.assertRaisesRegex(ArenaBrowserRequestError, "cannot be ready"):
+        with self.assertRaisesRegex(ArenaBrowserRequestError, "Prepare a native Dodge first"):
             source.choose_dodge({"handle": handle})
         self.assertEqual((candidate.encounter.time, candidate.encounter.choice_state,
                           tuple(candidate.universe.event_history), source._rng_cursor.state,
