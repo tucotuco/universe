@@ -132,6 +132,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(block["status"], "unavailable")
         self.assertIn("No native shield is equipped", block["reason"])
         self.assertEqual(block["shields"], [])
+        block_status, refusal = self.request("/api/generated/block", {
+            "handle": handle, "shield_handle": "not-an-equipped-shield"})
+        self.assertEqual(block_status, 409)
+        self.assertIn("actually equipped native shield", refusal["error"])
         status, accepted = self.request("/api/generated/dodge", {"handle": handle})
         self.assertEqual(status, 200)
         self.assertEqual(accepted["defense_action"]["status"], "accepted")
