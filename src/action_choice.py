@@ -475,6 +475,11 @@ class ChoiceBook:
                 strike = self.encounter.universe.get_event_by_id(action.target_action_id)
                 if strike is not None:
                     initial['threat_at_schedule'] = ((strike.id, strike._status(self.encounter)[0] == 'in_reach'),)
+                if action.kind == 'yield':
+                    actor = self.encounter.get_being(action.actor_id)
+                    attacker = self.encounter.get_being(action.target_id)
+                    initial['start_position'] = None if actor is None else actor.get_position()
+                    initial['target_position'] = None if attacker is None else attacker.get_position()
             updates.append((aid, action, initial))
         for aid, action, initial in updates:
             initial['_activity_started'] = True

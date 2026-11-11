@@ -89,7 +89,7 @@ _OUTCOMES = {
     'combat': _ATTACK_OUTCOMES | {'weapon_unavailable'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'},
-    'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked')),
+    'defense': frozenset(('unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
     'throw': frozenset(('unplaced', 'unavailable', 'released')),
@@ -187,7 +187,7 @@ def _copy_actions(snapshot):
         _identity(view.lifecycle)
         _require(view.lifecycle in ('pending', 'cancelled'), 'unsupported Action lifecycle')
         _require(view.lifecycle == 'cancelled' or view.boundary >= snapshot.boundary, 'stale pending Action')
-        data = {_identity(k): (position(v) if k == 'start_position' else freeze(v)) for k, v in _mapping(view.data).items()}
+        data = {_identity(k): (position(v) if k in ('start_position', 'target_position') else freeze(v)) for k, v in _mapping(view.data).items()}
         actions[key] = replace(view, data=MappingProxyType(data))
     _require(len({a.order for a in actions.values()}) == len(actions), 'ambiguous scheduling order')
     return actions
@@ -238,14 +238,24 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         _require(strike.family == 'melee' and strike.actor_id == action.target_id
             and strike.target_id == action.actor_id and strike.nominal_end == action.nominal_end,
             'contradictory designated defense relationship')
-        _require(effect.kind == action.data['kind'] and effect.kind in ('parry', 'dodge', 'block'), 'invalid defense kind')
+        _require(effect.kind == action.data['kind'] and effect.kind in ('parry', 'dodge', 'block', 'yield'), 'invalid defense kind')
         _require(type(effect.eligible) is bool and type(effect.success) is bool and (effect.eligible or not effect.success), 'invalid defense eligibility/success')
         expected = ('blocked' if effect.kind == 'block' else
+                    'yielded' if effect.kind == 'yield' else
                     'deflected' if effect.kind == 'parry' else 'evaded') if effect.success else 'failed' if effect.eligible else None
-        _require(proposal.outcome == expected if expected is not None else proposal.outcome in ('no_threat', 'unable_to_defend'), 'defense outcome contradicts dependency')
+        no_effect_outcomes = ('no_threat', 'unable_to_defend', 'no_space')
+        _require(proposal.outcome == expected if expected is not None else proposal.outcome in no_effect_outcomes, 'defense outcome contradicts dependency')
         if effect.kind == 'block' and effect.eligible and effect.success:
             _require(action.instrument_id in actor.data.get('shields', ()),
                      'Block does not use the actor’s actually equipped shield')
+        if effect.kind == 'yield' and effect.eligible and effect.success:
+            start, attacker_start = (action.data.get('start_position'),
+                                     action.data.get('target_position'))
+            current_distance = snapshot.distance(action.actor_id, action.target_id)
+            _require(start is not None and attacker_start is not None
+                     and current_distance is not None
+                     and current_distance > math.dist(start.as_tuple(), attacker_start.as_tuple()),
+                     'Yield is unsupported unless committed movement opens distance from the attacker')
         if effect.eligible:
             _require(strike.lifecycle == 'pending', 'eligible defense designates interrupted strike')
         return action.actor_id, ('defense', action.id, effect.strike_id)

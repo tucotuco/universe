@@ -248,7 +248,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'block', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -285,6 +285,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(action) is RunAction:
             selected['start_position'] = position(ad['start_position'])
             selected['started'] = ad.get('_activity_started', False)
+        if type(action) is MeleeDefense and action.kind == 'yield':
+            selected['start_position'] = position(ad.get('start_position'))
+            selected['target_position'] = position(ad.get('target_position'))
         if type(action) is ThrowAction:
             for key in ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m'):
                 selected[key] = freeze(ad[key])
@@ -698,6 +701,19 @@ def _defense(snapshot, action, rng):
         if not eligible:
             outcome = 'no_threat'
         else:
+            if kind == 'yield':
+                start, attacker_start = (action.data.get('start_position'),
+                                         action.data.get('target_position'))
+                current_distance = snapshot.distance(actor.id, attacker.id)
+                if (start is None or attacker_start is None or current_distance is None
+                        or math.dist(actor.position.as_tuple(), attacker.position.as_tuple())
+                           <= math.dist(start.as_tuple(), attacker_start.as_tuple())):
+                    dependency = DefenseEffect(action.id, strike.id, kind, False, False)
+                    return ActionProposal(action.id, actor.id, (attacker.id,), 'no_space', (),
+                                          (dependency,))
+                dependency = DefenseEffect(action.id, strike.id, kind, True, True)
+                return ActionProposal(action.id, actor.id, (attacker.id,), 'yielded', (),
+                                      (dependency,))
             if kind == 'block':
                 success = True
                 outcome = 'blocked'
@@ -769,7 +785,10 @@ def _combat(snapshot, action, rng, dependencies):
                 block_penalty = 4 if any(dependency.kind == 'block'
                     and dependency.eligible and dependency.success
                     for dependency in dependencies) else 0
-                return attack_hits(roll - block_penalty,
+                yield_penalty = sum(1 for dependency in dependencies
+                    if dependency.kind == 'yield' and dependency.eligible
+                    and dependency.success)
+                return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0) + actor.data['strategy']['attack'],
                     target_defense + parry_bonus, dc - adjustment)
             def save(being, dc):

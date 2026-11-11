@@ -18,6 +18,8 @@ from action_evaluation import capture_snapshot
 from movement_intent import (MovementIntent, MovementIntentRefusal,
                              MovementRateConditions, evaluate_movement_rate)
 from hex_facing import FacingSector, classify_vector, facing_vector, nearest_facing
+from melee_combat import MeleeStrike
+from melee_defense import MeleeDefense
 from skill import SkillDictionary
 from spatial.state import CartesianPosition
 from measured_values import truncate_position
@@ -340,7 +342,8 @@ class TestNativeMovementIntent(unittest.TestCase):
                        "movement_available", "movement_reason", "movement_plan", "movement_outcome",
                        "ready_weapon_action", "spot_available", "spot_reason",
                        "default_equipment_mode", "opponent_strategy", "opponent_melee_action",
-                       "opponent_activity", "melee_action"}
+                       "opponent_activity", "melee_action", "defense_action",
+                       "opponent_defense_action"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)
@@ -535,6 +538,56 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(self.encounter.time, 1)
         result = self.encounter.inspect_committed(1).action(self.session._player_action_id)
         self.assertEqual(result.facts.outcome, "success")
+
+    def test_native_yield_uses_one_second_committed_movement_before_melee_resolution(self):
+        # Explicitly authored test-world premise: an unobstructed, un-mapped
+        # corridor, no route geometry, and enough melee reach to keep the
+        # incoming dagger strike eligible after the player's one-second step.
+        self.encounter.map = None
+        self.session._opponent_strategy = "none"
+        self.player.set_position(CartesianPosition(2.0, 0.0, 0.0))
+        self.opponent.set_position(CartesianPosition(0.0, 0.0, 0.0))
+        self.player.set_hit_points(100)
+        self.opponent.set_hit_points(100)
+        self.player.set_hex_facing(0)       # forward is away from the attacker
+        self.opponent.set_hex_facing(6)     # attacker faces the player
+        self.session.choose_run()
+        activation = MovementIntent(self.player.id,
+            CartesianPosition(3.0, 0.0, 0.0), "walk", "yield-activation", 1,
+            facing_policy="turn")
+        self.encounter.step(1, movement_intent=activation,
+                            movement_conditions=self.conditions(demanding=False))
+        self.player.set_position(CartesianPosition(2.0, 0.0, 0.0))
+
+        weapon_id = self.candidate.universe.make_weapon_for_being(
+            self.opponent.id, "Dagger", "Yield test dagger")
+        self.candidate.universe.arm_being(self.opponent.id, weapon_id, "right hand")
+        strike = MeleeStrike(self.encounter, self.opponent.id, self.player.id,
+                             weapon_id, motion="thrust", reach=10.0)
+        self.encounter.schedule_action(strike)
+        self.encounter.step(3)  # reach second 4; Dagger thrust resolves at second 5
+
+        defense = MeleeDefense(self.encounter, self.player.id, self.opponent.id,
+                               kind="yield", target_action_id=strike.id)
+        self.encounter.schedule_action(defense)
+        start = self.player.get_position()
+        destination = CartesianPosition(10.0, 0.0, 0.0)
+        intent = MovementIntent(self.player.id, destination, "walk", "yield-step", 5,
+                                facing_policy="maintain")
+        self.encounter.step(1, movement_intent=intent,
+                            movement_conditions=self.conditions(demanding=False))
+
+        self.assertGreater(self.player.get_position().x, start.x)
+        published = self.encounter.inspect_committed(5)
+        self.assertEqual(defense.start_position, start)
+        self.assertEqual(defense.target_position, CartesianPosition(0.0, 0.0, 0.0))
+        self.assertGreater(math.dist(self.player.get_position().as_tuple(),
+                                     self.opponent.get_position().as_tuple()),
+                           math.dist(start.as_tuple(), defense.target_position.as_tuple()))
+        self.assertEqual(published.action(defense.id).facts.outcome, "yielded")
+        strike_result = published.action(strike.id)
+        self.assertIsNotNone(strike_result)
+        self.assertEqual(self.encounter.time, 5)
 
     def test_generated_facing_stream_is_reproducible_and_does_not_consume_other_rng(self):
         another = GeneratedArenaSession(root_seed_factory=lambda: 20261107)

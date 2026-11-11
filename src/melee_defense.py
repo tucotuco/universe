@@ -21,8 +21,8 @@ class MeleeDefense(Action):
     resolution_priority = -1
 
     def __init__(self, encounter, actor_id, attacker_id, *, kind, target_action_id, weapon_id=None):
-        if kind not in ('parry', 'dodge', 'block'):
-            raise ValueError('defensive reaction must be parry, dodge, or block')
+        if kind not in ('parry', 'dodge', 'block', 'yield'):
+            raise ValueError('defensive reaction kind is unsupported')
         self.encounter = encounter
         self.kind = kind
         self.defended_action_ids = ()
@@ -31,6 +31,8 @@ class MeleeDefense(Action):
         self.target_action_id = target_action_id
         self.ready_at = None
         self.threat_at_schedule = ()
+        self.start_position = None
+        self.target_position = None
         super().__init__(encounter.universe, encounter.time, None, kind,
                          actor_id, attacker_id, weapon_id,
                          parent_event_id=encounter.id)
@@ -78,13 +80,16 @@ class MeleeDefense(Action):
             times = [t for t in (weapon.St(), weapon.Tt()) if t is not None]
             preparation = max(1, min(times) - 1)
         else:
-            preparation = 2 if self.kind == 'dodge' else int(self.get_instrument().get_weapon_size())
+            preparation = (2 if self.kind == 'dodge' else
+                           int(self.get_instrument().get_weapon_size()) if self.kind == 'block' else 1)
             if self.kind == 'block' and preparation < 1:
                 raise ValueError('block requires a positive native shield-size duration')
         ready_at = self.start_time + preparation
-        if self.kind == 'block':
+        if self.kind in ('block', 'yield'):
             if ready_at != strike.end_time:
-                raise ValueError('Block must complete its shield-size timing at the incoming strike boundary')
+                required = ('Block must complete its shield-size timing' if self.kind == 'block'
+                            else 'Yield must complete its one-second step at')
+                raise ValueError(f'{required} the incoming strike boundary')
         elif ready_at > strike.end_time:
             raise ValueError('defense cannot be ready before the designated attack impacts')
         # Remain committed to this strike until its impact, even if prepared
@@ -121,6 +126,20 @@ class MeleeDefense(Action):
         if self.kind == 'block':
             self.success = True
             self.result = 'blocked'
+            return ActionResolution(self.result)
+        if self.kind == 'yield':
+            start = self.start_position
+            attacker_start = self.target_position
+            actor_position = actor.get_position()
+            attacker_position = attacker.get_position()
+            if (start is None or attacker_start is None or actor_position is None
+                    or attacker_position is None
+                    or math.dist(actor_position.as_tuple(), attacker_position.as_tuple())
+                       <= math.dist(start.as_tuple(), attacker_start.as_tuple())):
+                self.result = 'no_space'
+                return ActionResolution(self.result)
+            self.success = True
+            self.result = 'yielded'
             return ActionResolution(self.result)
         skill = (self.get_instrument().original.obj_type if self.kind == 'parry'
                  else 'tumble')

@@ -102,6 +102,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("function submitBlock(handle,shieldHandle)", page)
         self.assertIn("/api/generated/block", page)
         self.assertIn("actionBlock", page)
+        self.assertIn("function submitYield(handle)", page)
+        self.assertIn("/api/generated/yield", page)
+        self.assertIn("actionYield", page)
 
         self.session = GeneratedArenaSession(
             root_seed_factory=lambda: 20261107,
@@ -136,6 +139,13 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "handle": handle, "shield_handle": "not-an-equipped-shield"})
         self.assertEqual(block_status, 409)
         self.assertIn("actually equipped native shield", refusal["error"])
+        yielding = next(row for row in selected["action_catalog"]["entries"]
+                        if row["name"] == "Yield")
+        self.assertEqual(yielding["status"], "unavailable")
+        self.assertIn("destination away from the attacker", yielding["reason"])
+        yield_status, refusal = self.request("/api/generated/yield", {"handle": handle})
+        self.assertEqual(yield_status, 409)
+        self.assertIn("Choose a native destination away", refusal["error"])
         status, accepted = self.request("/api/generated/dodge", {"handle": handle})
         self.assertEqual(status, 200)
         self.assertEqual(accepted["defense_action"]["status"], "accepted")

@@ -945,6 +945,7 @@ class GeneratedArenaSession:
         action = self._latest_melee_defense(candidate, actor)
         if action is None:
             return None
+        name = action.kind.title()
         encounter = candidate.encounter
         pending = self._melee_defense_pending(candidate, action)
         accepted = None
@@ -965,21 +966,21 @@ class GeneratedArenaSession:
                       "committed") if pending else "completed"
         remaining = max(0, math.ceil(end_time - encounter.time))
         if pending or accepted is not None:
-            return {"name": "Dodge", "status": status, "outcome": None,
+            return {"name": name, "status": status, "outcome": None,
                     "duration_seconds": end_time - action.start_time,
                     "seconds_remaining": remaining,
                     "preparation_ready_at": ready_at}
         if action.id in encounter.cancelled_action_list:
-            return {"name": "Dodge", "status": "cancelled", "outcome": None,
+            return {"name": name, "status": "cancelled", "outcome": None,
                     "duration_seconds": end_time - action.start_time,
                     "seconds_remaining": 0, "preparation_ready_at": ready_at}
         try:
             result = encounter.inspect_committed(int(math.ceil(end_time))).action(action.id)
         except (ValueError, KeyError, AttributeError):
-            return {"name": "Dodge", "status": "completed", "outcome": "unavailable",
+            return {"name": name, "status": "completed", "outcome": "unavailable",
                     "duration_seconds": end_time - action.start_time,
                     "seconds_remaining": 0, "preparation_ready_at": ready_at}
-        return {"name": "Dodge", "status": "completed", "outcome": result.facts.outcome,
+        return {"name": name, "status": "completed", "outcome": result.facts.outcome,
                 "duration_seconds": end_time - action.start_time,
                 "seconds_remaining": 0, "preparation_ready_at": ready_at}
 
@@ -1431,6 +1432,61 @@ class GeneratedArenaSession:
                 f"impact={strike.end_time:g}s")
             return self._view_unlocked()
 
+    def _player_yield_preflight(self, candidate, player, entity_id, evidence):
+        if evidence is None or evidence.category != "being" or evidence.present_state != "present":
+            raise ArenaBrowserRequestError("Select a currently perceived attacking Being first.")
+        encounter = candidate.encounter
+        attacker = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if attacker is None or attacker.id == player.id or not encounter.is_aware(player.id, attacker.id):
+            raise ArenaBrowserRequestError("The selected Entity is not an aware participating attacker.")
+        if self._movement_plan is None:
+            raise ArenaBrowserRequestError("Choose a native destination away from the attacker before Yield.")
+        start, destination, attacker_position = (
+            player.get_position(), self._movement_plan.destination, attacker.get_position())
+        if start is None or attacker_position is None or math.dist(destination.as_tuple(), attacker_position.as_tuple()) <= math.dist(start.as_tuple(), attacker_position.as_tuple()):
+            raise ArenaBrowserRequestError("Yield requires an accepted destination that moves away from the attacker.")
+        ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+        strike = self._visible_incoming_strike(candidate, player, attacker, ledger)
+        if strike is None:
+            raise ArenaBrowserRequestError("No currently perceived, pending native strike is available to Yield against.")
+        if strike.end_time != encounter.time + 1:
+            raise ArenaBrowserRequestError("Yield lasts one second and must complete at the incoming strike boundary.")
+        action = MeleeDefense(encounter, player.id, attacker.id, kind="yield",
+                              target_action_id=strike.id)
+        try:
+            prepared = encounter.prepare_action(action)
+        except Exception as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
+        return action, prepared, strike
+
+    def choose_yield(self, payload):
+        if type(payload) is not dict or set(payload) != {"handle"} or type(payload["handle"]) is not str:
+            raise ArenaBrowserRequestError("Yield accepts exactly one currently perceived attacker handle")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Yield")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key, value in self._view_handles.items()
+                              if value == payload["handle"]), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            action, prepared, _strike = self._player_yield_preflight(
+                candidate, player, entity_id, evidence)
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Yield Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = payload["handle"]
+            self._trace.native_advance(None, None,
+                f"action=player_defense kind=yield duration="
+                f"{prepared.end_time-prepared.start_time:g}s movement=destination-away")
+            return self._view_unlocked()
+
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction
 
@@ -1601,6 +1657,17 @@ class GeneratedArenaSession:
         arena_rows.append({"name": "Block", "group": "Attack responses",
                            "status": block_status, "reason": block_reason,
                            "target": dodge_target, "shields": shield_options})
+        yield_status, yield_reason = "unavailable", "Choose an accepted destination away from the attacker first."
+        if supported_actions.get(MeleeDefense, False):
+            try:
+                self._player_yield_preflight(candidate, player, entity_id, evidence)
+                yield_status = "available"
+                yield_reason = "Native Yield: one second of committed movement away from the attacker, completing with its currently perceived strike."
+            except ArenaBrowserRequestError as exc:
+                yield_reason = str(exc)
+        arena_rows.append({"name": "Yield", "group": "Attack responses",
+                           "status": yield_status, "reason": yield_reason,
+                           "target": dodge_target})
         return {"catalog_source": "native Action catalog", "entries": catalog_rows + arena_rows}
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
