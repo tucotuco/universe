@@ -74,7 +74,7 @@ The browser Touch path is: generate two Beings with an empty ground profile; act
 - `1fb943e` — Document Feint action coverage.
 - `216a6e0` — Add native Coup de grace resolution.
 - Branch: `main`; the implementation commits follow `18ef9bc`.
-- Touch, Feint, and native Coup de grace changes are committed. This consolidated report update remains to be committed. The supplied U-ARENA-016 assignment and pre-existing tracked deletions/unrelated untracked files remain untouched and unstaged; see the working tree for the complete list.
+- Touch, Feint, and native Coup de grace changes and this consolidated report are committed on `main`. Pre-existing tracked deletions/unrelated untracked files remain untouched and unstaged; see `git status --short` for the complete list.
 
 ## Prioritized residual work
 
