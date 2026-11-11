@@ -4,7 +4,7 @@
 
 **DONE.** The public GitHub repository `tucotuco/universe` remains public, and its `main` history through `a97ba141fab8e86718e616a5f5a2234ea4624004` was retained unchanged. Read-only review classified all known findings at that baseline as benign legacy disclosures. I sanitized only the unpublished descendants, retained strict zero-finding checks for every new range, published by ordinary fast-forward, and established a fresh clean continuation clone.
 
-The first publication moved `main` from `a97ba14` to `c7e24d5`; two audited scanner improvements then moved it to `9cb1fd8`. This report and the final task-state update are being committed as the last descendant and will be published by a separate normal fast-forward. The final branch is expected to contain 162 commits beyond the unchanged `a97ba14` ancestor. No published commit was rewritten and no force push was used.
+The first publication moved `main` from `a97ba14` to `c7e24d5`; two audited scanner improvements then moved it to `9cb1fd8`. The report and task-state closeout were subsequently published by ordinary fast-forward. At final verification, the clean clone and remote `main` matched at the closeout commit, 163 commits beyond the unchanged `a97ba14` ancestor. No published commit was rewritten and no force push was used.
 
 ## Destination and public-history scope
 

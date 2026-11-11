@@ -60,7 +60,7 @@
 - [x] **U-WORLD-001A — DONE (bounded): one individual conserved across genealogy, counted population, native Being, place and Encounter.** One authored Human fixture, not arbitrary world integration.
 - [x] **U-WORLD-001B — DONE (bounded): independent observer can Spot that same Being.** Explicit authored target/geometry, not general unprompted discovery.
 - [x] **U-REPO-001–007B — DONE for specifically verified documentation/repository repairs and sanitized historical push.** [Universe 7→8 handoff](docs/handoffs/universe-7-to-8.md).
-- [x] **U-REPO-008 — DONE: reviewed the published legacy baseline, sanitized only the 158 unpublished history commits, and published the resulting 162-commit descendant range by ordinary fast-forward.** The new range has zero unreviewed findings; previously published benign findings remain and are documented without a path or filename waiver. A fresh clean clone now tracks the verified remote tip. The original dirty checkout was preserved. See [U-REPO-008C report](docs/reports/U-REPO-008C-report.md).
+- [x] **U-REPO-008 — DONE: reviewed the published legacy baseline, sanitized only the 158 unpublished history commits, and published the resulting 163-commit descendant range by ordinary fast-forward.** The new range has zero unreviewed findings; previously published benign findings remain and are documented without a path or filename waiver. A fresh clean clone now tracks the verified remote tip. The original dirty checkout was preserved. See [U-REPO-008C report](docs/reports/U-REPO-008C-report.md).
 - [x] **U-OPS-006 — DONE for the specifically authorized U-REPO-008C publication and continuation setup.** This does not authorize future pushes or history rewrites.
 
 ### Generated Arena and NPC integration
