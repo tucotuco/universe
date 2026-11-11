@@ -163,19 +163,20 @@ def _scan_history(base: str, tip: str) -> int:
             # the reviewed base (for example, a copied historical file). Scan
             # the version introduced by every commit in the range, not only
             # objects that are globally new to the range.
-            path_text = os.fsdecode(path)
-            object_id = _git(["rev-parse", "--verify", f"{commit}:{path_text}"], check=False).decode().strip()
-            if object_id and object_id in base_object_ids:
-                content = _git(["cat-file", "blob", object_id])
-                label = _relative_label(path)
-                findings += _print_findings(
-                    f"commit {commit[:12]} content {label}", inspect_bytes(content)
-                )
-                if len(content) > MAX_REVIEWED_BLOB:
+            if base_object_ids:
+                path_text = os.fsdecode(path)
+                object_id = _git(["rev-parse", "--verify", f"{commit}:{path_text}"], check=False).decode().strip()
+                if object_id and object_id in base_object_ids:
+                    content = _git(["cat-file", "blob", object_id])
+                    label = _relative_label(path)
                     findings += _print_findings(
-                        f"commit {commit[:12]} content {label}",
-                        [Finding("large-opaque-review", 1)],
+                        f"commit {commit[:12]} content {label}", inspect_bytes(content)
                     )
+                    if len(content) > MAX_REVIEWED_BLOB:
+                        findings += _print_findings(
+                            f"commit {commit[:12]} content {label}",
+                            [Finding("large-opaque-review", 1)],
+                        )
     object_rows = _git(["rev-list", "--objects", *revision_args]).splitlines()
     object_paths: dict[str, bytes] = {}
     for row in object_rows:
