@@ -109,7 +109,8 @@ class MeleeStrike(Action):
     """
 
     def __init__(self, encounter, actor_id, target_id, weapon_id,
-                 motion='thrust', reach=None, strategy=None):
+                 motion='thrust', reach=None, strategy=None,
+                 feint_source_action_id=None):
         if motion not in ('swing', 'thrust'):
             raise ValueError('motion must be swing or thrust')
         if isinstance(reach, bool) or not isinstance(reach, (int, float)):
@@ -122,6 +123,7 @@ class MeleeStrike(Action):
         self.combat_result = None
         self._simultaneous_eligibility = None
         self.defended_by = None
+        self.feint_source_action_id = feint_source_action_id
         super().__init__(encounter.universe, encounter.time, None, motion,
                          actor_id, target_id, weapon_id, strategy=strategy,
                          parent_event_id=encounter.id)
@@ -157,6 +159,23 @@ class MeleeStrike(Action):
             raise ValueError('instrument is not an instantiated Weapon')
         if self.instrument_id not in actor.armed_with(encounter.universe).values():
             raise ValueError('actor does not hold that weapon')
+        if self.feint_source_action_id is not None:
+            from action_evaluation import ActionProposal
+            source = encounter.universe.get_event_by_id(self.feint_source_action_id)
+            if (type(source) is not Action or source.event_type != 'feint'
+                    or source.id not in encounter.finished_action_list
+                    or source.actor_id != self.actor_id or source.target_id != self.target_id
+                    or type(source.resolution) is not ActionProposal
+                    or source.resolution.outcome != 'success'):
+                raise ValueError('Feint follow-up requires the immediately available successful native Feint')
+            for choice in encounter._choice_book._choices.values():
+                if choice.view.state not in ('accepted', 'executing', 'finished'):
+                    continue
+                for member in choice.members:
+                    chosen = member.action
+                    if (chosen.actor_id == self.actor_id and chosen.id != source.id
+                            and chosen.start_time >= source.end_time):
+                        raise ValueError('successful Feint benefit was already forfeited or consumed')
         if self.event_type not in weapon.get_melee_types():
             raise ValueError('weapon does not support requested attack motion')
         if self.damage_potential() is None or self.damage_potential() <= 0:

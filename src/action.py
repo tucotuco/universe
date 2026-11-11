@@ -12,6 +12,7 @@ __version__ = "action.py 2024-03-26T08:36-3:00"
 
 from transactional_progression import guard_legacy_action
 import json
+import math
 
 from armor import ArmorInstance
 from being import BeingInstance
@@ -94,6 +95,39 @@ class Action(Event):
         Encounter invokes only reviewed native implementations. The Encounter
         argument is read-only during preparation, never an extension sandbox.
         """
+        if self.event_type == 'feint':
+            from encounter import Encounter
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Feint requires the native transactional Encounter pathway')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            weapon = self.get_instrument()
+            motion = object.__getattribute__(self, '__dict__').get('feint_motion')
+            reach = object.__getattribute__(self, '__dict__').get('reach')
+            if (actor is None or target is None or actor is target
+                    or self.actor_id not in encounter.being_list
+                    or self.target_id not in encounter.being_list):
+                raise ValueError('Feint requires two distinct participating Beings')
+            if not encounter.is_aware(self.actor_id, self.target_id):
+                raise ValueError('Feint requires current native awareness of its target')
+            if (weapon is None or self.instrument_id not in actor.armed_with(encounter.universe).values()
+                    or motion not in ('swing', 'thrust')
+                    or motion not in weapon.get_melee_types()):
+                raise ValueError('Feint requires an actually held weapon and supported attack motion')
+            rank = actor.current.skills.weapon_skills.get(weapon.original.obj_type, 0)
+            if rank <= 1:
+                raise ValueError('armed Feint requires advanced skill with the selected weapon')
+            native_timing = weapon.St() if motion == 'swing' else weapon.Tt()
+            if type(native_timing) not in (int, float) or not math.isfinite(native_timing) or native_timing <= 0:
+                raise ValueError('Feint requires a supported positive weapon attack timing')
+            duration = max(1, math.ceil(native_timing / 2) - self.strategy.timing_adjustment())
+            if (self.end_time - self.start_time != duration
+                    or type(reach) not in (int, float) or not math.isfinite(reach) or reach <= 0):
+                raise ValueError('Feint timing or native reach declaration is invalid')
+            from melee_combat import effective_melee_reach_meters
+            expected_reach = effective_melee_reach_meters(actor.current, weapon.current)
+            if not math.isclose(reach, expected_reach, rel_tol=1e-12, abs_tol=1e-12):
+                raise ValueError('Feint reach does not match native Being/weapon dimensions')
+            return PreparedSchedule.from_action(self)
         if self.event_type == 'touch':
             from encounter import Encounter
             if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':

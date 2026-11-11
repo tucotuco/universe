@@ -276,6 +276,73 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(after_load["touch_action"], completed["touch_action"])
         self.assertEqual(after_load["time_seconds"], 2)
 
+    def test_armed_feint_uses_browser_route_and_pending_save_load(self):
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("function submitFeint(handle,motion)", page)
+        self.assertIn("/api/generated/feint", page)
+        self.assertIn("actionFeint", page)
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261107,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "5000000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        status, activated = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        player = self.session.active_candidate.participants[0].native.being
+        self.assertGreater(player.current.skills.weapon_skills.get("Dagger", 0), 1)
+        target_id = self.session.active_candidate.participants[1].native.being.id
+        target = next(row for row in activated["entities"]
+                      if row["category"] == "being"
+                      and self.session._view_handles[target_id] == row["handle"])
+        status, selected = self.request("/api/generated/inspect", {"handle": target["handle"]})
+        self.assertEqual(status, 200)
+        feint = next(row for row in selected["action_catalog"]["entries"]
+                     if row["name"] == "feint (armed)")
+        self.assertEqual(feint["status"], "available", feint["reason"])
+        status, accepted = self.request("/api/generated/feint", {
+            "handle": target["handle"], "motion": "thrust"})
+        self.assertEqual(status, 200)
+        self.assertEqual(accepted["feint_action"]["status"], "executing")
+        pending = self.session.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "pending-feint.json"
+            save_path.write_bytes(pending)
+            script = (
+                "import json,sys; import tests.test_generated_arena_browser; "
+                "from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:8); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "v=s._view_unlocked();\n"
+                "while v['feint_action']['status']=='executing':\n v=s.advance_one_second()\n"
+                "print(json.dumps({'view':v,'save':s.save_encounter_bytes().decode('utf8')}))")
+            process = subprocess.run([sys.executable, "-c", script, str(save_path)],
+                cwd=ROOT, check=True, capture_output=True, text=True)
+            restored = json.loads(process.stdout)
+        completed = self.session._view_unlocked()
+        while completed["feint_action"]["status"] == "executing":
+            completed = self.session.advance_one_second()
+        self.assertEqual(restored["view"]["time_seconds"], completed["time_seconds"])
+        self.assertEqual(restored["view"]["feint_action"], completed["feint_action"])
+        self.assertEqual(completed["feint_action"]["status"], "completed")
+        native = self.session.active_candidate.encounter.inspect_committed(
+            int(completed["time_seconds"]))
+        receipt = native.action(self.session._player_feint_action(
+            self.session.active_candidate, player).id)
+        self.assertIn(receipt.facts.outcome, ("success", "failure", "out_of_reach"))
+        self.assertFalse(receipt.facts.effects)
+        for key in ("name", "hex_facing", "posture", "cell", "position_meters"):
+            self.assertEqual(restored["view"]["player"][key], completed["player"][key])
+        completed_restore = GeneratedArenaSession(root_seed_factory=lambda: 9)
+        restored_completed = completed_restore.load_encounter_bytes(
+            restored["save"].encode("utf-8"))
+        self.assertEqual(restored_completed["time_seconds"], completed["time_seconds"])
+        self.assertEqual(restored_completed["feint_action"], completed["feint_action"])
+
     def test_attack_only_browser_requests_drive_native_approach_and_thrust(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
         self.session = GeneratedArenaSession(

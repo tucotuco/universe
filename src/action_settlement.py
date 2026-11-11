@@ -89,7 +89,8 @@ _OUTCOMES = {
     'combat': _ATTACK_OUTCOMES | {'weapon_unavailable', 'touched', 'missed',
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'unsupported_reach'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
-        'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'},
+        'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
+        'parried', 'dodged', 'success', 'failure'},
     'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
     'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
@@ -203,6 +204,12 @@ def _copy_proposal(proposal, actions, entities):
     _require(proposal.actor_id == action.actor_id, 'proposal actor does not match declaration')
     _require(type(proposal.outcome) is str, 'opaque outcome')
     allowed = {'interrupted'} if action.lifecycle == 'cancelled' else _OUTCOMES[action.family]
+    if action.family == 'melee':
+        allowed = (allowed & {'success', 'failure', 'unable_to_act', 'target_down',
+                              'weapon_unavailable', 'unplaced', 'out_of_reach',
+                              'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'}
+                   if action.data.get('event_type') == 'feint'
+                   else allowed - {'success', 'failure'})
     _require(proposal.outcome in allowed, 'outcome contradicts native Action family/lifecycle')
     targets = tuple(_identity(k) for k in _tuple(proposal.target_ids))
     _require(len(set(targets)) == len(targets) and all(k in entities for k in targets), 'invalid affected Target reference')
@@ -218,6 +225,18 @@ def _copy_proposal(proposal, actions, entities):
         else:
             _require(len(metadata) == 1 and metadata[0][0] == 'distance',
                      'Touch must record only its bounded target distance')
+            _number(metadata[0][1], nonnegative=True)
+    if action.family == 'melee' and action.data.get('event_type') == 'feint':
+        _require(proposal.outcome in ('success', 'failure', 'unable_to_act', 'target_down',
+                    'weapon_unavailable', 'unplaced', 'out_of_reach', 'not_facing',
+                    'blocked', 'uncertain_path', 'parried', 'dodged')
+                 and not proposal.effects,
+                 'Feint must resolve its non-damaging attack contract')
+        if proposal.outcome == 'unplaced':
+            _require(metadata == (), 'unplaced Feint must not claim a distance')
+        else:
+            _require(len(metadata) == 1 and metadata[0][0] == 'distance',
+                     'Feint must record only its bounded target distance')
             _number(metadata[0][1], nonnegative=True)
     names = tuple(pair[0] for pair in metadata)
     _require(len(set(names)) == len(names) and set(names).issubset(_METADATA[action.family]), 'unsupported metadata (no Target HP on Actions)')

@@ -113,6 +113,62 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertFalse(committed.facts.effects)
         self.assertEqual(committed.facts.metadata, (('distance', .2),))
 
+    def test_native_armed_feint_is_half_timing_nondamaging_and_bonus_is_one_followup(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        self.a.current.skills.weapon_skills['Dagger'] = 2
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon = self.world.get_object_by_id(self.w1)
+        action = Action(self.world, 0, 1, 'feint', self.a.id, self.b.id, self.w1)
+        action.feint_motion = 'thrust'
+        from melee_combat import effective_melee_reach_meters
+        action.reach = effective_melee_reach_meters(self.a.current, weapon.current)
+        duration = math.ceil(weapon.Tt() / 2)
+        action.end_time = duration
+        self.assertEqual(action.prepare_schedule(self.enc).end_time, duration)
+        self.enc.schedule_action(action)
+        iterator = iter([20])
+        def roll(ctx, dice):
+            value = next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(duration)
+        feint = self.enc.inspect_committed(duration).action(action.id)
+        self.assertEqual(feint.facts.outcome, 'success')
+        self.assertFalse(feint.facts.effects)
+        self.assertEqual(feint.facts.metadata, (('distance', .2),))
+        self.enc.difficulty_class = 15
+        strike = self.strike()
+        strike.feint_source_action_id = action.id
+        self.assertEqual(strike.prepare_schedule(self.enc).actor_id, self.a.id)
+        self.enc.schedule_action(strike)
+        next_duration = math.ceil(strike.end_time) - self.enc.time
+        iterator = iter([11, 2])
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(next_duration)
+        receipt = self.enc.inspect_committed(math.ceil(strike.end_time)).action(strike.id)
+        self.assertEqual(receipt.facts.outcome, 'normal')
+        self.assertTrue(any(type(effect).__name__ == 'DamageEffect'
+                            for effect in receipt.facts.effects))
+
+    def test_armed_feint_requires_advanced_weapon_skill_before_choice_mutation(self):
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon = self.world.get_object_by_id(self.w1)
+        action = Action(self.world, 0, 1, 'feint', self.a.id, self.b.id, self.w1)
+        action.feint_motion = 'thrust'
+        from melee_combat import effective_melee_reach_meters
+        action.reach = effective_melee_reach_meters(self.a.current, weapon.current)
+        action.end_time = math.ceil(weapon.Tt() / 2)
+        choices_before = self.enc.choice_state
+        history_before = dict(self.world.event_history)
+        rng_before = random.getstate()
+        with self.assertRaisesRegex(ValueError, 'advanced skill'):
+            self.enc.prepare_action(action)
+        self.assertEqual(self.enc.choice_state, choices_before)
+        self.assertEqual(dict(self.world.event_history), history_before)
+        self.assertEqual(random.getstate(), rng_before)
+
     def test_nested_views_frozen_and_detached(self):
         self.schedule(self.strike()); s = self.snapshot()
         a = s.entity(self.a.id)

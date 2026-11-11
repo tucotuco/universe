@@ -565,6 +565,8 @@ class GeneratedArenaSession:
         melee_pending = (melee_action is not None and melee_action["status"] == "executing")
         touch_action = self._touch_action_view(candidate, player.native.being)
         touch_pending = touch_action is not None and touch_action["status"] == "executing"
+        feint_action = self._feint_action_view(candidate, player.native.being)
+        feint_pending = feint_action is not None and feint_action["status"] == "executing"
         opponent = candidate.participants[1].native.being
         opponent_melee_action = self._opponent_melee_action_view(
             candidate, opponent, player.native.being)
@@ -649,6 +651,7 @@ class GeneratedArenaSession:
             "ready_weapon_action": ready_weapon_action,
             "melee_action": melee_action,
             "touch_action": touch_action,
+            "feint_action": feint_action,
             "opponent_melee_action": opponent_melee_action,
             "defense_action": defense_action,
             "opponent_defense_action": opponent_defense_action,
@@ -671,6 +674,7 @@ class GeneratedArenaSession:
                                        and self._ready_weapon_action_outcome is None)
                                    or melee_pending
                                    or touch_pending
+                                   or feint_pending
                                    or opponent_melee_pending
                                    or (defense_action is not None
                                        and defense_action["status"] in ("accepted", "preparing", "committed"))
@@ -898,6 +902,68 @@ class GeneratedArenaSession:
                     "seconds_remaining": 0}
         return {"name": "Touch", "status": "completed", "outcome": record.facts.outcome,
                 "seconds_remaining": 0}
+
+    @staticmethod
+    def _player_feint_action(candidate, player):
+        event_by_id = dict(candidate.universe.event_history)
+        committed_ids = (set(candidate.encounter.pending_action_list)
+                         | set(candidate.encounter.finished_action_list)
+                         | set(candidate.encounter.cancelled_action_list))
+        for choice in candidate.encounter._choice_book._choices.values():
+            if choice.view.state not in ("accepted", "executing", "finished"):
+                continue
+            committed_ids.update(choice.view.action_ids)
+            for member in choice.members:
+                if type(member.action) is Action and member.action.event_type == "feint":
+                    event_by_id[member.action.id] = member.action
+        actions = [event for event in event_by_id.values()
+                   if type(event) is Action and event.event_type == "feint"
+                   and event.actor_id == player.id and event.id in committed_ids]
+        return max(actions, key=lambda action: (action.start_time, action.id), default=None)
+
+    def _feint_action_view(self, candidate, player):
+        action = self._player_feint_action(candidate, player)
+        if action is None:
+            return None
+        if self._melee_action_pending(candidate, action):
+            return {"name": "Feint", "status": "executing", "outcome": None,
+                    "seconds_remaining": max(0, math.ceil(action.end_time-candidate.encounter.time))}
+        if action.id in candidate.encounter.cancelled_action_list:
+            return {"name": "Feint", "status": "cancelled", "outcome": None,
+                    "seconds_remaining": 0}
+        try:
+            record = candidate.encounter.inspect_committed(
+                int(math.ceil(action.end_time))).action(action.id)
+        except (ValueError, KeyError, AttributeError):
+            return {"name": "Feint", "status": "completed", "outcome": "unavailable",
+                    "seconds_remaining": 0}
+        return {"name": "Feint", "status": "completed", "outcome": record.facts.outcome,
+                "seconds_remaining": 0}
+
+    @staticmethod
+    def _available_feint_source(candidate, player, target_id):
+        from action_evaluation import ActionProposal
+        rows = []
+        for event in candidate.universe.event_history.values():
+            if (type(event) is not Action or event.event_type != "feint"
+                    or event.actor_id != player.id or event.target_id != target_id
+                    or event.id not in candidate.encounter.finished_action_list
+                    or type(event.resolution) is not ActionProposal
+                    or event.resolution.outcome != "success"):
+                continue
+            rows.append(event)
+        if not rows:
+            return None
+        source = max(rows, key=lambda action: (action.end_time, action.id))
+        for choice in candidate.encounter._choice_book._choices.values():
+            if choice.view.state not in ("accepted", "executing", "finished"):
+                continue
+            for member in choice.members:
+                action = member.action
+                if (action.actor_id == player.id and action.id != source.id
+                        and action.start_time >= source.end_time):
+                    return None
+        return source.id
 
     @staticmethod
     def _opponent_melee_action(candidate, opponent):
@@ -1426,8 +1492,10 @@ class GeneratedArenaSession:
         if motion not in weapon.get_melee_types():
             raise ArenaBrowserRequestError(f"The native Dagger does not support {motion}.")
         reach = effective_melee_reach_meters(player.current, weapon.current)
+        feint_source = self._available_feint_source(candidate, player, target.id)
         action = MeleeStrike(encounter, player.id, target.id, weapon.id,
-                             motion=motion, reach=reach)
+                             motion=motion, reach=reach,
+                             feint_source_action_id=feint_source)
         try:
             prepared = encounter.prepare_action(action)
         except Exception as exc:
@@ -1435,6 +1503,85 @@ class GeneratedArenaSession:
                 f"Native {motion} Choice is unavailable under the current Encounter state.") from exc
         distance = encounter.distance_between_beings(player.id, target.id)
         return action, weapon, prepared, distance, reach
+
+    def _feint_preflight(self, candidate, player, entity_id, evidence, motion,
+                         supported=True):
+        if motion not in ("swing", "thrust"):
+            raise ArenaBrowserRequestError("Choose the native Dagger Swing or Thrust motion.")
+        if not supported or not _has_native_transactional_action_contract(Action):
+            raise ArenaBrowserRequestError("The native Feint scheduler or resolver contract is unavailable.")
+        if evidence is None or evidence.category != "being" or evidence.present_state != "present":
+            raise ArenaBrowserRequestError("Select an aware opposing Being first.")
+        encounter = candidate.encounter
+        target = encounter.get_being(entity_id) if type(entity_id) is str else None
+        if (target is None or target.id == player.id or entity_id not in encounter.being_list
+                or not encounter.is_aware(player.id, target.id)):
+            raise ArenaBrowserRequestError("Feint requires an aware participating opposing Being.")
+        if not encounter.initiated or encounter.progression_mode != "transactional":
+            raise ArenaBrowserRequestError("Activate the native Encounter before choosing Feint.")
+        latest_feint = self._player_feint_action(candidate, player)
+        if latest_feint is not None and self._melee_action_pending(candidate, latest_feint):
+            raise ArenaBrowserRequestError("A native Feint is already resolving for the player.")
+        if encounter._choice_book.actor_planned_now(player.id):
+            raise ArenaBrowserRequestError("The player already has a native Action accepted or resolving.")
+        if player.get_hit_points() <= 0 or target.get_hit_points() <= 0:
+            raise ArenaBrowserRequestError("Both Beings must have positive native hit points to schedule Feint.")
+        weapon_id = self._initial_ready_dagger_id(candidate, player)
+        from weapon import WeaponInstance
+        weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
+        if (type(weapon) is not WeaponInstance or weapon.id not in player.weapons
+                or weapon.id not in player.armed_with(candidate.universe).values()
+                or weapon.parent_container_id != player.id or weapon.get_position() is not None
+                or weapon.current.obj_type != "Dagger"):
+            raise ArenaBrowserRequestError("Feint requires the API-created Dagger to be held and readied.")
+        if motion not in weapon.get_melee_types():
+            raise ArenaBrowserRequestError(f"The native Dagger does not support {motion}.")
+        if (player.current.skills.weapon_skills.get(weapon.original.obj_type, 0) or 0) <= 1:
+            raise ArenaBrowserRequestError("Armed Feint requires advanced skill with the selected weapon.")
+        native_timing = weapon.St() if motion == "swing" else weapon.Tt()
+        if type(native_timing) not in (int, float) or not math.isfinite(native_timing) or native_timing <= 0:
+            raise ArenaBrowserRequestError("The selected Dagger motion has no supported timing.")
+        action = Action(candidate.universe, encounter.time, encounter.time + 1,
+                        "feint", player.id, target.id, weapon.id)
+        action.feint_motion = motion
+        action.reach = effective_melee_reach_meters(player.current, weapon.current)
+        duration = max(1, math.ceil(native_timing / 2) - action.strategy.timing_adjustment())
+        action.end_time = encounter.time + duration
+        try:
+            prepared = encounter.prepare_action(action)
+        except Exception as exc:
+            raise ArenaBrowserRequestError(
+                "Native Feint Choice is unavailable under the current Encounter state.") from exc
+        return action, prepared
+
+    def choose_feint(self, payload):
+        if type(payload) is not dict or set(payload) != {"handle", "motion"}:
+            raise ArenaBrowserRequestError("Feint requires one currently perceived Being handle and a motion")
+        handle, motion = payload["handle"], payload["motion"]
+        if type(handle) is not str or type(motion) is not str:
+            raise ArenaBrowserRequestError("Feint target and motion must be text")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Feint")
+            candidate = self._active
+            player = candidate.participants[0].native.being
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            action, prepared = self._feint_preflight(
+                candidate, player, entity_id, evidence, motion)
+            try:
+                candidate.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Feint Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = handle
+            self._trace.native_advance(None, None,
+                f"action=feint motion={motion} duration={prepared.end_time-prepared.start_time:g}s")
+            return self._view_unlocked()
 
     def choose_melee_strike(self, payload):
         if type(payload) is not dict or set(payload) != {"handle", "motion"}:
@@ -1797,6 +1944,40 @@ class GeneratedArenaSession:
                     "is_melee": source_row["is_melee"], "status": status,
                     "display_name": f"Touch ({duration:g} s)" if duration is not None else "Touch",
                     "reason": reason, "target": target_view,
+                    "duration_seconds": duration,
+                })
+                continue
+            if name.casefold() == "feint (armed)":
+                reason = "Select a perceived opposing Being; armed Feint requires advanced skill with a held weapon."
+                status, duration = "unavailable", None
+                motions = []
+                target_view = (None if selected is None else {"handle": handle,
+                    "name": selected["name"], "type": selected["type"],
+                    "present_state": selected["present_state"]})
+                if supported_actions.get(Action, False):
+                    for motion in ("swing", "thrust"):
+                        try:
+                            _, prepared = self._feint_preflight(
+                                candidate, player, entity_id, evidence, motion)
+                            motion_duration = prepared.end_time - prepared.start_time
+                            motions.append({"motion": motion, "duration_seconds": motion_duration})
+                        except ArenaBrowserRequestError as exc:
+                            reason = str(exc)
+                    if motions:
+                        status = "available"
+                        duration = motions[0]["duration_seconds"]
+                        reason = ("Native armed Feint uses a false Dagger attack with no damage; "
+                                  "base timing is half the selected attack timing, rounded up. "
+                                  "A success grants +2 to the next chosen attack against this Being only.")
+                else:
+                    reason = "The native Action scheduler or Feint resolver contract is unavailable."
+                catalog_rows.append({
+                    "name": name, "group": "Being targets",
+                    "target_type": "being", "required_skill": source_row["required_skill"],
+                    "is_melee": source_row["is_melee"], "status": status,
+                    "display_name": f"Feint with Dagger ({duration:g} s)" if duration is not None else "Feint with Dagger",
+                    "reason": reason, "target": target_view,
+                    "motion": "thrust", "motions": motions,
                     "duration_seconds": duration,
                 })
                 continue
@@ -2855,6 +3036,8 @@ class GeneratedArenaSession:
             melee_pending = self._melee_action_pending(candidate, melee_action)
             touch_action = self._player_touch_action(candidate, player)
             touch_pending = self._melee_action_pending(candidate, touch_action)
+            feint_action = self._player_feint_action(candidate, player)
+            feint_pending = self._melee_action_pending(candidate, feint_action)
             player_defense = self._latest_melee_defense(candidate, player)
             player_defense_view = self._defense_action_view(candidate, player)
             player_defense_pending = (self._melee_defense_pending(candidate, player_defense)
@@ -2868,6 +3051,7 @@ class GeneratedArenaSession:
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
                     and not touch_pending
+                    and not feint_pending
                     and not player_defense_pending
                     and not opponent_melee_pending and not opponent_can_act
                     and self._movement_plan is None):
@@ -2881,6 +3065,7 @@ class GeneratedArenaSession:
                              and self._ready_weapon_action_outcome is None)
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
+                    and not feint_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
@@ -2892,12 +3077,14 @@ class GeneratedArenaSession:
                              and self._ready_weapon_action_outcome is None)
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
+                    and not feint_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             if (self._movement_plan is None and self._ready_weapon_action_id is not None
                     and self._ready_weapon_action_outcome is not None and not melee_pending
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
+                    and not feint_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:

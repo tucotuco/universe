@@ -248,7 +248,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -275,8 +275,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if not cancelled and math.ceil(end) < boundary:
             raise EvaluationIntegrityError('stale pending Action')
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
+        family = ('melee' if type(action) is Action and ad['event_type'] == 'feint'
+                  else families[type(action)])
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
-        for key in ('reach','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','feint_motion','feint_source_action_id','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool'):
             if key in ad:
                 selected[key] = freeze(ad[key])
@@ -337,7 +339,23 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             except BoundaryInvariantError as exc:
                 raise EvaluationIntegrityError(str(exc)) from exc
         # Position is an immutable native value; no arbitrary object survives.
-        actions[aid] = ActionView(aid, families[type(action)], freeze(ad['actor_id']),
+        if type(action) is Action and ad['event_type'] == 'feint':
+            if (ad.get('feint_motion') not in ('swing', 'thrust')
+                    or ad.get('instrument_id') is None
+                    or type(ad.get('reach')) not in (int, float)
+                    or not math.isfinite(ad['reach']) or ad['reach'] <= 0):
+                raise EvaluationIntegrityError('native Feint declaration is incomplete')
+        feint_source = ad.get('feint_source_action_id')
+        if type(action) is MeleeStrike and feint_source is not None:
+            source = wd['event_history'].get(feint_source)
+            if (type(source) is not Action or source.event_type != 'feint'
+                    or source.actor_id != ad.get('actor_id')
+                    or source.target_id != ad.get('target_id')
+                    or source.id not in ed['finished_action_list']
+                    or type(source.resolution) is not ActionProposal
+                    or source.resolution.outcome != 'success'):
+                raise EvaluationIntegrityError('MeleeStrike references an ineligible Feint result')
+        actions[aid] = ActionView(aid, family, freeze(ad['actor_id']),
             freeze(ad['target_id']), freeze(ad['instrument_id']), freeze(ad['start_time']),
             end, math.ceil(end), -1 if type(action) is MeleeDefense else 0, order,
             'cancelled' if cancelled else 'pending', MappingProxyType(selected))
@@ -879,9 +897,20 @@ def _combat(snapshot, action, rng, dependencies):
                 yield_penalty = sum(1 for dependency in dependencies
                     if dependency.kind == 'yield' and dependency.eligible
                     and dependency.success)
+                feint_bonus = 2 if action.data.get('feint_source_action_id') is not None else 0
                 return attack_hits(roll - block_penalty - yield_penalty,
-                    actor.data['weapon_skills'].get(weapon.obj_type, 0) + actor.data['strategy']['attack'],
+                    actor.data['weapon_skills'].get(weapon.obj_type, 0)
+                    + actor.data['strategy']['attack'] + feint_bonus,
                     target_defense + parry_bonus, dc - adjustment)
+            if action.family == 'melee' and action.data['event_type'] == 'feint':
+                if (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0) <= 1:
+                    outcome = 'weapon_unavailable'
+                else:
+                    adjustment = actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
+                    outcome = ('success' if adjustment is not None
+                               and hits(rng.roll('1d20'), snapshot.difficulty) else 'failure')
+                return ActionProposal(action.id, actor.id, (target.id,), outcome,
+                                      (), tuple(dependencies), (('distance', distance),))
             def save(being, dc):
                 return saving_throw(rng.roll('1d20'), dc,
                     saving_throw_experience_modifier(experience_level(being.data['experience'])))
@@ -1238,7 +1267,11 @@ def evaluate_snapshot(snapshot, action_ids=None):
         strike_proposal = by_id.get(strike_id)
         if strike_proposal is None:
             raise EvaluationIntegrityError('retained defense assignment lacks its same-boundary attack result')
-        landed = strike_proposal.outcome in ('normal', 'critical', 'fatal')
+        source_action = snapshot.actions[strike_id]
+        landed = (strike_proposal.outcome in ('normal', 'critical', 'fatal')
+                  or (source_action.family == 'melee'
+                      and source_action.data.get('event_type') == 'feint'
+                      and strike_proposal.outcome == 'success'))
         success = not landed
         outcome = ('deflected' if defense_action.data['kind'] == 'parry' else 'evaded') if success else 'failed'
         effect = replace(defense_proposal.defenses[0], success=success)
