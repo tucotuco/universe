@@ -25,6 +25,7 @@ from melee_defense import MeleeDefense
 from scheduling import PreparedSchedule, UnsupportedScheduleExtension
 from realization import Fact
 from spatial.state import CartesianPosition
+from strategy import Strategy
 from tactical_duel import TacticalDuel
 from universe import Universe
 
@@ -208,6 +209,26 @@ class TestActionChoices(unittest.TestCase):
         self.assertFalse(token.valid)
         self.assertTrue(any(d.object_id == self.w1 for d in token.diagnostics))
         self.assertEqual(defense.end_time, 0)
+
+    def test_one_retained_dodge_cannot_be_assigned_twice_in_one_choice(self):
+        preparation = MeleeDefense(self.enc, self.a.id, kind='dodge',
+            strategy=Strategy(defense=0, timing=0))
+        self.enc.schedule_action(preparation)
+        self.enc.step(2)
+        self.assertEqual(preparation.resolution.outcome, 'ready')
+        incoming = self.strike(self.w3, self.b, self.a)
+        self.enc.schedule_action(incoming)
+        first = MeleeDefense(self.enc, self.a.id, self.b.id, kind='dodge',
+            target_action_id=incoming.id,
+            prepared_defense_action_id=preparation.id)
+        second = MeleeDefense(self.enc, self.a.id, self.b.id, kind='dodge',
+            target_action_id=incoming.id,
+            prepared_defense_action_id=preparation.id)
+        token = self.enc.validate_choice(self.enc.propose_choice([first, second]))
+        self.assertFalse(token.valid)
+        self.assertTrue(any('already been committed' in diagnostic.reason
+                            or 'more than once in a Choice' in diagnostic.reason
+                            for diagnostic in token.diagnostics))
 
     def test_independent_instruments_and_movement_do_not_reserve_the_being(self):
         one, two = self.strike(self.w1), self.strike(self.w2)
