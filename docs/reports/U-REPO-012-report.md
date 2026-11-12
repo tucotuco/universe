@@ -4,7 +4,7 @@
 
 Phase B was carried out in the active `universe` checkout only. The local-only archive and four saved JSON resources were restored and verified against `universe-pre-safe`; documentation was organized without dropping the reconciled pre-safe history; the two focused code/test defects were corrected. No files were written to the other three repository directories. No push, `.venv` rebuild, dependency install, NPC Generator change, or gameplay feature work was performed.
 
-The starting active checkout was `main` at `d59bc7d495e5d4fbd3ccbe43f8e65296d63bf2af`. The final Git status and commit hash will be recorded after the reviewed changes are committed; original untracked user inputs will remain unstaged.
+The starting active checkout was `main` at `d59bc7d495e5d4fbd3ccbe43f8e65296d63bf2af`. The implementation and organization change is committed locally as `95408bb2431d6bb1e678f4827be6f9d4ce2481ce` (`Organize recovered Universe documentation`). The final report update is a separate report-only commit. No original user assignment/report inputs were staged.
 
 ## Restored local-only resources
 
@@ -151,4 +151,4 @@ The first NPC test run exposed the stale weight assertion after the length fix; 
 
 ## Git and publication state
 
-No push was attempted. Before each commit, the explicit staged path list and `python tools/check_publication_safety.py --staged` result will be recorded here. The report, source edits, and documentation moves are scoped to the active Universe checkout. The preexisting user-provided `U-REPO-009.md`, `U-REPO-010*.md`, `U-REPO-012.md`, and `U-REPO-010-report.md` remain unstaged. The final commit hash, branch, and status will be appended after commit verification.
+No push was attempted. The 63 staged paths were reviewed; `git diff --cached --check` passed, and `.venv/bin/python -B tools/check_publication_safety.py --staged` returned `staged-audit files=63 findings=0 result=PASS`. The commit recorded 43 paths after Git's rename detection. `git fsck --full --strict` exited 0. It reported three dangling trees also present in the untouched safe backup, plus 15 dangling blobs in the active object database; there were no corrupt objects. These unreachable objects were left intact rather than pruned. The final branch is `main`; after the implementation commit, status contains only five preexisting untracked user inputs: `docs/assignments/U-REPO-009.md`, `docs/assignments/U-REPO-010-reissued.md`, `docs/assignments/U-REPO-010.md`, `docs/assignments/U-REPO-012.md`, and `docs/reports/U-REPO-010-report.md`. The report and related code/docs are committed; restored local-only assets remain ignored and untracked by Git.
