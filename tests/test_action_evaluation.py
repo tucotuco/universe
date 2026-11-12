@@ -320,6 +320,61 @@ class TestActionEvaluation(unittest.TestCase):
                   if getattr(self.world.get_event_by_id(identity),'event_type',None)=='hold')
         self.assertEqual(self.enc.inspect_committed(8).action(hold.id).facts.outcome,'failed')
 
+    def test_staggered_automatic_maintenance_keeps_each_grip_independent(self):
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
+        for being in (self.a,self.b):
+            being.current.skills.skills['improved grapple']=0
+            being.set_ability('strength',10)
+        self.a.current.body_parts['left hand']=None
+        self.a.current.body_parts['right hand']=None
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        def resolve(action, rolls):
+            self.enc.schedule_action(action)
+            values=iter(rolls)
+            def scripted(ctx,dice):
+                value=next(values)
+                ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value))
+                return value
+            with patch.object(_ProvisionalRandom,'roll',scripted):
+                self.enc.step(action.end_time-self.enc.time)
+            return self.enc.inspect_committed(action.end_time).action(action.id)
+
+        touch1=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch1,[15,1]).facts.outcome,'touched')
+        grip1=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grip1.touch_action_id=touch1.id;grip1.grab_hand='left hand'
+        self.assertEqual(resolve(grip1,[6,6,6,1,1,1]).facts.outcome,'success')
+        touch2=Action(self.world,2,3,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch2,[15,1]).facts.outcome,'touched')
+        grip2=Action(self.world,3,4,'grab',self.a.id,self.b.id,None)
+        grip2.touch_action_id=touch2.id;grip2.grab_hand='right hand'
+        self.assertEqual(resolve(grip2,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual({row[0] for row in active_contact_state(self.enc)[0]},
+                         {grip1.id,grip2.id})
+
+        # The first Grip's check is due at 8. It loses and releases only that
+        # hand; the second Grip's independently scheduled check is due at 10.
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[1,1,1,6,6,6]):
+            self.enc.step(4)
+        self.assertEqual({row[0] for row in active_contact_state(self.enc)[0]},
+                         {grip2.id})
+        first_hold=next(self.world.get_event_by_id(identity)
+                        for identity in self.enc.finished_action_list
+                        if getattr(self.world.get_event_by_id(identity),'event_type',None)=='hold')
+        self.assertEqual(self.enc.inspect_committed(8).action(first_hold.id).facts.outcome,'failed')
+
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[6,6,6,1,1,1]):
+            self.enc.step(2)
+        self.assertEqual({row[0] for row in active_contact_state(self.enc)[0]},
+                         {grip2.id})
+        second_hold=next(self.world.get_event_by_id(identity)
+                         for identity in self.enc.finished_action_list
+                         if getattr(self.world.get_event_by_id(identity),'event_type',None)=='hold'
+                         and self.world.get_event_by_id(identity).start_time==9)
+        self.assertEqual(self.enc.inspect_committed(10).action(second_hold.id).facts.outcome,'success')
 
     def test_voluntary_release_releases_only_the_selected_grip_without_rng(self):
         from physical_contact import active_contact_state
