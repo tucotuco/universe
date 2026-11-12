@@ -64,7 +64,7 @@ The full test suite and an actual browser walkthrough of the new Release/Trip co
 | U-UI-001 | PARTIAL | PARTIAL; bounded Release/Trip selector options added, complete browser and observer-facing scope remains |
 | U-PER-002 | PARTIAL | PARTIAL; Release state is covered by fresh-process Arena Save/Load regression; general persistence remains open |
 
-`docs/ideas/inbox/` does not exist in this checkout, so no intake items were mapped or moved. `TASKS.md` reflects the bounded outcome and clears the ACTIVE marker; its update is intended to be committed with this report. No unrelated task or idea was rewritten.
+`docs/ideas/inbox/` does not exist in this checkout, so no intake items were mapped or moved. `TASKS.md` reflects the bounded outcome and clears the ACTIVE marker; its update was committed with the implementation/report as `23c462d`. No unrelated task or idea was rewritten.
 
 ## Git and publication safety
 
@@ -75,4 +75,4 @@ The staged paths will be limited to the reviewed source, tests, Action catalog, 
 - The final HTTP Release/fresh-process test passed (1 test, 25.839 s); the Trip tie test passed (1 test, 1.017 s); modified Python files compiled; and `git diff --check` passed.
 - Staged paths were the 15 files listed above. The first cached whitespace check found four Markdown hard-break trailing spaces in the newly installed assignment; those spaces were removed, then `git diff --cached --check` passed.
 - `.venv/bin/python -B tools/check_publication_safety.py --staged`: **15 files, 0 findings, PASS**. Untracked `U-ARENA-018B-new-codex.md` and pre-existing U-REPO assignment/report inputs remain unstaged.
-- Local commit and final worktree status are reported in the task closeout. No remote publication was attempted.
+- `23c462d` — `Complete bounded grip and trip lifecycle` (15 reviewed paths; includes `TASKS.md`). A follow-up report-only commit records this exact closeout. No remote publication was attempted.
