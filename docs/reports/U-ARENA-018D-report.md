@@ -24,7 +24,24 @@ Added `test_generated_http_contact_grapple_takedown_save_load_without_fixture_mu
 5. Advance the restored process through a successful Grapple at second 9. Through the same session route, declare Takedown to prone and advance to second 15; observe a successful Takedown, `advantaged_takedown_top`, and lying posture. The system Hold check also succeeds at second 15.
 6. Save again and verify in another fresh OS process that time, the Grip, Grapple position, and posture persist.
 
-This is real generated initialization plus the shipped HTTP/session handlers and fresh Python processes. It is **not** a full interactive Chrome walkthrough. The earlier Chrome session opened and inspected a generated Arena, but canvas marker targeting through the available automation did not reliably open the player selector, so no Chrome action/Save/Load sequence is claimed.
+This is real generated initialization plus the shipped HTTP/session handlers and fresh Python processes. An actual Chrome run is separately recorded below; it executes Touch → Grab → Grapple → Takedown and Save. Its file-based Load step was limited by the browser extension’s local-file access setting.
+
+### Actual Chrome walkthrough (12 November 2026)
+
+Chrome opened the local generated Arena. With root seed `20261100`, 10,000 XP, a 5×5 map, unequipped player/opponent, no opponent strategy, and Medium size categories selected in the Generate form, the visible sequence was:
+
+1. Generated the Encounter; chose Walk to cell `(0,1)` and advanced one native second. The player sheet showed the committed position in that cell.
+2. Opened the player popup from the blue map marker. Inspected the perceived opposing Being through its visible-entity button, then selected Touch against the opponent. At native second 2 the page showed `Touch resolved: touched.`
+3. Selected Grab with the left hand. At second 3 the page showed `Grab resolved: success.` and the player sheet exposed Grapple at the grip’s scheduled check.
+4. Selected Grapple; after six committed seconds the page showed `Grapple resolved: success.` at second 9 and displayed the individual left-hand Hold plus Grapple control and next six-second checks.
+5. Selected **Takedown → prone**; after six more committed seconds the page showed `Takedown resolved: success.` at second 15 and the player status exposed `advantaged_takedown_top`, confirming the new positional transition.
+6. Clicked **Save Encounter**; Chrome showed `Encounter downloaded as a portable native save file.`
+
+The Chrome Load control opened a local file chooser, but `setFiles` was rejected by the Codex Chrome extension because **Allow access to file URLs** is disabled. No Chrome permission was changed. Therefore this confirms the native browser action sequence and Save, not file-based Load in Chrome. The exact generated HTTP/session scenario above verifies Save/Load across fresh OS processes, including pending and resolved contact state.
+
+### Player cancellation control
+
+Added a character-popup **Cancel pending contact Action** control backed by `/api/generated/cancel-contact`. The request contains no Action ID: the server locates only the player’s own latest supported contact Action, permits a sole-member accepted Choice to be undone before it starts or a currently pending Action to be cancelled, and refuses to withdraw a shared multi-member Choice or an already-resolving Action. The API route test cancels a pending Wrest and verifies the cancelled status, no identity disclosure, no RNG draw, unchanged Object custody, and retained Object Grip receipt.
 
 ## Earlier 018B/018C work retained in this increment
 
@@ -39,8 +56,8 @@ All commands use the preserved `.venv`, `-B`, and no custom pre-import shim.
 | Command | Result |
 | --- | --- |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_action_evaluation` | 75 passed, 79.098 s |
-| `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser` | 48 passed, 62.235 s |
-| `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_native_object_wrest` | 9 passed, 12.618 s |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser` | 48 passed, 67.330 s |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_native_object_wrest` | 9 passed, 18.321 s (includes pending Wrest cancellation through the new player-facing HTTP route) |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_atomic_publication` | 70 passed, 49.361 s |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_transactional_progression tests.test_encounter_inspection` | 104 passed, 63.338 s |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_http_contact_grapple_takedown_save_load_without_fixture_mutations` | 1 passed, 9.200 s (also in the 48-test browser module) |
@@ -53,7 +70,7 @@ The checkpoint cohort failure details remain in the earlier 018B/018C reports. T
 
 ## Remaining scope and task state
 
-`TASKS.md` remains canonical and retains U-ARENA-018D as ACTIVE. U-ARENA-018 and U-ACT-012 remain PARTIAL; U-ACT-013 (declared Multiple actions) remains OPEN. This ruling resolves Hold's Action cost but does not implement the wider Multiple-action program, shared strategy allocation/priority penalties, or all legally simultaneous Action combinations. Remaining review also includes broader control/posture/size cases, more competing custody combinations, player-accessible cancellation of future pending contact Actions, defender-side browser choices, and the complete interactive Chrome walkthrough. U-ACT-020 Stun and U-ACT-021 Subdue remain OPEN; no new unarmed damage, timed condition, subdual track, or recovery framework was added. Force-based Pull remains outside this close-contact increment because its adopted force-to-motion mapping is explicitly unspecified.
+`TASKS.md` remains canonical and retains U-ARENA-018D as ACTIVE. U-ARENA-018 and U-ACT-012 remain PARTIAL; U-ACT-013 (declared Multiple actions) remains OPEN. This ruling resolves Hold's Action cost but does not implement the wider Multiple-action program, shared strategy allocation/priority penalties, or all legally simultaneous Action combinations. Remaining review also includes broader control/posture/size cases, more competing custody combinations, defender-side browser choices, broader custody combinations, and Chrome file-based Load verification (the extension denied local-file access). U-ACT-020 Stun and U-ACT-021 Subdue remain OPEN; no new unarmed damage, timed condition, subdual track, or recovery framework was added. Force-based Pull remains outside this close-contact increment because its adopted force-to-motion mapping is explicitly unspecified.
 
 No ideas-inbox entry was present for this scope. The generated outstanding-only Encounter to-do was refreshed using the documented tool; the working-draft TOC tool reports its older revision-60 target already current and did not modify the adopted revision-61 source. No `.venv`, ignored `legacy/`, local saves, independent `npc-generator`, backups, or unrelated user files were changed. The supplied assignments and unrelated report remain untracked. No push, reset, clean, or history rewrite was performed.
 

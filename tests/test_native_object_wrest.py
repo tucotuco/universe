@@ -444,7 +444,10 @@ class TestNativeObjectWrest(unittest.TestCase):
         request(session,'/api/generated/advance',{'seconds':1})
         self.assertIn(wrest.id,candidate.encounter.pending_action_list)
         before_rng=session._rng_cursor.state
-        candidate.encounter.cancel_action(wrest.id,reason='test withdrawal')
+        status,withdrawn=request(session,'/api/generated/cancel-contact',{})
+        self.assertEqual(status,200)
+        self.assertEqual(withdrawn['grappling_action']['status'],'cancelled')
+        self.assertNotIn(wrest.id,json.dumps(withdrawn))
         request(session,'/api/generated/advance',{'seconds':1})
 
         self.assertIn(wrest.id,candidate.encounter.cancelled_action_list)

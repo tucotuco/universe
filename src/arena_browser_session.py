@@ -1004,6 +1004,9 @@ class GeneratedArenaSession:
             return {"name":label,"status":"executing","outcome":None,
                     "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time)),
                     "end_time":action.end_time}
+        if action.id in candidate.encounter.cancelled_action_list:
+            return {"name":label,"status":"cancelled","outcome":None,
+                    "seconds_remaining":0,"end_time":action.end_time}
         try:
             record = candidate.encounter.inspect_committed(int(action.end_time)).action(action.id)
         except (ValueError, KeyError, AttributeError):
@@ -1797,6 +1800,53 @@ class GeneratedArenaSession:
             self._selected_entity_handle = payload["handle"]
             self._trace.native_advance(None, None,
                 f"action={payload['action']} duration={prepared.end_time-prepared.start_time:g}s")
+            return self._view_unlocked()
+
+    def cancel_pending_contact(self, payload):
+        """Let the player withdraw their own one-member contact Action."""
+        if payload != {}:
+            raise ArenaBrowserRequestError("Contact cancellation accepts an empty request.")
+        contact_types = {"touch", "grab", "grab object", "wrest", "break hold",
+                         "release grip", "grapple", "grapple escape", "takedown",
+                         "reverse", "pin", "trip"}
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before cancelling an Action.")
+            candidate = self._active
+            encounter = candidate.encounter
+            player = candidate.participants[0].native.being
+            choices = encounter._choice_book._choices
+            rows = []
+            for choice in choices.values():
+                if choice.view.state not in ("accepted", "executing"):
+                    continue
+                for member in choice.members:
+                    action = member.action
+                    if (type(action) is Action and action.actor_id == player.id
+                            and action.event_type in contact_types):
+                        rows.append((action, choice))
+            action, choice = max(rows, key=lambda row: (row[0].start_time,
+                              row[0].end_time, row[0].id), default=(None, None))
+            if action is None:
+                raise ArenaBrowserRequestError("You have no pending contact Action to cancel.")
+            if len(choice.members) != 1:
+                raise ArenaBrowserRequestError(
+                    "This contact Action belongs to a multi-Action Choice and cannot be cancelled alone.")
+            try:
+                if action.id in encounter.pending_action_list:
+                    encounter.cancel_action(action.id, reason="player_withdrawal")
+                elif choice.view.state == "accepted":
+                    encounter._choice_book.undo(choice.view.id)
+                else:
+                    raise ArenaBrowserRequestError(
+                        "The contact Action has already started resolving and cannot be withdrawn.")
+            except (ValueError, RuntimeError) as exc:
+                if isinstance(exc, ArenaBrowserRequestError):
+                    raise
+                raise ArenaBrowserRequestError(
+                    "The contact Action could not be withdrawn; Encounter state is unchanged.") from exc
+            self._trace.native_advance(None, None,
+                f"action={action.event_type} player_withdrawal=true")
             return self._view_unlocked()
 
     def _melee_strike_preflight(self, candidate, player, entity_id, evidence, motion,
