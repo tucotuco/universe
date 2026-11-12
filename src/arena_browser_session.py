@@ -574,23 +574,38 @@ class GeneratedArenaSession:
         contact_wait_available = any(boundary >= candidate.encounter.time + 1
                                      for boundary in contact_check_boundaries)
         contact_status = []
+        now = candidate.encounter.time
         for row in active_grips:
-            _, holder_id, held_id, hand, _, _ = row
+            _, holder_id, held_id, hand, _, next_check = row
+            check_text=f"; next maintenance check in {max(0,next_check-now)} s"
             if holder_id == player.native.being.id:
                 other = candidate.encounter.get_being(held_id)
-                contact_status.append(f"You hold {self._display_names.get(held_id, other.name)} with {hand}")
+                contact_status.append(f"You hold {self._display_names.get(held_id, other.name)} with {hand}{check_text}")
             elif held_id == player.native.being.id:
                 other = candidate.encounter.get_being(holder_id)
-                contact_status.append(f"{self._display_names.get(holder_id, other.name)} holds you")
+                contact_status.append(f"{self._display_names.get(holder_id, other.name)} holds you{check_text}")
         for row in active_controls:
-            _, controller_id, controlled_id, _, _, _, *position_detail = row
+            _, controller_id, controlled_id, _, _, next_check, *position_detail = row
             position_label = position_detail[0] if position_detail else "standing"
+            check_text=f"; next Grapple check in {max(0,next_check-now)} s"
             if controller_id == player.native.being.id:
                 other = candidate.encounter.get_being(controlled_id)
-                contact_status.append(f"You have Grapple control of {self._display_names.get(controlled_id, other.name)} ({position_label})")
+                contact_status.append(f"You have Grapple control of {self._display_names.get(controlled_id, other.name)} ({position_label}){check_text}")
             elif controlled_id == player.native.being.id:
                 other = candidate.encounter.get_being(controller_id)
-                contact_status.append(f"{self._display_names.get(controller_id, other.name)} has Grapple control of you ({position_label})")
+                contact_status.append(f"{self._display_names.get(controller_id, other.name)} has Grapple control of you ({position_label}){check_text}")
+        from physical_contact import active_object_grip_state
+        for row in active_object_grip_state(candidate.encounter):
+            object_id,_,actor_id,holder_id,actor_hand,holder_hand,_=row
+            if actor_id!=player.native.being.id:continue
+            obj=candidate.universe.get_object_by_id(object_id)
+            holder=candidate.encounter.get_being(holder_id)
+            evidence=next((item for item in ledger.current if item.entity_id==object_id),None)
+            if obj is None or holder is None or evidence is None or evidence.present_state!='carried':
+                continue
+            object_name=self._display_names.get(object_id,evidence.name)
+            holder_name=self._display_names.get(holder_id,holder.name)
+            contact_status.append(f"You grip {object_name} with {actor_hand}; {holder_name} holds it in {holder_hand}")
         feint_action = self._feint_action_view(candidate, player.native.being)
         feint_pending = feint_action is not None and feint_action["status"] == "executing"
         coup_de_grace_action = self._named_base_action_view(candidate, player.native.being, "coup de grace", "Coup de grace")
@@ -978,7 +993,7 @@ class GeneratedArenaSession:
         actions = [event_by_id.get(action_id) for action_id in accepted]
         actions = [action for action in actions if type(action) is Action
                    and action.actor_id == player.id and action.event_type in
-                   ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
+                   ("grab", "grab object", "wrest", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
         action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
         if action is None:
             return None
@@ -1361,7 +1376,7 @@ class GeneratedArenaSession:
         if any(action.actor_id == opponent.id
                for action in (candidate.universe.event_history.get(action_id)
                               for action_id in encounter.pending_action_list)
-               if action is not None):
+               if action is not None and action.event_type != "hold"):
             return False, "opponent_action_already_pending"
         ledger = object.__getattribute__(opponent, "__dict__").get("_arena_perception_ledger")
         evidence = (None if ledger is None else next(
@@ -1624,11 +1639,8 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("Choose an explicitly represented free native hand.")
             action_data.update(grab_hand=hand, touch_action_id=touch.id)
         elif event_type == "hold":
-            matching = [row for row in grips if row[1] == player.id
-                        and row[2] == target.id and row[5] == encounter.time + 1]
-            if len(matching) != 1:
-                raise ArenaBrowserRequestError("Hold maintenance is available only one second before this grip's six-second check.")
-            action_data["grip_id"] = matching[0][0]
+            raise ArenaBrowserRequestError(
+                "This Grip's six-second maintenance check resolves automatically; it is not a declared Action.")
         elif event_type == "break hold":
             matching = [row for row in grips if row[1] == target.id and row[2] == player.id]
             if len(matching) != 1:
@@ -1687,6 +1699,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("Unsupported native physical-contact Action.")
         if (encounter._choice_book.actor_planned_now(player.id)
                 or any(getattr(candidate.universe.get_event_by_id(action_id), "actor_id", None) == player.id
+                       and getattr(candidate.universe.get_event_by_id(action_id), "event_type", None) != "hold"
                        for action_id in encounter.pending_action_list)
                 or self._melee_action_pending(candidate, self._player_melee_action(candidate, player))
                 or self._melee_action_pending(candidate, self._player_touch_action(candidate, player))):
@@ -2654,6 +2667,9 @@ class GeneratedArenaSession:
                            "grapple":"Grapple", "grapple escape":"Grapple Escape",
                            "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip"}[event_type]
                 duration = 6 if event_type in ("grapple", "grapple escape","takedown","reverse","pin") else 2 if event_type=="trip" else 1
+                if event_type == "hold":
+                    display = "Automatic Hold check"
+                    duration = None
                 target_view = (None if selected is None else {"handle":handle,
                     "name":selected["name"],"type":selected["type"],
                     "present_state":selected["present_state"]})
@@ -2698,7 +2714,7 @@ class GeneratedArenaSession:
                         duration = prepared.end_time - prepared.start_time
                         reason = {
                             "grab":"One-second opposed native Grab after this player's committed successful Touch; the selected free hand becomes one distinct Grip.",
-                            "hold":"One-second maintenance check for this Grip at its six-second due boundary.",
+                            "hold":"Automatic opposed Grab check at this Grip's six-second maintenance boundary; no Action is spent.",
                             "break hold":"One-second opposed 3d6 + Strength contest against this Being's Grip on you.",
                             "release grip":"One-second declared voluntary release of the selected Grip you maintain; no contest is rolled.",
                             "grapple":"Six-second initial Grapple check at the prerequisite Grip's next maintenance boundary.",
@@ -2713,7 +2729,7 @@ class GeneratedArenaSession:
                 catalog_rows.append({"name":name,"group":"Physical contact",
                     "target_type":"being","required_skill":source_row["required_skill"],
                     "is_melee":source_row["is_melee"],"status":status,
-                    "display_name":f"{display} ({duration:g} s)","reason":reason,
+                    "display_name":(f"{display} ({duration:g} s)" if duration is not None else display),"reason":reason,
                     "target":target_view,"hands":hands,"duration_seconds":duration,
                     "event_type":event_type})
                 continue
@@ -3954,7 +3970,8 @@ class GeneratedArenaSession:
         demanding = False
         for action_id in candidate.encounter.pending_action_list:
             action = candidate.universe.event_history.get(action_id)
-            if action is None or getattr(action, "actor_id", None) != actor_id:
+            if (action is None or getattr(action, "actor_id", None) != actor_id
+                    or getattr(action, "event_type", None) == "hold"):
                 continue
             if type(action) is MeleeStrike:
                 demanding = True

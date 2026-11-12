@@ -398,14 +398,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                 "from physical_contact import active_contact_state; "
                 "s=GeneratedArenaSession(root_seed_factory=lambda:99); "
                 "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
-                "v=None; [ (v:=s.advance_one_second()) for _ in range(5) ]; "
-                "e=next(x for x in v['entities'] if x['category']=='being'); "
-                "s.inspect_entity({'handle':e['handle']}); "
-                "v=s._view_unlocked(); "
-                "r=next(x for x in v['action_catalog']['entries'] if x['name']=='hold being'); "
-                "assert r['status']=='available',r; "
-                "s.choose_grappling({'action':'hold','handle':e['handle']}); "
-                "v=s.advance_one_second(); "
+                "v=None; [ (v:=s.advance_one_second()) for _ in range(6) ]; "
                 "print(json.dumps({'time':v['time_seconds'],'action':v['grappling_action'],"
                 "'grips':active_contact_state(s.active_candidate.encounter)[0],"
                 "'rng':s._rng_cursor.state,'save':base64.b64encode(s.save_encounter_bytes()).decode()}))")
@@ -450,6 +443,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(resolved_grapple.returncode, 0, resolved_grapple.stderr)
         grapple_result = json.loads(resolved_grapple.stdout)
         self.assertEqual(grapple_result["time"],15)
+        self.assertEqual(grapple_result["action"]["name"],"Grapple")
         self.assertEqual(grapple_result["action"]["outcome"],"success")
         self.assertEqual(len(grapple_result["contact"][0]),1)
         self.assertEqual(len(grapple_result["contact"][1]),1)
@@ -478,9 +472,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "e=Action(s.active_candidate.universe,15,21,'grapple escape',o.id,p.id,None);e.grapple_id=c[0];e.end_time=21; "
             "s.active_candidate.encounter.schedule_action(e); "
             "v=None; [(v:=s.advance_one_second()) for _ in range(5)]; "
-            "v=s._view_unlocked(); h=next(x['handle'] for x in v['entities'] if x['category']=='being'); "
-            "s.inspect_entity({'handle':h}); r=next(x for x in s._view_unlocked()['action_catalog']['entries'] if x['name']=='hold being'); "
-            "assert r['status']=='available',r; s.choose_grappling({'action':'hold','handle':h}); "
+            "assert next(x for x in s._view_unlocked()['action_catalog']['entries'] if x['name']=='hold being')['status']=='unavailable'; "
             "print(base64.b64encode(s.save_encounter_bytes()).decode())")
         escape_pending = subprocess.run([sys.executable,"-c",continue_to_escape,str(grapple_path)],
             cwd=ROOT,check=False,capture_output=True,text=True)
@@ -504,6 +496,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             cwd=ROOT,check=True,capture_output=True,text=True)
         escaped = json.loads(settled.stdout)
         self.assertEqual(escaped["time"],21)
+        self.assertEqual(escaped["player_action"]["name"],"Grapple")
         self.assertEqual(escaped["player_action"]["outcome"],"success")
         self.assertEqual(escaped["escape"],"success")
         self.assertEqual(len(escaped["grips"]),1)
@@ -521,6 +514,92 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(restored_after_escape["time"],21)
         self.assertEqual(restored_after_escape["grips"][0][0],escaped["grips"][0][0])
         self.assertEqual(restored_after_escape["controls"],[])
+
+    def test_generated_http_contact_grapple_takedown_save_load_without_fixture_mutations(self):
+        self.session=GeneratedArenaSession(root_seed_factory=lambda:20261100)
+        status,_=self.request("/api/generated/generate",{
+            "starting_experience":"10000","width_cells":"5","height_cells":"5",
+            "root_seed":"20261100","equipment_mode":"unequipped",
+            "opponent_strategy":"none",
+            "size_categories":{"player":"medium","opponent":"medium"}})
+        self.assertEqual(status,200)
+        candidate=self.session.active_candidate
+        player=candidate.participants[0].native.being
+        opponent=candidate.participants[1].native.being
+        self.assertIn("left hand",player.current.body_parts)
+        self.assertIsNone(player.current.body_parts["left hand"])
+
+        # These are ordinary shipped session routes and an explicit Generate
+        # size choice; no skill, position, RNG, or contact state is injected.
+        status,_=self.request("/api/generated/destination",{
+            "column":0,"row":1,"rate":"walk","facing_policy":"turn"})
+        self.assertEqual(status,200)
+        self.assertEqual(self.request("/api/generated/advance",{"seconds":1})[0],200)
+        target=self.session._view_handles[opponent.id]
+        self.assertEqual(self.request("/api/generated/inspect",{"handle":target})[0],200)
+        self.assertEqual(self.request("/api/generated/touch",{"handle":target})[0],200)
+        status,touched=self.request("/api/generated/advance",{"seconds":1})
+        self.assertEqual(status,200)
+        self.assertEqual(touched["touch_action"]["outcome"],"touched")
+        grab_row=next(row for row in touched["action_catalog"]["entries"]
+                      if row["name"]=="grab being")
+        self.assertEqual(grab_row["status"],"available")
+        self.assertEqual(self.request("/api/generated/grappling",{
+            "action":"grab","handle":target,"hand":"left hand"})[0],200)
+        status,grabbed=self.request("/api/generated/advance",{"seconds":1})
+        self.assertEqual(status,200)
+        self.assertEqual(grabbed["grappling_action"]["outcome"],"success")
+        self.assertTrue(any("left hand" in text and "next maintenance check in 6 s" in text
+                            for text in grabbed["contact_status"]))
+        self.assertEqual(self.request("/api/generated/grappling",{
+            "action":"grapple","handle":target})[0],200)
+
+        with tempfile.TemporaryDirectory() as directory:
+            pending=Path(directory)/"generated-pending-grapple.json"
+            continued=Path(directory)/"generated-takedown.json"
+            pending.write_bytes(self.session.save_encounter_bytes())
+            env=dict(__import__("os").environ)
+            env["PYTHONPATH"]=__import__("os").pathsep.join(
+                (str(ROOT/"tests"),str(ROOT/"src"),str(ROOT/"examples")))
+            continue_native=(
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "from physical_contact import active_contact_state; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:1); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); v=None; "
+                "[(v:=s.advance_one_second()) for _ in range(6)]; "
+                "g=v['grappling_action']; c=s.active_candidate; "
+                "h=s._view_handles[c.participants[1].native.being.id]; "
+                "s.inspect_entity({'handle':h}); "
+                "s.choose_grappling({'action':'takedown','handle':h,'position':'prone'}); "
+                "[(v:=s.advance_one_second()) for _ in range(6)]; "
+                "open(sys.argv[2],'wb').write(s.save_encounter_bytes()); "
+                "print(json.dumps({'time':v['time_seconds'],'grapple':g,'action':v['grappling_action'],"
+                "'position':active_contact_state(c.encounter)[1][0][6],"
+                "'posture':c.participants[1].native.being.get_posture()}))")
+            child=subprocess.run([sys.executable,"-B","-c",continue_native,str(pending),str(continued)],
+                cwd=ROOT,env=env,check=False,capture_output=True,text=True,timeout=90)
+            self.assertEqual(child.returncode,0,child.stderr)
+            result=json.loads(child.stdout)
+            self.assertEqual(result["time"],15)
+            self.assertEqual((result["grapple"]["name"],result["grapple"]["outcome"]),
+                             ("Grapple","success"))
+            self.assertEqual((result["action"]["name"],result["action"]["outcome"]),
+                             ("Takedown","success"))
+            self.assertEqual(result["position"],"advantaged_takedown_top")
+            self.assertEqual(result["posture"],"lying")
+            verify=(
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "from physical_contact import active_contact_state; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:2); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); c=s.active_candidate; "
+                "g,p=active_contact_state(c.encounter); "
+                "print(json.dumps({'time':c.encounter.time,'grips':len(g),'controls':p[0][6],"
+                "'posture':c.participants[1].native.being.get_posture()}))")
+            restored=subprocess.run([sys.executable,"-B","-c",verify,str(continued)],
+                cwd=ROOT,env=env,check=False,capture_output=True,text=True,timeout=90)
+            self.assertEqual(restored.returncode,0,restored.stderr)
+            self.assertEqual(json.loads(restored.stdout),{
+                "time":15,"grips":1,"controls":"advantaged_takedown_top","posture":"lying"})
 
     def test_object_strike_has_shipped_selector_and_native_http_choice(self):
         status,page=self.request("/")
@@ -1688,7 +1767,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(candidate.encounter.time, 0)
         self.assertEqual(candidate.encounter._choice_book._choices, {})
         self.assertEqual(set(state["player"]),
-                         {"name", "hex_facing", "posture", "posture_source",
+                         {"name", "size_category", "hex_facing", "posture", "posture_source",
                           "cell", "position_meters"})
         hidden_position_payload = json.dumps({"x": hidden_position.x,
                                               "y": hidden_position.y,
@@ -1733,7 +1812,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("perceived ground Object", action_entries["Pick up"]["reason"])
         self.assertEqual(action_entries["ready weapon"]["status"], "unavailable")
         self.assertIn("carried Weapon", action_entries["ready weapon"]["reason"])
-        self.assertEqual(action_entries["grab object"]["status"], "not_implemented")
+        self.assertEqual(action_entries["grab object"]["status"], "unavailable")
+        self.assertIn("Select a currently perceived weapon held by an opposing Being",
+                      action_entries["grab object"]["reason"])
         target = next(row for row in state["entities"] if row["type"] == "Dagger")
         candidate = self.session.active_candidate
         placement = next(row for row in candidate.ground_objects if row.native_type_key == "Dagger")

@@ -50,6 +50,54 @@ _LEGACY_USED = {}
 _ROUTED_OWNERSHIP = {}
 _QUARANTINED = weakref.WeakSet()
 _ACTIVE_RESTORED_EXECUTION = None
+_AUTOMATIC_HOLD_SCHEDULES = set()
+
+
+def _is_automatic_hold_schedule(encounter, action):
+    return (id(encounter), id(action)) in _AUTOMATIC_HOLD_SCHEDULES
+
+
+def _schedule_automatic_hold_check(encounter, boundary):
+    """Stage the due physical Hold check as a system Action, not an actor choice."""
+    from action import Action
+    from physical_contact import active_contact_state
+    # ChoiceBook and the world scheduler share this reentrant lock. Serialize
+    # the check-and-schedule pair so concurrent step callers cannot create two
+    # system Actions for the same Grip/boundary.
+    with encounter._choice_book.lock:
+        due_grips, _controls = active_contact_state(encounter)
+        due_grips = tuple(row for row in due_grips if row[5] == boundary)
+        if not due_grips:
+            return
+        accepted = []
+        for record in encounter._choice_book._choices.values():
+            if record.view.state not in ('accepted', 'executing'):
+                continue
+            accepted.extend(member.action for member in record.members
+                            if type(member.action) is Action)
+        accepted.extend(encounter.universe.get_event_by_id(action_id)
+                        for action_id in encounter.pending_action_list)
+        for grip in due_grips:
+            grip_id, actor_id, target_id, _hand, _started, _next = grip
+            same_check = [action for action in accepted if type(action) is Action
+                          and action.actor_id == actor_id and action.target_id == target_id
+                          and action.end_time == boundary]
+            # Initial Grapple explicitly replaces maintenance for this one Grip.
+            if any(action.event_type == 'grapple'
+                   and getattr(action, 'grip_id', None) == grip_id for action in same_check):
+                continue
+            if any(action.event_type == 'hold'
+                   and getattr(action, 'grip_id', None) == grip_id for action in same_check):
+                continue
+            action = Action(encounter.universe, encounter.time, boundary, 'hold',
+                            actor_id, target_id, None)
+            action.grip_id = grip_id
+            key = (id(encounter), id(action))
+            _AUTOMATIC_HOLD_SCHEDULES.add(key)
+            try:
+                encounter.schedule_action(action)
+            finally:
+                _AUTOMATIC_HOLD_SCHEDULES.discard(key)
 
 
 @contextmanager
@@ -690,16 +738,32 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
         if duration != 1.0:
             raise TransactionalProgressionError('MovementIntent applies to exactly one native second')
     binding=_BINDINGS[id(encounter)]
+    # Native real inputs only; opaque numeric conversion is not an adapter.
+    if type(duration) not in (int,float) or not math.isfinite(duration) or duration<=0:
+        raise TransactionalProgressionError('transactional duration must be finite and positive')
+    start=encounter.time;end=start+duration
+    if not math.isfinite(end) or end<=start or end!=math.floor(end):
+        raise TransactionalProgressionError('transactional step must end at an exact integer boundary; fractional tails are unsupported')
+    if encounter.end_time is not None and end>encounter.end_time:
+        raise TransactionalProgressionError('transactional step exceeds Encounter end')
+    if duration > 1 and movement_intents is None:
+        # Commit every physical second as its own interval. Besides keeping
+        # intermediate snapshots exact, this lets recurring, automatic
+        # contact checks enter the same scheduler before their due second.
+        steps=[]
+        remaining_adult=adult_member_candidate
+        for _ in range(int(duration)):
+            steps.append(step_transactionally(encounter,1.0,velocities,velocity_frame,
+                adult_member_candidate=remaining_adult))
+            remaining_adult=None
+        moved=tuple(dict.fromkeys(identity for step in steps
+                                  for identity in step.moved_entity_ids))
+        completed=tuple(identity for step in steps for identity in step.completed_action_ids)
+        decisions=tuple(identity for step in steps for identity in step.movement_decision_ids)
+        return EncounterStep(start,end,moved,completed,decisions)
+    _schedule_automatic_hold_check(encounter, encounter.time + 1)
     if not binding.running.acquire(blocking=False):raise TransactionalProgressionError('reentrant/concurrent transactional progression')
     try:
-        # Native real inputs only; opaque numeric conversion is not an adapter.
-        if type(duration) not in (int,float) or not math.isfinite(duration) or duration<=0:
-            raise TransactionalProgressionError('transactional duration must be finite and positive')
-        start=encounter.time;end=start+duration
-        if not math.isfinite(end) or end<=start or end!=math.floor(end):
-            raise TransactionalProgressionError('transactional step must end at an exact integer boundary; fractional tails are unsupported')
-        if encounter.end_time is not None and end>encounter.end_time:
-            raise TransactionalProgressionError('transactional step exceeds Encounter end')
         completed=[];motion=None;facing_updates=None;movement_stop_times=None;movement_targets=None;movement_decision_ids=[]
         while encounter.time<end:
             with publication_boundary(encounter,quiescent=True) as ownership:

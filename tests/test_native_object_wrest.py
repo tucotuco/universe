@@ -132,6 +132,8 @@ class TestNativeObjectWrest(unittest.TestCase):
         self.assertNotIn(object_id,json.dumps(accepted))
         grabbed=request(session,'/api/generated/advance',{'seconds':1})[1]
         self.assertEqual(grabbed['grappling_action']['outcome'],'success')
+        self.assertTrue(any('You grip' in row and 'holds it in right hand' in row
+            for row in grabbed['contact_status']))
         self.assertEqual(native_object.parent_container_id,holder.id)
         self.assertEqual(holder.current.body_parts['right hand'],object_id)
         self.assertEqual(actor.current.body_parts['left hand'],None)
@@ -256,9 +258,204 @@ class TestNativeObjectWrest(unittest.TestCase):
             'handle':handle,'action':'wrest'})[0],409)
         self.assertEqual(weapon.parent_container_id,holder.id)
         self.assertEqual(holder.current.body_parts['right hand'],object_id)
-        self.assertEqual(actor.current.body_parts['left hand'],None)
-        self.assertEqual(len(active_object_grip_state(candidate.encounter)),1)
 
+    def test_wrest_late_publication_fault_restores_custody_receipts_and_rng(self):
+        from atomic_publication import PublicationFailure
+        from physical_contact import active_object_grip_state
+        from unittest.mock import patch
+        from tests.test_atomic_publication import raw_graph
+
+        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
+        request(session,'/api/generated/generate',{
+            'starting_experience':'10000','width_cells':'5','height_cells':'5',
+            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
+        candidate=session.active_candidate
+        actor=candidate.participants[0].native.being
+        holder=candidate.participants[1].native.being
+        object_id=holder.current.body_parts['right hand']
+        request(session,'/api/generated/run',{})
+        request(session,'/api/generated/advance',{'seconds':1})
+        handle=session._view_handles[object_id]
+        request(session,'/api/generated/inspect',{'handle':handle})
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
+        request(session,'/api/generated/advance',{'seconds':1})
+        self.assertEqual(len(active_object_grip_state(candidate.encounter)),1)
+        request(session,'/api/generated/grappling',{'handle':handle,'action':'wrest'})
+
+        # Seed a known winning contest so transfer custody writes and receipt
+        # publication are staged before the injected late fault.
+        session._rng_cursor.state=random.Random(3).getstate()
+        before_rng=session._rng_cursor.state
+        before=raw_graph(candidate.universe,candidate.encounter)
+        from atomic_publication import publish_interval_candidate
+        def inject(encounter,interval,**kwargs):
+            return publish_interval_candidate(encounter,interval,
+                _fail_after='rng',**kwargs)
+        with patch('atomic_publication.publish_interval_candidate',side_effect=inject):
+            with self.assertRaises(PublicationFailure):
+                candidate.encounter.step(1)
+
+        self.assertEqual(raw_graph(candidate.universe,candidate.encounter),before)
+        self.assertEqual(session._rng_cursor.state,before_rng)
+        obj=candidate.universe.get_object_by_id(object_id)
+        self.assertEqual(obj.parent_container_id,holder.id)
+        self.assertEqual(holder.current.body_parts['right hand'],object_id)
+        self.assertIsNone(actor.current.body_parts['left hand'])
+        self.assertEqual(len(active_object_grip_state(candidate.encounter)),1)
+        wrest=next(member.action
+                   for choice in candidate.encounter._choice_book._choices.values()
+                   for member in choice.members
+                   if getattr(member.action,'event_type',None)=='wrest')
+        self.assertIsNone(wrest.resolution)
+        self.assertFalse(any(row.boundary==candidate.encounter.time+1
+                             for row in candidate.encounter._atomic_interval_history))
+        with self.assertRaises(Exception):
+            session.save_encounter_bytes()
+
+    def test_same_boundary_second_object_grab_is_rejected_without_priority(self):
+        from action import Action
+        from action_choice import ChoiceRejected
+        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
+        request(session,'/api/generated/generate',{
+            'starting_experience':'10000','width_cells':'5','height_cells':'5',
+            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
+        candidate=session.active_candidate
+        actor=candidate.participants[0].native.being
+        holder=candidate.participants[1].native.being
+        object_id=holder.current.body_parts['right hand']
+        request(session,'/api/generated/run',{})
+        request(session,'/api/generated/advance',{'seconds':1})
+        handle=session._view_handles[object_id]
+        request(session,'/api/generated/inspect',{'handle':handle})
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
+
+        third_id=candidate.universe.make_being('Human','Second would-be wrestler')
+        third=candidate.universe.get_object_by_id(third_id)
+        third.set_position(actor.get_position());third.set_hit_points(100)
+        third.size_category='medium'
+        third.current.body_parts['left hand']=None
+        candidate.encounter.add_being(third.id)
+        candidate.encounter.mark_aware(third.id,holder.id)
+        candidate.encounter.mark_aware(holder.id,third.id)
+        competing=Action(candidate.universe,candidate.encounter.time,
+            candidate.encounter.time+1,'grab object',third.id,object_id,None)
+        competing.holder_id=holder.id;competing.grab_hand='left hand'
+        competing.holder_hand='right hand'
+        before_rng=session._rng_cursor.state
+        with self.assertRaises(ChoiceRejected):
+            candidate.encounter.schedule_action(competing)
+        self.assertEqual(session._rng_cursor.state,before_rng)
+        self.assertEqual(holder.current.body_parts['right hand'],object_id)
+        self.assertEqual(candidate.universe.get_object_by_id(object_id).parent_container_id,holder.id)
+        self.assertEqual(len(active_object_grip_state(candidate.encounter)),0)
+
+    def test_same_boundary_disarm_prevents_wrest_transfer(self):
+        from action import Action
+        from strategy import Strategy
+        from melee_combat import effective_melee_reach_meters
+        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
+        request(session,'/api/generated/generate',{
+            'starting_experience':'10000','width_cells':'5','height_cells':'5',
+            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
+        candidate=session.active_candidate
+        actor=candidate.participants[0].native.being
+        holder=candidate.participants[1].native.being
+        object_id=holder.current.body_parts['right hand']
+        request(session,'/api/generated/run',{})
+        request(session,'/api/generated/advance',{'seconds':1})
+        handle=session._view_handles[object_id]
+        request(session,'/api/generated/inspect',{'handle':handle})
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
+        request(session,'/api/generated/advance',{'seconds':1})
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'wrest'})[0],200)
+
+        third_id=candidate.universe.make_being('Human','Disarming participant')
+        third=candidate.universe.get_object_by_id(third_id)
+        from spatial.state import CartesianPosition
+        hp=holder.get_position()
+        ap=actor.get_position();dx,dy=ap.x-hp.x,ap.y-hp.y;norm=(dx*dx+dy*dy)**.5
+        third.set_position(CartesianPosition(hp.x-.5*dy/norm,hp.y+.5*dx/norm,hp.z))
+        third.set_hit_points(100)
+        from spatial.geometry import Sphere
+        third.set_geometry(Sphere(.1))
+        candidate.encounter.add_being(third.id)
+        from arena_perception import ArenaPerceptionLedger
+        third._arena_perception_ledger=ArenaPerceptionLedger(third.id)
+        candidate.encounter.mark_aware(third.id,holder.id)
+        candidate.encounter.mark_aware(holder.id,third.id)
+        tool_id=candidate.universe.make_weapon_for_being(third.id,'Dagger','Disarm dagger')
+        candidate.universe.arm_being(third.id,tool_id,'right hand')
+        third.current.skills.weapon_skills['Dagger']=10
+        tool=candidate.universe.get_object_by_id(tool_id)
+        disarm=Action(candidate.universe,candidate.encounter.time,
+            candidate.encounter.time+1,'disarm',third.id,holder.id,tool_id,
+            strategy=Strategy(timing=6))
+        disarm.disarm_weapon_id=object_id;disarm.disarm_motion='thrust'
+        disarm.reach=effective_melee_reach_meters(third.current,tool.current)
+        candidate.encounter.schedule_action(disarm)
+        candidate.encounter.step(1)
+
+        wrest=next(row for row in candidate.universe.event_history.values()
+                   if getattr(row,'event_type',None)=='wrest')
+        self.assertEqual(wrest.resolution.outcome,'custody_conflict')
+        item=candidate.universe.get_object_by_id(object_id)
+        self.assertNotEqual(item.parent_container_id,actor.id)
+        self.assertNotIn(object_id,actor.current.body_parts.values())
+        self.assertIsNotNone(disarm.resolution)
+        if disarm.resolution.outcome=='disarmed':
+            self.assertIsNone(item.parent_container_id)
+            self.assertEqual(item.get_position(),holder.get_position())
+        else:
+            self.assertEqual(item.parent_container_id,holder.id)
+            self.assertEqual(holder.current.body_parts['right hand'],object_id)
+
+    def test_cancelled_pending_wrest_keeps_receipt_custody_and_rng(self):
+        from action import Action
+        from physical_contact import active_object_grip_state
+        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
+        request(session,'/api/generated/generate',{
+            'starting_experience':'10000','width_cells':'5','height_cells':'5',
+            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
+        candidate=session.active_candidate
+        actor=candidate.participants[0].native.being
+        holder=candidate.participants[1].native.being
+        object_id=holder.current.body_parts['right hand']
+        request(session,'/api/generated/run',{})
+        request(session,'/api/generated/advance',{'seconds':1})
+        handle=session._view_handles[object_id]
+        request(session,'/api/generated/inspect',{'handle':handle})
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
+        request(session,'/api/generated/advance',{'seconds':1})
+        grip=active_object_grip_state(candidate.encounter)[0]
+
+        # Start the one-second Wrest one second in the future. At that start
+        # fence the native scheduler publishes it as pending; it can then be
+        # withdrawn before the following boundary resolves it.
+        now=candidate.encounter.time
+        wrest=Action(candidate.universe,now+1,now+2,'wrest',actor.id,object_id,None)
+        wrest.holder_id=holder.id;wrest.holder_hand='right hand'
+        wrest.grab_hand='left hand';wrest.object_grip_id=grip[1]
+        candidate.encounter.schedule_action(wrest)
+        request(session,'/api/generated/advance',{'seconds':1})
+        self.assertIn(wrest.id,candidate.encounter.pending_action_list)
+        before_rng=session._rng_cursor.state
+        candidate.encounter.cancel_action(wrest.id,reason='test withdrawal')
+        request(session,'/api/generated/advance',{'seconds':1})
+
+        self.assertIn(wrest.id,candidate.encounter.cancelled_action_list)
+        self.assertNotIn(wrest.id,candidate.encounter.finished_action_list)
+        self.assertIsNone(wrest.resolution)
+        self.assertEqual(session._rng_cursor.state,before_rng)
+        item=candidate.universe.get_object_by_id(object_id)
+        self.assertEqual(item.parent_container_id,holder.id)
+        self.assertEqual(holder.current.body_parts['right hand'],object_id)
+        self.assertIsNone(actor.current.body_parts['left hand'])
+        self.assertEqual(len(active_object_grip_state(candidate.encounter)),1)
 
 if __name__=='__main__':
     unittest.main()

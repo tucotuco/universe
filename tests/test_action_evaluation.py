@@ -151,8 +151,17 @@ class TestActionEvaluation(unittest.TestCase):
             action.end_time = action.start_time + duration
             self.enc.schedule_action(action)
             values = iter(rolls)
+            maintenance_draw = 0
             def scripted(ctx, dice):
-                value = next(values)
+                nonlocal maintenance_draw
+                # Automatic maintenance may resolve beside a six-second
+                # control Action. Script its opposed roles deterministically
+                # without changing the Action under test.
+                if ctx.action_id == action.id:
+                    value = next(values)
+                else:
+                    value = 6 if maintenance_draw % 6 < 3 else 1
+                    maintenance_draw += 1
                 ctx.trace.append(RandomDraw(ctx.action_id,dice,
                     int(dice[2:].split('+')[0]),value))
                 return value
@@ -167,8 +176,28 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(resolve(grab1,1,[6,6,6,1,1,1]).facts.outcome,'success')
         self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grab1.id,))
         self.enc.step(5)  # The individual six-second maintenance boundary is second 8.
-        hold = Action(self.world,7,8,'hold',self.a.id,self.b.id,None);hold.grip_id=grab1.id
-        self.assertEqual(resolve(hold,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        self.assertEqual(self.enc.time,7)
+        # The due check is automatic and does not consume an Action. The
+        # holder can resolve an ordinary Touch at the same boundary.
+        concurrent_touch=Action(self.world,7,8,'touch',self.a.id,self.b.id,None)
+        self.enc.schedule_action(concurrent_touch)
+        hold_rolls=iter([6,6,6,1,1,1])
+        touch_rolls=iter([15,1])
+        def hold_roll(ctx,dice):
+            if ctx.action_id==concurrent_touch.id:
+                value=next(touch_rolls)
+            else:
+                value=next(hold_rolls)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',hold_roll):
+            self.enc.step(1)
+        hold = next(self.world.get_event_by_id(action_id)
+                    for action_id in self.enc.finished_action_list
+                    if getattr(self.world.get_event_by_id(action_id),'event_type',None)=='hold')
+        self.assertEqual(self.enc.inspect_committed(8).action(concurrent_touch.id).facts.outcome,'touched')
+        self.assertEqual(self.enc.inspect_committed(8).action(hold.id).facts.outcome,'success')
         self.assertEqual(active_contact_state(self.enc)[0][0][5],14)
         break_hold = Action(self.world,8,9,'break hold',self.b.id,self.a.id,None)
         break_hold.grip_id=grab1.id
@@ -216,6 +245,82 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(active_contact_state(self.enc)[1],())
         self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grab2.id,))
 
+        # A second independent attacker is admitted under the adopted size
+        # cap and receives the +2 held-opponent bonus from the first holder.
+        c = self.world.get_object_by_id(self.world.make_being('Human','C'))
+        c.set_position(CartesianPosition(.4,0,0));c.set_geometry(Sphere(.25))
+        c.set_hit_points(100);c.size_category='medium';c.set_posture('standing')
+        c.current.skills.skills['improved grapple']=0
+        c.set_ability('strength',10);self.b.set_ability('strength',10)
+        self.enc.add_being(c.id)
+        self.enc.mark_aware(c.id,self.b.id);self.enc.mark_aware(self.b.id,c.id)
+        touch3=Action(self.world,53,54,'touch',c.id,self.b.id,None)
+        self.assertEqual(resolve(touch3,1,[15,1]).facts.outcome,'touched')
+        grab3=Action(self.world,54,55,'grab',c.id,self.b.id,None)
+        grab3.touch_action_id=touch3.id;grab3.grab_hand='left hand'
+        self.assertEqual(resolve(grab3,1,[1,1,1,1,1,1]).facts.outcome,'success')
+        self.assertEqual({row[1] for row in active_contact_state(self.enc)[0]},
+                         {self.a.id,c.id})
+
+        # Four medium attackers are the adopted maximum against a medium
+        # target; the fifth is refused before drawing any random numbers.
+        extra=[]
+        for name, start, rolls in (('D',55,[6,6,6,1,1,1]),
+                                   ('E',57,[6,6,6,1,1,1])):
+            being=self.world.get_object_by_id(self.world.make_being('Human',name))
+            being.set_position(CartesianPosition(.5,0,0));being.set_geometry(Sphere(.25))
+            being.set_hit_points(100);being.size_category='medium';being.set_posture('standing')
+            being.current.skills.skills['improved grapple']=0
+            being.set_ability('strength',10);self.enc.add_being(being.id)
+            self.enc.mark_aware(being.id,self.b.id);self.enc.mark_aware(self.b.id,being.id)
+            touch=Action(self.world,start,start+1,'touch',being.id,self.b.id,None)
+            self.assertEqual(resolve(touch,1,[15,1]).facts.outcome,'touched')
+            grab=Action(self.world,start+1,start+2,'grab',being.id,self.b.id,None)
+            grab.touch_action_id=touch.id;grab.grab_hand='left hand'
+            self.assertEqual(resolve(grab,1,rolls).facts.outcome,'success')
+            extra.append(being)
+        self.assertEqual(len(active_contact_state(self.enc)[0]),4)
+
+        fifth=self.world.get_object_by_id(self.world.make_being('Human','Fifth'))
+        fifth.set_position(CartesianPosition(.6,0,0));fifth.set_geometry(Sphere(.25))
+        fifth.set_hit_points(100);fifth.size_category='medium';fifth.set_posture('standing')
+        fifth.current.skills.skills['improved grapple']=0
+        fifth.set_ability('strength',10);self.enc.add_being(fifth.id)
+        self.enc.mark_aware(fifth.id,self.b.id);self.enc.mark_aware(self.b.id,fifth.id)
+        touch=Action(self.world,59,60,'touch',fifth.id,self.b.id,None)
+        self.assertEqual(resolve(touch,1,[15,1]).facts.outcome,'touched')
+        overflow=Action(self.world,60,61,'grab',fifth.id,self.b.id,None)
+        overflow.touch_action_id=touch.id;overflow.grab_hand='left hand'
+        self.assertEqual(resolve(overflow,1,[]).facts.outcome,'capacity_exceeded')
+        self.assertEqual(len(active_contact_state(self.enc)[0]),4)
+
+    def test_automatic_hold_maintenance_tie_releases_only_that_grip(self):
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
+        for being in (self.a,self.b):
+            being.current.skills.skills['improved grapple']=0
+            being.set_ability('strength',10)
+        self.a.current.body_parts['left hand']=None
+        self.a.current.body_parts['right hand']=None
+        self.enc.enable_transactional_progression(quiescent=True)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        self.enc.schedule_action(touch)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[15,1]):
+            self.enc.step(1)
+        grab=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grab.touch_action_id=touch.id;grab.grab_hand='left hand'
+        self.enc.schedule_action(grab)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[6,6,6,1,1,1]):
+            self.enc.step(1)
+        self.assertEqual(len(active_contact_state(self.enc)[0]),1)
+        with patch.object(_ProvisionalRandom,'roll',return_value=2):
+            self.enc.step(6)
+        self.assertEqual(active_contact_state(self.enc)[0],())
+        hold=next(self.world.get_event_by_id(identity) for identity in self.enc.finished_action_list
+                  if getattr(self.world.get_event_by_id(identity),'event_type',None)=='hold')
+        self.assertEqual(self.enc.inspect_committed(8).action(hold.id).facts.outcome,'failed')
+
+
     def test_voluntary_release_releases_only_the_selected_grip_without_rng(self):
         from physical_contact import active_contact_state
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
@@ -256,6 +361,64 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(result.facts.outcome,'success')
         self.assertEqual(result.effects[0].effect.operation,'release')
         self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grip2.id,))
+
+    def test_incompatible_pin_and_escape_reroll_as_one_no_time_conflict_group(self):
+        self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.body_parts['left hand']=None
+        self.a.current.skills.skills['improved grapple']=3
+        self.b.current.skills.skills['improved grapple']=3
+        self.a.size_category=self.b.size_category='medium'
+        self.a.set_posture('standing');self.b.set_posture('standing')
+        self.enc.enable_transactional_progression(quiescent=True)
+        def commit(action,values):
+            self.enc.schedule_action(action)
+            supplied=iter(values)
+            maintenance_draw=0
+            def roll(ctx,dice):
+                nonlocal maintenance_draw
+                if ctx.action_id==action.id:
+                    value=next(supplied)
+                else:
+                    value=6 if maintenance_draw%6<3 else 1
+                    maintenance_draw+=1
+                ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value))
+                return value
+            with patch.object(_ProvisionalRandom,'roll',roll):
+                self.enc.step(action.end_time-action.start_time)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        commit(touch,[6,1])
+        grip=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grip.touch_action_id=touch.id;grip.grab_hand='left hand'
+        commit(grip,[6,6,6,1,1,1])
+        grapple=Action(self.world,2,8,'grapple',self.a.id,self.b.id,None)
+        grapple.end_time=8;grapple.grip_id=grip.id
+        commit(grapple,[6,6,6,1,1,1])
+        takedown=Action(self.world,8,14,'takedown',self.a.id,self.b.id,None)
+        takedown.end_time=14;takedown.grapple_id=grapple.id;takedown.grapple_position='prone'
+        commit(takedown,[6,6,6,1,1,1])
+
+        pin=Action(self.world,14,20,'pin',self.a.id,self.b.id,None)
+        pin.end_time=20;pin.grapple_id=grapple.id;pin.grapple_position='pin_top'
+        escape=Action(self.world,14,20,'grapple escape',self.b.id,self.a.id,None)
+        escape.end_time=20;escape.grapple_id=grapple.id
+        self.enc.schedule_action(pin);self.enc.schedule_action(escape)
+        self.enc.step(1)
+        snapshot=self.snapshot(20)
+        rounds={pin.id:[6]*3+[1]*3+[1]*3+[6]*3+[6]*3+[1]*3,
+                 escape.id:[6]*3+[1]*3+[1]*3+[6]*3+[1]*3+[6]*3}
+        def roll(ctx,dice):
+            value=rounds[ctx.action_id].pop(0)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):
+            result=evaluate_snapshot(snapshot)
+        outcomes={row.action_id:row.outcome for row in result.proposals}
+        self.assertEqual(outcomes[pin.id],'success')
+        self.assertEqual(outcomes[escape.id],'failed')
+        self.assertEqual(len(result.trace),36)
+        self.assertEqual(rounds,{pin.id:[],escape.id:[]})
 
     def test_third_party_positive_hp_damage_releases_each_physical_grip_transactionally(self):
         from physical_contact import active_contact_state

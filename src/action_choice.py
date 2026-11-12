@@ -621,6 +621,6 @@ class ChoiceBook:
     def actor_planned_now(self, actor_id):
         with self.lock:
             return any(p.actor_id == actor_id and p.start_time <= self.encounter.time
-                       and object.__getattribute__(m.action, '__dict__').get('event_type') != 'delay'
+                       and object.__getattribute__(m.action, '__dict__').get('event_type') not in ('delay', 'hold')
                        for record in self._choices.values() if record.view.state == 'accepted'
                        for m, p in zip(record.members, record.prepared))

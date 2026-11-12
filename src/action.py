@@ -369,6 +369,9 @@ class Action(Event):
                 if self.instrument_id is not None or self.end_time - self.start_time != 1:
                     raise ValueError('Grab is a separate unarmed one-second Action')
             elif self.event_type == 'hold':
+                from transactional_progression import _is_automatic_hold_schedule
+                if not _is_automatic_hold_schedule(encounter, self):
+                    raise ValueError('Hold maintenance is an automatic six-second check, not a declared Action')
                 state_id = data.get('grip_id')
                 row = next((r for r in grips if r[0] == state_id and r[1] == actor.id
                             and r[2] == target.id), None)

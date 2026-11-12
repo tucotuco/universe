@@ -924,6 +924,8 @@ def _combat(snapshot, action, rng, dependencies):
     meta = []
     attempted = False
     outcome = None
+    pinned_controls = tuple(row for row in snapshot.grapple_controls
+        if len(row) > 6 and row[6] in ('pin_top', 'pin_bottom'))
     if action.family == 'combat' and action.data['event_type'] == 'touch':
         distance = snapshot.distance(actor.id, target.id)
         if actor.position is None or target.position is None or distance is None:
@@ -956,7 +958,16 @@ def _combat(snapshot, action, rng, dependencies):
     if action.family == 'melee':
         status, distance = snapshot.melee_status(action)
         meta.append(('distance', distance))
-        if actor.hp <= 0 or actor.data['fatigue_level'] >= 5:
+        if any(row[2] == actor.id for row in pinned_controls):
+            outcome = 'unable_to_act'
+        elif any(row[1] == actor.id and row[2] == target.id
+                 for row in pinned_controls):
+            outcome = 'grapple_restricted'
+        elif (any(actor.id in (row[1], row[2]) for row in snapshot.grapple_controls)
+                and not any({actor.id, target.id} == {row[1], row[2]}
+                            for row in snapshot.grapple_controls)):
+            outcome = 'grapple_restricted'
+        elif actor.hp <= 0 or actor.data['fatigue_level'] >= 5:
             outcome = 'unable_to_act'
         elif target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
@@ -1008,9 +1019,10 @@ def _combat(snapshot, action, rng, dependencies):
                     if dependency.kind == 'yield' and dependency.eligible
                     and dependency.success)
                 feint_bonus = 2 if action.data.get('feint_source_action_id') is not None else 0
+                pin_bonus = 4 if any(row[2] == target.id for row in pinned_controls) else 0
                 return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0)
-                    + actor.data['strategy']['attack'] + feint_bonus,
+                    + actor.data['strategy']['attack'] + feint_bonus + pin_bonus,
                     target_defense + parry_bonus, dc - adjustment)
             if action.family == 'melee' and action.data['event_type'] == 'feint':
                 if (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0) <= 1:
@@ -1100,7 +1112,48 @@ def _combat(snapshot, action, rng, dependencies):
     return ActionProposal(action.id, actor.id, affected, outcome, tuple(effects), tuple(dependencies), tuple(meta))
 
 
-def _grapple_roll(rng, being, *, escape=False, strength_only=False):
+_GRAPPLE_SIZE_ORDER = ('diminutive', 'tiny', 'small', 'medium', 'large',
+                      'huge', 'gargantuan', 'colossal')
+
+
+def _effective_grapple_size(being):
+    category = being.data.get('size_category')
+    if category not in _GRAPPLE_SIZE_ORDER:
+        return None
+    return 2 ** (_GRAPPLE_SIZE_ORDER.index(category) - 1)
+
+
+def _grapple_attackers(snapshot, target_id):
+    return ({row[1] for row in snapshot.physical_grips if row[2] == target_id}
+            | {row[1] for row in snapshot.grapple_controls if row[2] == target_id})
+
+
+def _grapple_capacity_and_bonus(snapshot, actor, target):
+    """Return adopted multi-attacker capacity and bonus from this frozen frame."""
+    other_ids = _grapple_attackers(snapshot, target.id) - {actor.id}
+    declared_ids = {row.actor_id for row in snapshot.actions.values()
+                    if row.actor_id != actor.id and row.target_id == target.id
+                    and row.boundary == snapshot.boundary
+                    and row.data.get('event_type') in ('grab', 'hold', 'grapple')}
+    if not other_ids and not declared_ids:
+        return True, 0
+    target_size = _effective_grapple_size(target)
+    capacity_ids = other_ids | declared_ids | {actor.id}
+    attacker_sizes = [_effective_grapple_size(snapshot.entity(identity))
+                      for identity in capacity_ids]
+    if target_size is None or any(size is None for size in attacker_sizes):
+        return False, 0
+    total = sum(attacker_sizes)
+    if total > 4 * target_size:
+        return False, 0
+    # Revision 34: independent opposed checks, with +2 times the effective
+    # sizes of other existing attackers divided by the target's effective size.
+    bonus = 2 * sum(_effective_grapple_size(snapshot.entity(identity))
+                    for identity in other_ids) / target_size
+    return True, bonus
+
+
+def _grapple_roll(rng, being, *, escape=False, strength_only=False, bonus=0):
     skills = being.data.get('skills', {})
     if strength_only:
         score = being.data['abilities'].get('STR', 10)
@@ -1117,7 +1170,7 @@ def _grapple_roll(rng, being, *, escape=False, strength_only=False):
                               if name.casefold() == 'escape artist'), 0) or 0
     modifier -= being.data.get('armor_check_penalty', 0) or 0
     dice = tuple(rng.roll('1d6') for _ in range(3))
-    return sum(dice) + modifier
+    return sum(dice) + modifier + bonus
 
 
 def _grappling(snapshot, action, rng):
@@ -1220,8 +1273,14 @@ def _grappling(snapshot, action, rng):
             return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
         if actor.hp <= 0 or target.hp <= 0 or actor.data['fatigue_level'] >= 5:
             return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
-        holder = _grapple_roll(rng,actor); resistor = _grapple_roll(rng,target)
-        if holder <= resistor:
+        allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
+        if not allowed:
+            return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
+        holder = _grapple_roll(rng,actor,bonus=bonus)
+        pinned = any(row[2] == target.id and len(row) > 6
+                     and row[6] in ('pin_top', 'pin_bottom')
+                     for row in snapshot.grapple_controls)
+        if not pinned and holder <= _grapple_roll(rng,target):
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
             'grip','establish',action.data['grab_hand'],action.boundary+6))
@@ -1231,7 +1290,10 @@ def _grappling(snapshot, action, rng):
                      and row[1] == actor.id and row[2] == target.id),None)
         if grip is None: return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
         if grip[5] != action.boundary: return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
-        if _grapple_roll(rng,actor) <= _grapple_roll(rng,target):
+        allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
+        if not allowed:
+            return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
+        if _grapple_roll(rng,actor,bonus=bonus) <= _grapple_roll(rng,target):
             effects.append(GrappleStateEffect(action.id,target.id,actor.id,grip[0],
                 'grip','release',grip[3],None))
             return ActionProposal(action.id,actor.id,(target.id,),'failed',tuple(effects))
@@ -1263,7 +1325,8 @@ def _grappling(snapshot, action, rng):
             grip = next((row for row in snapshot.physical_grips
                          if row[1] == actor.id and row[2] == target.id),None)
         if grip is None: return ActionProposal(action.id,actor.id,(target.id,),'grip_lost')
-        if any(row[2] == target.id for row in snapshot.grapple_controls):
+        if any(row[1] == actor.id and row[2] == target.id
+               for row in snapshot.grapple_controls):
             return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
         if grip[5] != action.boundary:
             return ActionProposal(action.id,actor.id,(target.id,),'grip_lost')
@@ -1271,7 +1334,10 @@ def _grappling(snapshot, action, rng):
         # same prerequisite grip at the coincident six-second boundary.
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,grip[0],
             'grip','maintain',grip[3],action.boundary+6))
-        if _grapple_roll(rng,actor) <= _grapple_roll(rng,target):
+        allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
+        if not allowed:
+            return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
+        if _grapple_roll(rng,actor,bonus=bonus) <= _grapple_roll(rng,target):
             return ActionProposal(action.id,actor.id,(target.id,),'failed',tuple(effects))
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
             'control','establish',None,action.boundary+6))
@@ -1326,7 +1392,10 @@ def _grappling(snapshot, action, rng):
                 return ActionProposal(action.id,actor.id,(target.id,),'size_category_unknown')
             if order.index(sizes[1])-order.index(sizes[0])>1:
                 return ActionProposal(action.id,actor.id,(target.id,),'size_limit')
-        if _grapple_roll(rng,actor)<=_grapple_roll(rng,target):
+        allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
+        if not allowed:
+            return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
+        if _grapple_roll(rng,actor,bonus=bonus)<=_grapple_roll(rng,target):
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,control[0],
             'control','transition',None,action.boundary+6,goal))
@@ -1338,7 +1407,10 @@ def _grappling(snapshot, action, rng):
                 'posture','set',None,None,'lying'))
         return ActionProposal(action.id,actor.id,(target.id,), 'success',tuple(effects))
     escape = _grapple_roll(rng,actor,escape=True)
-    resist = _grapple_roll(rng,target)
+    allowed, bonus = _grapple_capacity_and_bonus(snapshot, target, actor)
+    if not allowed:
+        return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
+    resist = _grapple_roll(rng,target,bonus=bonus)
     if escape > resist:
         position=control[6] if len(control)>6 else 'standing'
         if position == 'pin_top':
@@ -1793,6 +1865,47 @@ def evaluate_snapshot(snapshot, action_ids=None):
         else:
             proposal = _activity(snapshot, action, rng)
         proposals.append(proposal)
+    # Adopted revision 36–37: separately declared Grapple actions whose
+    # successful same-boundary results prescribe incompatible states of the
+    # same control are rerolled as one fixed group, without advancing time or
+    # changing any eligibility/modifier inputs from this snapshot.
+    by_id = {proposal.action_id: proposal for proposal in proposals}
+    control_groups = {}
+    for proposal in proposals:
+        if proposal.outcome != 'success':
+            continue
+        action = snapshot.actions[proposal.action_id]
+        if action.family != 'grappling':
+            continue
+        for effect in proposal.effects:
+            if type(effect) is GrappleStateEffect and effect.kind == 'control' \
+                    and effect.operation in ('establish','transition','release'):
+                key=(effect.target_id,effect.state_id)
+                signature=(effect.actor_id,effect.operation,effect.position,effect.next_check)
+                control_groups.setdefault(key,[]).append((action,signature))
+    conflict_groups=[]
+    for rows in control_groups.values():
+        if len(rows)>1 and len({signature for _action,signature in rows})>1:
+            conflict_groups.append(tuple(sorted((action for action,_signature in rows),
+                key=lambda action:(action.priority,action.order,action.id))))
+    for group in conflict_groups:
+        while True:
+            rerolled=[]
+            for action in group:
+                rng.action_id=action.id
+                rerolled.append(_grappling(snapshot,action,rng))
+            successes=[proposal for proposal in rerolled if proposal.outcome=='success']
+            signatures=[]
+            for proposal in successes:
+                for effect in proposal.effects:
+                    if type(effect) is GrappleStateEffect and effect.kind=='control' \
+                            and effect.operation in ('establish','transition','release'):
+                        signatures.append((effect.actor_id,effect.operation,effect.position,effect.next_check))
+            compatible=len(set(signatures))<=1
+            if (len(group)==2 and len(successes)==1) or (len(group)>=3 and successes and compatible):
+                by_id.update((proposal.action_id,proposal) for proposal in rerolled)
+                break
+    proposals=[by_id[proposal.action_id] for proposal in proposals]
     # Preparation is retained until the defender assigns it. Assignment is
     # fixed before the roll; its result follows the ordinary shared attack
     # result and both records publish in the same atomic boundary.

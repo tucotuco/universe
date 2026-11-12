@@ -106,7 +106,7 @@ _OUTCOMES = {
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
     'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','blocked','uncertain_path',
-        'unavailable','failed','success','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict')),
+        'unavailable','failed','success','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
 }
 _METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
@@ -246,7 +246,8 @@ def _copy_proposal(proposal, actions, entities):
                               'target_down', 'weapon_unavailable', 'unplaced',
                               'out_of_reach', 'not_facing', 'blocked',
                               'uncertain_path', 'parried', 'dodged',
-                              'ineligible_target'})
+                              'ineligible_target', 'grapple_restricted',
+                              })
     _require(proposal.outcome in allowed, 'outcome contradicts native Action family/lifecycle')
     targets = tuple(_identity(k) for k in _tuple(proposal.target_ids))
     _require(len(set(targets)) == len(targets) and all(k in entities for k in targets), 'invalid affected Target reference')
