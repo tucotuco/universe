@@ -14,7 +14,7 @@ from types import MappingProxyType, MethodType, FunctionType
 from _thread import RLock
 
 from action_evaluation import (EvaluationIntegrityError, UnsupportedEvaluation,
-    capture_snapshot, freeze, native_data, position)
+    capture_snapshot, freeze, native_data, position, GrappleStateEffect)
 from observer_proposals import capture_observer_context, build_supported_candidate
 from spatial.state import CartesianPosition, SpatialState, integrate_position
 from spatial.frame import LocalFrame
@@ -733,19 +733,73 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                 _require(spatial not in spatial_owners, 'aliased mutable spatial state')
                 spatial_owners[spatial]=key
         supported=build_supported_candidate(context)
-        # Exactly the native settled ordering: finish due Actions, release the
-        # old resources, then publish/start choices at the endpoint fence.
+        # Derive adopted interruptions from the complete successful proposal
+        # batch before building queue changes. These cancellations share the
+        # Trip/release publication boundary and never rewrite same-boundary
+        # outcomes from the frozen common snapshot.
+        interrupt_ids=set()
+        released_grips={row.effect.state_id for row in supported.boundary.effects.values()
+            if type(row.effect) is GrappleStateEffect and row.effect.kind=='grip'
+            and row.effect.operation=='release'}
+        if released_grips:
+            surviving_grips=tuple(row for row in context.snapshot.physical_grips
+                if row[0] not in released_grips)
+            for view in context.snapshot.actions.values():
+                if (view.lifecycle!='pending' or view.family!='grappling'
+                        or view.data.get('event_type')!='grapple'
+                        or view.boundary<=next_boundary
+                        or view.data.get('grip_id') not in released_grips):
+                    continue
+                if not any(grip[1]==view.actor_id and grip[2]==view.target_id
+                           for grip in surviving_grips):
+                    interrupt_ids.add(view.id)
+        for source_id,proposal in supported.boundary.actions.items():
+            source=context.snapshot.actions[source_id]
+            if (source.data.get('event_type')!='trip' or proposal.outcome!='success'
+                    or source.target_id is None):
+                continue
+            for view in context.snapshot.actions.values():
+                if (view.lifecycle=='pending' and view.family=='melee'
+                        and view.data.get('event_type') in ('swing','thrust')
+                        and view.actor_id==source.target_id
+                        and view.start < next_boundary < view.nominal_end
+                        and view.boundary>next_boundary):
+                    interrupt_ids.add(view.id)
+
+        # Exactly the native settled ordering: finish due Actions, apply
+        # outcome-backed cancellations, release their resources, then publish
+        # or start choices at the endpoint fence.
         finished=list(ed['finished_action_list']);cancelled=tuple(ed['cancelled_action_list'])
         for aid in supported.boundary.actions:
             if aid in pending:pending.remove(aid);finished.append(aid);states[aid]='finished'
+        canceled_now=[]
+        for aid in sorted(interrupt_ids):
+            if aid not in pending:
+                continue
+            pending.remove(aid);cancelled=cancelled+(aid,);states[aid]='cancelled'
+            canceled_now.append(aid)
+        for cid,record in records.items():
+            if choice_states[cid] in ('accepted','executing') and all(
+                    states.get(aid) in ('finished','cancelled') for aid in record.view.action_ids):
+                choice_states[cid]='finished'
         reservations=tuple(r for r in book._reservations if r.boundary>next_boundary)
+        reservations=tuple(r for r in reservations if r.action_id not in canceled_now)
         for cid,r in records.items():
             if choice_states[cid]=='executing' and all(states.get(aid) in ('finished','cancelled') for aid in r.view.action_ids):
                 choice_states[cid]='finished'
         start(next_boundary,'after_settlement')
         revision=wd['_schedule_revision']+sum(len(f.published_choices) for f in fences)+sum(
             a.lifecycle!='cancelled' for a in context.snapshot.actions.values() if a.boundary==next_boundary)+1
-        metadata=_data_metadata(initialization,encounter)
+        metadata={aid:dict(data) for aid,data in _data_metadata(initialization,encounter).items()}
+        for aid in canceled_now:
+            metadata.setdefault(aid,{})['canceled_at']=next_boundary
+            metadata[aid]['cancellation_reason']=('successful_trip' if any(
+                context.snapshot.actions[source_id].data.get('event_type')=='trip'
+                and proposal.outcome=='success'
+                and context.snapshot.actions[source_id].target_id==context.snapshot.actions[aid].actor_id
+                for source_id,proposal in supported.boundary.actions.items())
+                else 'last_prerequisite_grip_released')
+        metadata=MappingProxyType({aid:MappingProxyType(data) for aid,data in metadata.items()})
         queues=QueueProjection(tuple(pending),tuple(finished),cancelled,
             tuple(RegistrationIntent(AuthorityReference('event',aid,id(events[aid])),registered[aid][0],
                 AuthorityReference('accepted_packet',aid,id(registered[aid][1])),metadata[aid])

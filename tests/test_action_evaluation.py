@@ -216,6 +216,47 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(active_contact_state(self.enc)[1],())
         self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grab2.id,))
 
+    def test_voluntary_release_releases_only_the_selected_grip_without_rng(self):
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.body_parts['right hand'] = None
+        self.a.current.skills.skills['improved grapple'] = 100
+        self.b.current.skills.skills['improved grapple'] = 0
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        def resolve(action, duration, rolls=()):
+            action.end_time = action.start_time + duration
+            self.enc.schedule_action(action)
+            values = iter(rolls)
+            def scripted(ctx, dice):
+                value = next(values)
+                ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value))
+                return value
+            with patch.object(_ProvisionalRandom,'roll',scripted):
+                self.enc.step(duration)
+            return self.enc.inspect_committed(self.enc.last_processed_boundary).action(action.id)
+
+        touch1 = Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch1,1,[15,1]).facts.outcome,'touched')
+        grip1 = Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grip1.touch_action_id=touch1.id; grip1.grab_hand='left hand'
+        self.assertEqual(resolve(grip1,1,[6,6,6,1,1,1]).facts.outcome,'success')
+        touch2 = Action(self.world,2,3,'touch',self.a.id,self.b.id,None)
+        self.assertEqual(resolve(touch2,1,[15,1]).facts.outcome,'touched')
+        grip2 = Action(self.world,3,4,'grab',self.a.id,self.b.id,None)
+        grip2.touch_action_id=touch2.id; grip2.grab_hand='right hand'
+        self.assertEqual(resolve(grip2,1,[6,6,6,1,1,1]).facts.outcome,'success')
+
+        release = Action(self.world,4,5,'release grip',self.a.id,self.b.id,None)
+        release.grip_id=grip1.id
+        result = resolve(release,1)
+        self.assertEqual(result.facts.outcome,'success')
+        self.assertEqual(result.effects[0].effect.operation,'release')
+        self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[0]),(grip2.id,))
+
     def test_third_party_positive_hp_damage_releases_each_physical_grip_transactionally(self):
         from physical_contact import active_contact_state
         from spatial.state import CartesianPosition
@@ -290,6 +331,157 @@ class TestActionEvaluation(unittest.TestCase):
         with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(2)
         self.assertEqual(self.enc.inspect_committed(3).action(trip.id).facts.outcome,'success')
         self.assertEqual(self.b.get_posture(),'lying')
+
+    def test_native_trip_accepts_a_committed_successful_grab_as_contact(self):
+        from physical_contact import trip_contact_kind
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.body_parts['right hand'] = None
+        self.a.current.skills.skills['improved grapple'] = 100
+        self.b.current.skills.skills['improved grapple'] = 0
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None); touch.end_time=1
+        self.enc.schedule_action(touch)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[15,1]): self.enc.step(1)
+        grab=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grab.touch_action_id=touch.id; grab.grab_hand='left hand'; grab.end_time=2
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[6,6,6,1,1,1]):
+            self.enc.schedule_action(grab); self.enc.step(1)
+        self.assertEqual(trip_contact_kind(self.enc,grab.id,self.a.id,self.b.id),'grab')
+        trip=Action(self.world,2,4,'trip',self.a.id,self.b.id,None)
+        trip.trip_source_action_id=grab.id; trip.trip_defender_ability='STR'; trip.end_time=4
+        self.enc.schedule_action(trip)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[6,6,6,1,1,1]): self.enc.step(2)
+        receipt=self.enc.inspect_committed(4).action(trip.id)
+        self.assertEqual(receipt.facts.outcome,'success')
+        self.assertEqual(dict(receipt.facts.metadata)['contact_kind'],'grab')
+        self.assertEqual(self.b.get_posture(),'lying')
+
+    def test_native_trip_tie_preserves_posture_and_records_contact_source(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None); touch.end_time=1
+        self.enc.schedule_action(touch)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[15,1]): self.enc.step(1)
+        trip=Action(self.world,1,3,'trip',self.a.id,self.b.id,None)
+        trip.trip_source_action_id=touch.id; trip.trip_defender_ability='STR'; trip.end_time=3
+        self.enc.schedule_action(trip)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[3,3,3,3,3,3]): self.enc.step(2)
+        receipt=self.enc.inspect_committed(3).action(trip.id)
+        self.assertEqual(receipt.facts.outcome,'failed')
+        self.assertEqual(dict(receipt.facts.metadata)['contact_kind'],'touch')
+        self.assertEqual(self.b.get_posture(),'standing')
+
+    def _run_trip_interruption_scenario(self, same_second):
+        from action_evaluation import RandomDraw, _ProvisionalRandom
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.size_category = self.b.size_category = 'medium'
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.body_parts['right hand'] = None
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        touch.end_time=1; self.enc.schedule_action(touch)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[15,1]):
+            self.enc.step(1)
+        self.assertEqual(touch.resolution.outcome,'touched')
+
+        strike_strategy=Strategy(timing=1 if same_second else 0)
+        attack=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,
+            motion='thrust',reach=2,strategy=strike_strategy)
+        self.assertEqual(attack.start_time,1)
+        self.assertEqual(attack.end_time,4 if same_second else 5)
+        self.enc.schedule_action(attack)
+        trip=Action(self.world,2,4,'trip',self.a.id,self.b.id,None)
+        trip.trip_source_action_id=touch.id
+        trip.trip_defender_ability='STR'
+        trip.end_time=4
+        self.enc.schedule_action(trip)
+        trip_rolls=iter((6,6,6,1,1,1))
+        def scripted(ctx,dice):
+            value=next(trip_rolls) if ctx.action_id==trip.id else 1
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',scripted):
+            self.enc.step(3)
+        self.assertEqual(trip.resolution.outcome,'success')
+        if same_second:
+            self.assertNotIn(attack.id,self.enc.cancelled_action_list)
+            self.assertIn(attack.id,self.enc.finished_action_list)
+            self.assertNotEqual(attack.resolution.outcome,'interrupted')
+        else:
+            self.assertIn(attack.id,self.enc.cancelled_action_list)
+            self.assertEqual(attack.canceled_at,4)
+            self.assertEqual(attack.cancellation_reason,'successful_trip')
+            self.enc.step(1)
+            self.assertEqual(attack.resolution.outcome,'interrupted')
+
+    def test_successful_trip_cancels_only_an_attack_scheduled_for_a_later_second(self):
+        self._run_trip_interruption_scenario(False)
+
+    def test_successful_trip_preserves_an_attack_due_in_the_same_second(self):
+        self._run_trip_interruption_scenario(True)
+
+    def _run_initial_grapple_release_timing_case(self, same_second):
+        from action_evaluation import RandomDraw, _ProvisionalRandom
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.body_parts['right hand'] = None
+        self.a.current.skills.skills['improved grapple'] = 100
+        self.b.current.skills.skills['improved grapple'] = 0
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.enc.enable_transactional_progression(quiescent=True)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        touch.end_time=1; self.enc.schedule_action(touch)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[15,1]):
+            self.enc.step(1)
+        grab=Action(self.world,1,2,'grab',self.a.id,self.b.id,None)
+        grab.touch_action_id=touch.id; grab.grab_hand='left hand'; grab.end_time=2
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[6,6,6,1,1,1]):
+            self.enc.schedule_action(grab); self.enc.step(1)
+        grapple=Action(self.world,2,8,'grapple',self.a.id,self.b.id,None)
+        grapple.grip_id=grab.id; grapple.end_time=8
+        self.enc.schedule_action(grapple)
+        if same_second:
+            self.enc.step(5)
+            start,end=7,8
+        else:
+            start,end=3,4
+        breaker=Action(self.world,start,end,'break hold',self.b.id,self.a.id,None)
+        breaker.grip_id=grab.id; breaker.end_time=end
+        self.enc.schedule_action(breaker)
+        draws={grapple.id:iter((6,6,6,1,1,1)),breaker.id:iter((6,6,6,1,1,1))}
+        def scripted(ctx,dice):
+            value=next(draws[ctx.action_id])
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',scripted):
+            self.enc.step(end-self.enc.time)
+        self.assertEqual(breaker.resolution.outcome,'success')
+        if same_second:
+            self.assertNotIn(grapple.id,self.enc.cancelled_action_list)
+            self.assertEqual(grapple.resolution.outcome,'success')
+            self.assertEqual(active_contact_state(self.enc)[0],())
+            self.assertEqual(tuple(row[0] for row in active_contact_state(self.enc)[1]),(grapple.id,))
+        else:
+            self.assertIn(grapple.id,self.enc.cancelled_action_list)
+            self.assertEqual(grapple.canceled_at,4)
+            self.assertEqual(active_contact_state(self.enc), ((),()))
+            self.assertFalse(self.enc._choice_book.actor_planned_now(self.a.id))
+
+    def test_earlier_last_grip_release_cancels_only_unestablished_initial_grapple(self):
+        self._run_initial_grapple_release_timing_case(False)
+
+    def test_same_second_last_grip_release_does_not_retroactively_cancel_grapple(self):
+        self._run_initial_grapple_release_timing_case(True)
 
     def test_failed_initial_grapple_still_atomically_maintains_its_prerequisite_grip(self):
         from physical_contact import active_contact_state

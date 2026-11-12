@@ -353,6 +353,42 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(len(grip_before), 1)
         self.assertEqual(grip_before[0][3], "left hand")
         wire = self.session.save_encounter_bytes()
+        # Exercise the shipped browser's explicit, selected-hand Release grip
+        # route in an isolated restored copy so the Hold/Grapple continuation
+        # below still starts from the original generated Encounter.
+        release_session = GeneratedArenaSession(root_seed_factory=lambda: 8)
+        release_session.load_encounter_bytes(wire)
+        release_session._view_unlocked()
+        release_handle = release_session._view_handles[opponent.id]
+        release_session.inspect_entity({"handle": release_handle})
+        release_entries = release_session._view_unlocked()["action_catalog"]["entries"]
+        release_entry = next(item for item in release_entries if item["name"] == "release grip")
+        self.assertEqual(release_entry["status"], "available")
+        self.assertIn("left hand", release_entry["hands"])
+        self.session = release_session
+        status, release_response = self.request("/api/generated/grappling", {"action":"release grip",
+            "handle":release_handle,"hand":"left hand"})
+        self.assertEqual(status, 200)
+        self.assertEqual(release_response["grappling_action"]["status"], "executing")
+        status, release_result = self.request("/api/generated/advance", {"seconds":1})
+        self.assertEqual(status, 200)
+        self.assertEqual(release_result["grappling_action"]["outcome"], "success")
+        self.assertEqual(active_contact_state(release_session.active_candidate.encounter)[0], ())
+        release_wire = release_session.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as release_directory:
+            release_path = Path(release_directory) / "arena-released.json"
+            release_path.write_bytes(release_wire)
+            restore_release = (
+                "import json,sys; import tests.test_generated_arena_browser; "
+                "from arena_browser_session import GeneratedArenaSession; "
+                "from physical_contact import active_contact_state; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:10); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "print(json.dumps({'time':s.active_candidate.encounter.time,"
+                "'grips':active_contact_state(s.active_candidate.encounter)[0]}))")
+            restored_release = subprocess.run([sys.executable,"-c",restore_release,str(release_path)],
+                cwd=ROOT,check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(restored_release.stdout), {"time":4,"grips":[]})
         with tempfile.TemporaryDirectory() as directory:
             saved_path = Path(directory) / "arena-grip.json"
             saved_path.write_bytes(wire)

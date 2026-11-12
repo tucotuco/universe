@@ -91,7 +91,7 @@ A checkbox `[x]` means DONE *for the bounded statement*. Open/partial/idea entri
 
 ## 4. Roles and work cycle
 
-- **User:** sets vision and priorities, adopts rules, authorizes material changes and Git publication, assesses meaningful product behavior. No need to repeat already captured decisions.
+- **User:** sets vision and priorities, adopts rules, authorizes material changes and Git publication, assesses meaningful product behavior. A user-authorized assignment includes routine local commits within its approved scope; separate explicit authorization is required for Git publication or history rewriting. No need to repeat already captured decisions.
 - **ChatGPT coordinator:** reconciles latest report, current task/idea state and broader vision; flags genuine rules decisions; supplies compact self-contained repository-relative assignment and exact invocation; maintains handoff coherence and prepares state/document corrections. ChatGPT cannot assert that Codex edited the local repository without an actual report/check.
 - **Codex (Universe repository):** inspects true checkout and rule authority, implements/test/commits native source and UI, updates `TASKS.md` under the assignment's explicit instructions, writes engineering report, preserves unrelated work. It must not modify the independent NPC generator.
 - **NPC Generator owner (separate Claude development):** maintains the independently importable `npcgen` library, its data, skill generation and initial profile contract. Universe integrates through public interface and reports cross-repo requests rather than duplicating generator code.

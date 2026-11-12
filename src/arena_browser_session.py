@@ -929,6 +929,15 @@ class GeneratedArenaSession:
                    and event.actor_id == player.id and event.id in committed_ids]
         return max(actions, key=lambda action: (action.start_time, action.id), default=None)
 
+    @staticmethod
+    def _player_trip_contact_action(candidate, player, target):
+        from physical_contact import trip_contact_kind
+        actions = [event for event in candidate.universe.event_history.values()
+                   if type(event) in (Action, MeleeStrike) and event.actor_id == player.id
+                   and event.target_id == target.id
+                   and trip_contact_kind(candidate.encounter,event.id,player.id,target.id) is not None]
+        return max(actions,key=lambda action:(action.end_time,action.id),default=None)
+
     def _touch_action_view(self, candidate, player):
         action = self._player_touch_action(candidate, player)
         if action is None:
@@ -968,11 +977,11 @@ class GeneratedArenaSession:
         actions = [event_by_id.get(action_id) for action_id in accepted]
         actions = [action for action in actions if type(action) is Action
                    and action.actor_id == player.id and action.event_type in
-                   ("grab", "hold", "break hold", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
+                   ("grab", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
         action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
         if action is None:
             return None
-        label = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold",
+        label = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                  "grapple":"Grapple", "grapple escape":"Grapple Escape",
                  "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip"}[action.event_type]
         if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
@@ -1621,6 +1630,12 @@ class GeneratedArenaSession:
             if len(matching) != 1:
                 raise ArenaBrowserRequestError("Break hold requires exactly one identified physical grip on the player from this Being.")
             action_data["grip_id"] = matching[0][0]
+        elif event_type == "release grip":
+            matching = [row for row in grips if row[1] == player.id
+                        and row[2] == target.id and (hand is None or row[3] == hand)]
+            if len(matching) != 1:
+                raise ArenaBrowserRequestError("Choose exactly one of your identified physical Grips on this Being.")
+            action_data["grip_id"] = matching[0][0]
         elif event_type == "grapple":
             matching = [row for row in grips if row[1] == player.id and row[2] == target.id]
             if len(matching) != 1:
@@ -1657,13 +1672,12 @@ class GeneratedArenaSession:
                     or getattr(target, "size_category", None) not in order):
                 raise ArenaBrowserRequestError(
                     "Trip requires explicitly represented size categories for both Beings.")
-            touch = self._player_touch_action(candidate, player)
-            if (touch is None or touch.target_id != target.id
-                    or not successful_touch(encounter, touch.id, player.id, target.id)):
-                raise ArenaBrowserRequestError("Trip requires this player's committed successful Touch of the selected Being.")
+            source = self._player_trip_contact_action(candidate,player,target)
+            if source is None:
+                raise ArenaBrowserRequestError("Trip requires your committed successful Touch, Grab, or Swing/Thrust Strike against this Being.")
             if position not in ("STR", "DEX"):
                 raise ArenaBrowserRequestError("Choose the defender's Strength or Dexterity Trip defense.")
-            action_data.update(trip_source_action_id=touch.id, trip_defender_ability=position)
+            action_data.update(trip_source_action_id=source.id, trip_defender_ability=position)
             duration = 2
         else:
             raise ArenaBrowserRequestError("Unsupported native physical-contact Action.")
@@ -1688,7 +1702,7 @@ class GeneratedArenaSession:
         if (type(payload) is not dict or set(payload) - {"handle", "action", "hand", "position"}
                 or not {"handle", "action"}.issubset(payload)
                 or type(payload.get("handle")) is not str
-                or payload.get("action") not in ("grab", "hold", "break hold", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")
+                or payload.get("action") not in ("grab", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")
                 or ("position" in payload and payload["position"] not in ("kneeling","prone","pin_top","pin_bottom","STR","DEX"))
                 or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))):
             raise ArenaBrowserRequestError("Physical-contact Action request is malformed.")
@@ -2575,12 +2589,12 @@ class GeneratedArenaSession:
                     (f" ({duration:g} s)" if duration is not None else ""),"reason":reason,
                     "target":target_view,"duration_seconds":duration})
                 continue
-            elif name.casefold() in ("grab being", "hold being", "break hold", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip"):
+            elif name.casefold() in ("grab being", "hold being", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip"):
                 event_type = {"grab being":"grab", "hold being":"hold",
-                              "break hold":"break hold", "grapple":"grapple",
+                              "break hold":"break hold", "release grip":"release grip", "grapple":"grapple",
                               "grapple escape":"grapple escape", "takedown":"takedown",
                               "reverse":"reverse", "pin from above":"pin", "pin from below":"pin", "trip":"trip"}[name.casefold()]
-                display = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold",
+                display = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                            "grapple":"Grapple", "grapple escape":"Grapple Escape",
                            "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip"}[event_type]
                 duration = 6 if event_type in ("grapple", "grapple escape","takedown","reverse","pin") else 2 if event_type=="trip" else 1
@@ -2603,6 +2617,15 @@ class GeneratedArenaSession:
                                 raise ArenaBrowserRequestError("No explicitly represented free native hand is available.")
                             _, prepared = self._grappling_preflight(
                                 candidate, player, entity_id, evidence, event_type, hands[0])
+                        elif event_type == "release grip":
+                            from physical_contact import active_contact_state
+                            active_grips, _ = active_contact_state(candidate.encounter)
+                            hands = [row[3] for row in active_grips
+                                     if row[1] == player.id and row[2] == entity_id]
+                            if not hands:
+                                raise ArenaBrowserRequestError("You do not maintain a physical Grip on this Being.")
+                            _, prepared = self._grappling_preflight(
+                                candidate, player, entity_id, evidence, event_type, hands[0])
                         elif event_type == "trip":
                             _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type,position="STR")
                         elif event_type in ("takedown","pin"):
@@ -2618,6 +2641,7 @@ class GeneratedArenaSession:
                             "grab":"One-second opposed native Grab after this player's committed successful Touch; the selected free hand becomes one distinct Grip.",
                             "hold":"One-second maintenance check for this Grip at its six-second due boundary.",
                             "break hold":"One-second opposed 3d6 + Strength contest against this Being's Grip on you.",
+                            "release grip":"One-second declared voluntary release of the selected Grip you maintain; no contest is rolled.",
                             "grapple":"Six-second initial Grapple check at the prerequisite Grip's next maintenance boundary.",
                             "grapple escape":"Six-second opposed Escape check at the existing Grapple control boundary; Escape Artist adds to your check.",
                             "takedown":"One opposed Grapple check at the next control boundary. Requires explicit size categories and standing control.",

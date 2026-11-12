@@ -18,6 +18,7 @@ escape	being	none	False
 feint (armed)	being	advanced weapon	True
 feint (unarmed)	being	unarmed combat	True
 grab being	being	none	False
+release grip	being	none	False
 grab object	object	none	False
 hold being	being	none	False
 hold object	object	none	False

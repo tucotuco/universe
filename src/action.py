@@ -280,7 +280,7 @@ class Action(Event):
             if not math.isclose(reach,effective_melee_reach_meters(actor.current,weapon.current),rel_tol=1e-12,abs_tol=1e-12):
                 raise ValueError('Disarm reach differs from native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
-        if self.event_type in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape',
+        if self.event_type in ('grab', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape',
                                'takedown', 'reverse', 'pin', 'trip'):
             from encounter import Encounter
             from physical_contact import active_contact_state, successful_touch
@@ -318,6 +318,13 @@ class Action(Event):
                     raise ValueError('Break hold requires one identifiable physical grip on the actor')
                 if self.instrument_id is not None or self.end_time - self.start_time != 1:
                     raise ValueError('Break hold is a one-second unarmed Action')
+            elif self.event_type == 'release grip':
+                state_id = data.get('grip_id')
+                if not any(r[0] == state_id and r[1] == actor.id and r[2] == target.id
+                           for r in grips):
+                    raise ValueError('Release grip requires one of this Being’s identified physical Grips')
+                if self.instrument_id is not None or self.end_time - self.start_time != 1:
+                    raise ValueError('Release grip is a one-second unarmed Action')
             elif self.event_type == 'grapple':
                 state_id = data.get('grip_id')
                 if not any(r[0] == state_id and r[1] == actor.id and r[2] == target.id
@@ -370,11 +377,11 @@ class Action(Event):
                 if self.instrument_id is not None:
                     raise ValueError('Grapple position transitions are unarmed Actions')
             else:
-                touch_id=data.get('trip_source_action_id')
-                from physical_contact import successful_touch
-                if (not successful_touch(encounter,touch_id,actor.id,target.id)
+                contact_id=data.get('trip_source_action_id')
+                from physical_contact import trip_contact_kind
+                if (trip_contact_kind(encounter,contact_id,actor.id,target.id) is None
                         or self.end_time-self.start_time != 2 or self.instrument_id is not None):
-                    raise ValueError('Trip requires this actor’s successful Touch and two-second unarmed timing')
+                    raise ValueError('Trip requires this actor’s committed successful Touch, Grab, or Strike and two-second unarmed timing')
                 if data.get('trip_defender_ability') not in ('STR','DEX'):
                     raise ValueError('Trip requires the defender’s Strength or Dexterity choice')
                 sizes=(getattr(actor,'size_category',None),getattr(target,'size_category',None))

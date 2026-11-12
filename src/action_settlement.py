@@ -114,7 +114,7 @@ _METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': (
                       'objective_key', 'evidence_kind', 'visible_count'),
              'observe_group': ('skill_level_used', 'roll', 'observation_id', 'objective_key'),
              'history_request': ('account_id', 'objective_key', 'newly_constructed'),
-             'pickup': (), 'ready_weapon': (), 'grappling': ()}
+             'pickup': (), 'ready_weapon': (), 'grappling': ('contact_kind',)}
 _METADATA['throw'] = ('release_speed_yd_s', 'impact_time')
 
 
@@ -230,7 +230,7 @@ def _copy_proposal(proposal, actions, entities):
     _require(proposal.actor_id == action.actor_id, 'proposal actor does not match declaration')
     _require(type(proposal.outcome) is str, 'opaque outcome')
     allowed = {'interrupted'} if action.lifecycle == 'cancelled' else _OUTCOMES[action.family]
-    if action.family == 'melee':
+    if action.family == 'melee' and action.lifecycle != 'cancelled':
         allowed = (allowed & {'success', 'failure', 'unable_to_act', 'target_down',
                               'weapon_unavailable', 'unplaced', 'out_of_reach',
                               'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'}
@@ -299,9 +299,18 @@ def _copy_proposal(proposal, actions, entities):
     if action.family == 'grappling':
         state_effects = [e for e in proposal.effects if type(e) is GrappleStateEffect]
         event = action.data.get('event_type')
+        if event == 'trip' and action.lifecycle == 'pending':
+            values = dict(metadata)
+            contact_kind = action.data.get('trip_contact_kind')
+            if contact_kind in ('touch', 'grab', 'strike') and proposal.outcome in ('success', 'failed'):
+                _require(values.get('contact_kind') == contact_kind,
+                         'Trip receipt does not preserve its qualifying contact source')
+            else:
+                _require('contact_kind' not in values,
+                         'Trip receipt claims unsupported contact provenance')
         expected_effects = (2 if event == 'grapple' and proposal.outcome == 'success'
             else 1 if ((event in ('hold','grapple escape') and proposal.outcome in ('success','failed'))
-                       or (event in ('grab','break hold') and proposal.outcome == 'success')
+                       or (event in ('grab','break hold','release grip') and proposal.outcome == 'success')
                        or (event == 'grapple' and proposal.outcome == 'failed')
                        or (event == 'trip' and proposal.outcome == 'success')) else
             2 if event == 'pin' and proposal.outcome == 'success' else
@@ -405,8 +414,9 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         elif action.family == 'grappling' and event_type == 'trip':
             _require(effect.kind == 'posture' and effect.operation == 'set'
                 and effect.target_id == action.target_id and effect.position == 'lying'
-                and proposal.outcome == 'success' and action.data.get('trip_contact_verified') is True,
-                'Trip requires its recorded successful Touch and prone effect')
+                and proposal.outcome == 'success'
+                and action.data.get('trip_contact_kind') in ('touch','grab','strike'),
+                'Trip requires its recorded successful contact and prone effect')
         elif is_damage_release:
             grip = next((r for r in snapshot.physical_grips if r[0] == effect.state_id),None)
             body_id = action.actor_id if proposal.outcome == 'hit self' else action.target_id
@@ -424,7 +434,7 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
                 and effect.hand == action.data.get('grab_hand')
                 and action.data.get('contact_verified') is True and effect.next_check == snapshot.boundary+6,
                 'Grab does not cite the prior successful Touch or native hand/due boundary')
-        elif event_type in ('hold','break hold'):
+        elif event_type in ('hold','break hold','release grip'):
             grip = next((r for r in snapshot.physical_grips if r[0] == action.data.get('grip_id')),None)
             _require(grip is not None and effect.kind == 'grip' and effect.state_id == grip[0],
                      'Hold transition lacks one exact receipt-backed grip')
@@ -438,13 +448,22 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
                         and effect.actor_id == grip[1] and effect.target_id == grip[2]
                         and effect.next_check is None,
                         'failed Hold maintenance must release only its individual grip')
-            else:
+            elif event_type == 'break hold':
                 _require(effect.operation == 'release' and effect.actor_id == action.actor_id
                     and effect.target_id == action.actor_id and grip[1] == action.target_id
                     and grip[2] == action.actor_id and effect.next_check is None,
                     'Break hold releases anything other than its named physical grip')
+            else:
+                _require(proposal.outcome == 'success' and effect.operation == 'release'
+                    and effect.actor_id == action.actor_id and effect.target_id == action.target_id
+                    and grip[1] == action.actor_id and grip[2] == action.target_id
+                    and effect.next_check is None,
+                    'voluntary release must affect only the acting Being’s named physical Grip')
         elif event_type == 'grapple':
-            grip = next((r for r in snapshot.physical_grips if r[0] == action.data.get('grip_id')),None)
+            grip_effect = next((candidate for candidate in proposal.effects
+                if type(candidate) is GrappleStateEffect and candidate.kind=='grip'),None)
+            grip = next((r for r in snapshot.physical_grips
+                if grip_effect is not None and r[0] == grip_effect.state_id),None)
             _require(grip is not None,
                 'initial Grapple lacks its separately established prerequisite Grab')
             if effect.kind == 'grip':

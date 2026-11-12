@@ -24,11 +24,11 @@
 
 ## ACTIVE — current implementation program
 
-**No implementation assignment is active.** U-ARENA-018 remains the next candidate for continuation; it is not currently authorized.
+**No implementation assignment is active.** U-ARENA-018B is closed as a partial implementation increment; its supported close-contact work and remaining held-Object custody gap are recorded in the [U-ARENA-018B report](docs/reports/U-ARENA-018B-report.md). The full U-ARENA-018 family remains PARTIAL.
 
 ## NEXT — candidate capability programs (ordered for discussion; not automatically authorized)
 
-- [ ] **U-ARENA-018 — PARTIAL / OPEN; NEXT candidate for continuation.** Native Takedown, Reverse, Pin, Trip and kneeling state exist; the generated Arena in-app browser completed Touch→Grab→Grapple→Takedown and a pending-Grapple Save/Load continuation. Remaining items: voluntary Grip release, cancellation of later attacks after Trip, multi-grappler/simultaneous position conflicts, remaining position consequences, supported Stun/Subdue/unarmed Disarm work, and an eligible-player browser flow. The separate Chrome session reached Touch/Grab only. See the [assignment](docs/assignments/U-ARENA-018.md) and [report](docs/reports/U-ARENA-018-report.md).
+- [ ] **U-ARENA-018 — PARTIAL / OPEN; U-ARENA-018B delivered a bounded continuation.** Native voluntary one-Grip Release, earlier-second prerequisite cancellation, qualifying Touch/Grab/Strike Trip provenance, and later-second attack interruption are implemented and focused-tested. Existing generated-Arena browser Save/Load evidence remains as documented; the new continuation's HTTP/session regression is tracked in its report. Held-Object Grab/Wrest, broader position/maintenance capacity semantics, and defender-side browser walkthrough remain open. See the [U-ARENA-018B report](docs/reports/U-ARENA-018B-report.md).
 - [ ] **U-CAP-001 — NEXT candidate: general Action composition.** Implement Multiple actions, declared shared resource/timing/strategy-point allocation, Delay, conditional Ready, and legal concurrent demanding Actions under common-snapshot resolution; reuse native Choice/transaction infrastructure. Dependencies: [U-ACT-007](#offensive-and-defensive-combat-action-inventory), [U-ACT-013](#offensive-and-defensive-combat-action-inventory), [U-ACT-015](#offensive-and-defensive-combat-action-inventory).
 - [ ] **U-CAP-002 — NEXT candidate: authoritative occupied-space and forced-movement contract.** Resolve traversed/occupied hex clearance, contested displacement, posture/occupancy and simultaneous route interactions to unlock Bull rush, Overrun, End run, Charge and Disengage; do not invent body geometry or force physics.
 - [ ] **U-CAP-003 — NEXT candidate: weapon/equipment completion.** Finish shield bash, two-handed handling, non-Dagger hand requirements, Object attack variants, readiness/possession and off-hand conflicts using native Object identities and adopted rules.
@@ -97,7 +97,7 @@
 - [ ] **U-RULE-001 — OPEN / VERIFY: remove or reconcile provisional `ObserveGroupAction` skill/XP.** Do not confuse it with the adopted six-second Spot (no Spot XP).
 - [ ] **U-LOC-002 — PARTIAL / OPEN: general Action-acquired location and motion evidence.** Last-seen Being evidence exists; waypoints/velocity/event locations, history and loss-of-contact semantics remain open.
 - [ ] **U-PER-002 — PARTIAL / OPEN: general file-based Universe/Being/Encounter persistence.** Arena's strict complex Action/equipment/observer checkpointing is substantial; cross-domain mutable Groups, world realization, multiple interacting Encounters, and portable forward compatibility remain unverified. Historical checkpoint test cohorts include baseline RNG-ownership/adapter failures that must not be hidden.
-- [ ] **U-UI-001 — PARTIAL / OPEN: fully observer-facing world/Encounter presentation.** Arena works for bounded play; general Belief/evidence, noncombat world inquiry, replay and authentic ordinary-browser grappling are unfinished.
+- [ ] **U-UI-001 — PARTIAL / OPEN: fully observer-facing world/Encounter presentation.** Arena now exposes bounded Release grip and qualifying Trip choices; general Belief/evidence, noncombat world inquiry, replay and complete defender-side physical-contact interaction remain unfinished.
 - [ ] **U-ARC-001 — OPEN: historical archive inventory/interpretation.** Retain provenance, rights/privacy review and opaque formats; legacy data is not authoritative biology or safe executable code.
 - [ ] **U-NPC-001 — PARTIAL / OPEN: complete generator/native Being compatibility.** `npcgen` owns initial profile/age-derived skills; Universe imports validated known fields, preserves unsupported source fields, and owns subsequent experience. Expand live mappings only when adopted native semantics exist; independent `npc-generator` is maintained separately.
 - [ ] **U-NPC-002 — DEFERRED: plausible retrospective personal/skill history conditioned on a *current* NPC profile.** Do not generate developmental history first or silently change age-driven initial skill-rank policy. [design](docs/design/deferred-npc-skill-development.md).
@@ -143,7 +143,7 @@
 - [ ] **U-ACT-009 — End run — OPEN.** Occupied-hex passage, contested speed/position and full native legality.
 - [ ] **U-ACT-010 — Feint — PARTIAL.** Armed native one-use +2 follow-up; unarmed/other variants absent and forfeiture rules require coverage.
 - [x] **U-ACT-011 — Grab — DONE bounded against a Being after successful Touch.** Opposed Grab check creates separately identified Grip; object-held-by-another Grab remains open.
-- [ ] **U-ACT-012 — Grapple — PARTIAL.** Initial six-second Grapple, separate Grip/Hold identities, Escape and bounded Takedown/Reverse/Pin transitions are native; multi-grappler and incompatible simultaneous position outcomes, voluntary release, remaining position consequences and complete browser interaction remain open.
+- [ ] **U-ACT-012 — Grapple — PARTIAL.** Initial six-second Grapple, separate Grip/Hold identities, Escape, bounded Takedown/Reverse/Pin transitions, and a one-second no-contest Release grip Action are native; multi-grappler/incompatible simultaneous positions, maintenance Action capacity and remaining position consequences remain open.
 - [ ] **U-ACT-013 — Multiple actions — OPEN.** Shared declarations, resource/strategy allocation and extra penalties.
 - [ ] **U-ACT-014 — Overrun — OPEN.** Forced movement plus prone/size constraints.
 - [ ] **U-ACT-015 — Ready — PARTIAL related capability.** Native two-second Draw exists; generalized Ready/trigger conditional Action not implemented. Do not equate them.
@@ -155,10 +155,10 @@
 - [ ] **U-ACT-021 — Subdue — OPEN.** Separate subdual damage and unconscious/recovery handling are not implemented; U-ARENA-018 did not add a Subdue branch.
 - [ ] **U-ACT-022 — Throw — PARTIAL narrow native ballistic Action.** Per-second object motion exists; complete target hit/miss/interception and Arena parameters absent.
 - [ ] **U-ACT-023 — Touch — PARTIAL.** Native unwilling-Being one-second opposed contact, hex reach and Arena; willing/consent/Dexterity and concurrent Action branches absent.
-- [ ] **U-ACT-024 — Trip — PARTIAL.** Native Touch-identity prerequisite, two-second contest, size/Grip modifiers and atomic prone result are implemented and exposed in the Arena; nullifying an already-pending later-second attack and other prerequisite sources remain open.
+- [ ] **U-ACT-024 — Trip — PARTIAL.** Native successful Touch, Being Grab, or swing/thrust Strike receipt prerequisites; two-second contest, size modifier, +2 only for Grab contact, atomic prone result, and cancellation of a target attack due in a later second are implemented. Same-second attacks remain protected by common-snapshot resolution; failure/tie and some conflict/position variants need broader coverage.
 - [ ] **U-ACT-025 — Two-handed strike — OPEN.** Explicit hand occupancy, weapon rules and two-hand damage semantics.
 - [ ] **U-ACT-026 — Undefended attack — OPEN rule integration.** Verify whether it is an attack-resolution condition rather than independent schedulable Action; no unsupported synthetic command.
-- [ ] **U-ACT-027 — Wrest — OPEN.** Grab of another Being's held Object, one-second contest and native custody transfer are not implemented; U-ARENA-018 confirmed the distinct held-Object Grab prerequisite is unsupported by current Being Grab and ground Pick up.
+- [ ] **U-ACT-027 — Wrest — OPEN.** Distinct Grab-object attack against a holder, recorded Object Grip, one-second Strength contest and same-identity native custody/hand transfer remain unimplemented. Current Being Grab and ground Pick up do not satisfy this prerequisite; see the bounded gap analysis in [U-ARENA-018B](docs/reports/U-ARENA-018B-report.md).
 
 ### Appendix IV — Defensive Actions (6)
 

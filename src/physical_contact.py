@@ -74,3 +74,30 @@ def successful_touch(encounter, action_id, actor_id, target_id):
                if type(r) is PublishedInterval and r.committed
                and r.boundary == action.end_time and action_id in r.action_ids]
     return bool(records)
+
+
+def trip_contact_kind(encounter, action_id, actor_id, target_id):
+    """Return the adopted prior contact kind when its committed receipt qualifies Trip."""
+    from action import Action
+    from melee_combat import MeleeStrike
+    action = encounter.universe.get_event_by_id(action_id)
+    if (action is None or action.actor_id != actor_id or action.target_id != target_id
+            or action_id not in encounter.finished_action_list or action.resolution is None):
+        return None
+    if type(action) is Action and action.event_type == 'touch':
+        valid = action.resolution.outcome == 'touched'
+        kind = 'touch'
+    elif type(action) is Action and action.event_type == 'grab':
+        valid = action.resolution.outcome == 'success'
+        kind = 'grab'
+    elif type(action) is MeleeStrike and action.event_type in ('swing', 'thrust'):
+        valid = action.resolution.outcome in ('normal', 'critical', 'fatal')
+        kind = 'strike'
+    else:
+        return None
+    if not valid:
+        return None
+    from atomic_publication import PublishedInterval
+    return kind if any(type(record) is PublishedInterval and record.committed
+        and record.boundary == action.end_time and action_id in record.action_ids
+        for record in encounter._atomic_interval_history) else None
