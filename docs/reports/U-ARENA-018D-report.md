@@ -41,13 +41,28 @@ The Chrome Load control opened a local file chooser, but `setFiles` was rejected
 
 ### Player cancellation control
 
-Added a character-popup **Cancel pending contact Action** control backed by `/api/generated/cancel-contact`. The request contains no Action ID: the server locates only the player’s own latest supported contact Action, permits a sole-member accepted Choice to be undone before it starts or a currently pending Action to be cancelled, and refuses to withdraw a shared multi-member Choice or an already-resolving Action. The API route test cancels a pending Wrest and verifies the cancelled status, no identity disclosure, no RNG draw, unchanged Object custody, and retained Object Grip receipt.
+Added a character-popup **Cancel pending contact Action** control backed by `/api/generated/cancel-contact`. The request contains no Action ID: the server locates only the player’s own latest supported contact Action, permits a sole-member accepted Choice to be undone before it starts or a currently pending Action to be cancelled, and refuses to withdraw a shared multi-member Choice or an already-resolving Action. The API route regression withdraws a future accepted Wrest before its start fence and cancels a later pending Wrest. It verifies no identity disclosure, no RNG draw, unchanged Object custody, and retained Object Grip receipt.
 
 ## Earlier 018B/018C work retained in this increment
 
 - Being Grips and Grapple control remain separate receipt-backed identities. Native work includes voluntary one-Grip Release, qualifying Trip, initial Grapple and Escape, bounded Takedown/Reverse/Pin transitions, compatible simultaneous control rerolls, attacker effective-size capacity/bonus, pinned-target restrictions, and earlier-versus-same-second prerequisite-loss behavior.
 - Held-Object Grab creates a receipt-backed Object Grip; Wrest contests the exact same Object and atomically transfers its identity/custody/hand references. Failure/tie preserves custody. Tests cover holder weapon use, same-boundary Disarm/Wrest custody conflict, a second Object Grab refusal, pending Wrest cancellation, and late-publication fault injection restoring raw graph, custody references, receipts, RNG, and refusing Save after the fault.
 - Arena status exposes observer-authorized Grip/Object-Grip state with opaque handles. Catalog and view expectations were corrected to current server behavior.
+
+### Compact Action delta matrix from U-ARENA-017
+
+| Action / area | Change in 018B–018D | Current result and noteworthy gap |
+| --- | --- | --- |
+| Break hold | Added to browser choice flow with exact Grip identity; player can cancel a pending contact Action without disclosing an Action ID. | Native and HTTP cancellation are covered. Full Multi-action continuation with Break hold remains unavailable. |
+| Grab | Added held-Object Grab as a separate receipt-backed Object Grip; expanded hand reservation and custody validation. | Same Object ID is carried into Wrest; broader three-Being / simultaneous custody-loss cases remain. |
+| Grapple | Added Takedown, Reverse and Pin control-position transitions; multi-attacker effective-size capacity/bonus, incompatible-position rerolls and pinned-target restrictions; automatic no-cost Hold maintenance. | Touch→Grab→Grapple→Takedown is covered in native, HTTP/fresh-process and Chrome runs. Multi-action defense/resource allocation and broader posture/size/interruption combinations remain. |
+| Multiple actions | No general declaration/strategy-allocation implementation. | Open: ordered action program, shared defense/skill/ability resources, overlap priorities and penalties. |
+| Stun | No new implementation. | Open: specialized unarmed attack/threat, Fortitude save, duration and later-action interruption integration. |
+| Subdue | No new implementation. | Open: bludgeon-only subdual damage ledger and recovery/fatigue lifecycle. |
+| Touch | Completed a real generated Chrome opposed Touch as the opening step of the accepted sequence. | Bounded unwilling-Being path works; willing-recipient consent and concurrent-action variants remain. |
+| Trip | Added receipt-identity eligibility, defender Strength/Dexterity selection, adopted size/stability terms and later-second attack cancellation. | Bounded success/failure/tie and same-second nonretroactivity are covered; broader body stability evidence remains unsupported where absent. |
+| Wrest | Added same-Object custody transfer, failure/tie and reservation conflicts; injected late-publication rollback and player cancellation coverage. | Same-ID custody and fresh-process restoration are covered; broader simultaneous three-Being outcomes remain fail-closed where the adopted winner policy is unspecified. |
+| Arena / persistence | Added observer-authorized opaque target handles and contact status; pending and resolved save continuation. | Chrome Save and generated fresh-process Save/Load pass. Chrome file picker Load remains blocked by extension local-file permission. |
 
 ## Verification
 
@@ -57,7 +72,7 @@ All commands use the preserved `.venv`, `-B`, and no custom pre-import shim.
 | --- | --- |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_action_evaluation` | 75 passed, 79.098 s |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser` | 48 passed, 67.330 s |
-| `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_native_object_wrest` | 9 passed, 18.321 s (includes pending Wrest cancellation through the new player-facing HTTP route) |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_native_object_wrest` | 9 passed, 11.535 s (includes accepted-future and pending Wrest cancellation through the new player-facing HTTP route) |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_atomic_publication` | 70 passed, 49.361 s |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_transactional_progression tests.test_encounter_inspection` | 104 passed, 63.338 s |
 | `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_http_contact_grapple_takedown_save_load_without_fixture_mutations` | 1 passed, 9.200 s (also in the 48-test browser module) |
@@ -74,4 +89,4 @@ The checkpoint cohort failure details remain in the earlier 018B/018C reports. T
 
 No ideas-inbox entry was present for this scope. The generated outstanding-only Encounter to-do was refreshed using the documented tool; the working-draft TOC tool reports its older revision-60 target already current and did not modify the adopted revision-61 source. No `.venv`, ignored `legacy/`, local saves, independent `npc-generator`, backups, or unrelated user files were changed. The supplied assignments and unrelated report remain untracked. No push, reset, clean, or history rewrite was performed.
 
-**Local functional commit:** `719c8ca` (`Add automatic Hold maintenance and Arena walkthrough`). **Publication:** not authorized; no push.
+**Local functional commits:** `719c8ca` (`Add automatic Hold maintenance and Arena walkthrough`); `a376aa7` (`Expose player cancellation for contact actions`). **Publication:** not authorized; no push.

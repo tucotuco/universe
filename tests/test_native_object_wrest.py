@@ -433,7 +433,21 @@ class TestNativeObjectWrest(unittest.TestCase):
         request(session,'/api/generated/advance',{'seconds':1})
         grip=active_object_grip_state(candidate.encounter)[0]
 
-        # Start the one-second Wrest one second in the future. At that start
+        # Before the start fence, the same user route withdraws an accepted
+        # future Action by undoing its sole-member Choice.
+        now=candidate.encounter.time
+        accepted=Action(candidate.universe,now+1,now+2,'wrest',actor.id,object_id,None)
+        accepted.holder_id=holder.id;accepted.holder_hand='right hand'
+        accepted.grab_hand='left hand';accepted.object_grip_id=grip[1]
+        candidate.encounter.schedule_action(accepted)
+        before_rng=session._rng_cursor.state
+        status,withdrawn=request(session,'/api/generated/cancel-contact',{})
+        self.assertEqual(status,200)
+        self.assertNotIn(accepted.id,json.dumps(withdrawn))
+        self.assertFalse(candidate.encounter._choice_book.actor_planned_now(actor.id))
+        self.assertEqual(session._rng_cursor.state,before_rng)
+
+        # Start the next one-second Wrest one second in the future. At that start
         # fence the native scheduler publishes it as pending; it can then be
         # withdrawn before the following boundary resolves it.
         now=candidate.encounter.time
