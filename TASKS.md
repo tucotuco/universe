@@ -24,7 +24,7 @@
 
 ## ACTIVE — current implementation program
 
-**ACTIVE: U-ARENA-018C — implement and verify a bounded native held-Object Grab → Wrest custody sequence.** The full U-ARENA-018 family remains PARTIAL.
+**ACTIVE: U-ARENA-018D — complete the adopted, observable and persistent U-ARENA-018 close-contact lifecycle.** This program continues across bounded Action milestones and conversation handoffs until its full accepted outcome is achieved or a genuine blocker is recorded. The full U-ARENA-018 family remains PARTIAL.
 
 ## NEXT — candidate capability programs (ordered for discussion; not automatically authorized)
 
