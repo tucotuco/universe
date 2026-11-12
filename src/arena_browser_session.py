@@ -311,7 +311,8 @@ class GeneratedArenaSession:
             being = candidate.universe.get_object_by_id(being_id)
             try:
                 validate_saved_equipment_row(
-                    by_being[being_id], being, source_by_being[being_id], candidate.universe)
+                    by_being[being_id], being, source_by_being[being_id], candidate.universe,
+                    candidate.encounter)
             except (TypeError, ValueError, KeyError) as exc:
                 raise ArenaBrowserRequestError(
                     "initial equipment commitment disagrees with its source profile or native state: "
@@ -977,11 +978,11 @@ class GeneratedArenaSession:
         actions = [event_by_id.get(action_id) for action_id in accepted]
         actions = [action for action in actions if type(action) is Action
                    and action.actor_id == player.id and action.event_type in
-                   ("grab", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
+                   ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")]
         action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
         if action is None:
             return None
-        label = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
+        label = {"grab":"Grab", "grab object":"Grab held Object", "wrest":"Wrest", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                  "grapple":"Grapple", "grapple escape":"Grapple Escape",
                  "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip"}[action.event_type]
         if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
@@ -1614,6 +1615,9 @@ class GeneratedArenaSession:
             slots = object.__getattribute__(player, "__dict__").get("current")
             body_parts = getattr(slots, "body_parts", {}) if slots is not None else {}
             occupied = {row[3] for row in grips if row[1] == player.id}
+            from physical_contact import active_object_grip_state
+            occupied.update(row[4] for row in active_object_grip_state(encounter)
+                            if row[2] == player.id)
             free_hands = [name for name in ("left hand", "right hand")
                           if name in body_parts and not body_parts[name] and name not in occupied]
             if hand not in free_hands:
@@ -1698,11 +1702,59 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError(str(exc)) from exc
         return action, prepared
 
+    def _object_grappling_preflight(self,candidate,player,object_id,evidence,event_type,hand=None):
+        from weapon import WeaponInstance
+        from physical_contact import active_object_grip_state
+        encounter=candidate.encounter
+        obj=candidate.universe.get_object_by_id(object_id) if type(object_id) is str else None
+        if (evidence is None or evidence.category!='object' or evidence.present_state!='carried'
+                or evidence.owner_id is None or evidence.equipment_status not in
+                ('held in left hand','held in right hand') or type(obj) is not WeaponInstance):
+            raise ArenaBrowserRequestError('Select a currently perceived weapon held by an opposing Being.')
+        holder=encounter.get_being(evidence.owner_id)
+        holder_hand=evidence.equipment_status.removeprefix('held in ')
+        if (holder is None or holder.id==player.id or not encounter.is_aware(player.id,holder.id)
+                or obj.parent_container_id!=holder.id
+                or holder.current.body_parts.get(holder_hand)!=obj.id):
+            raise ArenaBrowserRequestError('The selected Object is no longer held by the perceived opponent.')
+        if event_type=='grab object':
+            hand=hand or next((name for name in ('left hand','right hand')
+                if name in player.current.body_parts and player.current.body_parts[name] is None),None)
+            if hand not in ('left hand','right hand') or player.current.body_parts.get(hand,'missing') is not None:
+                raise ArenaBrowserRequestError('Choose an explicitly represented free receiving hand.')
+            if any(row[0]==obj.id for row in active_object_grip_state(encounter)):
+                raise ArenaBrowserRequestError('This Object already has an established Object Grip.')
+        else:
+            grip=next((row for row in active_object_grip_state(encounter)
+                if row[0]==obj.id and row[2]==player.id and row[3]==holder.id),None)
+            if grip is None:
+                raise ArenaBrowserRequestError('Wrest requires your current receipt-backed Object Grip.')
+            hand=grip[4]
+        if encounter._choice_book.actor_planned_now(player.id):
+            raise ArenaBrowserRequestError('The player already has an accepted Action resolving.')
+        if player.get_position() is None or holder.get_position() is None:
+            raise ArenaBrowserRequestError('Object Grip requires positioned participants.')
+        from melee_combat import reference_arm_length_inches
+        reach=reference_arm_length_inches(height_inches=player.current.height,
+            length_inches=player.current.length,size_category=getattr(player,'size_category',None))*0.0254
+        from action_calculations import melee_hex_occupancy_path_status
+        status,_=melee_hex_occupancy_path_status(player.get_position(),holder.get_position(),reach,
+            encounter.physical_path(player.id,holder.id),candidate.arena_map.layout)
+        if status!='in_reach':raise ArenaBrowserRequestError('The holder is outside your native arm reach or the physical path is blocked/uncertain.')
+        action=Action(candidate.universe,encounter.time,encounter.time+1,event_type,
+            player.id,obj.id,None)
+        action.holder_id=holder.id;action.holder_hand=holder_hand;action.grab_hand=hand
+        if event_type=='wrest':action.object_grip_id=grip[1]
+        try:prepared=encounter.prepare_action(action)
+        except (ValueError,TypeError,KeyError) as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
+        return action,prepared
+
     def choose_grappling(self, payload):
         if (type(payload) is not dict or set(payload) - {"handle", "action", "hand", "position"}
                 or not {"handle", "action"}.issubset(payload)
                 or type(payload.get("handle")) is not str
-                or payload.get("action") not in ("grab", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")
+                or payload.get("action") not in ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip")
                 or ("position" in payload and payload["position"] not in ("kneeling","prone","pin_top","pin_bottom","STR","DEX"))
                 or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))):
             raise ArenaBrowserRequestError("Physical-contact Action request is malformed.")
@@ -1718,8 +1770,12 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("Player-owned perception evidence is unavailable.")
             evidence = None if entity_id is None else next(
                 (row for row in ledger.current if row.entity_id == entity_id), None)
-            action, prepared = self._grappling_preflight(
-                candidate, player, entity_id, evidence, payload["action"], payload.get("hand"), payload.get("position"))
+            if payload['action'] in ('grab object','wrest'):
+                action,prepared=self._object_grappling_preflight(candidate,player,entity_id,evidence,
+                    payload['action'],payload.get('hand'))
+            else:
+                action, prepared = self._grappling_preflight(
+                    candidate, player, entity_id, evidence, payload["action"], payload.get("hand"), payload.get("position"))
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -2611,6 +2667,9 @@ class GeneratedArenaSession:
                             from physical_contact import active_contact_state
                             active_grips, _ = active_contact_state(candidate.encounter)
                             occupied = {row[3] for row in active_grips if row[1] == player.id}
+                            from physical_contact import active_object_grip_state
+                            occupied.update(row[4] for row in active_object_grip_state(candidate.encounter)
+                                            if row[2] == player.id)
                             hands = [part for part in ("left hand", "right hand")
                                      if part in body_parts and not body_parts[part] and part not in occupied]
                             if not hands:
@@ -2658,9 +2717,31 @@ class GeneratedArenaSession:
                     "target":target_view,"hands":hands,"duration_seconds":duration,
                     "event_type":event_type})
                 continue
-            elif name.casefold() == "grab object":
-                reason = ("The legacy Grab object catalog Action is not admitted for this use. "
-                          "Revision 64 defines Pick up as a separate native Action for a free ground Object.")
+            elif name.casefold() in ("grab object","wrest"):
+                event_type=name.casefold()
+                target_view=(None if selected is None else {"handle":handle,"name":selected["name"],
+                    "type":selected["type"],"present_state":selected["present_state"]})
+                status,reason='unavailable','Select a currently perceived weapon held by an opposing Being.'
+                hands=[];duration=1
+                if selected is not None and selected.get('category')=='object':
+                    try:
+                        if event_type=='grab object':
+                            hands=[part for part in ('left hand','right hand')
+                                if part in player.current.body_parts and player.current.body_parts[part] is None]
+                            if not hands:raise ArenaBrowserRequestError('No explicitly represented free receiving hand is available.')
+                        _,prepared=self._object_grappling_preflight(candidate,player,entity_id,evidence,event_type,
+                            hands[0] if hands else None)
+                        status='available';duration=prepared.end_time-prepared.start_time
+                        reason=('One-second native held-Object Grab using the holder’s Defense, Object-size DC modifier, and +5 DC.'
+                            if event_type=='grab object' else
+                            'One-second native Wrest: 3d6 plus Strength bonus against the holder; a strict win transfers the same Object ID atomically.')
+                    except ArenaBrowserRequestError as exc:reason=str(exc)
+                catalog_rows.append({'name':name,'group':'Physical contact','target_type':'object',
+                    'required_skill':source_row['required_skill'],'is_melee':source_row['is_melee'],
+                    'status':status,'display_name':('Grab held Object' if event_type=='grab object' else 'Wrest')+
+                        f' ({duration:g} s)','reason':reason,'target':target_view,'hands':hands,
+                    'duration_seconds':duration,'event_type':event_type})
+                continue
             elif name.casefold() == "ready weapon":
                 reason = (ready_reason if supported_actions.get(ReadyWeaponAction, False)
                           else "The native Ready weapon scheduler or resolver contract is unavailable.")

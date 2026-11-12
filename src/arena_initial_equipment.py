@@ -245,7 +245,7 @@ def equip_generated_being(native, universe, encounter):
     }
 
 
-def validate_saved_equipment_row(row, being, source_record_bytes, universe):
+def validate_saved_equipment_row(row, being, source_record_bytes, universe, encounter=None):
     """Validate persisted Generator commitment against source and current native state."""
     if type(row) is not dict or set(row) != _EQUIPMENT_FIELDS:
         raise ValueError("initial Arena-ready equipment record has an unsupported field set")
@@ -295,8 +295,7 @@ def validate_saved_equipment_row(row, being, source_record_bytes, universe):
         raise ValueError("saved Arena-ready native Object identity map is incomplete or duplicated")
     for unit in units:
         obj = universe.get_object_by_id(mappings[unit["equipment_id"]])
-        if (obj is None or obj.parent_container_id != being.id or obj.get_position() is not None
-                or obj.id not in being.possessions or obj.current.obj_type != unit["native_type_key"]):
+        if (obj is None or obj.current.obj_type != unit["native_type_key"]):
             raise ValueError("saved Arena-ready unit disagrees with native Object identity/custody")
         from armor import ArmorInstance
         from weapon import WeaponInstance
@@ -305,9 +304,43 @@ def validate_saved_equipment_row(row, being, source_record_bytes, universe):
             raise ValueError("saved Arena-ready category disagrees with the native Object type")
         placement = unit["placement"]
         if placement["kind"] == "held":
-            if (obj.id not in being.weapons or unit["readied"] is not True
-                    or any(being.current.body_parts.get(hand) != obj.id for hand in placement["hands"])):
-                raise ValueError("saved Arena-ready held unit disagrees with native hand state")
+            if unit["readied"] is not True:
+                raise ValueError("saved Arena-ready held unit lost its original ready declaration")
+            if obj.parent_container_id == being.id:
+                if (obj.get_position() is not None or obj.id not in being.possessions
+                        or obj.id not in being.weapons
+                        or any(being.current.body_parts.get(hand) != obj.id for hand in placement["hands"])):
+                    raise ValueError("saved Arena-ready held unit disagrees with native hand state")
+            else:
+                from action_evaluation import ObjectGripEffect
+                history=object.__getattribute__(obj,'__dict__').get('_atomic_target_history',[])
+                transfers=[]
+                for record in history:
+                    for identified in getattr(getattr(record,'state',None),'incoming',()):
+                        effect=getattr(identified,'effect',None)
+                        if type(effect) is ObjectGripEffect and effect.target_id==obj.id and effect.operation=='transfer':
+                            action=universe.get_event_by_id(effect.source_action_id)
+                            if (action is None or action.event_type!='wrest'
+                                    or action.resolution is None or action.resolution.outcome!='success'
+                                    or action.actor_id!=effect.actor_id or action.target_id!=obj.id):
+                                raise ValueError('saved Object transfer lacks its committed native Wrest Action')
+                            transfers.append((record.boundary,effect))
+                transfers.sort(key=lambda row:row[0])
+                if not transfers or transfers[0][1].holder_id!=being.id:
+                    raise ValueError('initial Arena weapon custody changed without a receipt-backed Wrest')
+                for prior,current in zip(transfers,transfers[1:]):
+                    if current[1].holder_id!=prior[1].actor_id:
+                        raise ValueError('saved Wrest custody receipt chain is discontinuous')
+                latest=transfers[-1][1]
+                owner=universe.get_object_by_id(obj.parent_container_id)
+                if (encounter is None or owner is None or owner.id not in encounter.being_list
+                        or latest.actor_id!=owner.id or obj.get_position() is not None
+                        or obj.id not in owner.possessions or owner.possessions.count(obj.id)!=1
+                        or obj.id not in owner.weapons or owner.weapons.count(obj.id)!=1
+                        or owner.current.body_parts.get(latest.actor_hand)!=obj.id
+                        or obj.id in being.possessions or obj.id in being.weapons
+                        or obj.id in being.current.body_parts.values()):
+                    raise ValueError('saved Wrest destination disagrees with native Object identity/hand custody')
         elif placement["kind"] == "worn":
             if being.current.armor_id != obj.id or unit["readied"] is not False:
                 raise ValueError("saved Arena-ready armor disagrees with native armor state")

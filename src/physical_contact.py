@@ -1,6 +1,6 @@
 """Receipt-backed physical Grab/Hold and distinct Grapple-control projections."""
 
-from action_evaluation import GrappleStateEffect
+from action_evaluation import GrappleStateEffect, ObjectGripEffect
 
 
 def _history_effects(being):
@@ -58,6 +58,42 @@ def active_contact_state(encounter):
             else:
                 raise ValueError('unknown native Grapple state transition')
     return tuple(grips[key] for key in sorted(grips)), tuple(controls[key] for key in sorted(controls))
+
+
+def active_object_grip_state(encounter):
+    """Fold committed Object-owned receipts and retain only exact live custody."""
+    objects=encounter.universe.object_registry.object_instances
+    active={}
+    for object_id,obj in objects.items():
+        history=object.__getattribute__(obj,'__dict__').get('_atomic_target_history',[])
+        for record in history:
+            state=getattr(record,'state',None)
+            for identified in getattr(state,'incoming',()):
+                effect=getattr(identified,'effect',None)
+                if type(effect) is not ObjectGripEffect or effect.target_id!=object_id:
+                    continue
+                if effect.operation=='establish':
+                    active[object_id]=(object_id,effect.state_id,effect.actor_id,effect.holder_id,
+                        effect.actor_hand,effect.holder_hand,record.boundary)
+                elif effect.operation=='transfer':
+                    active.pop(object_id,None)
+                else:
+                    raise ValueError('unknown native Object Grip transition')
+    valid=[]
+    being_grips,_controls=active_contact_state(encounter)
+    occupied_hands={(row[1],row[3]) for row in being_grips if row[3] is not None}
+    for object_id,row in active.items():
+        _object_id,_state_id,actor_id,holder_id,actor_hand,holder_hand,_boundary=row
+        actor=objects.get(actor_id);holder=objects.get(holder_id);obj=objects.get(object_id)
+        if (actor is None or holder is None or obj is None
+                or obj.parent_container_id!=holder_id or obj.spatial_state is not None
+                or holder.current.body_parts.get(holder_hand)!=object_id
+                or object_id not in holder.weapons
+                or actor.current.body_parts.get(actor_hand,'missing') is not None
+                or (actor_id,actor_hand) in occupied_hands):
+            continue
+        valid.append(row)
+    return tuple(sorted(valid))
 
 
 def successful_touch(encounter, action_id, actor_id, target_id):

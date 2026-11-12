@@ -8,7 +8,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 import importlib
 
-from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation)
 from spatial.state import CartesianPosition
 
@@ -156,6 +156,10 @@ def _expected_body_parts(meta, target_id, initial):
         elif type(effect) is DropObjectEffect and effect.owner_id == target_id:
             for slot,value in tuple(expected.items()):
                 if value==effect.target_id:expected[slot]=None
+        elif type(effect) is ObjectGripEffect and effect.operation=='transfer':
+            if effect.actor_id==target_id:expected[effect.actor_hand]=effect.target_id
+            if effect.holder_id==target_id and expected.get(effect.holder_hand)==effect.target_id:
+                expected[effect.holder_hand]=None
     return expected
 
 
@@ -164,7 +168,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect GrappleStateEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect GrappleStateEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',
@@ -312,6 +316,21 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                     and key not in tuple(owner.current.body_parts.values())
                     and obj.parent_container_id is None and obj.get_position()==CartesianPosition(*row.effect.position),
                     'unreceipted native Disarm release')
+            if type(row.effect) is ObjectGripEffect and row.effect.target_id==key and row.effect.operation=='transfer':
+                receiver=objects.get(row.effect.actor_id);holder=objects.get(row.effect.holder_id)
+                from being import BeingInstance
+                _require(type(receiver) is BeingInstance and type(holder) is BeingInstance
+                    and key in receiver.possessions and receiver.possessions.count(key)==1
+                    and key in receiver.weapons and receiver.weapons.count(key)==1
+                    and receiver.current.body_parts.get(row.effect.actor_hand)==key
+                    and key not in holder.possessions and key not in holder.weapons
+                    and key not in holder.current.body_parts.values()
+                    and obj.parent_container_id==receiver.id and obj.spatial_state is None
+                    and not any(key in tuple(getattr(other,name,()) or ())
+                        for other in objects.values() if type(other) is BeingInstance
+                        and other not in (receiver,holder)
+                        for name in ('possessions','weapons','body_parts','armor')),
+                    'unreceipted same-ID Wrest custody transfer')
         if key in meta.projectile_states:
             _require(obj.__dict__.get('_atomic_projectile_history',())[-1] == meta.projectile_states[key],
                      'unreceipted projectile boundary state')

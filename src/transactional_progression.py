@@ -463,7 +463,7 @@ def validate_action_contract(encounter,action,*,_force=False):
             or 'on_completed' in data or inspect.getattr_static(type(action),'on_completed',None) is not _NATIVE_HOOKS.get(type(action))
             or any(callable(value) for key,value in data.items() if key!='generate')):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
-    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip'):
+    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
     if type(action) is Action and data['event_type'] == 'touch' and (
             data.get('instrument_id') is not None
@@ -487,6 +487,14 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or type(data.get('disarm_weapon_id')) is not str
                 or data.get('disarm_motion') not in ('swing','thrust')):
             raise TransactionalProgressionError('native Disarm requires two weapon identities and attack motion')
+    if type(action) is Action and data['event_type'] in ('grab object','wrest'):
+        expected=('holder_id','holder_hand','grab_hand') + (('object_grip_id',) if data['event_type']=='wrest' else ())
+        if (any(type(data.get(key)) is not str or not data[key] for key in expected)
+                or data.get('holder_hand') not in ('left hand','right hand')
+                or data.get('grab_hand') not in ('left hand','right hand')
+                or data.get('instrument_id') is not None
+                or data.get('end_time')-data.get('start_time')!=1):
+            raise TransactionalProgressionError('native held-Object Action lacks its exact Object, owner, hand, or timing declaration')
     if type(action) is Action and data['event_type'] in ('grab','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip'):
         expected = {'grab': ('touch_action_id','grab_hand'), 'hold': ('grip_id',),
                     'break hold': ('grip_id',), 'release grip': ('grip_id',), 'grapple': ('grip_id',),

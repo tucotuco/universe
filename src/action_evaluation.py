@@ -115,6 +115,7 @@ class EvaluationSnapshot:
     encounter_map: object = None
     physical_grips: tuple = ()
     grapple_controls: tuple = ()
+    object_grips: tuple = ()
 
     def entity(self, identity):
         try:
@@ -250,7 +251,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -279,12 +280,12 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
         family = ('disarm' if type(action) is Action and ad['event_type']=='disarm' else
                   'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
-                  'grappling' if type(action) is Action and ad['event_type'] in ('grab','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip') else
+                  'grappling' if type(action) is Action and ad['event_type'] in ('grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip') else
                   'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
                   else families[type(action)])
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id'):
             if key in ad:
                 selected[key] = freeze(ad[key])
         if type(action) is Action and ad['event_type'] == 'grab':
@@ -555,8 +556,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     if _objective:
         from objective_reality import capture_objective_inputs
         objective_inputs = capture_objective_inputs(objects, objective_actions, participants)
-    from physical_contact import active_contact_state
+    from physical_contact import active_contact_state, active_object_grip_state
     grips, controls = active_contact_state(encounter)
+    object_grips=active_object_grip_state(encounter)
+    object_grip_hands={(row[2],row[4]) for row in object_grips}
     for key in tuple(entities):
         entity = entities[key]
         if entity.category != 'being':
@@ -567,13 +570,19 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             data['free_hands'] = tuple(hand for hand in data.get('free_hands', ())
                                        if hand not in occupied)
             entities[key] = replace(entity, data=MappingProxyType(data))
+    for key,entity in tuple(entities.items()):
+        if entity.category=='being' and any(owner_id==key for owner_id,_hand in object_grip_hands):
+            data=dict(entity.data)
+            data['free_hands']=tuple(hand for hand in data.get('free_hands',())
+                if (key,hand) not in object_grip_hands)
+            entities[key]=replace(entity,data=MappingProxyType(data))
     snapshot = EvaluationSnapshot(ed['id'], boundary, freeze(ed['difficulty_class']),
         MappingProxyType(entities), participants, MappingProxyType(actions), freeze(ed['awareness']),
         freeze(frame.to_dict()), freeze(profiles), freeze(random.getstate() if rng_state is None else rng_state),
         practice_inputs=practice_inputs, objective_inputs=objective_inputs,
         imported_practice_dependency=imported_dependency,
         encounter_map=freeze(ed.get('map')), physical_grips=grips,
-        grapple_controls=controls)
+        grapple_controls=controls, object_grips=object_grips)
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -696,6 +705,19 @@ class GrappleStateEffect:
     hand: str | None
     next_check: int | None
     position: str | None = None
+
+
+@dataclass(frozen=True)
+class ObjectGripEffect:
+    """Typed, Target-owned receipt for an Object Grip or same-ID Wrest transfer."""
+    source_action_id: str
+    target_id: str
+    actor_id: str
+    holder_id: str
+    state_id: str
+    operation: str
+    actor_hand: str
+    holder_hand: str
 
 
 @dataclass(frozen=True)
@@ -1102,6 +1124,74 @@ def _grappling(snapshot, action, rng):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     event_type = action.data['event_type']
     effects = []
+    if event_type in ('grab object','wrest'):
+        holder=snapshot.entity(action.data['holder_id'])
+        if actor.hp<=0 or actor.data['fatigue_level']>=5 or holder.hp<=0:
+            return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
+        hand=action.data.get('grab_hand');holder_hand=action.data.get('holder_hand')
+        if (target.category!='weapon' or target.data.get('parent_container_id')!=holder.id
+                or target.id not in holder.data.get('held',())
+                or holder.data.get('body_parts',{}).get(holder_hand)!=target.id):
+            return ActionProposal(action.id,actor.id,(target.id,),'not_held')
+        if event_type=='grab object' and hand not in actor.data.get('free_hands',()):
+            return ActionProposal(action.id,actor.id,(target.id,),'hand_unavailable')
+        if actor.position is None or holder.position is None:
+            return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
+        from melee_combat import reference_arm_length_inches
+        try:
+            reach=reference_arm_length_inches(height_inches=actor.data.get('height'),
+                length_inches=actor.data.get('length'),size_category=actor.data.get('size_category'))*0.0254
+        except ValueError:
+            return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
+        path=snapshot.physical_path(actor.id,holder.id)
+        from arena_hex_map import layout_from_encounter_map
+        layout=layout_from_encounter_map(snapshot.encounter_map)
+        if layout is None:
+            status,_=melee_path_status(math.dist(actor.position.as_tuple(),holder.position.as_tuple()),reach,path)
+        else:
+            from action_calculations import melee_hex_occupancy_path_status
+            status,_=melee_hex_occupancy_path_status(actor.position,holder.position,reach,path,layout)
+        if status!='in_reach':return ActionProposal(action.id,actor.id,(target.id,),status)
+        competing=[row for row in snapshot.actions.values() if row.lifecycle=='pending'
+            and row.boundary==action.boundary and row.target_id==target.id
+            and row.id!=action.id and row.data.get('event_type') in ('grab object','wrest')]
+        if competing:
+            return ActionProposal(action.id,actor.id,(target.id,),'contested')
+        losing=[row for row in snapshot.actions.values() if row.lifecycle=='pending'
+            and row.boundary==action.boundary and row.data.get('event_type')=='disarm'
+            and row.data.get('disarm_weapon_id')==target.id]
+        holder_use=[row for row in snapshot.actions.values() if row.lifecycle=='pending'
+            and row.boundary==action.boundary and row.id!=action.id
+            and row.actor_id==holder.id and row.instrument_id==target.id]
+        if losing or holder_use:
+            return ActionProposal(action.id,actor.id,(target.id,),'custody_conflict')
+        existing=next((row for row in snapshot.object_grips if row[0]==target.id),None)
+        if event_type=='grab object':
+            if existing is not None:
+                return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
+            size_mod={'D':4,'T':2,'S':1,'M':0,'L':-1,'H':-2,'G':-4,'C':-8}.get(target.data.get('size'))
+            if size_mod is None:
+                return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
+            roll=rng.roll('1d20')
+            success=attack_hits(roll,actor.data['strategy']['attack'],
+                holder.data['strategy']['defense'],snapshot.difficulty+5+size_mod)
+            if not success:
+                return ActionProposal(action.id,actor.id,(target.id,),'failed')
+            effects.append(ObjectGripEffect(action.id,target.id,actor.id,holder.id,
+                action.id,'establish',hand,holder_hand))
+            return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
+        grip_id=action.data.get('object_grip_id')
+        if (existing is None or existing[2]!=actor.id
+                or existing[3]!=holder.id or existing[4]!=hand or existing[5]!=holder_hand
+                or existing[1]!=grip_id):
+            return ActionProposal(action.id,actor.id,(target.id,),'grip_lost')
+        actor_total=sum(rng.roll('1d6') for _ in range(3))+(actor.data['abilities'].get('STR',10)-10)//2
+        holder_total=sum(rng.roll('1d6') for _ in range(3))+(holder.data['abilities'].get('STR',10)-10)//2
+        if actor_total<=holder_total:
+            return ActionProposal(action.id,actor.id,(target.id,),'failed')
+        effects.append(ObjectGripEffect(action.id,target.id,actor.id,holder.id,
+            grip_id,'transfer',hand,holder_hand))
+        return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
     if event_type in ('grab', 'hold', 'break hold', 'release grip', 'grapple','takedown','reverse','pin','trip'):
         distance = snapshot.distance(actor.id, target.id)
         if actor.position is None or target.position is None or distance is None:

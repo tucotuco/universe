@@ -13,7 +13,7 @@ from spatial.state import CartesianPosition
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
     EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, GrappleStateEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, EffectIdentity, IdentifiedEffect,
-    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, UnsupportedEvaluation,
+    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ObjectGripEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
 
 
@@ -80,7 +80,7 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect)
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
 _FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
@@ -106,7 +106,7 @@ _OUTCOMES = {
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
     'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','blocked','uncertain_path',
-        'unavailable','failed','success','grip_lost','no_control')),
+        'unavailable','failed','success','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict')),
 }
 _METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
@@ -157,6 +157,12 @@ def _effect(effect):
     if type(effect) is ReadyWeaponEffect:
         _identity(values['object_id'])
         _require(values['hand'] in ('left hand', 'right hand'), 'unsupported native Ready weapon hand')
+    if type(effect) is ObjectGripEffect:
+        for name in ('actor_id','holder_id','state_id'):_identity(values[name])
+        _require(values['operation'] in ('establish','transfer')
+                 and values['actor_hand'] in ('left hand','right hand')
+                 and values['holder_hand'] in ('left hand','right hand'),
+                 'invalid native Object Grip transition')
     if type(effect) is DropObjectEffect:
         _identity(values['owner_id'])
         _require(type(values['position']) is tuple and len(values['position'])==3,
@@ -297,7 +303,7 @@ def _copy_proposal(proposal, actions, entities):
                      and ((values['margin']>0) if proposal.outcome=='disarmed' else values['margin']<=0),
                      'Disarm outcome contradicts opposed attack-roll margin')
     if action.family == 'grappling':
-        state_effects = [e for e in proposal.effects if type(e) is GrappleStateEffect]
+        state_effects = [e for e in proposal.effects if type(e) in (GrappleStateEffect,ObjectGripEffect)]
         event = action.data.get('event_type')
         if event == 'trip' and action.lifecycle == 'pending':
             values = dict(metadata)
@@ -310,7 +316,7 @@ def _copy_proposal(proposal, actions, entities):
                          'Trip receipt claims unsupported contact provenance')
         expected_effects = (2 if event == 'grapple' and proposal.outcome == 'success'
             else 1 if ((event in ('hold','grapple escape') and proposal.outcome in ('success','failed'))
-                       or (event in ('grab','break hold','release grip') and proposal.outcome == 'success')
+                       or (event in ('grab','break hold','release grip','grab object','wrest') and proposal.outcome == 'success')
                        or (event == 'grapple' and proposal.outcome == 'failed')
                        or (event == 'trip' and proposal.outcome == 'success')) else
             2 if event == 'pin' and proposal.outcome == 'success' else
@@ -375,6 +381,20 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
     _identity(effect.target_id)
     _require(effect.target_id in entities, 'unknown effect recipient')
     recipient = entities[effect.target_id]
+    if type(effect) is ObjectGripEffect:
+        _identity(effect.actor_id); _identity(effect.holder_id); _identity(effect.state_id)
+        _require(action.family == 'grappling' and action.data.get('event_type') in ('grab object','wrest')
+                 and recipient.category == 'weapon' and effect.target_id == action.target_id
+                 and effect.actor_id == action.actor_id
+                 and effect.holder_id == action.data.get('holder_id')
+                 and effect.actor_hand in ('left hand','right hand')
+                 and effect.holder_hand in ('left hand','right hand'),
+                 'Object Grip effect differs from its native held-Object Action')
+        expected = 'establish' if action.data.get('event_type') == 'grab object' else 'transfer'
+        _require(effect.operation == expected and proposal.outcome == 'success'
+                 and effect.state_id == (action.id if expected == 'establish' else action.data.get('object_grip_id')),
+                 'Object Grip receipt does not match the declared successful transition')
+        return effect.target_id, ('object_grip', action.id, effect.target_id, effect.operation)
     if type(effect) is GrappleStateEffect:
         event_type = action.data.get('event_type')
         is_damage_release = (action.family == 'melee'
@@ -653,6 +673,9 @@ def _validate_complete_outcome(proposal, action, entities):
     drops=[e for e in effects if type(e) is DropObjectEffect]
     _require(len(drops)==int(action.family=='disarm' and proposal.outcome=='disarmed'),
              'missing/extra native Disarm custody release')
+    object_grips=[e for e in effects if type(e) is ObjectGripEffect]
+    _require(len(object_grips)==int(action.family=='grappling' and action.data.get('event_type') in ('grab object','wrest') and proposal.outcome=='success'),
+             'missing/extra native Object Grip receipt')
     releases = [e for e in effects if type(e) is ProjectileReleaseEffect]
     _require(len(releases) == int(action.family == 'throw' and proposal.outcome == 'released'),
              'missing/extra projectile release contribution')

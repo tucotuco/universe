@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -598,6 +598,42 @@ def _make_plan(encounter,candidate,rng_owner):
         plan.contents('targets',owner.current.body_parts,body_parts)
         plan.contents('targets',owner.weapons,weapons)
         plan.contents('targets',owner.possessions,possessions)
+    wrests=[row.effect for row in supported.boundary.effects.values()
+            if type(row.effect) is ObjectGripEffect and row.effect.operation=='transfer']
+    from action import Action
+    if len({effect.target_id for effect in wrests})!=len(wrests):
+        raise PublicationRejected('simultaneous Wrest claims the same native Object')
+    for effect in wrests:
+        source=events.get(effect.source_action_id)
+        receiver=objects.get(effect.actor_id);holder=objects.get(effect.holder_id)
+        obj=objects.get(effect.target_id)
+        if (type(source) is not Action or source.event_type!='wrest'
+                or type(receiver) is not BeingInstance or type(holder) is not BeingInstance
+                or type(obj) is not WeaponInstance or receiver is holder
+                or effect.actor_id not in encounter.being_list or effect.holder_id not in encounter.being_list
+                or receiver.current.body_parts.get(effect.actor_hand,'missing') is not None
+                or holder.current.body_parts.get(effect.holder_hand)!=effect.target_id
+                or holder.weapons.count(effect.target_id)!=1
+                or obj.parent_container_id!=holder.id or obj.spatial_state is not None
+                or effect.target_id in tuple(receiver.current.body_parts.values())
+                or effect.target_id in receiver.weapons or effect.target_id in receiver.possessions
+                or any(effect.target_id in tuple(getattr(other,name,()) or ())
+                       for key,other in objects.items() if type(other) is BeingInstance
+                       and other not in (receiver,holder)
+                       for name in ('possessions','weapons','body_parts','armor'))):
+            raise PublicationRejected('Wrest custody or receiving hand changed before atomic transfer')
+        hparts=dict(holder.current.body_parts);hparts[effect.holder_hand]=None
+        hweapons=list(holder.weapons);hweapons.remove(effect.target_id)
+        hposs=list(holder.possessions)
+        if effect.target_id in hposs:hposs.remove(effect.target_id)
+        rparts=dict(receiver.current.body_parts);rparts[effect.actor_hand]=effect.target_id
+        plan.contents('targets',holder.current.body_parts,hparts)
+        plan.contents('targets',holder.weapons,hweapons)
+        plan.contents('targets',holder.possessions,hposs)
+        plan.contents('targets',receiver.current.body_parts,rparts)
+        plan.contents('targets',receiver.weapons,receiver.weapons+[effect.target_id])
+        plan.contents('targets',receiver.possessions,receiver.possessions+[effect.target_id])
+        plan.attr('targets',obj,'parent_container_id',receiver.id)
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}
@@ -712,6 +748,12 @@ def _make_plan(encounter,candidate,rng_owner):
     pickup_owners = {row.effect.object_id: row.effect.target_id
                      for row in supported.boundary.effects.values()
                      if type(row.effect) is PickupEffect}
+    object_transfers = {row.effect.target_id: (row.effect.actor_id,row.effect.actor_hand)
+                        for row in supported.boundary.effects.values()
+                        if type(row.effect) is ObjectGripEffect and row.effect.operation=='transfer'}
+    weapon_draws = {row.effect.object_id: (row.effect.target_id,row.effect.hand)
+                    for row in supported.boundary.effects.values()
+                    if type(row.effect) is ReadyWeaponEffect}
     for observer_id in encounter.being_list:
         observer = objects.get(observer_id)
         if type(observer) is not BeingInstance:
@@ -734,14 +776,19 @@ def _make_plan(encounter,candidate,rng_owner):
                      'carried' if carried else 'ground' if position is not None else 'unplaced')
             equipment_status = None
             if prior.category == 'object' and owner_id is not None:
-                owner = candidate.pre_action_snapshot.entities.get(owner_id)
-                if owner is None or owner.category != 'being':
+                owner_native=objects.get(owner_id)
+                if type(owner_native) is not BeingInstance:
                     raise PublicationRejected('visible carried Object owner is not a participating Being')
-                if owner.data.get('armor_id') == entity_id:
+                if owner_native.current.armor_id == entity_id:
                     equipment_status = 'worn'
                 else:
-                    slots = owner.data.get('body_parts')
-                    slots = slots if type(slots) is dict else {}
+                    slots=dict(owner_native.current.body_parts)
+                    if entity_id in object_transfers:
+                        _owner_id,hand=object_transfers[entity_id]
+                        slots[hand]=entity_id
+                    if entity_id in weapon_draws:
+                        _owner_id,hand=weapon_draws[entity_id]
+                        slots[hand]=entity_id
                     held = [slot for slot, item_id in slots.items() if item_id == entity_id]
                     equipment_status = f"held in {held[0]}" if held else 'carried'
             updated = ArenaPerceptionEvidence(observer_id, entity_id, prior.category,

@@ -280,6 +280,66 @@ class Action(Event):
             if not math.isclose(reach,effective_melee_reach_meters(actor.current,weapon.current),rel_tol=1e-12,abs_tol=1e-12):
                 raise ValueError('Disarm reach differs from native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
+        if self.event_type in ('grab object','wrest'):
+            from encounter import Encounter
+            from weapon import WeaponInstance
+            from physical_contact import active_object_grip_state
+            if type(encounter) is not Encounter or encounter.progression_mode!='transactional':
+                raise ValueError('Object Grip Actions require native transactional progression')
+            actor=encounter.get_being(self.actor_id)
+            target_obj=encounter.universe.get_object_by_id(self.target_id)
+            data=object.__getattribute__(self,'__dict__')
+            holder=encounter.get_being(data.get('holder_id'))
+            if (actor is None or holder is None or actor is holder or self.actor_id not in encounter.being_list
+                    or data.get('holder_id') not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id,holder.id)
+                    or type(target_obj) is not WeaponInstance or target_obj.id not in holder.weapons
+                    or target_obj.parent_container_id!=holder.id or target_obj.spatial_state is not None):
+                raise ValueError('Object Grip requires a specifically perceived Weapon held by an aware opponent')
+            slots=object.__getattribute__(holder.current,'__dict__').get('body_parts',{})
+            hands=[hand for hand,value in slots.items() if hand in ('left hand','right hand') and value==target_obj.id]
+            if len(hands)!=1 or data.get('holder_hand')!=hands[0]:
+                raise ValueError('Object Grip requires the actual unique holder hand')
+            actor_parts=object.__getattribute__(actor.current,'__dict__').get('body_parts',{})
+            actor_hand=data.get('grab_hand')
+            if actor_hand not in ('left hand','right hand'):
+                raise ValueError('Object Grip requires an explicitly represented hand')
+            if self.instrument_id is not None or self.end_time-self.start_time!=1:
+                raise ValueError('Object Grip Actions are one-second unarmed Actions')
+            from melee_combat import reference_arm_length_inches
+            reach=reference_arm_length_inches(height_inches=actor.current.height,
+                length_inches=actor.current.length,size_category=getattr(actor,'size_category',None))*0.0254
+            ap=actor.get_position();hp=holder.get_position()
+            if ap is None or hp is None:
+                raise ValueError('Object Grip target is outside the actor’s native arm reach')
+            from arena_hex_map import layout_from_encounter_map
+            from action_calculations import melee_hex_occupancy_path_status, melee_path_status
+            path=encounter.physical_path(actor.id,holder.id)
+            layout=layout_from_encounter_map(encounter.map)
+            status,_=(melee_path_status(math.dist(ap.as_tuple(),hp.as_tuple()),reach,path)
+                if layout is None else melee_hex_occupancy_path_status(ap,hp,reach,path,layout))
+            if status!='in_reach':
+                raise ValueError('Object Grip target is outside native reach or has a blocked/uncertain path')
+            grips=active_object_grip_state(encounter)
+            if self.event_type=='grab object':
+                if actor_parts.get(actor_hand,'missing') is not None:
+                    raise ValueError('Object Grip requires an explicitly free receiving hand')
+                from physical_contact import active_contact_state
+                being_grips,_controls=active_contact_state(encounter)
+                if any(row[1]==actor.id and row[3]==actor_hand for row in being_grips):
+                    raise ValueError('receiving hand already maintains a physical Being Grip')
+                if any(row[2]==actor.id and row[4]==actor_hand for row in grips):
+                    raise ValueError('receiving hand already maintains an Object Grip')
+                if any(row[0]==target_obj.id for row in grips):
+                    raise ValueError('Object already has an established Object Grip')
+            else:
+                grip=next((row for row in grips if row[0]==target_obj.id
+                    and row[2]==actor.id and row[3]==holder.id),None)
+                if (grip is None or grip[4]!=actor_hand or grip[5]!=hands[0]
+                        or data.get('object_grip_id')!=grip[1]
+                        or actor_parts.get(actor_hand,'missing') is not None):
+                    raise ValueError('Wrest requires this actor’s current receipt-backed Object Grip')
+            return PreparedSchedule.from_action(self)
         if self.event_type in ('grab', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape',
                                'takedown', 'reverse', 'pin', 'trip'):
             from encounter import Encounter
@@ -303,6 +363,9 @@ class Action(Event):
                     raise ValueError('Grab requires one explicitly represented free native hand')
                 if any(row[1] == actor.id and row[3] == hand for row in grips):
                     raise ValueError('Grab requires a hand not maintaining another physical Grip')
+                from physical_contact import active_object_grip_state
+                if any(row[2]==actor.id and row[4]==hand for row in active_object_grip_state(encounter)):
+                    raise ValueError('Grab requires a hand not maintaining an Object Grip')
                 if self.instrument_id is not None or self.end_time - self.start_time != 1:
                     raise ValueError('Grab is a separate unarmed one-second Action')
             elif self.event_type == 'hold':
