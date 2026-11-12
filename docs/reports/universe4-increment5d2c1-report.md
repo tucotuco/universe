@@ -6,11 +6,11 @@ Implemented an inactive, versioned portable descriptor for accepted choices cont
 
 ## Changes
 
-- Added [checkpoint_choices.py](../src/checkpoint_choices.py): `universe.accepted-action-choice/1`, frozen detached descriptor records, exact Run/Spot adapters, exact integer/binary64 timing encoding, verified logical references, ordered member and prepared schedule capture, reservation validation, explicit unsupported-case refusal. Descriptor reads hold the native ChoiceBook lock.
-- Updated [checkpoint_adapters.py](../src/checkpoint_adapters.py) to embed this descriptor in place of `_Accepted.signatures`; unsupported choice families produce `portable_choice_descriptor_unsupported`.
-- Updated [checkpoint_inventory.py](../src/checkpoint_inventory.py) so the descriptor adapter participates in the rule-kernel compatibility fingerprint. Full checkpoint readiness remains false.
-- Added [test_checkpoint_choice_descriptors.py](../tests/test_checkpoint_choice_descriptors.py) and updated the 5D2B blocker test to expect the newly represented supported choice.
-- Extended the existing [checkpoint compatibility contract](universe4-checkpoint-compatibility-contract-draft.md) with schema, identity, numeric, rehydration, and refusal requirements.
+- Added [checkpoint_choices.py](../../src/checkpoint_choices.py): `universe.accepted-action-choice/1`, frozen detached descriptor records, exact Run/Spot adapters, exact integer/binary64 timing encoding, verified logical references, ordered member and prepared schedule capture, reservation validation, explicit unsupported-case refusal. Descriptor reads hold the native ChoiceBook lock.
+- Updated [checkpoint_adapters.py](../../src/checkpoint_adapters.py) to embed this descriptor in place of `_Accepted.signatures`; unsupported choice families produce `portable_choice_descriptor_unsupported`.
+- Updated [checkpoint_inventory.py](../../src/checkpoint_inventory.py) so the descriptor adapter participates in the rule-kernel compatibility fingerprint. Full checkpoint readiness remains false.
+- Added [test_checkpoint_choice_descriptors.py](../../tests/test_checkpoint_choice_descriptors.py) and updated the 5D2B blocker test to expect the newly represented supported choice.
+- Extended the existing [checkpoint compatibility contract](../history/universe4-checkpoint-compatibility-contract-draft.md) with schema, identity, numeric, rehydration, and refusal requirements.
 
 ## Descriptor behavior and limits
 

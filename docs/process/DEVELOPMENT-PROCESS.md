@@ -1,17 +1,17 @@
 # Universe — Development, Task-State and Handoff Process
 
-> **Version:** 1.0 · **Adopted:** 2026-11-11. This is an operational collaboration contract, not a change to adopted Encounter mechanics or authorization to publish Git history. **Companion single state/ideas register:** [`TASKS.md`](../TASKS.md).
+> **Version:** 1.0 · **Adopted:** 2026-11-11. This is an operational collaboration contract, not a change to adopted Encounter mechanics or authorization to publish Git history. **Companion single state/ideas register:** [`TASKS.md`](../../TASKS.md).
 
 ## 1. Purpose and source-of-truth boundaries
 
 Universe is a long-running, multi-conversation engineering and simulation-design project. Decisions, experiments, source code, user ideas and unfinished work must survive transitions between ChatGPT conversations and Codex conversations without making the user repeat prior context or reread months of logs. Use a **small number of durable, version-controlled entry points**.
 
 1. **`TASKS.md` is the sole canonical project-wide current-state and ideas list.** It includes bounded completed capabilities, at most one active implementation program (and explicitly says when none is active), next candidates, open/blocked/deferred work, a current Action inventory and all retained future ideas. It is a *state snapshot*, not a journal. Do not maintain a separate competing ideas backlog or separate canonical task list in `docs/tasks/`.
-2. **`docs/DEVELOPMENT-PROCESS.md`** (this document) defines how people and agents maintain that state, execute code changes, report results and hand off context.
+2. **`docs/process/DEVELOPMENT-PROCESS.md`** (this document) defines how people and agents maintain that state, execute code changes, report results and hand off context.
 3. **Adopted rules and decisions** (e.g. `docs/encounters/README.md` and its effective revision/supplements/issue register) define simulation behavior. `TASKS.md`, assignments, code comments, examples and speculative ideas **do not create or silently amend rules**.
 4. **Current code and executable tests** establish which behaviors are implemented and under what limits. Passing a bounded fixture does not establish general conformance. Reports record evidence; a report is not a substitute for source inspection.
 5. **`docs/assignments/<ID>.md`** specifies an authorized Codex work outcome; **`docs/reports/<ID>-report.md`** records its execution and evidence; **Git commits** preserve the actual implementation and document edits. These are **logs/provenance**, not the current-state register.
-6. **`docs/design/`, `docs/tasks/`, handoffs, archived backlogs and experiments** hold explanations, detailed proposals, rejected alternatives and historical context. Links may point into them; their embedded historical statuses must not compete with the present `TASKS.md`. Existing [`docs/design/deferred-ideas.md`](design/deferred-ideas.md) is retained as archival source evidence after reconciliation, not maintained as a second live ideas register.
+6. **`docs/design/`, `docs/tasks/`, handoffs, archived backlogs and experiments** hold explanations, detailed proposals, rejected alternatives and historical context. Links may point into them; their embedded historical statuses must not compete with the present `TASKS.md`. Existing [`docs/design/deferred-ideas.md`](../design/deferred-ideas.md) is retained as archival source evidence after reconciliation, not maintained as a second live ideas register.
 
 **Canonical priority for disagreements:** user-adopted decision/current applicable rule > current code/test evidence for actual implementation > current TASKS state for project tracking > current assignment/report for work scope/evidence > topic/design note > handoff/archive/conversation recollection. A task-state entry may be wrong; preserve uncertainty and repair it based on evidence, never by silently changing an adopted rule.
 
@@ -34,7 +34,7 @@ Universe is a long-running, multi-conversation engineering and simulation-design
 - **Outcome-oriented assignments:** prefer complete, executable capability clusters with shared dependencies over a stream of tiny reports. Codex should resolve ordinary engineering dependencies autonomously; consult the user only for genuine rules/vision/authorization conflicts. Preserve partial successful commits when a larger scope is incomplete.
 - **Focus tests first:** run newly added/affected tests, neighboring regressions, syntax/structural checks, and real browser smoke when relevant. Reserve the expensive full HTTP-inclusive suite for meaningful integration milestones or high-risk changes. Report which exact tests ran, timings and failures; never imply unrun suites are green.
 - **Verification levels:** distinguish unit/native integration; process-restart Save/Load; HTTP/session or JavaScript harness; actual interactive Chrome/browser; full-suite. Do not call a mocked browser an end-to-end user walkthrough.
-- **Preserve the working tree:** first inspect `git status`, branch/HEAD/upstream; never reset/clean/stash wholesale, blanket-stage unrelated files, overwrite unknown work, or modify protected archives, independent `npc-generator`, or local secrets. Stage only reviewed paths. Make small coherent commits at actual functional boundaries (often 1–3 per assignment; more if justified), and report commit hashes.
+- **Preserve the working tree and local-only resources:** first inspect `git status`, branch/HEAD/upstream; never reset/clean/stash wholesale, blanket-stage unrelated files, overwrite unknown work, or modify protected archives, independent `npc-generator`, or local secrets. Before replacing a clone or publishing/migrating a checkout, inventory essential local-only assets, identify their destination and backup, record byte/mode checksums outside Git, restore and verify them before retiring the source, and explicitly ignore the restored local-only paths. Stage only reviewed paths. Make small coherent commits at actual functional boundaries (often 1–3 per assignment; more if justified), and report commit hashes.
 - **No unauthorized publication/history rewrite:** never push, force-push, rebase, rewrite/sanitize historical commits, or publish private paths/data without explicit user authorization. Local commits are not equivalent to remote backups. Apply safety checks before any approved publication.
 - **Inspectability:** prefer ordinary readable, version-controlled files and reproducible commands to premature database/service infrastructure.
 
@@ -111,7 +111,7 @@ A checkbox `[x]` means DONE *for the bounded statement*. Open/partial/idea entri
 The following clause is the default **required** content in `docs/assignments/<ID>.md` (customize IDs and expected transitions rather than leaving the placeholders):
 
 > ### `TASKS.md` integration (required)
-> - Before editing source, read repository-root `TASKS.md` and `docs/DEVELOPMENT-PROCESS.md` alongside the authoritative rules, prior relevant report, `git status -sb`, HEAD and branch. Identify the IDs this assignment affects: **[explicit list]**. Inspect actual status/evidence; do not assume the assignment's preparation-time snapshot is current.
+> - Before editing source, read repository-root `TASKS.md` and `docs/process/DEVELOPMENT-PROCESS.md` alongside the authoritative rules, prior relevant report, `git status -sb`, HEAD and branch. Identify the IDs this assignment affects: **[explicit list]**. Inspect actual status/evidence; do not assume the assignment's preparation-time snapshot is current.
 > - Preserve every unrelated task, deferred idea, existing stable ID, other Codex changes and historical completed entry. If you discover a materially new dependency or previously untracked idea, add a concise uniquely numbered OPEN/BLOCKED/IDEA entry as appropriate; ideas are not adopted mechanics.
 > - At each meaningful validated capability boundary and before final report, update the affected `TASKS.md` entries to reflect **actual outcomes and remaining limits**; move the one ACTIVE marker only as authorized by current priority. Mark DONE only for exact tested bounded acceptance, leave partial/blocked work explicit, and update links to the report/design where helpful. Do not append a chronological log of steps/tests/commits.
 > - Review the task-register diff and stage only reviewed files; include `TASKS.md` in the relevant scoped commit (or immediately adjacent documentation commit). In `docs/reports/<ID>-report.md`, list **Task IDs before → after**, any ideas captured, and whether the root register was actually committed. If it could not be safely reconciled, say so explicitly and leave it unchanged rather than overwrite conflicting state.
@@ -150,7 +150,7 @@ A failing pre-existing test still matters; demonstrate its baseline if claiming 
 
 ### At the start of a new ChatGPT conversation
 
-Provide `TASKS.md` (or a verified accessible repository/library copy), `docs/DEVELOPMENT-PROCESS.md`, and the latest relevant report/assignment. Refer to the active Encounter rule README, newest dated handoff, and independent `npcgen` boundary if pertinent. Assistant should:
+Provide `TASKS.md` (or a verified accessible repository/library copy), `docs/process/DEVELOPMENT-PROCESS.md`, and the latest relevant report/assignment. Refer to the active Encounter rule README, newest dated handoff, and independent `npcgen` boundary if pertinent. Assistant should:
 
 1. State the **current objective and active task, or explicitly say no implementation task is active**, recently demonstrated outcomes and concrete unresolved blockers from the register; no generic re-design of completed decisions.
 2. Confirm that local Git/reports may be newer than the supplied snapshot; ask Codex to verify the actual checkout when an assignment runs, not the user to re-explain history.
@@ -161,7 +161,7 @@ Provide `TASKS.md` (or a verified accessible repository/library copy), `docs/DEV
 
 The first user/Codex prompt may be:
 
-> Continue the Universe repository workflow. First read `TASKS.md`, `docs/DEVELOPMENT-PROCESS.md`, `docs/encounters/README.md`, the latest relevant handoff, and the currently assigned `docs/assignments/<ID>.md`; inspect the actual branch/HEAD/status and affected source/tests. Preserve unrelated work and existing stable task IDs. Execute the assignment outcome, update `TASKS.md` according to its required clause, run focused evidence, commit reviewed paths, and write the required report. Do not push or rewrite history without separate explicit authorization.
+> Continue the Universe repository workflow. First read `TASKS.md`, `docs/process/DEVELOPMENT-PROCESS.md`, `docs/encounters/README.md`, the latest relevant handoff, and the currently assigned `docs/assignments/<ID>.md`; inspect the actual branch/HEAD/status and affected source/tests. Preserve unrelated work and existing stable task IDs. Execute the assignment outcome, update `TASKS.md` according to its required clause, run focused evidence, commit reviewed paths, and write the required report. Do not push or rewrite history without separate explicit authorization.
 
 A handoff document is **navigation**, not a second task register. If the handoff contradicts current `TASKS.md`, rules or source, document the conflict and resolve it from actual authority, not from a guessed chronology.
 

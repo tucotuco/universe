@@ -42,7 +42,7 @@ The developer-labeled timeline shows Spot accepted at t=0 and committed at bound
 - Focused Arena, Spot, and attention tests: **22 passed**.
 - Demo command above: passed; output showed the expected committed success and observer-specific Awareness.
 - Candidate fixture regeneration and byte comparison: both exact exports matched.
-- Python compilation: `PYTHONPYCACHEPREFIX=/tmp/universe-arena-pycache python -m py_compile src/arena_npc_import.py examples/npc_encounter_arena.py tests/test_npc_encounter_arena.py` passed.
+- Python compilation: `PYTHONPYCACHEPREFIX=<temp-cache-dir> python -m py_compile src/arena_npc_import.py examples/npc_encounter_arena.py tests/test_npc_encounter_arena.py` passed.
 - Relative Markdown links in the five updated task/roadmap files: no broken links. `git diff --check` passed; one extra blank line at EOF in the new importer was removed before commit.
 - Full HTTP-inclusive suite: `PYTHONDONTWRITEBYTECODE=1 sh run_tests.sh` with loopback permission ran **1,712 tests**. HTTP tests completed; **one unrelated failure remains**: `test_exertion.TestExertion.test_check` expects `Exertion.check(20)` always to succeed. The existing `src/utils.py::ability_check` returns `ability_value > roll_dice("1d20")`; a natural 20 therefore fails the strict comparison. No exertion or utility files were changed. A preceding sandbox-only attempt could not bind local HTTP test servers; the permitted rerun resolved those setup errors.
 

@@ -397,7 +397,7 @@ class AgentDuel(TacticalDuel):
         state['ai_mode'] = ('OpenAI model' if isinstance(getattr(self, 'policy', None), OpenAIPolicy)
                             else 'deterministic tactical baseline')
         state['ai_last'] = decision
-        state['rules_coverage'] = 'bounded armed duel; see docs/ai-encounter-experiment.md'
+        state['rules_coverage'] = 'bounded armed duel; see docs/experiments/ai-encounter-experiment.md'
         return state
 
     def to_session(self):

@@ -178,4 +178,4 @@
 
 ## Evidence inspected
 
-`src/action.py`, `src/melee_combat.py`, `src/melee_defense.py`, `src/tactical_duel.py`, `src/ai_duel.py`, `src/strategy.py`, `src/exertion.py`, `src/weapon.py`, `src/armor.py`, `src/encounter.py`, `src/being.py`, and `docs/ai-encounter-experiment.md` from the reconstructed post-feedback Universe checkpoint. The user’s local checkout may have further changes; reconcile before accepting checkboxes as current.
+`src/action.py`, `src/melee_combat.py`, `src/melee_defense.py`, `src/tactical_duel.py`, `src/ai_duel.py`, `src/strategy.py`, `src/exertion.py`, `src/weapon.py`, `src/armor.py`, `src/encounter.py`, `src/being.py`, and `docs/history/encounters/encounter-timeline-choice-damage-characterization.md` from the reconstructed post-feedback Universe checkpoint. The user’s local checkout may have further changes; reconcile before accepting checkboxes as current.

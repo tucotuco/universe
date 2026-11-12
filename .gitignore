@@ -129,3 +129,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Local-only restoration assets. Keep these outside the public repository.
+/legacy/
+/examples/saved/universe-inhabited-scene.json
+/workspace/ai-encounter.json
+/workspace/combat-session.json
+/workspace/universe-planetary-world.json

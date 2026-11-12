@@ -2,7 +2,7 @@
 
 > **Reconciled:** 2026-11-11 through U-REPO-008C. This register reflects the sanitized public `main`, the fresh clean continuation clone, and the U-ARENA-018 report. It is a current-state document, **not a development log**. Repository reports record evidence but do not independently re-execute it.
 >
-> **Single point of departure:** **All significant completed capabilities, active work, open tasks, blocked dependencies, deferred tasks, and future ideas live here.** Reports, assignments, Git history, design notes, and archived experiments remain evidence/detail, **not competing task or idea registers**. New ideas are appended here even when not authorized for implementation. See [development process](docs/DEVELOPMENT-PROCESS.md).
+> **Single point of departure:** **All significant completed capabilities, active work, open tasks, blocked dependencies, deferred tasks, and future ideas live here.** Reports, assignments, Git history, design notes, and archived experiments remain evidence/detail, **not competing task or idea registers**. New ideas are appended here even when not authorized for implementation. See [development process](docs/process/DEVELOPMENT-PROCESS.md).
 
 ## Reading this register
 
@@ -256,13 +256,13 @@
 - **Observer view is evidence-bounded.** Never leak hidden identities/private Actions/Generator data to an Agent or player. Interim successful Spot/Listen gives accurate information about *perceptible* properties, not everything stored.
 - **Engineering evidence matters.** Separate native test, HTTP/UI harness, live browser walkthrough and full-suite results; protect working native paths, source/IDs and strict checkpoints. Preserve early implementations by reusing/adapting them when compatible, without calling legacy sequential resolvers from transactional encounters.
 - **File-based inspectability, small coherent commits, focused validation.** Preserve unrelated dirty files and independent repositories; never push or rewrite history without explicit authorization. Source of truth for implementation is actual code + tests; this document is the current navigational state and work priority.
-- **Each Codex assignment explicitly states the `TASKS.md` rows to inspect/update; each report enumerates exact changes and verification.** Update the root register in the same meaningful capability commit rather than asking the user to merge status manually. [Process contract](docs/DEVELOPMENT-PROCESS.md).
+- **Each Codex assignment explicitly states the `TASKS.md` rows to inspect/update; each report enumerates exact changes and verification.** Update the root register in the same meaningful capability commit rather than asking the user to merge status manually. [Process contract](docs/process/DEVELOPMENT-PROCESS.md).
 
 ## References and document roles
 
 - **Only live consolidated state/idea register:** this `TASKS.md`.
 - **Normative adopted Encounter rules/issues:** `docs/encounters/README.md` and linked rulebook/issue files (verify current revision and precedence).
-- **Workflow and continuity contract:** `docs/DEVELOPMENT-PROCESS.md`.
+- **Workflow and continuity contract:** [`docs/process/DEVELOPMENT-PROCESS.md`](docs/process/DEVELOPMENT-PROCESS.md).
 - **Implementation details and evidence:** `docs/assignments/<ID>.md`, `docs/reports/<ID>-report.md`, Git commits/source/tests; `docs/tasks/` and `docs/design/` explain topics but **do not maintain competing canonical status lists**.
 - **Historical material:** `docs/design/deferred-ideas.md`, earlier consolidated backlogs and dated handoffs are source material **incorporated into this file**, not a second current ideas register. Do not delete or rewrite them merely to avoid duplication; mark them archival/reference only during verified repository adoption.
 - **Explicit limit:** This reconciliation incorporates accessible earlier idea records and reports, but cannot certify completeness of any deleted/inaccessible conversation or unreviewed local file. `U-DOC-002` keeps that gap visible and actionable.

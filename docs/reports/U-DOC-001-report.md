@@ -2,7 +2,7 @@
 
 ## Result
 
-Installed the reconciled root [`TASKS.md`](../../TASKS.md) and [`docs/DEVELOPMENT-PROCESS.md`](../DEVELOPMENT-PROCESS.md). The register now has 181 unique list entries covering bounded completed work, open/partial/deferred items, candidate next work, all 39 adopted Combat Action inventory entries, and retained ideas. It preserves every stable ID found in the previously committed register.
+Installed the reconciled root [`TASKS.md`](../../TASKS.md) and historical [`docs/DEVELOPMENT-PROCESS.md`](../process/DEVELOPMENT-PROCESS.md). The register now has 181 unique list entries covering bounded completed work, open/partial/deferred items, candidate next work, all 39 adopted Combat Action inventory entries, and retained ideas. It preserves every stable ID found in the previously committed register.
 
 There is **no active implementation assignment** after this documentation task. U-ARENA-018 is recorded once as PARTIAL / OPEN and a NEXT candidate: its report verifies native Takedown, Reverse, Pin and Trip plus an in-app-browser Touch→Grab→Grapple→Takedown flow with pending-Grapple Save/Load, but it explicitly says the assignment is incomplete. The separate Chrome run reached Touch and Grab only. The remaining close-contact requirements stay visible; no feature work was performed here.
 

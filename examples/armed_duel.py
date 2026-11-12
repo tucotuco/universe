@@ -2,7 +2,7 @@
 
 From the project root: python examples/armed_duel.py --seed 17
 
-Not yet a full tactical combat engine: see docs/armed-melee-increment.md.
+Not yet a full tactical combat engine: see docs/design/armed-melee-increment.md.
 """
 
 import argparse

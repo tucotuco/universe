@@ -6,7 +6,7 @@ Date: October 27, 2026. Status: characterization and implementation proposal onl
 
 The current native engine passes its existing full suite, but does not implement the adopted one-second transaction or exclusive-use choice lifecycle. Added 42 passing, explicitly labeled **legacy-current-behavior** tests. The full suite with those tests passes: **822 passed, 0 failed, 0 errors, 0 skipped**. No alternative combat simulator, production refactor, target-behavior implementation, or failing future test was introduced.
 
-Authority, in order: [revised assignment](universe4-codex-task-03-updated-2026-10-27.md), [Class A addendum v2](universe4-class-a-addendum-t5-f2-h2-v2-2026-10-27.md), then the nonconflicting parts of the [decision record](universe4-class-a-decisions-2026-10-27.md). All three are present. The earlier architectural reports were used as leads and checked against current source, not assumed accurate.
+Authority, in order: the [archived Assignment 03 evidence](../historical-evidence-archive-index.md#universe-4-assignment-03-evidence), the preserved [Class A addendum v2](universe4-class-a-addendum-t5-f2-h2-v2-2026-10-27.md), then the nonconflicting parts of the preserved [decision record](universe4-class-a-decisions-2026-10-27.md). The earlier architectural reports were used as leads and checked against current source, not assumed accurate.
 
 The decision record's deferred T5 language, initial-time questions, unspecified F2 refusal timing/passive protection, and pending low-HP H2 reducer are **superseded**. They are not remaining approval questions. Adopted rules now include start at zero, duration ≥1, completion bucket `ceil(nominal_end)`, exactly-once chronological integer boundaries, scheduling-time active-use refusal, positive whole-choice acceptance/editing/undo, and the exact no-healing fatal reducer.
 
@@ -14,15 +14,15 @@ The decision record's deferred T5 language, initial-time questions, unspecified 
 
 Repository: repository root. Branch: `main`. HEAD: `8a00e884a62e37160a8eeb69f0e6e67e94ab16b4`. Python: 3.14.3.
 
-The inspected revision is **HEAD plus the existing dirty/untracked working tree**, not HEAD alone. Existing tracked modifications: `examples/live_combat.py`, `src/being.py`, `src/encounter.py`, `src/library.py`, `src/universe.py`. There were also untracked native fatigue/work/profile modules and tests, planetary work, examples, saved workspaces, fatigue workbench, patch deliveries, and documents. The complete initial list is retained in [initial-status.txt](historical-evidence-archive-index.md#universe-4-assignment-03-evidence); none was removed, reset, committed, or overwritten.
+The inspected revision is **HEAD plus the existing dirty/untracked working tree**, not HEAD alone. Existing tracked modifications: `examples/live_combat.py`, `src/being.py`, `src/encounter.py`, `src/library.py`, `src/universe.py`. There were also untracked native fatigue/work/profile modules and tests, planetary work, examples, saved workspaces, fatigue workbench, patch deliveries, and documents. The complete initial list is retained in [initial-status.txt](../historical-evidence-archive-index.md#universe-4-assignment-03-evidence); none was removed, reset, committed, or overwritten.
 
-Preservation verification hashes 128 existing files under `src/` and `examples/`, excluding bytecode, before additions and after verification. **All remained byte-identical**. The [preservation manifest](historical-evidence-archive-index.md#universe-4-assignment-03-evidence) also records delivery-time test hashes and confirms no tracked test changes; no pre-existing test file was edited. Only the new characterization test, this report, and its evidence were intentionally added.
+Preservation verification hashes 128 existing files under `src/` and `examples/`, excluding bytecode, before additions and after verification. **All remained byte-identical**. The [preservation manifest](../historical-evidence-archive-index.md#universe-4-assignment-03-evidence) also records delivery-time test hashes and confirms no tracked test changes; no pre-existing test file was edited. Only the new characterization test, this report, and its evidence were intentionally added.
 
 ### Native fatigue patch state
 
 - Patch 1 behavior is present: immutable persistent Q/B plus physiology reference/migration, Being initialization/reset/serialization, common fatigue views/history, and existing tests. Patch 1's added `physical_fatigue.py`, `standard_fatigue_check.py`, `universe_physical_fatigue_r4.py`, and `test_native_physical_fatigue.py` match its delivered full-file additions exactly.
 - `git apply --reverse --check universe4-native-fatigue-patch2.patch` exits **0**: Patch 2's delivered hunks are present in this tree. This was a read-only applicability check, not an application or reversal.
-- Patch 1 reverse-check exits **1** on bridge/Universe/Encounter hunks extended by later work; that is not evidence Patch 1 is absent. Its bridge file is superseded by Patch 2's profile/work proposal extension. See [patch-state.txt](historical-evidence-archive-index.md#universe-4-assignment-03-evidence).
+- Patch 1 reverse-check exits **1** on bridge/Universe/Encounter hunks extended by later work; that is not evidence Patch 1 is absent. Its bridge file is superseded by Patch 2's profile/work proposal extension. See [patch-state.txt](../historical-evidence-archive-index.md#universe-4-assignment-03-evidence).
 - Verified native `PhysicalFatigueState`, `FrozenFatigueFrame`, `WorkTimeline`, versioned `PhysiologyRegistry`, and pure `propose_work()`/`propose_physical_fatigue()` exist. There is **no general native Being/Object transaction**, no automatic work provider, and no native Q/B settlement in the dispatcher. Melee accuracy still uses legacy fatigue; TacticalDuel still applies legacy Exertion checks after combat. Nothing here activates new fatigue penalties or costs.
 
 ### Exact verification commands and results
@@ -43,21 +43,21 @@ PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s ../tests -p 'test_*.py'
 | Final focused characterization run | **42 passed; 0 failures/errors/skips** | Controlled native probes and damage handlers; no network required. |
 | Final full discovery with local socket access | **822 passed; 0 failures/errors/skips**, 17.282 s | Includes existing HTTP tests and all new characterization tests. |
 
-The second and fourth commands used the tool's approved execution outside the restrictive socket sandbox. No tests were disabled or skipped to obtain the full result. Existing tests print several diagnostic messages and a temporary replay path; these are not test failures. Raw output is retained in the [evidence directory](historical-evidence-archive-index.md#universe-4-assignment-03-evidence).
+The second and fourth commands used the tool's approved execution outside the restrictive socket sandbox. No tests were disabled or skipped to obtain the full result. Existing tests print several diagnostic messages and a temporary replay path; these are not test failures. Raw output is retained in the [evidence directory](../historical-evidence-archive-index.md#universe-4-assignment-03-evidence).
 
 ## 2. Native interfaces and hooks inspected
 
 | Built-in | Deadline construction and scheduling effects | Evaluation / consequences |
 |---|---|---|
-| [`Action`](../src/action.py) | Constructor overwrites supplied `end_time` with calculated weapon timing or fallback `start+1`; no hook | Rolls hit/save, then directly mutates shield/armor/body HP or invokes the current no-op drop handler. |
-| [`MeleeStrike`](../src/melee_combat.py) | Weapon timing; hook checks actor/target viability, awareness, held weapon, motion and damage support | Eligibility snapshot is limited to HP readiness, possession, reach/path; live legacy fatigue and skills remain inputs. Produces mutable combat result and practice proposal. |
-| [`MeleeDefense`](../src/melee_defense.py) | Constructor sets `end_time=encounter.time` as a placeholder. Hook sets readiness and **final end to the designated strike's end**, and records schedule-time threat | Priority `-1`; contests live skills/strategies, writes strike `defended_by` and its own result, returns practice. |
-| [`RunAction`](../src/activities.py) | Positive duration, not minimum one second; hook stores start position and binds start to scheduling time | Measures displacement; no movement mutation inside resolver. Returns configured practice. |
-| [`SpotAction`](../src/activities.py) | Positive duration; hook binds Encounter, checks start and skill definition | Reads live rank/positions/optics; stores check metadata, returns practice and directed awareness. |
-| [`ObserveGroupAction`](../src/group_observation.py) | Positive duration; hook binds actor/group/skill context | Sampling can realize group aggregate composition/cache; interpretation reads live observer rank. Completion hook learns evidence into a supplied BeliefLedger. |
-| [`AskAboutPastAction`](../src/history_conversation.py) | Positive duration; hook checks personal history/range-independent eligibility/awareness/start | Resolves speaker history and supporting facts immediately; completion delivers account and optionally appends a caller-owned list. |
+| [`Action`](../../../src/action.py) | Constructor overwrites supplied `end_time` with calculated weapon timing or fallback `start+1`; no hook | Rolls hit/save, then directly mutates shield/armor/body HP or invokes the current no-op drop handler. |
+| [`MeleeStrike`](../../../src/melee_combat.py) | Weapon timing; hook checks actor/target viability, awareness, held weapon, motion and damage support | Eligibility snapshot is limited to HP readiness, possession, reach/path; live legacy fatigue and skills remain inputs. Produces mutable combat result and practice proposal. |
+| [`MeleeDefense`](../../../src/melee_defense.py) | Constructor sets `end_time=encounter.time` as a placeholder. Hook sets readiness and **final end to the designated strike's end**, and records schedule-time threat | Priority `-1`; contests live skills/strategies, writes strike `defended_by` and its own result, returns practice. |
+| [`RunAction`](../../../src/activities.py) | Positive duration, not minimum one second; hook stores start position and binds start to scheduling time | Measures displacement; no movement mutation inside resolver. Returns configured practice. |
+| [`SpotAction`](../../../src/activities.py) | Positive duration; hook binds Encounter, checks start and skill definition | Reads live rank/positions/optics; stores check metadata, returns practice and directed awareness. |
+| [`ObserveGroupAction`](../../../src/group_observation.py) | Positive duration; hook binds actor/group/skill context | Sampling can realize group aggregate composition/cache; interpretation reads live observer rank. Completion hook learns evidence into a supplied BeliefLedger. |
+| [`AskAboutPastAction`](../../../src/history_conversation.py) | Positive duration; hook checks personal history/range-independent eligibility/awareness/start | Resolves speaker history and supporting facts immediately; completion delivers account and optionally appends a caller-owned list. |
 
-[`Encounter.schedule_action()`](../src/encounter.py) accepts any `Event` with callable `resolve`, participating actor, and optional participating target. Non-Action Events can be scheduled and resolved but `cancel_action()` refuses them; non-Action structured results cannot award practice or observations. General instrument existence, resource declarations, hook purity, or final post-hook deadlines are not validated. It retains the same Event/Action object in Universe history.
+[`Encounter.schedule_action()`](../../../src/encounter.py) accepts any `Event` with callable `resolve`, participating actor, and optional participating target. Non-Action Events can be scheduled and resolved but `cancel_action()` refuses them; non-Action structured results cannot award practice or observations. General instrument existence, resource declarations, hook purity, or final post-hook deadlines are not validated. It retains the same Event/Action object in Universe history.
 
 `on_schedule()` runs **after initial checks but before parent assignment/event registration/pending append**. There is no staged preparation protocol. A failing hook can mutate Beings and register nested events; those effects survive. TacticalDuel directly calls strike/defense `on_schedule()` before interrupting an existing action and then calls `schedule_action()`, which invokes the hook again. Migrating hooks must eliminate double preparation without weakening validation-before-interruption.
 
@@ -65,7 +65,7 @@ Legacy combat AI in `choose_fight_actions()` directly appends/registers base Act
 
 ## 3. Time and scheduling: current versus adopted
 
-Evidence is the current [`Encounter`](../src/encounter.py), constructors above, the new `TestLegacyTimeline` and `TestLegacyChoiceAndHooks`, and existing `test_encounter_cycle.py`, `test_attack_specific_defense.py`, and replay tests.
+Evidence is the current [`Encounter`](../../../src/encounter.py), constructors above, the new `TestLegacyTimeline` and `TestLegacyChoiceAndHooks`, and existing `test_encounter_cycle.py`, `test_attack_specific_defense.py`, and replay tests.
 
 | Case | Current behavior | Adopted status and narrow candidate check |
 |---|---|---|
@@ -172,9 +172,9 @@ GUI/replay/save/load must distinguish draft, accepted, published, and executed s
 
 ### Current calculation chain
 
-[`ObjectInstance.damage()`](../src/object.py) is inherited by Being, ArmorInstance, and WeaponInstance. If `damage > current.hit_points`, it assigns zero; otherwise it subtracts. Thus `12−8−7` currently becomes 0, armor `6−4−4` becomes 0, and damage 6 applied at HP −12 **raises HP to 0**. These are legacy defects relative to H1/H3/H4, not normative expectations.
+[`ObjectInstance.damage()`](../../../src/object.py) is inherited by Being, ArmorInstance, and WeaponInstance. If `damage > current.hit_points`, it assigns zero; otherwise it subtracts. Thus `12−8−7` currently becomes 0, armor `6−4−4` becomes 0, and damage 6 applied at HP −12 **raises HP to 0**. These are legacy defects relative to H1/H3/H4, not normative expectations.
 
-[`Action`](../src/action.py) dispatches exactly one hit handler:
+[`Action`](../../../src/action.py) dispatches exactly one hit handler:
 
 - Normal: weapon damage die + action extra damage → shield interception → armor → target HP.
 - Shield: choose a held shield, roll interception, apply **full incoming damage to shield HP**, and pass `max(0, incoming−shield_size)` onward. No new broken-shield rule.
@@ -328,7 +328,7 @@ Not pending: T1–T5 integer grouping and chronological progression; Action star
 
 ## 10. Exact characterization-test catalog
 
-All tests below live in [`test_encounter_legacy_characterization.py`](../tests/test_encounter_legacy_characterization.py). Names deliberately say `legacy`; assertions describe the current migration baseline, not rules to preserve after authorized target implementation. ProbeAction is instrumentation around the native scheduler; all damage tests invoke native handlers. Pending target cases above are documentation only.
+All tests below live in [`test_encounter_legacy_characterization.py`](../../../tests/test_encounter_legacy_characterization.py). Names deliberately say `legacy`; assertions describe the current migration baseline, not rules to preserve after authorized target implementation. ProbeAction is instrumentation around the native scheduler; all damage tests invoke native handlers. Pending target cases above are documentation only.
 
 ### `TestLegacyTimeline`
 

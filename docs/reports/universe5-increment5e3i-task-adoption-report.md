@@ -17,7 +17,7 @@ The six seed documents in `docs/universe5-5e3i.zip` were extracted to a separate
 
 ## Issue-register reconciliation
 
-The assignment/seed said 20 outstanding revision-60 entries and included ES-053. The actual adopted issue register has no ES-053, and the current generated outstanding queue contains 19 entries. I preserved every listed authoritative entry, exact issue ID and status in [`docs/tasks/encounters-r60-open-issues.md`](tasks/encounters-r60-open-issues.md), without inventing an ES-053 or changing the source register/generated queue.
+The assignment/seed said 20 outstanding revision-60 entries and included ES-053. The actual adopted issue register has no ES-053, and the current generated outstanding queue contains 19 entries. I preserved every listed authoritative entry, exact issue ID and status in [`docs/tasks/encounters-r60-open-issues.md`](../tasks/encounters-r60-open-issues.md), without inventing an ES-053 or changing the source register/generated queue.
 
 The 19-entry bridge and queue match exactly: ES-008, ES-020–ES-030, ES-033, ES-041, ES-045–ES-049, with ES-045/046 deferred and the other entries open or partially resolved as labeled by the register. The bridge links each item directly to its source-register heading and records the seed discrepancy.
 

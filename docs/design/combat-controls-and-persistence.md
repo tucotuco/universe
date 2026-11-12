@@ -8,9 +8,9 @@ introducing a separate combat game state. `TacticalDuel` orchestrates genuine
 
 ```sh
 python examples/live_combat.py --open
-python examples/live_combat.py --save /tmp/ford-encounter.json --open
-python examples/live_combat.py --load /tmp/ford-encounter.json --open
-python examples/live_combat.py --replay /tmp/ford-encounter.json --open
+python examples/live_combat.py --save <save-file> --open
+python examples/live_combat.py --load <save-file> --open
+python examples/live_combat.py --replay <save-file> --open
 ```
 
 Use the **Save encounter** button while playing. The default save destination
