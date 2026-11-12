@@ -413,6 +413,120 @@ class TestNativeObjectWrest(unittest.TestCase):
             self.assertEqual(item.parent_container_id,holder.id)
             self.assertEqual(holder.current.body_parts['right hand'],object_id)
 
+    def test_earlier_disarm_invalidates_accepted_future_wrest_with_three_beings(self):
+        """Explicit test Geometry resolves paths without changing Arena rules."""
+        from action import Action
+        from action_evaluation import _ProvisionalRandom, RandomDraw
+        from encounter import Encounter
+        from library import Library
+        from melee_combat import effective_melee_reach_meters
+        from arena_hex_map import ArenaHexLayout, encounter_map_descriptor
+        from spatial.geometry import Sphere
+        from spatial.state import CartesianPosition
+        from universe import Universe
+        from strategy import Strategy
+        from unittest.mock import patch
+
+        world=Universe('Three-Being custody race',
+            library=Library(config_dir=str(ROOT/'src/config')))
+        actor=world.get_object_by_id(world.make_being('Human','Wrestler'))
+        holder=world.get_object_by_id(world.make_being('Human','Holder'))
+        disarmer=world.get_object_by_id(world.make_being('Human','Disarmer'))
+        layout=ArenaHexLayout.rectangle(5,5)
+        origin=layout.center_position(layout.address_for_index(12))
+        actor.set_position(origin)
+        holder.set_position(CartesianPosition(origin.x+.3,origin.y,origin.z))
+        disarmer.set_position(CartesianPosition(origin.x+.3,origin.y+.3,origin.z))
+        for being in (actor,holder,disarmer):
+            being.set_geometry(Sphere(.1))
+            being.set_hit_points(100)
+            being.size_category='medium'
+            being.set_posture('standing')
+        actor.set_hex_facing(0)
+        holder.set_hex_facing(6)
+        disarmer.set_hex_facing(9)
+        world_weapon=world.make_weapon_for_being(holder.id,'Dagger','Held dagger')
+        world.arm_being(holder.id,world_weapon,'right hand')
+        disarm_weapon=world.make_weapon_for_being(disarmer.id,'Dagger','Disarm dagger')
+        world.arm_being(disarmer.id,disarm_weapon,'right hand')
+        world.get_object_by_id(world_weapon).parent_container_id=holder.id
+        world.get_object_by_id(disarm_weapon).parent_container_id=disarmer.id
+        disarmer.current.skills.weapon_skills['Dagger']=10
+        disarmer.strategy.attack=10
+        actor.strategy.attack=100
+        holder.strategy.defense=0
+
+        encounter=Encounter(world,20,0,initiated=True)
+        # The adopted Arena path classifier excludes carried Objects because
+        # they have no independent world position; keep that rule in the
+        # fixture rather than weakening the general non-Arena path contract.
+        encounter.map=encounter_map_descriptor(layout)
+        for being in (actor,holder,disarmer):
+            encounter.add_being(being.id)
+        for observer in (actor,holder,disarmer):
+            for target in (actor,holder,disarmer):
+                if observer is not target:
+                    encounter.mark_aware(observer.id,target.id)
+        encounter.add_object(world_weapon)
+        encounter.add_object(disarm_weapon)
+        encounter.mark_aware(actor.id,world_weapon)
+        self.assertTrue(encounter.is_aware(actor.id,holder.id))
+        world.add_event(encounter)
+        encounter.enable_transactional_progression(quiescent=True)
+        from weapon import WeaponInstance
+        native_world_weapon=world.get_object_by_id(world_weapon)
+        self.assertIs(type(native_world_weapon),WeaponInstance)
+        self.assertIn(world_weapon,holder.weapons)
+        self.assertEqual(native_world_weapon.parent_container_id,holder.id)
+        self.assertIsNone(native_world_weapon.spatial_state)
+
+        grab=Action(world,0,1,'grab object',actor.id,world_weapon,None)
+        grab.holder_id=holder.id;grab.holder_hand='right hand';grab.grab_hand='left hand'
+        encounter.schedule_action(grab)
+        def step_with(rolls):
+            values=iter(rolls)
+            def scripted(ctx,dice):
+                value=next(values)
+                ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                    int(dice[2:].split('+')[0]),value))
+                return value
+            with patch.object(_ProvisionalRandom,'roll',scripted):
+                encounter.step(1)
+        step_with([10])
+        self.assertEqual(grab.resolution.outcome,'success')
+        grip=active_object_grip_state(encounter)[0]
+        self.assertIsNotNone(actor.get_position())
+        self.assertIsNotNone(holder.get_position())
+        self.assertIsNotNone(disarmer.get_position())
+        self.assertIsNotNone(layout.cell_at_position(disarmer.get_position()))
+
+        disarm=Action(world,1,2,'disarm',disarmer.id,holder.id,disarm_weapon,
+                      strategy=Strategy(timing=6))
+        disarm.disarm_weapon_id=world_weapon;disarm.disarm_motion='thrust'
+        disarm.reach=effective_melee_reach_meters(disarmer.current,
+            world.get_object_by_id(disarm_weapon).current)
+        wrest=Action(world,2,3,'wrest',actor.id,world_weapon,None)
+        wrest.holder_id=holder.id;wrest.holder_hand='right hand'
+        wrest.grab_hand='left hand';wrest.object_grip_id=grip[1]
+        encounter.schedule_choice((disarm,wrest))
+
+        # Disarm commits at second 2 while Wrest is accepted to start there and
+        # resolve at 3. All three Beings have explicit test Geometry, so path
+        # validation tests the custody ordering instead of returning unknown.
+        step_with([20,1])
+        self.assertEqual(disarm.resolution.outcome,'disarmed')
+        self.assertIn(wrest.id,encounter.pending_action_list)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=AssertionError(
+                'stale Wrest must be rejected before drawing RNG')):
+            encounter.step(1)
+        self.assertEqual(wrest.resolution.outcome,'not_held')
+        self.assertEqual(active_object_grip_state(encounter),())
+        dropped=world.get_object_by_id(world_weapon)
+        self.assertIsNone(dropped.parent_container_id)
+        self.assertEqual(dropped.get_position(),holder.get_position())
+        self.assertNotIn(world_weapon,holder.current.body_parts.values())
+        self.assertNotIn(world_weapon,actor.current.body_parts.values())
+
     def test_cancelled_pending_wrest_keeps_receipt_custody_and_rng(self):
         from action import Action
         from physical_contact import active_object_grip_state
