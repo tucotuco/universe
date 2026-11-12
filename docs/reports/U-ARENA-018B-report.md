@@ -24,7 +24,7 @@ The preceding [U-ARENA-018 report](U-ARENA-018-report.md) records a Chrome Touch
 - Added committed-receipt classification for Trip contact from Touch, Being Grab, and Swing/Thrust Strike. Trip receipts retain `contact_kind`; the +2 modifier is based on that contact source rather than an unrelated active Grip.
 - Added atomic lifecycle interruption for a later-second target Swing/Thrust after successful Trip and for an initial Grapple whose last prerequisite Grip is released in an earlier second. Other Grips preserve the initial attempt; established Grapple control is not canceled. Same-boundary Actions retain common-snapshot results.
 - Corrected settlement's cancelled-melee outcome validation so an interrupted native melee Action can be published as `interrupted`.
-- Added native regressions for selected Grip release without RNG, Grab-sourced Trip, same/later-second Trip attack scheduling, and earlier/same-second initial-Grapple prerequisite release. Extended the generated Arena HTTP/session test with Release and fresh-process restoration.
+- Added native regressions for selected Grip release without RNG, Touch/Grab/Strike-sourced Trip, tied Trip, same/later-second Trip attack scheduling, and earlier/same-second initial-Grapple prerequisite release. Extended the generated Arena HTTP/session test with Release and fresh-process restoration.
 
 ### Held-Object Grab → Wrest gap
 
@@ -43,7 +43,7 @@ Existing Takedown/Reverse/Pin posture/control transitions remain bounded to repr
 Executed with the preserved checkout `.venv`, no bytecode writes, no user-site packages, and `PYTHONPATH=tests:src:examples`:
 
 - Five focused native lifecycle tests (Release, Trip later/same-second, initial Grapple earlier/same-second): **5 passed, 6.9 s**.
-- Two focused Trip receipt tests (Touch and Grab contact): **2 passed, 4.1 s**. A separate tied-Trip test also passed, preserving standing posture and recording the Touch source.
+- Focused Trip source/contest cases: Touch and Grab contact tests **2 passed, 4.1 s**; tied Trip **1 passed, 1.017 s**; committed Strike receipt source **1 passed, 1.847 s**.
 - Generated Arena `test_grab_selector_http_receipt_and_fresh_process_hold_continuation` plus six focused native lifecycle cases: **7 passed, 34.1 s** before adding the HTTP Release/fresh-process branch.
 - After adding the Release HTTP-route test, `test_grab_selector_http_receipt_and_fresh_process_hold_continuation`: **1 passed, 25.839 s**. Its first attempt found a test-only expected-boundary error (expected 5, restored actual 4); correcting the assertion yielded the passing final rerun. The final tie test passed separately.
 - `py_compile` for modified Python source/tests and `git diff --check`: **passed**.
@@ -72,7 +72,7 @@ The staged paths will be limited to the reviewed source, tests, Action catalog, 
 
 ### Final execution record
 
-- The final HTTP Release/fresh-process test passed (1 test, 25.839 s); the Trip tie test passed (1 test, 1.017 s); modified Python files compiled; and `git diff --check` passed.
+- The final HTTP Release/fresh-process test passed (1 test, 25.839 s); the Trip tie and Strike-source tests passed (1.017 s and 1.847 s); modified Python files compiled; and `git diff --check` passed.
 - Staged paths were the 15 files listed above. The first cached whitespace check found four Markdown hard-break trailing spaces in the newly installed assignment; those spaces were removed, then `git diff --cached --check` passed.
 - `.venv/bin/python -B tools/check_publication_safety.py --staged`: **15 files, 0 findings, PASS**. Untracked `U-ARENA-018B-new-codex.md` and pre-existing U-REPO assignment/report inputs remain unstaged.
 - `23c462d` — `Complete bounded grip and trip lifecycle` (15 reviewed paths; includes `TASKS.md`). A follow-up report-only commit records this exact closeout. No remote publication was attempted.

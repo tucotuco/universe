@@ -376,6 +376,30 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(dict(receipt.facts.metadata)['contact_kind'],'touch')
         self.assertEqual(self.b.get_posture(),'standing')
 
+    def test_native_trip_accepts_a_committed_successful_swing_or_thrust_strike(self):
+        from physical_contact import trip_contact_kind
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        strike=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',reach=2)
+        self.enc.schedule_action(strike)
+        def hit(ctx,dice):
+            value=15 if dice.startswith('1d20') else 1
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',hit): self.enc.step(math.ceil(strike.end_time))
+        self.assertIn(strike.resolution.outcome,('normal','critical','fatal'))
+        self.assertEqual(trip_contact_kind(self.enc,strike.id,self.a.id,self.b.id),'strike')
+        start=self.enc.time
+        trip=Action(self.world,start,start+2,'trip',self.a.id,self.b.id,None)
+        trip.trip_source_action_id=strike.id; trip.trip_defender_ability='STR'; trip.end_time=start+2
+        self.enc.schedule_action(trip)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[6,6,6,1,1,1]): self.enc.step(2)
+        receipt=self.enc.inspect_committed(int(start+2)).action(trip.id)
+        self.assertEqual(receipt.facts.outcome,'success')
+        self.assertEqual(dict(receipt.facts.metadata)['contact_kind'],'strike')
+
     def _run_trip_interruption_scenario(self, same_second):
         from action_evaluation import RandomDraw, _ProvisionalRandom
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
