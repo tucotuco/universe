@@ -57,4 +57,4 @@ The checkpoint cohort failure details remain in the earlier 018B/018C reports. T
 
 No ideas-inbox entry was present for this scope. The generated outstanding-only Encounter to-do was refreshed using the documented tool; the working-draft TOC tool reports its older revision-60 target already current and did not modify the adopted revision-61 source. No `.venv`, ignored `legacy/`, local saves, independent `npc-generator`, backups, or unrelated user files were changed. The supplied assignments and unrelated report remain untracked. No push, reset, clean, or history rewrite was performed.
 
-**Local functional commit hash:** fill after the reviewed commit. **Publication:** not authorized; no push.
+**Local functional commit:** `719c8ca` (`Add automatic Hold maintenance and Arena walkthrough`). **Publication:** not authorized; no push.
