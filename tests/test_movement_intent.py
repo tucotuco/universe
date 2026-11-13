@@ -537,6 +537,47 @@ class TestNativeMovementIntent(unittest.TestCase):
             validate_grip_relative_movement((prepared,), snapshot)
         self.assertEqual(refused.exception.code, "pinned")
 
+    def validate_physical_grip_movement(self, holder_destination=None,
+                                        held_destination=None):
+        from types import SimpleNamespace
+        from movement_intent import validate_grip_relative_movement
+        holder_start = CartesianPosition(0, 0, 0)
+        held_start = CartesianPosition(1, 0, 0)
+        positions = {
+            self.player.id: holder_start,
+            self.opponent.id: held_start,
+        }
+        snapshot = SimpleNamespace(
+            grapple_controls=(),
+            physical_grips=(("grip", self.player.id, self.opponent.id),),
+            entity=lambda actor_id: SimpleNamespace(position=positions[actor_id]))
+        prepared = []
+        for actor, start, destination in (
+                (self.player, holder_start, holder_destination),
+                (self.opponent, held_start, held_destination)):
+            if destination is None:
+                continue
+            intent = SimpleNamespace(actor_id=actor.id, destination=destination)
+            prepared.append(SimpleNamespace(
+                intent=intent, start_position=start,
+                velocity_meters_per_second=(0, 0, 0),
+                arrival_time_seconds=1))
+        validate_grip_relative_movement(tuple(prepared), snapshot)
+
+    def test_held_beings_can_move_together_without_increasing_separation(self):
+        self.validate_physical_grip_movement(
+            CartesianPosition(2, 0, 0), CartesianPosition(3, 0, 0))
+
+    def test_held_being_can_move_toward_stationary_holder(self):
+        self.validate_physical_grip_movement(
+            held_destination=CartesianPosition(0.5, 0, 0))
+
+    def test_held_being_cannot_move_away_from_stationary_holder(self):
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.validate_physical_grip_movement(
+                held_destination=CartesianPosition(2, 0, 0))
+        self.assertEqual(refused.exception.code, "grip_limit")
+
     def test_rate_categories_and_run_skill_increment_follow_adopted_units(self):
         conditions = self.conditions()
         self.assertEqual(self.player.get_fatigue_level(), 0)
