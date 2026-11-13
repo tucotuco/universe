@@ -365,7 +365,11 @@ def restore(envelope):
     # Accepted declarations contain process-local class/object identity data.
     for accepted in book._choices.values():
         _need(type(accepted) is _Accepted, 'unknown accepted Choice record')
-        signatures = tuple((member.key, declaration(member.action)) for member in accepted.members)
+        signatures = tuple(
+            (member.key, member.priority_penalty, declaration(member.action))
+            if member.priority_penalty is not None else
+            (member.key, declaration(member.action))
+            for member in accepted.members)
         object.__setattr__(accepted, 'signatures', signatures)
     for action_id, row in tuple(book._registered.items()):
         choice_id, packet, _signature = row

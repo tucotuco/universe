@@ -1608,6 +1608,76 @@ class GeneratedArenaSession:
                 f"action=touch opposed=true duration={prepared.end_time-prepared.start_time:g}s")
             return self._view_unlocked()
 
+    def choose_multiple_touch(self, payload):
+        """Declare an ordered, recurring two-Touch program from visible target handles."""
+        from action_choice import ChoiceMember
+        if (type(payload) is not dict or set(payload) != {"handle", "priorities"}
+                or type(payload["handle"]) is not str or type(payload["priorities"]) is not list
+                or len(payload["priorities"]) != 2
+                or any(type(value) is not int for value in payload["priorities"])):
+            raise ArenaBrowserRequestError("Multiple Touch requires a perceived Being handle and two priority values")
+        if tuple(sorted(payload["priorities"])) not in ((0, 3), (1, 2)):
+            raise ArenaBrowserRequestError("Two overlapping Actions need adopted priorities (0, 3) or (1, 2)")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before declaring Multiple actions")
+            candidate = self._active
+            encounter = candidate.encounter
+            player = candidate.participants[0].native.being
+            if (player.get_skill_level("multi-action") or 0) <= 0:
+                raise ArenaBrowserRequestError("Overlapping Actions require the player's acquired Multi-action skill")
+            handle = payload["handle"]
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("Player-owned perception evidence is unavailable.")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            actions = []
+            for _ in range(2):
+                action, _prepared = self._touch_preflight(
+                    candidate, player, entity_id, evidence, supported=True)
+                actions.append(action)
+            members = tuple(ChoiceMember(f"touch-{index + 1}", action,
+                priority_penalty=payload["priorities"][index])
+                for index, action in enumerate(actions))
+            try:
+                view = encounter.schedule_choice(members)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "Native Multiple Touch Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = handle
+            self._trace.native_advance(None, None,
+                f"action=multiple_touch components=2 choice={view.state}")
+            return self._view_unlocked()
+
+    def cancel_multiple_action(self, payload):
+        """Stop the player's own declared Multiple-action program without exposing IDs."""
+        if payload != {}:
+            raise ArenaBrowserRequestError("Multiple-action cancellation accepts an empty request.")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before cancelling Multiple actions.")
+            candidate = self._active
+            encounter = candidate.encounter
+            player_id = candidate.participants[0].native.being.id
+            book = encounter._choice_book
+            records = [record for record in book._choices.values()
+                if record.view.state in ("accepted", "executing")
+                and any(member.action.actor_id == player_id and member.priority_penalty is not None
+                        for member in record.members)]
+            if len(records) != 1:
+                raise ArenaBrowserRequestError("There is no single active player Multiple-action program to cancel.")
+            record = records[0]
+            try:
+                if record.view.state == "accepted":
+                    book.undo(record.view.id)
+                else:
+                    book.abort_multiple_action(record.view.id)
+            except (ValueError, RuntimeError) as exc:
+                raise ArenaBrowserRequestError("Native Multiple-action cancellation was refused.") from exc
+            return self._view_unlocked()
+
     def _grappling_preflight(self, candidate, player, entity_id, evidence,
                              event_type, hand=None, position=None):
         """Prepare one supported physical-contact Action from player evidence."""
@@ -2557,6 +2627,22 @@ class GeneratedArenaSession:
                     "reason": reason, "target": target_view,
                     "duration_seconds": duration,
                 })
+                has_multiple_skill = (player.get_skill_level("multi-action") or 0) > 0
+                multiple_status = "available" if status == "available" and has_multiple_skill else "unavailable"
+                multiple_reason = (
+                    "Declares two ordered native Touch components at this perceived Being. Choose one of "
+                    "the adopted priority rows (0, 3) or (1, 2); the complete program repeats with fresh "
+                    "Action identities until cancelled." if multiple_status == "available" else
+                    "Overlapping Touches require the player's acquired Multi-action skill and the same "
+                    "currently available perceived target." if not has_multiple_skill else reason)
+                catalog_rows.append({
+                    "name": "Multiple Touch", "group": "Physical contact",
+                    "target_type": "being", "required_skill": "multi-action",
+                    "is_melee": False, "status": multiple_status,
+                    "display_name": "Two simultaneous Touches (1 s)",
+                    "reason": multiple_reason, "target": target_view,
+                    "event_type": "multiple-touch", "duration_seconds": duration,
+                })
                 continue
             if name.casefold() == "coup de grace":
                 status,reason="unavailable","Select a perceived helpless opponent; use a native held weapon."
@@ -3020,6 +3106,15 @@ class GeneratedArenaSession:
         arena_rows.append({"name": "Yield", "group": "Attack responses",
                            "status": yield_status, "reason": yield_reason,
                            "target": dodge_target})
+        book = candidate.encounter._choice_book
+        player_id = player.id
+        has_active_program = any(record.view.state in ("accepted", "executing")
+            and any(member.action.actor_id == player_id and member.priority_penalty is not None
+                    for member in record.members)
+            for record in book._choices.values())
+        if has_active_program:
+            arena_rows.append({"name": "Abort Multiple actions", "group": "Active actions",
+                "status": "available", "reason": "Cancel the player's declared program and stop future cycles."})
         return {"catalog_source": "native Action catalog", "entries": catalog_rows + arena_rows}
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,

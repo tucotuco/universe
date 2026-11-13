@@ -355,7 +355,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "equipment_mode": "unequipped", "opponent_strategy": "none"})
         self.assertEqual(status, 200)
         self.assertEqual(self.request("/api/generated/run", {})[0], 200)
-        status, activated = self.request("/api/generated/advance", {"seconds": 1})
+        status, _ = self.request("/api/generated/advance", {"seconds": 1})
         self.assertEqual(status, 200)
         target_id = self.session.active_candidate.participants[1].native.being.id
         target = next(row for row in activated["entities"]
@@ -366,8 +366,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         touch = next(row for row in selected["action_catalog"]["entries"]
                      if row["name"] == "touch being")
         self.assertEqual(touch["status"], "available")
+        multiple_touch = next(row for row in selected["action_catalog"]["entries"]
+                              if row["name"] == "Multiple Touch")
+        self.assertEqual(multiple_touch["status"], "unavailable")
+        self.assertIn("acquired Multi-action skill", multiple_touch["reason"])
         choices_before = self.session.active_candidate.encounter.choice_state
         rng_before = self.session._rng_cursor.state
+        multiple_status, multiple_refusal = self.request("/api/generated/multiple-touch", {
+            "handle": target["handle"], "priorities": [0, 3]})
+        self.assertEqual(multiple_status, 409)
+        self.assertIn("acquired Multi-action skill", multiple_refusal["error"])
+        self.assertEqual(self.session.active_candidate.encounter.choice_state, choices_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
         rejected_status, rejected = self.request("/api/generated/touch", {
             "handle": "not-a-currently-perceived-being"})
         self.assertEqual(rejected_status, 409)
@@ -433,6 +443,110 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(after_load["touch_action"], completed["touch_action"])
         self.assertEqual(after_load["time_seconds"], 2)
 
+    def test_native_multiple_touch_cycle_survives_live_and_recurring_fresh_process_saves(self):
+        """Generated Arena declares, saves, restores, repeats and aborts Multiple actions."""
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("submitMultipleTouch(handle,priorityText)", page)
+        self.assertIn("/api/generated/multiple-touch", page)
+        self.assertIn("abortMultipleAction()", page)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "5", "height_cells": "5",
+            "root_seed": "20261107", "equipment_mode": "unequipped",
+            "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        # An explicit native test-world skill input, established before the
+        # first committed boundary so the receipt remains closed and portable.
+        player.set_skill_level(candidate.universe.get_skill_dictionary(), "multi-action", 1)
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        status, activated = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        target_handle = self.session._view_handles[target.id]
+        self.assertEqual(self.request("/api/generated/inspect", {"handle": target_handle})[0], 200)
+        target_row = next(row for row in self.session.public_view()["action_catalog"]["entries"]
+                          if row["name"] == "Multiple Touch")
+        self.assertEqual(target_row["status"], "available")
+        choices_before = encounter.choice_state
+        rng_before = self.session._rng_cursor.state
+        invalid_status, invalid = self.request("/api/generated/multiple-touch", {
+            "handle": target_handle, "priorities": [0, 4]})
+        self.assertEqual(invalid_status, 409)
+        self.assertIn("adopted priorities", invalid["error"])
+        self.assertEqual(encounter.choice_state, choices_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
+        status, accepted_view = self.request("/api/generated/multiple-touch", {
+            "handle": target_handle, "priorities": [1, 2]})
+        self.assertEqual(status, 200)
+        self.assertEqual(next(row for row in accepted_view["action_catalog"]["entries"]
+                              if row["name"] == "Abort Multiple actions")["status"], "available")
+        accepted = next(record for record in encounter._choice_book._choices.values()
+                        if record.view.state == "accepted")
+        self.assertEqual(tuple(member.priority_penalty for member in accepted.members), (1, 2))
+        first_ids = tuple(accepted.view.action_ids)
+        with tempfile.TemporaryDirectory() as directory:
+            pending_path = Path(directory) / "live-multiple-touch.json"
+            repeated_path = Path(directory) / "repeated-multiple-touch.json"
+            pending_path.write_bytes(self.session.save_encounter_bytes())
+            env = dict(__import__("os").environ)
+            env["PYTHONPATH"] = __import__("os").pathsep.join(
+                (str(ROOT / "tests"), str(ROOT / "src"), str(ROOT / "examples")))
+            advance = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:1); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); s.advance_one_second(); "
+                "e=s.active_candidate.encounter; b=e._choice_book; "
+                "rows=[r for r in b._choices.values() if r.origin=='multiple-action-cycle']; "
+                "assert len(rows)==1; r=rows[0]; "
+                "assert tuple(m.priority_penalty for m in r.members)==(1,2); "
+                "assert not set(r.view.action_ids).intersection(json.loads(sys.argv[2])); "
+                "open(sys.argv[3],'wb').write(s.save_encounter_bytes()); "
+                "print(json.dumps({'time':e.time,'state':r.view.state,'ids':r.view.action_ids,"
+                "'penalties':[m.priority_penalty for m in r.members],"
+                "'rng':s._rng_cursor.state}))")
+            child = subprocess.run([sys.executable, "-B", "-c", advance,
+                str(pending_path), json.dumps(first_ids), str(repeated_path)],
+                cwd=ROOT, env=env, check=False, capture_output=True, text=True, timeout=90)
+            self.assertEqual(child.returncode, 0, child.stderr)
+            continued = json.loads(child.stdout)
+            self.assertEqual(continued["time"], 2)
+            self.assertEqual(continued["state"], "accepted")
+            self.assertEqual(continued["penalties"], [1, 2])
+
+            # Resolve one real program cycle, then abort its queued successor
+            # through the shipped actor-scoped HTTP control. No private Choice
+            # or Action identity is sent by the browser.
+            status, cycled = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200)
+            self.assertEqual(cycled["time_seconds"], 2)
+            self.assertTrue(any(record.origin == "multiple-action-cycle"
+                                for record in encounter._choice_book._choices.values()))
+            status, _ = self.request("/api/generated/multiple-actions/abort", {})
+            self.assertEqual(status, 200)
+            self.assertFalse(any(record.origin == "multiple-action-cycle"
+                                 and record.view.state in ("accepted", "executing")
+                                 for record in encounter._choice_book._choices.values()))
+
+            verify = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:2); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "e=s.active_candidate.encounter; b=e._choice_book; "
+                "r=next(r for r in b._choices.values() if r.origin=='multiple-action-cycle'); "
+                "print(json.dumps({'time':e.time,'state':r.view.state,"
+                "'penalties':[m.priority_penalty for m in r.members],"
+                "'rng':s._rng_cursor.state}))")
+            restored = subprocess.run([sys.executable, "-B", "-c", verify,
+                str(repeated_path)], cwd=ROOT, env=env, check=False,
+                capture_output=True, text=True, timeout=90)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+            self.assertEqual(json.loads(restored.stdout), {
+                "time": 2, "state": "accepted", "penalties": [1, 2],
+                "rng": json.loads(json.dumps(continued["rng"]))})
     def test_grab_selector_http_receipt_and_fresh_process_hold_continuation(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)

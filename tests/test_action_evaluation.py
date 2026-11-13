@@ -345,6 +345,77 @@ class TestActionEvaluation(unittest.TestCase):
                   if getattr(self.world.get_event_by_id(identity),'event_type',None)=='hold')
         self.assertEqual(self.enc.inspect_committed(8).action(hold.id).facts.outcome,'failed')
 
+    def test_declared_multiple_grapple_and_break_hold_do_not_interrupt_control(self):
+        """Adopted Grapple + Break hold runs as one priority-bearing Action set."""
+        from physical_contact import active_contact_state
+        self.a.set_position(CartesianPosition(0, 0, 0))
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        for being in (self.a, self.b):
+            being.current.body_parts["left hand"] = None
+            being.current.body_parts["right hand"] = None
+            being.current.skills.skills["improved grapple"] = 3
+            being.set_ability("strength", 10)
+            being.size_category = "medium"
+            being.set_posture("standing")
+        self.a.set_skill_level(self.world.get_skill_dictionary(), "multi-action", 1)
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        touch_a = Action(self.world, 0, 1, "touch", self.a.id, self.b.id, None)
+        touch_b = Action(self.world, 0, 1, "touch", self.b.id, self.a.id, None)
+        self.enc.schedule_choice((touch_a, touch_b))
+        touch_values = {touch_a.id: iter((15, 1)), touch_b.id: iter((15, 1))}
+        def touch_roll(ctx, dice):
+            value = next(touch_values[ctx.action_id])
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", touch_roll):
+            self.enc.step(1)
+
+        grab_a = Action(self.world, 1, 2, "grab", self.a.id, self.b.id, None)
+        grab_a.touch_action_id = touch_a.id; grab_a.grab_hand = "left hand"
+        grab_b = Action(self.world, 1, 2, "grab", self.b.id, self.a.id, None)
+        grab_b.touch_action_id = touch_b.id; grab_b.grab_hand = "left hand"
+        self.enc.schedule_choice((grab_a, grab_b))
+        grab_values = {grab_a.id: iter((6, 6, 6, 1, 1, 1)),
+                       grab_b.id: iter((6, 6, 6, 1, 1, 1))}
+        def grab_roll(ctx, dice):
+            value = next(grab_values[ctx.action_id])
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", grab_roll):
+            self.enc.step(1)
+        grips = {row[1]: row[0] for row in active_contact_state(self.enc)[0]}
+        self.assertEqual(set(grips), {self.a.id, self.b.id})
+
+        grapple = Action(self.world, 2, 8, "grapple", self.a.id, self.b.id, None)
+        grapple.end_time = 8; grapple.grip_id = grips[self.a.id]
+        break_hold = Action(self.world, 2, 3, "break hold", self.a.id, self.b.id, None)
+        break_hold.end_time = 3; break_hold.grip_id = grips[self.b.id]
+        choice = self.enc.schedule_choice((
+            ChoiceMember("continue-grapple", grapple, priority_penalty=0),
+            ChoiceMember("break-hold", break_hold, priority_penalty=3)))
+        accepted = self.enc._choice_book._choices[choice.id]
+        self.assertEqual(tuple(member.priority_penalty for member in accepted.members), (0, 3))
+
+        break_values = iter((6, 6, 6, 1, 1, 1))
+        def break_roll(ctx, dice):
+            value = next(break_values)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", break_roll):
+            self.enc.step(1)
+        self.assertEqual(self.enc.inspect_committed(3).action(break_hold.id).facts.outcome, "success")
+        self.assertIn(grapple.id, self.enc.pending_action_list)
+        self.assertEqual(tuple(row[1:3] for row in active_contact_state(self.enc)[0]),
+                         ((self.a.id, self.b.id),))
+        self.enc.abort_multiple_action(self.enc._choice_book.view(choice.id))
+        self.assertNotIn(grapple.id, self.enc.pending_action_list)
+        self.assertIn(grapple.id, self.enc.cancelled_action_list)
+        self.assertEqual(len(active_contact_state(self.enc)[1]), 0)
+
     def test_staggered_automatic_maintenance_keeps_each_grip_independent(self):
         from physical_contact import active_contact_state
         self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
