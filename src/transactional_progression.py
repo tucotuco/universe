@@ -804,9 +804,13 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                             prepared_rows.append((intent,prepare_movement_intent(
                                 encounter,intent,conditions,duration=duration,
                                 pre_action_snapshot=context.snapshot)))
-                        from movement_intent import validate_grip_relative_movement
+                        from movement_intent import (validate_grip_relative_movement,
+                                                     validate_arena_movement_paths)
                         validate_grip_relative_movement(tuple(prepared for _,prepared in prepared_rows),
                                                         context.snapshot)
+                        validate_arena_movement_paths(
+                            tuple(prepared for _, prepared in prepared_rows),
+                            context.snapshot)
                         motion={intent.actor_id:prepared.velocity_meters_per_second
                                 for intent,prepared in prepared_rows}
                         facing_updates={intent.actor_id:prepared.facing_update

@@ -116,6 +116,107 @@ class PreparedMovementIntent:
     arrival_time_seconds: float | None = None
 
 
+def _segment_hex_interval(start, end, center, vertices):
+    """Closed interval where a planar segment intersects one closed hex."""
+    dx, dy = end.x-start.x, end.y-start.y
+    low, high = 0.0, 1.0
+    absolute = tuple((center.x+x, center.y+y) for x, y in vertices)
+    for (ax, ay), (bx, by) in zip(absolute, absolute[1:] + absolute[:1]):
+        ex, ey = bx-ax, by-ay
+        value = ex*(start.y-ay)-ey*(start.x-ax)
+        slope = ex*dy-ey*dx
+        if abs(slope) < 1e-15:
+            if value < -1e-12:
+                return None
+            continue
+        crossing = -value/slope
+        if slope > 0:
+            low = max(low, crossing)
+        else:
+            high = min(high, crossing)
+        if low > high + 1e-12:
+            return None
+    return max(0.0, low), min(1.0, high)
+
+
+def _movement_hexes(start, end, layout):
+    intervals = []
+    touched = set()
+    for address in layout.addresses():
+        center = layout.center_position(address, z=start.z)
+        interval = _segment_hex_interval(start, end, center,
+                                         layout.vertex_offsets_meters)
+        if interval is not None:
+            intervals.append(interval)
+            touched.add(address)
+    intervals.sort()
+    covered = -1e-12
+    for low, high in intervals:
+        if low > covered + 1e-9:
+            raise MovementIntentRefusal("unknown_path", "movement crosses outside modeled Arena cells")
+        covered = max(covered, high)
+    if covered < 1.0 - 1e-9:
+        raise MovementIntentRefusal("unknown_path", "movement exits the modeled Arena footprint")
+    return frozenset(touched)
+
+
+def validate_arena_movement_paths(prepared, snapshot):
+    """Fail closed on reference-point routes through known occupied Arena cells.
+
+    Hexes are a one-yard-across-flats occupancy/presentation reference only;
+    no Being footprint or body clearance is inferred. The same starting cell
+    may contain a contact/grip already represented by the Encounter.
+    """
+    from arena_hex_map import layout_from_encounter_map
+    layout = layout_from_encounter_map(snapshot.encounter_map)
+    if layout is None:
+        return
+    moving = {row.intent.actor_id: row for row in prepared}
+    routes = {}
+    for actor_id, row in moving.items():
+        end = (row.intent.destination
+               if row.arrival_time_seconds is not None
+               and row.arrival_time_seconds <= 1.0 else CartesianPosition(
+                   row.start_position.x + row.velocity_meters_per_second[0],
+                   row.start_position.y + row.velocity_meters_per_second[1],
+                   row.start_position.z + row.velocity_meters_per_second[2]))
+        start_cell = layout.cell_at_position(row.start_position)
+        if start_cell is None or layout.cell_at_position(end) is None:
+            raise MovementIntentRefusal("unknown_path", "movement endpoint is outside modeled Arena cells")
+        routes[actor_id] = (start_cell, _movement_hexes(row.start_position, end, layout))
+
+    stationary = {}
+    ground_objects = {}
+    for entity_id in snapshot.participant_ids:
+        if entity_id in moving:
+            continue
+        entity = snapshot.entity(entity_id)
+        if entity.position is None:
+            continue
+        cell = layout.cell_at_position(entity.position)
+        if cell is None:
+            continue
+        if entity.category == "being":
+            stationary.setdefault(cell, []).append((entity_id, entity))
+        elif entity.data.get("parent_container_id") is None:
+            ground_objects.setdefault(cell, []).append(entity_id)
+    for actor_id, (origin, route) in routes.items():
+        for cell in route - {origin}:
+            occupants = stationary.get(cell, ())
+            if occupants:
+                raise MovementIntentRefusal("occupied_path", "movement passes through a known occupied Being hex")
+            if ground_objects.get(cell):
+                raise MovementIntentRefusal("uncertain_path", "movement crosses a ground Object cell without supported clearance geometry")
+        for other_id, (other_origin, other_route) in routes.items():
+            if actor_id == other_id:
+                continue
+            if other_origin != origin and other_origin in route:
+                raise MovementIntentRefusal("conflicting_routes", "simultaneous route enters another mover's occupied starting hex")
+            shared = (route - {origin}) & (other_route - {other_origin})
+            if shared:
+                raise MovementIntentRefusal("conflicting_routes", "simultaneous routes claim the same Arena hex")
+
+
 def _finite_factor(value, name):
     if (isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or not 0 <= value <= 1):

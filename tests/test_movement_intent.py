@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 sys.path.insert(0, str(ROOT / "src"))
 
 from arena_browser_session import GeneratedArenaSession
-from arena_hex_map import HexAddress
+from arena_hex_map import ArenaHexLayout, HexAddress
 from action_evaluation import capture_snapshot
 from movement_intent import (MovementIntent, MovementIntentRefusal,
                              MovementRateConditions, evaluate_movement_rate)
@@ -33,13 +33,71 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.encounter = self.candidate.encounter
         self.player = self.candidate.participants[0].native.being
         self.opponent = self.candidate.participants[1].native.being
-        # Test-only authored positions. The movement test below separately
-        # declares its corridor premise; the map does not prove clearance.
-        self.player.set_position(CartesianPosition(0.0, 0.0, 0.0))
-        self.opponent.set_position(CartesianPosition(0.0, 100.0, 0.0))
+        # Keep authored test routes inside the represented Arena footprint;
+        # the native movement validator rejects unknown/out-of-map passages.
+        self.layout = ArenaHexLayout.rectangle(5, 5)
+        self.player.set_position(self.layout.center_position(HexAddress(0, 0)))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
         self.rng = self.session._rng_cursor
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
         self.global_rng = random.getstate()
+
+    def test_movement_refuses_known_occupied_hex_before_any_state_or_rng_commit(self):
+        self.activate_run_observer()
+        origin = HexAddress(1, 2)
+        occupied = HexAddress(2, 2)
+        destination = HexAddress(3, 2)
+        self.player.set_position(self.layout.center_position(origin))
+        self.opponent.set_position(self.layout.center_position(occupied))
+        self.player.set_hex_facing(0)
+        intent = MovementIntent(self.player.id,
+            self.layout.center_position(destination), "sprint", "occupied-route", 1)
+        before = (self.encounter.time, self.player.get_position(), self.rng.state,
+                  random.getstate(), tuple(self.encounter.pending_action_list))
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intent=intent,
+                movement_conditions=MovementRateConditions(
+                    terrain_multiplier=1.0, hampered_multiplier=1.0,
+                    direction="forward", concurrent_demanding_action=False))
+        self.assertEqual(refused.exception.code, "occupied_path")
+        self.assertEqual((self.encounter.time, self.player.get_position(), self.rng.state,
+                          random.getstate(), tuple(self.encounter.pending_action_list)), before)
+
+    def test_movement_refuses_unmodeled_route_outside_arena_footprint(self):
+        self.activate_run_observer()
+        start = self.player.get_position()
+        intent = MovementIntent(self.player.id,
+            CartesianPosition(start.x + 100.0, start.y, start.z), "sprint", "unknown-route", 1)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intent=intent,
+                movement_conditions=MovementRateConditions(
+                    terrain_multiplier=1.0, hampered_multiplier=1.0,
+                    direction="forward", concurrent_demanding_action=False))
+        self.assertEqual(refused.exception.code, "unknown_path")
+        self.assertEqual(self.encounter.time, 0)
+
+    def test_simultaneous_movers_cannot_claim_one_destination_hex(self):
+        self.activate_run_observer()
+        common = HexAddress(2, 2)
+        starts = (HexAddress(1, 2), HexAddress(3, 1))
+        actors = (self.player, self.opponent)
+        for actor, cell in zip(actors, starts):
+            actor.set_position(self.layout.center_position(cell))
+            actor.set_hit_points(10)
+        destination = self.layout.center_position(common)
+        intents = tuple(MovementIntent(actor.id, destination, "sprint",
+            f"contested:{actor.id}", 1) for actor in actors)
+        conditions = {actor.id: MovementRateConditions(
+            terrain_multiplier=1.0, hampered_multiplier=1.0,
+            direction="forward", concurrent_demanding_action=False) for actor in actors}
+        before = (self.encounter.time, tuple(actor.get_position() for actor in actors),
+                  self.rng.state)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intents=intents,
+                                movement_conditions=conditions)
+        self.assertEqual(refused.exception.code, "conflicting_routes")
+        self.assertEqual((self.encounter.time, tuple(actor.get_position() for actor in actors),
+                          self.rng.state), before)
 
     def conditions(self, *, demanding=False):
         # Explicit test-only rate premises. ``demanding`` is an authored
@@ -191,7 +249,7 @@ class TestNativeMovementIntent(unittest.TestCase):
             self.encounter.step(1, movement_intent=intent, movement_conditions=conditions)
         self.assertEqual(refused.exception.code, "unknown_facing")
         self.player.set_hex_facing(0)
-        self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
         self.encounter.step(1, movement_intent=intent, movement_conditions=conditions)
         end = self.player.get_position()
         self.assertGreaterEqual(math.dist(start.as_tuple(), end.as_tuple()), 0.90)
@@ -302,7 +360,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         start = layout.center_position(HexAddress(0, 0))
         self.player.set_position(start)
         self.player.set_hex_facing(1)  # Explicit test-world facing at the included +30° boundary.
-        self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
         public_before = self.session.public_view()
         self.assertEqual(public_before["player"]["cell"], {"column": 0, "row": 0})
         # Test-only authored clear corridor points toward the adjacent hex
@@ -346,7 +404,9 @@ class TestNativeMovementIntent(unittest.TestCase):
                        "opponent_defense_action", "touch_action", "grappling_action",
                        "contact_wait_available", "contact_status", "contact_check_seconds",
                        "feint_action", "coup_de_grace_action", "object_strike_action",
-                       "disarm_action"}
+                       "disarm_action", "paused_action", "action_programs",
+                       "pause_available", "resume_available", "delay_action",
+                       "ready_preparation_action"}
         for projection in (public_before, public_after):
             encoded = repr(projection)
             self.assertEqual(set(projection), public_keys)
@@ -361,16 +421,18 @@ class TestNativeMovementIntent(unittest.TestCase):
 
     def test_two_distinct_movement_intents_settle_from_one_common_native_boundary(self):
         self.activate_run_observer()
-        self.player.set_position(CartesianPosition(0.0, 0.0, 0.0))
-        self.opponent.set_position(CartesianPosition(10.0, 10.0, 0.0))
+        self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
+        self.opponent.set_position(self.layout.center_position(HexAddress(3, 2)))
         self.player.set_hit_points(10)
         self.opponent.set_hit_points(10)
         self.player.set_hex_facing(0)
         self.opponent.set_hex_facing(0)
         intents = (
-            MovementIntent(self.player.id, CartesianPosition(20.0, 0.0, 0.0),
+            MovementIntent(self.player.id, CartesianPosition(self.player.get_position().x + 0.5,
+                               self.player.get_position().y, 0.0),
                            "walk", "player-boundary-1", 1, facing_policy="turn"),
-            MovementIntent(self.opponent.id, CartesianPosition(10.0, 30.0, 0.0),
+            MovementIntent(self.opponent.id, CartesianPosition(self.opponent.get_position().x,
+                               self.opponent.get_position().y + 0.5, 0.0),
                            "walk", "opponent-boundary-1", 1, facing_policy="turn"),
         )
         conditions = {self.player.id: self.conditions(),
@@ -396,16 +458,18 @@ class TestNativeMovementIntent(unittest.TestCase):
 
     def test_two_actor_movement_rolls_back_as_one_publication(self):
         action = self.activate_run_observer()
-        self.player.set_position(CartesianPosition(0.0, 0.0, 0.0))
-        self.opponent.set_position(CartesianPosition(10.0, 10.0, 0.0))
+        self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
+        self.opponent.set_position(self.layout.center_position(HexAddress(3, 2)))
         self.player.set_hit_points(10)
         self.opponent.set_hit_points(10)
         self.player.set_hex_facing(0)
         self.opponent.set_hex_facing(0)
         intents = (
-            MovementIntent(self.player.id, CartesianPosition(20.0, 0.0, 0.0),
+            MovementIntent(self.player.id, CartesianPosition(self.player.get_position().x + 0.5,
+                               self.player.get_position().y, 0.0),
                            "walk", "player-rollback", 1, facing_policy="turn"),
-            MovementIntent(self.opponent.id, CartesianPosition(10.0, 30.0, 0.0),
+            MovementIntent(self.opponent.id, CartesianPosition(self.opponent.get_position().x,
+                               self.opponent.get_position().y + 0.5, 0.0),
                            "walk", "opponent-rollback", 1, facing_policy="turn"),
         )
         conditions = {self.player.id: self.conditions(),
@@ -439,7 +503,7 @@ class TestNativeMovementIntent(unittest.TestCase):
         action = self.activate_run_observer()
         start = self.player.get_position()
         self.player.set_hex_facing(0)
-        self.opponent.set_position(CartesianPosition(100.0, 100.0, 0.0))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
         destination = CartesianPosition(start.x, start.y + 20.0, start.z)
         intent = MovementIntent(self.player.id, destination, "walk", "turn-north", 1,
                                 facing_policy="turn", target_facing=3)
@@ -560,7 +624,6 @@ class TestNativeMovementIntent(unittest.TestCase):
             facing_policy="turn")
         self.encounter.step(1, movement_intent=activation,
                             movement_conditions=self.conditions(demanding=False))
-        self.player.set_position(CartesianPosition(2.0, 0.0, 0.0))
 
         weapon_id = self.candidate.universe.make_weapon_for_being(
             self.opponent.id, "Dagger", "Yield test dagger")

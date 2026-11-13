@@ -275,7 +275,14 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             raise EvaluationIntegrityError('Action already has a successful live result')
         book = object.__getattribute__(encounter, '__dict__').get('_choice_book')
         paused = bool(book is not None and book.is_paused(aid))
-        end = ad['end_time'] if book is None else book.effective_end(action)
+        # A newly started Action's interval initialization is authoritative
+        # inside this detached common-boundary snapshot. The live ChoiceBook
+        # deadline is not published until interval commit and can still show
+        # the constructor's placeholder deadline (notably for timed Yield).
+        staged_start = (_stage is not None and aid in _stage.initialization
+                        and 'end_time' in _stage.initialization[aid])
+        end = (ad['end_time'] if book is None or staged_start
+               else book.effective_end(action))
         if type(end) not in (int, float) or not math.isfinite(end):
             raise EvaluationIntegrityError('invalid Action deadline')
         cancelled = aid in ed['cancelled_action_list']
