@@ -1651,6 +1651,53 @@ class GeneratedArenaSession:
                 f"action=multiple_touch components=2 choice={view.state}")
             return self._view_unlocked()
 
+    def choose_multiple_grapple_break(self, payload):
+        """Declare the adopted initial Grapple + Break-hold combination."""
+        from action_choice import ChoiceMember
+        if (type(payload) is not dict or set(payload) != {"handle", "actions", "priorities"}
+                or type(payload["handle"]) is not str
+                or type(payload["actions"]) is not list
+                or type(payload["priorities"]) is not list
+                or len(payload["actions"]) != 2 or len(payload["priorities"]) != 2
+                or any(type(value) is not str for value in payload["actions"])
+                or tuple(sorted(payload["actions"])) != ("break hold", "grapple")
+                or any(type(value) is not int for value in payload["priorities"])):
+            raise ArenaBrowserRequestError(
+                "Multiple Grapple + Break hold requires the observed target, both ordered Actions, and two priorities.")
+        if tuple(sorted(payload["priorities"])) not in ((0, 3), (1, 2)):
+            raise ArenaBrowserRequestError(
+                "Two overlapping Actions need adopted priorities (0, 3) or (1, 2).")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before declaring Multiple actions.")
+            candidate = self._active
+            encounter = candidate.encounter
+            player = candidate.participants[0].native.being
+            if (player.get_skill_level("multi-action") or 0) <= 0:
+                raise ArenaBrowserRequestError("Overlapping Actions require the player's acquired Multi-action skill.")
+            handle = payload["handle"]
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("Player-owned perception evidence is unavailable.")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            members = []
+            for index, event_type in enumerate(payload["actions"]):
+                action, _prepared = self._grappling_preflight(
+                    candidate, player, entity_id, evidence, event_type)
+                members.append(ChoiceMember(event_type, action,
+                    priority_penalty=payload["priorities"][index]))
+            try:
+                view = encounter.schedule_choice(tuple(members))
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "Native Grapple + Break-hold Choice was not accepted; Arena state is unchanged.") from exc
+            self._selected_entity_handle = handle
+            self._trace.native_advance(None, None,
+                f"action=multiple_grapple_break order={','.join(payload['actions'])} choice={view.state}")
+            return self._view_unlocked()
+
     def cancel_multiple_action(self, payload):
         """Stop the player's own declared Multiple-action program without exposing IDs."""
         if payload != {}:
@@ -3106,6 +3153,22 @@ class GeneratedArenaSession:
         arena_rows.append({"name": "Yield", "group": "Attack responses",
                            "status": yield_status, "reason": yield_reason,
                            "target": dodge_target})
+        contact_program_status, contact_program_reason = (
+            "unavailable", "Requires one reciprocal physical Grip and an acquired Multi-action skill.")
+        if (supported_actions.get(Action, False)
+                and (player.get_skill_level("multi-action") or 0) > 0
+                and entity_id is not None and evidence is not None):
+            try:
+                self._grappling_preflight(candidate, player, entity_id, evidence, "grapple")
+                self._grappling_preflight(candidate, player, entity_id, evidence, "break hold")
+                contact_program_status = "available"
+                contact_program_reason = (
+                    "Declare initial Grapple and Break hold together using their native six-second and one-second timings.")
+            except ArenaBrowserRequestError as exc:
+                contact_program_reason = str(exc)
+        arena_rows.append({"name": "Multiple Grapple + Break hold", "group": "Physical contact",
+                           "status": contact_program_status, "reason": contact_program_reason,
+                           "target": dodge_target, "event_type": "multiple-contact"})
         book = candidate.encounter._choice_book
         player_id = player.id
         has_active_program = any(record.view.state in ("accepted", "executing")

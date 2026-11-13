@@ -209,6 +209,155 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(defense.parry_motion, "thrust")
         self.assertEqual(accepted["defense_action"]["duration_seconds"], max(1, weapon.Tt() - 1))
 
+    def test_generated_multiple_grapple_break_program_uses_native_choice_and_abort(self):
+        from action import Action
+        from action_evaluation import RandomDraw, _ProvisionalRandom
+        from dataclasses import replace
+        from physical_contact import active_contact_state
+
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261115,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("submitMultipleGrappleBreak", page)
+        self.assertIn("/api/generated/multiple-contact", page)
+        self.assertIn("Multiple contact action order", page)
+        self.assertIn("Multiple contact priority allocation", page)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "5", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        for being in (player, target):
+            being.current.body_parts["left hand"] = None
+            being.current.body_parts["right hand"] = None
+            being.current.skills.skills["improved grapple"] = 3
+            being.set_ability("strength", 10)
+            being.size_category = "medium"
+            being.set_posture("standing")
+        player.set_skill_level(candidate.universe.get_skill_dictionary(), "multi-action", 1)
+        player.set_position(CartesianPosition(1.0, 1.0, 0))
+        target.set_position(CartesianPosition(1.1, 1.0, 0))
+        target.set_hex_facing(nearest_facing((player.get_position().x - target.get_position().x,
+            player.get_position().y - target.get_position().y, 0)))
+        ledger = player._arena_perception_ledger
+        evidence = replace(ledger._current[target.id], position=target.get_position())
+        ledger._current[target.id] = evidence
+        ledger._history = [evidence if row.entity_id == target.id else row
+                           for row in ledger._history]
+        encounter.mark_aware(target.id, player.id)
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        target_handle = self.session._view_handles[target.id]
+        self.assertEqual(self.request("/api/generated/touch", {"handle": target_handle})[0], 200)
+        touch_player = self.session._player_touch_action(candidate, player)
+        touch_target = Action(candidate.universe, encounter.time, encounter.time + 1,
+                              "touch", target.id, player.id, None)
+        encounter.schedule_action(touch_target)
+
+        touch_values = {touch_player.id: iter((20, 1)), touch_target.id: iter((20, 1))}
+        def touch_roll(context, dice):
+            value = next(touch_values[context.action_id])
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", touch_roll):
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(touch_player.resolution.outcome, "touched")
+        self.assertEqual(touch_target.resolution.outcome, "touched")
+
+        self.assertEqual(self.request("/api/generated/grappling", {
+            "action": "grab", "handle": target_handle, "hand": "left hand"})[0], 200)
+        grab_target = Action(candidate.universe, encounter.time, encounter.time + 1,
+                             "grab", target.id, player.id, None)
+        grab_target.touch_action_id = touch_target.id
+        grab_target.grab_hand = "left hand"
+        encounter.schedule_action(grab_target)
+        grab_player = next(member.action for record in encounter._choice_book._choices.values()
+                           for member in record.members if member.action.event_type == "grab"
+                           and member.action.actor_id == player.id)
+        grab_values = {grab_player.id: iter((6, 6, 6, 1, 1, 1)),
+                       grab_target.id: iter((6, 6, 6, 1, 1, 1))}
+        def grab_roll(context, dice):
+            value = next(grab_values[context.action_id])
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", grab_roll):
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(grab_player.resolution.outcome, "success")
+        self.assertEqual(grab_target.resolution.outcome, "success")
+        self.assertEqual(len(active_contact_state(encounter)[0]), 2)
+
+        status, selected = self.request("/api/generated/inspect", {"handle": target_handle})
+        self.assertEqual(status, 200)
+        program_row = next(row for row in selected["action_catalog"]["entries"]
+                           if row["name"] == "Multiple Grapple + Break hold")
+        self.assertEqual(program_row["status"], "available", program_row["reason"])
+        choices_before = encounter.choice_state
+        rng_before = self.session._rng_cursor.state
+        invalid_status, refusal = self.request("/api/generated/multiple-contact", {
+            "handle": target_handle, "actions": ["grapple", "break hold"],
+            "priorities": [0, 4]})
+        self.assertEqual(invalid_status, 409)
+        self.assertIn("adopted priorities", refusal["error"])
+        self.assertEqual(encounter.choice_state, choices_before)
+        self.assertEqual(self.session._rng_cursor.state, rng_before)
+
+        status, accepted = self.request("/api/generated/multiple-contact", {
+            "handle": target_handle, "actions": ["grapple", "break hold"],
+            "priorities": [0, 3]})
+        self.assertEqual(status, 200, accepted)
+        record = next(row for row in encounter._choice_book._choices.values()
+                      if any(member.priority_penalty is not None and
+                             member.action.actor_id == player.id for member in row.members))
+        self.assertEqual(tuple(member.action.event_type for member in record.members),
+                         ("grapple", "break hold"))
+        self.assertEqual(tuple(member.priority_penalty for member in record.members), (0, 3))
+        grapple, break_hold = (member.action for member in record.members)
+        self.assertEqual((grapple.end_time - grapple.start_time,
+                          break_hold.end_time - break_hold.start_time), (6, 1))
+        program_wire = self.session.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            program_path = Path(directory) / "multiple-grapple-break.json"
+            program_path.write_bytes(program_wire)
+            restore_code = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:1); "
+                "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "e=s.active_candidate.encounter; "
+                "r=next(r for r in e._choice_book._choices.values() "
+                "if any(m.priority_penalty is not None for m in r.members)); "
+                "print(json.dumps({'time':v['time_seconds'],'state':r.view.state,"
+                "'members':[(m.action.event_type,m.priority_penalty) for m in r.members],"
+                "'action_ids':list(r.view.action_ids),'pending':sorted(e.pending_action_list)}))")
+            restored = subprocess.run([sys.executable, "-B", "-c", restore_code,
+                str(program_path)], cwd=ROOT, check=True, capture_output=True, text=True)
+        restored_program = json.loads(restored.stdout)
+        self.assertEqual(restored_program["time"], 2)
+        self.assertEqual(restored_program["state"], "accepted")
+        self.assertEqual(restored_program["members"], [["grapple", 0], ["break hold", 3]])
+        self.assertEqual(set(restored_program["action_ids"]), {grapple.id, break_hold.id})
+        self.assertEqual(restored_program["pending"], [])
+        break_values = iter((6, 6, 6, 1, 1, 1))
+        def break_roll(context, dice):
+            value = next(break_values)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", break_roll):
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(break_hold.resolution.outcome, "success")
+        self.assertIn(grapple.id, encounter.pending_action_list)
+        self.assertEqual(self.request("/api/generated/multiple-actions/abort", {})[0], 200)
+        self.assertNotIn(grapple.id, encounter.pending_action_list)
+        self.assertIn(grapple.id, encounter.cancelled_action_list)
+        self.assertEqual(encounter.get_choice(record.view.id).state, "finished")
+
     def test_player_defender_assigns_block_to_observed_attack(self):
         from dataclasses import replace
         from melee_combat import MeleeStrike, effective_melee_reach_meters
