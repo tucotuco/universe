@@ -48,9 +48,17 @@ class TestBoundedClosureBlockers(unittest.TestCase):
         profile=json.loads((ROOT/'tests/fixtures/arena/test_ground_loadout_profile.json').read_text())
         session=GeneratedArenaSession(root_seed_factory=lambda: 20261109,
                                       ground_loadout_profile=profile)
-        session.generate({'starting_experience':'10000','width_cells':'5','height_cells':'5'})
+        session.generate({'starting_experience':'10000','width_cells':'5','height_cells':'5',
+                          'opponent_strategy':'none'})
         candidate=session.active_candidate
-        address=candidate.arena_map.layout.address_for_index(0)
+        layout=candidate.arena_map.layout
+        player=candidate.participants[0].native.being
+        opponent=candidate.participants[1].native.being
+        origin=layout.cell_at_position(player.get_position())
+        occupied=layout.cell_at_position(opponent.get_position())
+        allowed=set(layout.addresses())
+        address=next(cell for cell in layout.neighbors(origin)
+                     if cell in allowed and cell != occupied)
         session.choose_destination({'column':address.column,'row':address.row,
                                     'rate':'walk','facing_policy':'turn'})
         session.advance_one_second()
