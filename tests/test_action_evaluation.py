@@ -816,6 +816,42 @@ class TestActionEvaluation(unittest.TestCase):
             self.enc.prepare_action(overrun)
         self.assertEqual(self.enc.pending_action_list,[])
 
+    def test_native_bull_rush_records_success_pending_displacement_without_moving_target(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        self.assertEqual(rush.end_time,1)
+        self.enc.schedule_action(rush)
+        before=(self.a.get_position(),self.b.get_position())
+        values=iter([6,6,6,1,1,1])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        result=self.enc.inspect_committed(1).action(rush.id)
+        self.assertEqual(result.facts.outcome,'success_pending_displacement')
+        self.assertEqual((self.a.get_position(),self.b.get_position()),before)
+
+    def test_native_bull_rush_tie_fails_without_displacement(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        self.enc.schedule_action(rush)
+        before=(self.a.get_position(),self.b.get_position())
+        values=iter([2,2,2,2,2,2])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        self.assertEqual(self.enc.inspect_committed(1).action(rush.id).facts.outcome,'failed')
+        self.assertEqual((self.a.get_position(),self.b.get_position()),before)
+
     def test_native_trip_accepts_a_committed_successful_grab_as_contact(self):
         from physical_contact import trip_contact_kind
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))

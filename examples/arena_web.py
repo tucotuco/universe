@@ -374,7 +374,7 @@ function renderActionProgramComposer(catalog){
   else if(a.name==="Block"&&a.shields?.length){kind="block";extra.shield_handle=a.shields[0].handle}
   else if(a.name==="Yield")kind="yield";
   else if(a.name==="swing at object"||a.name==="thrust at object"){kind="object-strike";extra.motion=a.motion}
-  else if(a.group==="Physical contact"&&["break hold","release grip","grapple","grapple escape","takedown","reverse","pin","trip","grab","overrun"].includes(a.event_type)){
+  else if(a.group==="Physical contact"&&["break hold","release grip","grapple","grapple escape","takedown","reverse","pin","trip","grab","bull rush","overrun"].includes(a.event_type)){
    kind="contact";extra.action=a.event_type;
    if(["takedown","pin","trip"].includes(a.event_type))extra.position=a.event_type==="takedown"?"prone":a.event_type==="pin"?"pin_top":"STR";
    if(a.event_type==="grab")extra.hand=a.hands?.[0];

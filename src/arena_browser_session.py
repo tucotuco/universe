@@ -1123,13 +1123,13 @@ class GeneratedArenaSession:
         actions = [event_by_id.get(action_id) for action_id in accepted]
         actions = [action for action in actions if type(action) is Action
                    and action.actor_id == player.id and action.event_type in
-                   ("grab", "grab object", "wrest", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "overrun")]
+                   ("grab", "grab object", "wrest", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "bull rush", "overrun")]
         action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
         if action is None:
             return None
         label = {"grab":"Grab", "grab object":"Grab held Object", "wrest":"Wrest", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                  "grapple":"Grapple", "grapple escape":"Grapple Escape",
-                 "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip", "overrun":"Overrun"}[action.event_type]
+                 "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip", "bull rush":"Bull Rush", "overrun":"Overrun"}[action.event_type]
         if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
             return {"name":label,"status":"executing","outcome":None,
                     "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time)),
@@ -1975,7 +1975,7 @@ class GeneratedArenaSession:
                         entity_id, evidence)
                 elif kind == "contact" and component.get("action") in (
                         "break hold", "release grip", "grapple", "grapple escape",
-                        "takedown", "reverse", "pin", "trip", "grab", "overrun"):
+                        "takedown", "reverse", "pin", "trip", "grab", "bull rush", "overrun"):
                     action, _ = self._grappling_preflight(candidate, player,
                         entity_id, evidence, component["action"],
                         component.get("hand"), component.get("position"),
@@ -2083,9 +2083,9 @@ class GeneratedArenaSession:
         grips, controls = active_contact_state(encounter)
         action_data = {}
         duration = 4 if event_type == "overrun" else 1
-        if event_type == "overrun":
-            # Native preparation validates same-cell occupancy, posture, sizes,
-            # timing and facing without the browser choosing contest outcomes.
+        if event_type in ("overrun", "bull rush"):
+            # Native preparation validates positions, sizes, timing and facing
+            # without the browser choosing contest outcomes.
             pass
         elif event_type == "grab":
             touch = self._player_touch_action(candidate, player)
@@ -2232,7 +2232,7 @@ class GeneratedArenaSession:
         if (type(payload) is not dict or set(payload) - {"handle", "action", "hand", "position"}
                 or not {"handle", "action"}.issubset(payload)
                 or type(payload.get("handle")) is not str
-                or payload.get("action") not in ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "overrun")
+                or payload.get("action") not in ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "bull rush", "overrun")
                 or ("position" in payload and payload["position"] not in ("kneeling","prone","pin_top","pin_bottom","STR","DEX"))
                 or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))):
             raise ArenaBrowserRequestError("Physical-contact Action request is malformed.")
@@ -2270,7 +2270,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("Contact cancellation accepts an empty request.")
         contact_types = {"touch", "grab", "grab object", "wrest", "break hold",
                          "release grip", "grapple", "grapple escape", "takedown",
-                         "reverse", "pin", "trip", "overrun"}
+                         "reverse", "pin", "trip", "bull rush", "overrun"}
         with self._lock:
             if self._active is None:
                 raise ArenaBrowserRequestError("Generate an Encounter before cancelling an Action.")
@@ -3222,14 +3222,14 @@ class GeneratedArenaSession:
                     (f" ({duration:g} s)" if duration is not None else ""),"reason":reason,
                     "target":target_view,"duration_seconds":duration})
                 continue
-            elif name.casefold() in ("grab being", "hold being", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip", "overrun"):
+            elif name.casefold() in ("grab being", "hold being", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip", "bull rush", "overrun"):
                 event_type = {"grab being":"grab", "hold being":"hold",
                               "break hold":"break hold", "release grip":"release grip", "grapple":"grapple",
                               "grapple escape":"grapple escape", "takedown":"takedown",
-                              "reverse":"reverse", "pin from above":"pin", "pin from below":"pin", "trip":"trip", "overrun":"overrun"}[name.casefold()]
+                              "reverse":"reverse", "pin from above":"pin", "pin from below":"pin", "trip":"trip", "bull rush":"bull rush", "overrun":"overrun"}[name.casefold()]
                 display = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                            "grapple":"Grapple", "grapple escape":"Grapple Escape",
-                           "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip","overrun":"Overrun"}[event_type]
+                           "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip","bull rush":"Bull Rush","overrun":"Overrun"}[event_type]
                 duration = 6 if event_type in ("grapple", "grapple escape","takedown","reverse","pin") else 4 if event_type=="overrun" else 2 if event_type=="trip" else 1
                 if event_type == "hold":
                     display = "Automatic Hold check"
@@ -3267,7 +3267,7 @@ class GeneratedArenaSession:
                                 candidate, player, entity_id, evidence, event_type, hands[0])
                         elif event_type == "trip":
                             _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type,position="STR")
-                        elif event_type == "overrun":
+                        elif event_type in ("overrun", "bull rush"):
                             _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type)
                         elif event_type in ("takedown","pin"):
                             default_position = ("prone" if event_type == "takedown" else
@@ -3289,6 +3289,7 @@ class GeneratedArenaSession:
                             "reverse":"One opposed Grapple check at the next control boundary from a disadvantaged position; requires explicit size categories.",
                             "pin":"One opposed Grapple check at the next control boundary; target becomes prone and immobilized.",
                             "trip":"Two-second Strength versus defender-chosen Strength/Dexterity contest after this player's successful Touch; size category is required.",
+                            "bull rush":"One-second native Strength contest within one yard and ahead; success records pending displacement without inventing a distance.",
                             "overrun":"Four-second native Strength + Dexterity contest against a standing Being within one yard and ahead; success leaves the target prone without invented displacement.",
                         }[event_type]
                     except ArenaBrowserRequestError as exc:

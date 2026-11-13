@@ -536,6 +536,45 @@ class TestArenaMeleeAttack(unittest.TestCase):
         result = candidate.encounter.inspect_committed(math.ceil(strike.end_time)).action(strike.id)
         self.assertEqual(result.facts.outcome, "out_of_reach")
 
+    def test_generated_bull_rush_uses_native_strength_contest_and_pending_boundary(self):
+        view = self.generate(size_categories={"player": "medium", "opponent": "medium"})
+        view, target_row, _weapon_id, _distance, _reach = self.move_to_target_neighbor(view)
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn('"bull rush","overrun"', page)
+        status, inspected = self.request("/api/generated/inspect", {"handle": target_row["handle"]})
+        self.assertEqual(status, 200, inspected)
+        entry = next(row for row in inspected["action_catalog"]["entries"]
+                     if row.get("event_type") == "bull rush")
+        self.assertEqual(entry["status"], "available", entry["reason"])
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        before = (player.get_position(), target.get_position())
+        status, accepted = self.request("/api/generated/grappling", {
+            "handle": target_row["handle"], "action": "bull rush"})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["grappling_action"]["status"], "executing")
+        with tempfile.TemporaryDirectory() as directory:
+            saved = Path(directory) / "pending-bull-rush.json"
+            saved.write_bytes(self.session.save_encounter_bytes())
+            code = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 19); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "assert s.public_view()['grappling_action']['status']=='executing'; "
+                "s.advance_one_second(); v=s.public_view(); "
+                "print(json.dumps({'status':v['grappling_action']['status'], "
+                "'outcome':v['grappling_action']['outcome']}))"
+            )
+            env = dict(os.environ, PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}")
+            restored = subprocess.run([sys.executable, "-B", "-c", code, str(saved)],
+                cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+        outcome = json.loads(restored.stdout)
+        self.assertEqual(outcome["status"], "completed")
+        self.assertIn(outcome["outcome"],
+                      ("failed", "success_pending_displacement"))
+        self.assertEqual((player.get_position(), target.get_position()), before)
+
 
 if __name__ == "__main__":
     unittest.main()

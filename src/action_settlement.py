@@ -108,8 +108,8 @@ _OUTCOMES = {
     'ready_preparation': frozenset(('unavailable', 'unable_to_act', 'unsupported_motion',
                                     'unsupported_timing', 'already_ready', 'contested', 'success')),
     'delay': frozenset(('success',)),
-    'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','blocked','uncertain_path',
-        'unavailable','failed','success','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
+    'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','not_facing','blocked','uncertain_path',
+        'unavailable','failed','success','success_pending_displacement','tower_shield_restricted','shield_unavailable','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
 }
 _METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
