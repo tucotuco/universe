@@ -1098,16 +1098,29 @@ def _combat(snapshot, action, rng, dependencies):
                     saving_throw_experience_modifier(experience_level(being.data['experience'])))
             coup_de_grace = (action.family == 'melee'
                              and action.data['event_type'] == 'coup de grace')
+            attack_roll = [None]
             if coup_de_grace:
                 if not _helpless(target):
                     return ActionProposal(action.id, actor.id, (target.id,),
                         'ineligible_target', (), tuple(dependencies), (('distance', distance),))
                 outcome = 'critical'
             else:
-                outcome = hit_outcome(snapshot.difficulty, rng.roll, hits,
+                def combat_roll(dice):
+                    value = rng.roll(dice)
+                    if attack_roll[0] is None and dice == '1d20':
+                        attack_roll[0] = value
+                    return value
+                outcome = hit_outcome(snapshot.difficulty, combat_roll, hits,
                     lambda dc: save(target, dc), lambda dc: save(actor, dc))
             attempted = True
-            recipient = actor if outcome == 'hit self' else target
+            redirected_pin = next((row for row in pinned_controls
+                if row[2] == target.id and row[1] != actor.id
+                and outcome == 'miss' and attack_roll[0] is not None
+                and attack_roll[0] <= (2 if row[6] == 'pin_top' else 1)), None)
+            if redirected_pin is not None:
+                outcome = 'normal'
+            recipient = (actor if outcome == 'hit self' else
+                         snapshot.entity(redirected_pin[1]) if redirected_pin else target)
             if outcome == 'fatal':
                 effects.append(FatalEffect(action.id, target.id))
             potential = weapon.data['attacks']['S' if action.data['event_type'] == 'swing' else 'T']['d']

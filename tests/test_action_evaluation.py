@@ -642,6 +642,34 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(len(result.trace),36)
         self.assertEqual(rounds,{pin.id:[],escape.id:[]})
 
+    def test_outsider_low_miss_against_pinned_target_hits_pin_holder(self):
+        from dataclasses import replace
+        holder_id = self.world.make_being('Human', 'Pin holder')
+        holder = self.world.get_object_by_id(holder_id)
+        holder.set_position(CartesianPosition(1.8, 0, 0))
+        holder.set_geometry(Sphere(.25)); holder.set_hit_points(100)
+        self.enc.add_being(holder.id)
+        self.enc.mark_aware(self.a.id, holder.id)
+        self.enc.mark_aware(holder.id, self.a.id)
+        self.a.set_position(CartesianPosition(0, 0, 0))
+        self.b.set_position(CartesianPosition(1.5, 0, 0))
+        self.a.set_posture('standing'); self.b.set_posture('lying')
+        attack = MeleeStrike(self.enc, self.a.id, self.b.id, self.w1,
+                             motion='thrust', reach=2)
+        attack.end_time = 1
+        self.enc.schedule_action(attack)
+        snapshot = self.snapshot(1)
+        snapshot = replace(snapshot, grapple_controls=(
+            ('native-pin', holder.id, self.b.id, None, 0, 7, 'pin_top'),))
+        result = self.scripted(snapshot, [2, 3])
+        proposal = result.proposals[0]
+        self.assertEqual(proposal.outcome, 'normal')
+        damage = tuple(effect for effect in proposal.effects
+                       if type(effect) is DamageEffect and effect.component == 'body')
+        self.assertEqual(len(damage), 1)
+        self.assertEqual(damage[0].target_id, holder.id)
+        self.assertEqual(damage[0].amount, 3)
+
     def test_third_party_positive_hp_damage_releases_each_physical_grip_transactionally(self):
         from physical_contact import active_contact_state
         from spatial.state import CartesianPosition
