@@ -132,7 +132,7 @@ def _resource_skill_pool(encounter, action):
                  'parry', 'block'):
         combat = skills.get('armed combat', 0) or 0
     elif event in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape',
-                   'takedown', 'reverse', 'pin', 'trip', 'wrest', 'grab object'):
+                   'takedown', 'reverse', 'pin', 'trip', 'overrun', 'wrest', 'grab object'):
         combat = skills.get('unarmed combat', 0) or 0
     elif event == 'dodge':
         combat = skills.get('tumble', 0) or 0

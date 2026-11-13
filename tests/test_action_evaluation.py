@@ -745,6 +745,64 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.enc.inspect_committed(3).action(trip.id).facts.outcome,'success')
         self.assertEqual(self.b.get_posture(),'lying')
 
+    def test_native_overrun_standing_same_hex_contest_commits_prone_without_displacement(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,None)
+        self.assertEqual(overrun.end_time,4)
+        self.enc.schedule_action(overrun)
+        values=iter([6,6,6,1,1,1])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(4)
+        self.assertEqual(self.enc.inspect_committed(4).action(overrun.id).facts.outcome,'success')
+        self.assertEqual(self.b.get_posture(),'lying')
+        self.assertEqual(self.a.get_position(),CartesianPosition(0,0,0))
+        self.assertEqual(self.b.get_position(),CartesianPosition(.2,0,0))
+
+    def test_native_overrun_tie_preserves_standing_posture(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,None)
+        self.assertEqual(overrun.end_time,4)
+        self.enc.schedule_action(overrun)
+        values=iter([2,2,2,2,2,2])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(4)
+        self.assertEqual(self.enc.inspect_committed(4).action(overrun.id).facts.outcome,'failed')
+        self.assertEqual(self.b.get_posture(),'standing')
+
+    def test_native_overrun_uses_advanced_equipped_shield_bonus(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        shield_id=self.world.make_weapon_for_being(self.a.id,'Small shield','Overrun shield')
+        self.world.arm_being(self.a.id,shield_id,'shield hand')
+        self.a.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Small shield',2)
+        self.enc.enable_transactional_progression(quiescent=True)
+        overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,shield_id)
+        self.enc.schedule_action(overrun)
+        values=iter([3,3,3,3,3,4])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(4)
+        self.assertEqual(self.enc.inspect_committed(4).action(overrun.id).facts.outcome,'success')
+        self.assertEqual(self.b.get_posture(),'lying')
+
     def test_native_trip_accepts_a_committed_successful_grab_as_contact(self):
         from physical_contact import trip_contact_kind
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))

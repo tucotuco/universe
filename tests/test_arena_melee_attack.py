@@ -42,10 +42,13 @@ class TestArenaMeleeAttack(unittest.TestCase):
             value = json.loads(json.dumps(value) if type(value) is not str else value)
         return result["status"], value
 
-    def generate(self, *, equipment_mode="equipped"):
-        status, view = self.request("/api/generated/generate", {
+    def generate(self, *, equipment_mode="equipped", size_categories=None):
+        payload = {
             "starting_experience": "10000", "width_cells": "10",
-            "height_cells": "5", "equipment_mode": equipment_mode})
+            "height_cells": "5", "equipment_mode": equipment_mode}
+        if size_categories is not None:
+            payload["size_categories"] = size_categories
+        status, view = self.request("/api/generated/generate", payload)
         self.assertEqual(status, 200, view)
         return view
 
@@ -392,6 +395,53 @@ class TestArenaMeleeAttack(unittest.TestCase):
                   dict(candidate.encounter._choice_book._choices), unreadied._rng_cursor.state))
         self.assertIn(dagger_id, player.possessions)
         self.assertEqual(target.get_hit_points(), candidate.participants[1].native.being.get_hit_points())
+
+    def test_generated_overrun_refuses_when_required_size_facts_are_absent(self):
+        view = self.generate()
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        target_row = next(row for row in self.session.public_view()["entities"]
+                          if row["category"] == "being" and row["name"] != player.name)
+        status, inspected = self.request("/api/generated/inspect", {"handle": target_row["handle"]})
+        self.assertEqual(status, 200, inspected)
+        entry = next(row for row in inspected["action_catalog"]["entries"]
+                     if row.get("event_type") == "overrun")
+        self.assertEqual(entry["status"], "unavailable")
+        self.assertIn("size categories", entry["reason"])
+        before = (candidate.encounter.time, dict(candidate.universe.event_history),
+                  dict(candidate.encounter._choice_book._choices), self.session._rng_cursor.state)
+        status, refusal = self.request("/api/generated/grappling", {
+            "handle": target_row["handle"], "action": "overrun"})
+        self.assertEqual(status, 409)
+        self.assertIn("size categories", refusal["error"])
+        self.assertEqual(before, (candidate.encounter.time, dict(candidate.universe.event_history),
+            dict(candidate.encounter._choice_book._choices), self.session._rng_cursor.state))
+        self.assertNotIn(player.id, json.dumps(refusal))
+        self.assertNotIn(candidate.participants[1].native.being.id, json.dumps(refusal))
+
+    def test_generated_overrun_uses_explicit_size_and_native_prone_resolution(self):
+        view = self.generate(size_categories={"player": "medium", "opponent": "medium"})
+        view, target_row, _weapon_id, _distance, _reach = self.move_to_target_neighbor(view)
+        status, inspected = self.request("/api/generated/inspect", {"handle": target_row["handle"]})
+        self.assertEqual(status, 200, inspected)
+        entry = next(row for row in inspected["action_catalog"]["entries"]
+                     if row.get("event_type") == "overrun")
+        self.assertEqual(entry["status"], "available", entry["reason"])
+        candidate = self.session.active_candidate
+        player, target = (part.native.being for part in candidate.participants)
+        before = (player.get_position(), target.get_position())
+        status, accepted = self.request("/api/generated/grappling", {
+            "handle": target_row["handle"], "action": "overrun"})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["grappling_action"]["status"], "executing")
+        for _ in range(4):
+            status, accepted = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["grappling_action"]["status"], "completed")
+        self.assertEqual(target.get_posture(), "lying")
+        self.assertEqual((player.get_position(), target.get_position()), before)
 
 
 if __name__ == "__main__":

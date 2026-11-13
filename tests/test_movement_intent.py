@@ -110,6 +110,28 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(refused.exception.code, "uncertain_path")
         self.assertEqual(self.encounter.time, 0)
 
+    def test_movement_refuses_intersection_with_modeled_ground_object(self):
+        from spatial.geometry import Sphere
+        self.activate_run_observer()
+        origin, obstruction, destination = (HexAddress(1, 2), HexAddress(2, 2),
+                                            HexAddress(3, 2))
+        self.player.set_position(self.layout.center_position(origin))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
+        object_id = self.candidate.universe.make_object("Rock", "modeled route rock")
+        rock = self.candidate.universe.get_object_by_id(object_id)
+        rock.set_position(self.layout.center_position(obstruction))
+        rock.set_geometry(Sphere(0.5))
+        self.encounter.add_object(object_id)
+        intent = MovementIntent(self.player.id, self.layout.center_position(destination),
+                                "sprint", "blocked-object-route", 1)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intent=intent,
+                movement_conditions=MovementRateConditions(
+                    terrain_multiplier=1.0, hampered_multiplier=1.0,
+                    direction="forward", concurrent_demanding_action=False))
+        self.assertEqual(refused.exception.code, "blocked_path")
+        self.assertEqual(self.encounter.time, 0)
+
     def test_simultaneous_movers_cannot_claim_one_destination_hex(self):
         self.activate_run_observer()
         common = HexAddress(2, 2)

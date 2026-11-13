@@ -60,7 +60,8 @@ class Action(Event):
         self.instrument_id = instrument_id
         self.strategy = strategy or Strategy()
         self.resolution = None  # Set only after successful structured resolution.
-        self.end_time = self.calculate_end_time(0, self.strategy.timing_adjustment())
+        base_duration = 4 if self.event_type == "overrun" else 0
+        self.end_time = self.calculate_end_time(base_duration, self.strategy.timing_adjustment())
         instrument = self.get_instrument()
         if instrument is not None:
             if self.event_type == 'swing':
@@ -95,6 +96,59 @@ class Action(Event):
         Encounter invokes only reviewed native implementations. The Encounter
         argument is read-only during preparation, never an extension sandbox.
         """
+        if self.event_type == 'overrun':
+            from encounter import Encounter
+            from arena_hex_map import layout_from_encounter_map
+            from hex_facing import FacingSector, classify_vector
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Overrun requires the native transactional Encounter pathway')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            if (actor is None or target is None or actor is target
+                    or self.actor_id not in encounter.being_list
+                    or self.target_id not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id, self.target_id)):
+                raise ValueError('Overrun requires two distinct aware participating Beings')
+            if (actor.is_helpless() or target.is_helpless()
+                    or actor.get_posture() != 'standing' or target.get_posture() != 'standing'):
+                raise ValueError('bounded Overrun requires able standing participants')
+            shields = actor.shielded_with(encounter.universe)
+            if any('tower' in (encounter.universe.get_object_by_id(shield_id).current.obj_type or '').casefold()
+                   for shield_id in shields.values()
+                   if encounter.universe.get_object_by_id(shield_id) is not None):
+                raise ValueError('a Being bearing a tower shield cannot Overrun')
+            if self.instrument_id is not None:
+                shield = encounter.universe.get_object_by_id(self.instrument_id)
+                shield_type = None if shield is None or shield.current is None else shield.current.obj_type
+                if self.instrument_id not in shields.values() or type(shield_type) is not str:
+                    raise ValueError('Overrun shield must be equipped on the actor')
+            order = ('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+            sizes = (getattr(actor,'size_category',None), getattr(target,'size_category',None))
+            if any(value not in order for value in sizes):
+                raise ValueError('Overrun requires explicit native size categories for both Beings')
+            if order.index(sizes[1])-order.index(sizes[0]) > 1:
+                raise ValueError('a single Overrun cannot defeat a target more than one size category larger')
+            duration = max(1, 4 - self.strategy.timing_adjustment())
+            if (self.strategy.attack != 0
+                    or self.strategy.defense != 0
+                    or self.end_time-self.start_time != duration):
+                raise ValueError('Overrun requires zero attack/defense levels and adopted adjusted four-second timing')
+            source, destination = actor.get_position(), target.get_position()
+            layout = layout_from_encounter_map(encounter.map)
+            if source is None or destination is None:
+                raise ValueError('Overrun requires positioned participants')
+            if layout is not None:
+                if (layout.cell_at_position(source) is None
+                        or layout.cell_at_position(destination) is None
+                        or math.dist(source.as_tuple(), destination.as_tuple()) > 0.9144):
+                    raise ValueError('bounded Overrun requires positioned participants within represented one-yard reach')
+            elif math.dist(source.as_tuple(), destination.as_tuple()) > 0.9144:
+                raise ValueError('bounded Overrun requires represented one-yard reach')
+            facing = actor.hex_facing
+            if (facing is None or classify_vector(facing,
+                    (destination.x-source.x,destination.y-source.y,destination.z-source.z))
+                    is not FacingSector.FRONT):
+                raise ValueError('Overrun target must be in the actor’s forward direction')
+            return PreparedSchedule.from_action(self)
         if self.event_type == 'feint':
             from encounter import Encounter
             if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':

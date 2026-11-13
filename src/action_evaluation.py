@@ -253,7 +253,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','overrun', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -293,7 +293,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                   'delay' if type(action) is Action and ad['event_type']=='delay' else
                   'disarm' if type(action) is Action and ad['event_type']=='disarm' else
                   'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
-                  'grappling' if type(action) is Action and ad['event_type'] in ('grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip') else
+                  'grappling' if type(action) is Action and ad['event_type'] in ('grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','overrun') else
                   'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
                   else families[type(action)])
         multiple_action_priority = None
@@ -1372,7 +1372,7 @@ def _grappling(snapshot, action, rng):
         effects.append(ObjectGripEffect(action.id,target.id,actor.id,holder.id,
             grip_id,'transfer',hand,holder_hand))
         return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
-    if event_type in ('grab', 'hold', 'break hold', 'release grip', 'grapple','takedown','reverse','pin','trip'):
+    if event_type in ('grab', 'hold', 'break hold', 'release grip', 'grapple','takedown','reverse','pin','trip','overrun'):
         distance = snapshot.distance(actor.id, target.id)
         if actor.position is None or target.position is None or distance is None:
             return ActionProposal(action.id, actor.id, (target.id,), 'unavailable')
@@ -1387,6 +1387,62 @@ def _grappling(snapshot, action, rng):
             status = 'in_reach' if distance <= .9144 else 'out_of_reach'
         if status != 'in_reach':
             return ActionProposal(action.id, actor.id, (target.id,), status)
+    if event_type == 'overrun':
+        if (actor.data.get('posture') != 'standing'
+                or target.data.get('posture') != 'standing'):
+            return ActionProposal(action.id, actor.id, (target.id,), 'wrong_position')
+        from arena_hex_map import layout_from_encounter_map
+        layout = layout_from_encounter_map(snapshot.encounter_map)
+        if layout is not None:
+            if (layout.cell_at_position(actor.position) is None
+                    or layout.cell_at_position(target.position) is None
+                    or distance > .9144):
+                return ActionProposal(action.id, actor.id, (target.id,), 'wrong_position')
+        elif math.dist(actor.position.as_tuple(), target.position.as_tuple()) > .9144:
+            return ActionProposal(action.id, actor.id, (target.id,), 'out_of_reach')
+        from hex_facing import FacingSector, classify_vector
+        facing = actor.data.get('hex_facing')
+        if (facing is None or classify_vector(facing,
+                (target.position.x-actor.position.x,target.position.y-actor.position.y,
+                 target.position.z-actor.position.z)) is not FacingSector.FRONT):
+            return ActionProposal(action.id, actor.id, (target.id,), 'not_facing')
+        order=('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+        sizes=(actor.data.get('size_category'),target.data.get('size_category'))
+        if any(value not in order for value in sizes):
+            return ActionProposal(action.id,actor.id,(target.id,),'size_category_unknown')
+        if any(type(snapshot.entity(shield_id).data.get('original_type')) is str
+               and 'tower' in snapshot.entity(shield_id).data['original_type'].casefold()
+               for shield_id in actor.data.get('shields', ())):
+            return ActionProposal(action.id,actor.id,(target.id,),'tower_shield_restricted')
+        difference=order.index(sizes[1])-order.index(sizes[0])
+        if difference>1:
+            return ActionProposal(action.id,actor.id,(target.id,),'size_limit')
+        actor_size=actor.data['abilities'].get('STR',10)
+        target_size=target.data['abilities'].get('STR',10)
+        actor_dex=actor.data['abilities'].get('DEX',10)
+        target_dex=target.data['abilities'].get('DEX',10)
+        size_modifier=4*(order.index(sizes[0])-order.index(sizes[1]))
+        shield_bonus = 0
+        if action.instrument_id is not None:
+            if action.instrument_id not in actor.data.get('shields', ()):
+                return ActionProposal(action.id, actor.id, (target.id,), 'shield_unavailable')
+            shield = snapshot.entity(action.instrument_id)
+            shield_type = shield.data.get('original_type')
+            if type(shield_type) is not str or 'tower' in shield_type.casefold():
+                return ActionProposal(action.id, actor.id, (target.id,), 'shield_unavailable')
+            shield_rank = actor.data['weapon_skills'].get(shield_type, 0) or 0
+            shield_bonus = 2 if shield_rank > 1 else 1
+        actor_total=(sum(rng.roll('1d6') for _ in range(3))
+                     +(actor_size-10)//2+(actor_dex-10)//2
+                     +max(0,size_modifier)+shield_bonus-priority_penalty)
+        target_total=(sum(rng.roll('1d6') for _ in range(3))
+                      +(target_size-10)//2+(target_dex-10)//2
+                      +max(0,-size_modifier))
+        if actor_total<=target_total:
+            return ActionProposal(action.id,actor.id,(target.id,),'failed')
+        effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
+            'posture','set',None,None,'lying'))
+        return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
     if event_type == 'grab':
         source = action.data['touch_action_id']
         if not any(row.id == source and row.actor_id == actor.id and row.target_id == target.id

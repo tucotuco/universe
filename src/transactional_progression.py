@@ -533,7 +533,7 @@ def validate_action_contract(encounter,action,*,_force=False):
             or 'on_completed' in data or inspect.getattr_static(type(action),'on_completed',None) is not _NATIVE_HOOKS.get(type(action))
             or any(callable(value) for key,value in data.items() if key!='generate')):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
-    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','delay'):
+    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','overrun','delay'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
     if type(action) is Action and data['event_type'] == 'touch' and (
             data.get('instrument_id') is not None

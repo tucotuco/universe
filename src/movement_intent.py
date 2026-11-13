@@ -167,11 +167,13 @@ def _validate_arena_routes(routes, snapshot):
         return
     moving = set(routes)
     occupied_routes = {}
+    trajectories = {}
     for actor_id, (start, end) in routes.items():
         start_cell = layout.cell_at_position(start)
         if start_cell is None or layout.cell_at_position(end) is None:
             raise MovementIntentRefusal("unknown_path", "movement endpoint is outside modeled Arena cells")
         occupied_routes[actor_id] = (start_cell, _movement_hexes(start, end, layout))
+        trajectories[actor_id] = (start, end)
 
     stationary = {}
     ground_objects = {}
@@ -193,8 +195,12 @@ def _validate_arena_routes(routes, snapshot):
             occupants = stationary.get(cell, ())
             if occupants:
                 raise MovementIntentRefusal("occupied_path", "movement passes through a known occupied Being hex")
-            if ground_objects.get(cell):
-                raise MovementIntentRefusal("uncertain_path", "movement crosses a ground Object cell without supported clearance geometry")
+            for object_id in ground_objects.get(cell, ()):
+                obstacle = snapshot.entity(object_id)
+                if obstacle.geometry is None:
+                    raise MovementIntentRefusal("uncertain_path", "movement crosses a ground Object cell without supported clearance geometry")
+                if obstacle.segment_intersection(*trajectories[actor_id]) is not None:
+                    raise MovementIntentRefusal("blocked_path", "movement intersects a modeled ground Object")
         for other_id, (other_origin, other_route) in occupied_routes.items():
             if actor_id == other_id:
                 continue

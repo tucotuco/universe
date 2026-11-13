@@ -332,7 +332,7 @@ def _copy_proposal(proposal, actions, entities):
             else 1 if ((event in ('hold','grapple escape') and proposal.outcome in ('success','failed'))
                        or (event in ('grab','break hold','release grip','grab object','wrest') and proposal.outcome == 'success')
                        or (event == 'grapple' and proposal.outcome == 'failed')
-                       or (event == 'trip' and proposal.outcome == 'success')) else
+                       or (event in ('trip','overrun') and proposal.outcome == 'success')) else
             2 if event == 'pin' and proposal.outcome == 'success' else
             2 if event in ('takedown','pin') and proposal.outcome == 'success' else
             1 if event == 'reverse' and proposal.outcome == 'success' else 0)
@@ -452,6 +452,13 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
                 and proposal.outcome == 'success'
                 and action.data.get('trip_contact_kind') in ('touch','grab','strike'),
                 'Trip requires its recorded successful contact and prone effect')
+        elif action.family == 'grappling' and event_type == 'overrun':
+            _require(effect.kind == 'posture' and effect.operation == 'set'
+                and effect.actor_id == action.actor_id and effect.target_id == action.target_id
+                and effect.position == 'lying' and proposal.outcome == 'success'
+                and entities[action.actor_id].data.get('posture') == 'standing'
+                and entities[action.target_id].data.get('posture') == 'standing',
+                'Overrun must be a successful standing contest that leaves its target prone')
         elif is_damage_release:
             grip = next((r for r in snapshot.physical_grips if r[0] == effect.state_id),None)
             body_id = action.actor_id if proposal.outcome == 'hit self' else action.target_id
