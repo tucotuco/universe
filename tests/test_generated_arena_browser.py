@@ -2300,11 +2300,24 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         being = player.native.being
         start = being.get_position()
         layout = candidate.arena_map.layout
-        address = max(
-            (HexAddress(column, row)
-             for column in range(candidate.arena_map.width_cells)
-             for row in range(candidate.arena_map.height_cells)),
-            key=lambda cell: math.dist(start.as_tuple(), layout.center_position(cell, z=start.z).as_tuple()))
+        from movement_intent import _movement_hexes
+        origin = layout.cell_at_position(start)
+        occupied = {layout.cell_at_position(part.native.being.get_position())
+                    for part in candidate.participants if part.native.being.id != being.id}
+        occupied.update(layout.cell_at_position(row.position)
+                        for row in candidate.ground_objects)
+        valid_destinations = []
+        for cell in layout.addresses():
+            destination = layout.center_position(cell, z=start.z)
+            try:
+                route = _movement_hexes(start, destination, layout) - {origin}
+            except Exception:
+                continue
+            if not route.intersection(occupied):
+                valid_destinations.append(cell)
+        address = max(valid_destinations,
+            key=lambda cell: math.dist(start.as_tuple(),
+                layout.center_position(cell, z=start.z).as_tuple()))
         before_history = dict(candidate.universe.event_history)
         before_choices = dict(encounter._choice_book._choices)
         before_awareness = (encounter.aware_beings(being.id),
