@@ -872,6 +872,22 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(result.action(defense.id).facts.outcome,'no_space')
         self.assertEqual(result.action(rush.id).facts.outcome,'success_pending_displacement')
 
+    def test_prepared_overrun_rechecks_target_position_at_completion_boundary(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.8,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,None)
+        self.enc.schedule_action(overrun)
+        self.enc.step(1,velocities={self.b.id:(.2,0,0)})
+        moved=self.b.get_position()
+        self.assertEqual(moved,CartesianPosition(1.0,0,0))
+        self.enc.step(3)
+        result=self.enc.inspect_committed(4).action(overrun.id)
+        self.assertEqual(result.facts.outcome,'out_of_reach')
+        self.assertEqual(self.b.get_position(),moved)
+
     def test_native_bull_rush_tie_fails_without_displacement(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.set_hex_facing(0)
