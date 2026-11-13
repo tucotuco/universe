@@ -144,7 +144,7 @@
 - [ ] **U-ACT-010 — Feint — PARTIAL.** Armed native one-use +2 follow-up; unarmed/other variants absent and forfeiture rules require coverage.
 - [x] **U-ACT-011 — Grab — DONE bounded.** Being Grab follows successful Touch; held-Object Grab uses holder Defense, the Object-size modifier and +5 DC and creates a distinct receipt-backed Object Grip. Other variants remain open.
 - [ ] **U-ACT-012 — Grapple — PARTIAL.** Initial six-second Grapple, separate Grip/Hold identities, Escape, bounded Takedown/Reverse/Pin transitions, multi-attacker capacity/bonus, incompatible-position rerolls, pin attack restrictions and one-Grip Release are native. Staggered no-cost Hold checks now have a two-Grip progression regression. Declared Multi-action capacity and remaining position consequences remain open; six-second Hold checks resolve automatically without Action cost.
-- [ ] **U-ACT-013 — Multiple actions — OPEN.** Shared declarations, resource/strategy allocation and extra penalties.
+- [ ] **U-ACT-013 — Multiple actions — OPEN.** Pure policy helper validates adopted priority penalties over overlap intervals. Native program declaration/execution, Multi-action skill prerequisite, shared defense/skill/ability allocation, component timing/order and abort/interruption remain unimplemented.
 - [ ] **U-ACT-014 — Overrun — OPEN.** Forced movement plus prone/size constraints.
 - [ ] **U-ACT-015 — Ready — PARTIAL related capability.** Native two-second Draw exists; generalized Ready/trigger conditional Action not implemented. Do not equate them.
 - [ ] **U-ACT-016 — Shield bash — OPEN.** Shield attack timing/damage and off-hand capacity, despite native shield Objects and Block.
