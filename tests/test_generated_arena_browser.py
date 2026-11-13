@@ -272,6 +272,74 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(strike.resolution.outcome,'hit self')
         self.assertEqual(player.get_hit_points(),player_hp)
 
+    def test_player_defender_assigns_retained_parry_to_observed_attack(self):
+        from action_evaluation import _ProvisionalRandom, RandomDraw
+        from melee_combat import MeleeStrike, effective_melee_reach_meters
+        from dataclasses import replace
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261108,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience":"10000", "width_cells":"10", "height_cells":"5",
+            "equipment_mode":"equipped", "opponent_strategy":"none"})
+        self.assertEqual(status,200)
+        candidate=self.session.active_candidate
+        defender=candidate.participants[0].native.being
+        attacker=candidate.participants[1].native.being
+        defender_weapon_id=defender.current.body_parts['right hand']
+        attacker_weapon_id=attacker.current.body_parts['right hand']
+        defender_weapon=candidate.universe.get_object_by_id(defender_weapon_id)
+        attacker_weapon=candidate.universe.get_object_by_id(attacker_weapon_id)
+        defender.set_weapon_skill_level(candidate.universe.get_weapon_dictionary(),
+            defender_weapon.current.obj_type, 10)
+        attacker.set_position(CartesianPosition(defender.get_position().x+.1,
+            defender.get_position().y,defender.get_position().z))
+        from hex_facing import nearest_facing
+        attacker.set_hex_facing(nearest_facing((defender.get_position().x-attacker.get_position().x,
+            defender.get_position().y-attacker.get_position().y,0)))
+        ledger=defender._arena_perception_ledger
+        evidence=replace(ledger._current[attacker.id],position=attacker.get_position())
+        ledger._current[attacker.id]=evidence
+        ledger._history=[evidence if row.entity_id==attacker.id else row for row in ledger._history]
+        self.assertEqual(self.request('/api/generated/run',{})[0],200)
+        self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        weapon_handle=self.session._view_handles[defender_weapon_id]
+        self.assertEqual(self.request('/api/generated/parry',{
+            'weapon_handle':weapon_handle,'motion':'swing'})[0],200)
+        preparation=self.session._latest_melee_defense(candidate,defender)
+        self.assertIsNone(preparation.target_action_id)
+        preparation_seconds=max(1,defender_weapon.St()-1)
+        for _ in range(preparation_seconds):
+            self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        self.assertIs(self.session._retained_defense(candidate,defender,'parry',
+            defender_weapon_id),preparation)
+        attacker.strategy.attack=0
+        strike=MeleeStrike(candidate.encounter,attacker.id,defender.id,attacker_weapon_id,
+            motion='thrust',reach=effective_melee_reach_meters(attacker.current,attacker_weapon.current))
+        candidate.encounter.schedule_action(strike)
+        self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        attacker_handle=self.session._view_handles[attacker.id]
+        status,response=self.request('/api/generated/parry',{
+            'handle':attacker_handle,'weapon_handle':weapon_handle})
+        self.assertEqual(status,200,response)
+        defense=next(member.action for choice in candidate.encounter._choice_book._choices.values()
+            for member in choice.members if type(member.action) is MeleeDefense
+            and member.action.target_action_id==strike.id)
+        self.assertEqual(defense.prepared_defense_action_id,preparation.id)
+        self.assertEqual(defense.parry_motion,'swing')
+        def scripted(context,dice):
+            value=(1 if context.action_id==strike.id else 20) if dice=='1d20' else int(dice.split('d',1)[1])
+            context.trace.append(RandomDraw(context.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',scripted):
+            while candidate.encounter.time < math.ceil(strike.end_time):
+                self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        self.assertIn(defense.resolution.outcome,('deflected','failed'))
+        self.assertEqual(defense.resolution.defenses[0].kind,'parry')
+        self.assertIsNotNone(strike.resolution)
+
     def test_touch_uses_native_choice_http_route_and_survives_pending_save_load(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
