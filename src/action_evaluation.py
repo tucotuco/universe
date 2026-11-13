@@ -1106,6 +1106,13 @@ def _combat(snapshot, action, rng, dependencies):
                     if rng.roll_probability(probability,purpose):
                         effects.append(GrappleStateEffect(action.id,grip[2],grip[1],
                             grip[0],'grip','release',grip[3],None))
+    if outcome in ('parried','dodged'):
+        if attempted and action.family == 'melee':
+            effects.append(PracticeEffect(action.id, actor.id, weapon.data['original_type'], 10))
+        affected = tuple(dict.fromkeys((target.id,) + tuple(
+            effect.target_id for effect in effects if hasattr(effect, 'target_id'))))
+        return ActionProposal(action.id, actor.id, affected, outcome, tuple(effects),
+                              tuple(dependencies), tuple(meta))
     if attempted and action.family == 'melee':
         effects.append(PracticeEffect(action.id, actor.id, weapon.data['original_type'], 10))
     affected = tuple(dict.fromkeys((target.id,) + tuple(e.target_id for e in effects if hasattr(e, 'target_id'))))

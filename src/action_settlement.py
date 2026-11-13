@@ -882,7 +882,19 @@ def reconcile_boundary(snapshot, result):
         successes = [d for d in expected if d.eligible and d.success]
         combat_defenses = [d for d in successes if d.kind in ('parry', 'dodge')]
         if combat_defenses:
-            _require(p.outcome not in _ATTACK_OUTCOMES and not any(type(e) in (DamageEffect, FatalEffect, ProtectionEffect) for e in p.effects), 'successful defense conflicts with attack effects')
+            target = entities[actions[aid].target_id]
+            defended_ids = {actions[aid].target_id}
+            armor_id = target.data.get('armor_id')
+            if armor_id is not None:
+                defended_ids.add(armor_id)
+            defended_ids.update(target.data.get('shields', ()))
+            harmful = any(type(effect) in (DamageEffect, FatalEffect, ProtectionEffect)
+                          and effect.target_id in defended_ids for effect in p.effects)
+            # A successful Parry/Dodge can coincide with an attack miss or a
+            # self-hit; it must prevent effects on the defender, not erase
+            # unrelated consequences of the same attack roll.
+            _require(p.outcome not in ('normal', 'critical', 'fatal') and not harmful,
+                     'successful defense conflicts with attack effects')
         if p.outcome in ('parried', 'dodged'):
             kind = 'parry' if p.outcome == 'parried' else 'dodge'
             _require(any(d.kind == kind for d in combat_defenses), 'defended outcome lacks successful dependency')

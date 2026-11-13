@@ -209,6 +209,69 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(defense.parry_motion, "thrust")
         self.assertEqual(accepted["defense_action"]["duration_seconds"], max(1, weapon.Tt() - 1))
 
+    def test_player_defender_assigns_retained_dodge_to_observed_attack(self):
+        from action_evaluation import _ProvisionalRandom, RandomDraw
+        from melee_combat import MeleeStrike, effective_melee_reach_meters
+        from hex_facing import nearest_facing
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261107,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience":"10000", "width_cells":"10", "height_cells":"5",
+            "equipment_mode":"equipped", "opponent_strategy":"none"})
+        self.assertEqual(status,200)
+        candidate=self.session.active_candidate
+        player=candidate.participants[0].native.being
+        attacker=candidate.participants[1].native.being
+        attacker_weapon_id=attacker.current.body_parts['right hand']
+        attacker_weapon=candidate.universe.get_object_by_id(attacker_weapon_id)
+        from dataclasses import replace
+        attacker.set_position(CartesianPosition(player.get_position().x+.1,
+            player.get_position().y,player.get_position().z))
+        attacker.set_hex_facing(nearest_facing((player.get_position().x-attacker.get_position().x,
+            player.get_position().y-attacker.get_position().y,0)))
+        ledger=player._arena_perception_ledger
+        evidence=replace(ledger._current[attacker.id],position=attacker.get_position())
+        ledger._current[attacker.id]=evidence
+        ledger._history=[evidence if row.entity_id==attacker.id else row for row in ledger._history]
+        self.assertEqual(self.request('/api/generated/run',{})[0],200)
+        self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        pool=MeleeDefense.dodge_strategy_pool(player,candidate.universe)
+        self.assertEqual(self.request('/api/generated/dodge',{'defense':pool,'timing':0})[0],200)
+        self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        retained=self.session._retained_defense(candidate,player,'dodge')
+        self.assertIsNotNone(retained)
+        attacker.strategy.attack=0
+        strike=MeleeStrike(candidate.encounter,attacker.id,player.id,attacker_weapon_id,
+            motion='thrust',reach=effective_melee_reach_meters(attacker.current,attacker_weapon.current))
+        candidate.encounter.schedule_action(strike)
+        self.assertEqual(self.request('/api/generated/advance',{'seconds':1})[0],200)
+        self.assertLessEqual(retained.ready_at,strike.end_time,
+            f'ready_at={retained.ready_at}, strike_end={strike.end_time}, now={candidate.encounter.time}')
+        handle=self.session._view_handles[attacker.id]
+        status, response=self.request('/api/generated/dodge',{'handle':handle})
+        self.assertEqual(status,200,response)
+        defense=next(member.action for choice in candidate.encounter._choice_book._choices.values()
+            for member in choice.members if type(member.action) is MeleeDefense
+            and member.action.target_action_id==strike.id)
+        self.assertEqual(strike._status(candidate.encounter)[0],'in_reach')
+        attack_roll=1
+        player_hp=player.get_hit_points()
+        def scripted(context,dice):
+            sides=int(dice.split('d',1)[1].split('+',1)[0])
+            value=(20 if context.action_id==defense.id else attack_roll) if dice=='1d20' else sides
+            context.trace.append(RandomDraw(context.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',scripted):
+            while candidate.encounter.time < math.ceil(strike.end_time):
+                candidate.encounter.step(1)
+        self.assertEqual(defense.resolution.outcome,'evaded')
+        self.assertEqual(strike.resolution.outcome,'hit self')
+        self.assertEqual(player.get_hit_points(),player_hp)
+
     def test_touch_uses_native_choice_http_route_and_survives_pending_save_load(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)

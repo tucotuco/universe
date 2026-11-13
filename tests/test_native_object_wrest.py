@@ -351,6 +351,50 @@ class TestNativeObjectWrest(unittest.TestCase):
         self.assertEqual(candidate.universe.get_object_by_id(object_id).parent_container_id,holder.id)
         self.assertEqual(len(active_object_grip_state(candidate.encounter)),0)
 
+    def test_competing_three_being_wrest_reservation_is_rejected_without_rng(self):
+        from action import Action
+        from action_choice import ChoiceRejected
+        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
+        request(session,'/api/generated/generate',{
+            'starting_experience':'10000','width_cells':'5','height_cells':'5',
+            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
+        candidate=session.active_candidate
+        actor=candidate.participants[0].native.being
+        holder=candidate.participants[1].native.being
+        object_id=holder.current.body_parts['right hand']
+        request(session,'/api/generated/run',{})
+        request(session,'/api/generated/advance',{'seconds':1})
+        handle=session._view_handles[object_id]
+        request(session,'/api/generated/inspect',{'handle':handle})
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
+        request(session,'/api/generated/advance',{'seconds':1})
+        grip=active_object_grip_state(candidate.encounter)[0]
+        self.assertEqual(request(session,'/api/generated/grappling',{
+            'handle':handle,'action':'wrest'})[0],200)
+
+        third_id=candidate.universe.make_being('Human','Competing wrestler')
+        third=candidate.universe.get_object_by_id(third_id)
+        third.set_position(actor.get_position())
+        third.set_hit_points(100)
+        third.size_category='medium'
+        third.current.body_parts['left hand']=None
+        candidate.encounter.add_being(third.id)
+        candidate.encounter.mark_aware(third.id,holder.id)
+        candidate.encounter.mark_aware(third.id,object_id)
+        candidate.encounter.mark_aware(holder.id,third.id)
+        competing=Action(candidate.universe,candidate.encounter.time,
+            candidate.encounter.time+1,'wrest',third.id,object_id,None)
+        competing.holder_id=holder.id;competing.holder_hand='right hand'
+        competing.grab_hand='left hand';competing.object_grip_id=grip[1]
+        before_rng=session._rng_cursor.state
+        with self.assertRaises(ChoiceRejected):
+            candidate.encounter.schedule_action(competing)
+        self.assertEqual(session._rng_cursor.state,before_rng)
+        self.assertEqual(holder.current.body_parts['right hand'],object_id)
+        self.assertEqual(candidate.universe.get_object_by_id(object_id).parent_container_id,holder.id)
+        self.assertEqual(active_object_grip_state(candidate.encounter),(grip,))
+
     def test_same_boundary_disarm_prevents_wrest_transfer(self):
         from action import Action
         from strategy import Strategy
@@ -414,7 +458,7 @@ class TestNativeObjectWrest(unittest.TestCase):
             self.assertEqual(holder.current.body_parts['right hand'],object_id)
 
     def test_earlier_disarm_invalidates_accepted_future_wrest_with_three_beings(self):
-        """Explicit test Geometry resolves paths without changing Arena rules."""
+        """Arena map and explicit test Geometry exercise stale custody cleanly."""
         from action import Action
         from action_evaluation import _ProvisionalRandom, RandomDraw
         from encounter import Encounter
@@ -511,8 +555,7 @@ class TestNativeObjectWrest(unittest.TestCase):
         encounter.schedule_choice((disarm,wrest))
 
         # Disarm commits at second 2 while Wrest is accepted to start there and
-        # resolve at 3. All three Beings have explicit test Geometry, so path
-        # validation tests the custody ordering instead of returning unknown.
+        # resolve at 3. All Beings have explicit test Geometry and valid facing.
         step_with([20,1])
         self.assertEqual(disarm.resolution.outcome,'disarmed')
         self.assertIn(wrest.id,encounter.pending_action_list)
