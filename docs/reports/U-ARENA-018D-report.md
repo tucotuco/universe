@@ -58,9 +58,9 @@ These items keep the broader program and Action inventory PARTIAL / OPEN; they a
 - `98bed44bc00a6adfcbbe27fc9d29ca85a660ddab` — native/generated unarmed Disarm.
 - `a908169562667049cb78657a63caaa5b33eafaa5` — grappled-defender Disarm modifier regression.
 - `ead115d92621081fe4204f1f228156aed3248409` — contact Multiple-action Arena integration.
-- `dbc9587` — pinned-target attack redirection and regression; focused 85-test action-evaluation module passed after this commit.
+- `dbc95877afe888c90f71c5d2b2fb0258a7a78ab3` — pinned-target attack redirection and regression; focused 85-test action-evaluation module passed after this commit.
 - Earlier required workflow correction and canonical assignment commits are `32a698f31ff015ad5885f376044867756f742b0c` and `f0264cc`.
-- The report/TASKS closeout commit follows `dbc9587`; its full hash is recorded by Git history at verification. The checkout remains unpublished. Unrelated user-provided untracked files were preserved and not staged.
+- TASKS/report closeout commit: `07d93a644f80fe9e67fee754e91c536a8e459c52`. At closeout verification, tracked changes were committed and only the pre-existing unrelated user-provided untracked files remained; they were not staged. The checkout remains unpublished.
 
 ## Historical milestone notes (superseded by the current matrix)
 
