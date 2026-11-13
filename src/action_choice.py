@@ -96,9 +96,29 @@ def _freeze(value):
 
 
 def _requires_multiple_action_capacity(action):
-    # Run Actions represent the movement exception in the adopted rule. Other
-    # registered action families consume simultaneous Action capacity.
-    return getattr(action, 'event_type', None) != 'run'
+    # Run is the adopted movement exception. A declared willing Touch also
+    # retains its specific no-Multiple-action exception (revision 68).
+    data = object.__getattribute__(action, '__dict__')
+    if data.get('event_type') == 'touch' and data.get('touch_willing') is True:
+        return False
+    return data.get('event_type') != 'run'
+
+
+def _compatible_simultaneous_object_claims(first, second, object_id):
+    """Permit only same-boundary same-holder Object Grip/Wrest contests."""
+    if first is None or second is None or type(first) is not type(second):
+        return False
+    first_data=object.__getattribute__(first,'__dict__')
+    second_data=object.__getattribute__(second,'__dict__')
+    event_type=first_data.get('event_type')
+    return (event_type in ('grab object','wrest')
+        and second_data.get('event_type')==event_type
+        and first.target_id==second.target_id==object_id
+        and first.actor_id!=second.actor_id
+        and first_data.get('holder_id')==second_data.get('holder_id')
+        and first_data.get('holder_hand')==second_data.get('holder_hand')
+        and first.start_time==second.start_time
+        and math.ceil(first.end_time)==math.ceil(second.end_time))
 
 
 def _resource_skill_pool(encounter, action):
@@ -285,6 +305,16 @@ class ChoiceBook:
                                          and other in book._reservations
                                          for book in self.encounter.universe._choice_books))
                     if object_id == other.object_id and (overlap or unsettled):
+                        prior_action = (self.encounter.universe.get_event_by_id(other.action_id)
+                            or next((candidate for candidate in candidates.values()
+                                     if candidate.id == other.action_id), None)
+                            or next((member.action for book in self.encounter.universe._choice_books
+                                for record in book._choices.values()
+                                for member, packet in zip(record.members, record.prepared)
+                                if packet.action_id == other.action_id), None))
+                        if _compatible_simultaneous_object_claims(
+                                prior_action,member.action,object_id):
+                            continue
                         errors.append(ChoiceDiagnostic('active_object_conflict', member.key,
                             f'Object {object_id} is actively reserved by {other.action_id}; '
                             'edit the Object or interval (handoff requires boundary settlement)',

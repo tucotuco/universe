@@ -138,6 +138,77 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertFalse(committed.facts.effects)
         self.assertEqual(committed.facts.metadata, (('distance', .2),))
 
+    def test_willing_touch_during_another_action_uses_dex_check_without_multiple_action(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        target_id = self.world.make_being('Human', 'Willing recipient')
+        target = self.world.get_object_by_id(target_id)
+        target.set_position(CartesianPosition(.25, .1, 0))
+        target.set_hit_points(100)
+        self.enc.add_being(target.id)
+        self.enc.mark_aware(self.a.id, target.id)
+        self.enc.enable_transactional_progression(quiescent=True)
+
+        other = Action(self.world, 0, 1, 'touch', self.a.id, self.b.id, None)
+        willing = Action(self.world, 0, 1, 'touch', self.a.id, target.id, None)
+        willing.touch_willing = True
+        self.enc.schedule_action(other)
+        self.enc.schedule_action(willing)
+        self.assertEqual(self.enc.get_being(self.a.id).get_skill_level('multi-action') or 0, 0)
+
+        values = {other.id: iter((15, 1)), willing.id: iter((1, 1, 1))}
+        willing_draws = []
+        def roll(context, dice):
+            value = next(values[context.action_id])
+            if context.action_id == willing.id:
+                willing_draws.append(dice)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(1)
+        result = self.enc.inspect_committed(1)
+        self.assertEqual(result.action(other.id).facts.outcome, 'touched')
+        self.assertEqual(result.action(willing.id).facts.outcome, 'touched')
+        self.assertEqual(willing_draws, ['1d6'] * 3)
+
+    def test_willing_touch_uses_four_dice_when_actor_and_recipient_are_moving(self):
+        self.a.set_position(CartesianPosition(.2, 0, 0))
+        self.b.set_position(CartesianPosition(.25, 0, 0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        actor_run = RunAction(self.world, self.a.id, 0, 2, 3, experience=0)
+        target_run = RunAction(self.world, self.b.id, 0, 2, 3, experience=0)
+        willing = Action(self.world, 0, 1, 'touch', self.a.id, self.b.id, None)
+        willing.touch_willing = True
+        self.enc.schedule_choice((actor_run, target_run, willing))
+        values = iter((1, 1, 1, 1))
+        willing_draws = []
+        def roll(context, dice):
+            value = next(values)
+            if context.action_id == willing.id:
+                willing_draws.append(dice)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(1)
+        result = self.enc.inspect_committed(1)
+        self.assertEqual(result.action(willing.id).facts.outcome, 'touched')
+        self.assertEqual(willing_draws, ['1d6'] * 4)
+
+        self.assertEqual(self.enc.time, 1)
+
+    def test_paralysis_precludes_willing_touch_without_a_random_draw(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        self.a.current.states.states['paralyzed'] = True
+        self.enc.enable_transactional_progression(quiescent=True)
+        willing = Action(self.world, 0, 1, 'touch', self.a.id, self.b.id, None)
+        willing.touch_willing = True
+        self.enc.schedule_action(willing)
+        with patch.object(_ProvisionalRandom, 'roll', side_effect=AssertionError('paralyzed actor must not roll')):
+            self.enc.step(1)
+        result = self.enc.inspect_committed(1)
+        self.assertEqual(result.action(willing.id).facts.outcome, 'unable_to_act')
+
     def test_touch_uses_one_yard_hex_occupancy_without_requiring_facing(self):
         from arena_hex_map import ArenaHexLayout,HexAddress,encounter_map_descriptor
         layout=ArenaHexLayout.rectangle(4,4)

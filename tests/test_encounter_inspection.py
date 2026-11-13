@@ -383,7 +383,36 @@ class TestCombatInspection(unittest.TestCase):
         self.enc.enable_transactional_progression(quiescent=True,rng_owner=RNGCursor(random.Random(4).getstate()))
 
     def resolve(self,actions,rolls):
-        self.enc.schedule_choice(actions); values=iter(rolls)
+        from action_choice import ChoiceMember
+        rows=tuple(actions);by_actor={}
+        by_id={action.id:action for action in rows}
+        for index,action in enumerate(rows):
+            by_actor.setdefault(action.actor_id,[]).append((index,action))
+        penalties={}
+        def bounds(action):
+            target_id=getattr(action,'target_action_id',None)
+            target=by_id.get(target_id) or self.world.get_event_by_id(target_id)
+            if type(action) is MeleeDefense and target is not None:
+                return target.start_time,target.end_time
+            return action.start_time,action.end_time
+        for actor_id,components in by_actor.items():
+            overlapping=set()
+            for position,(index,action) in enumerate(components):
+                for other_index,other in components[position+1:]:
+                    first=bounds(action);second=bounds(other)
+                    if max(first[0],second[0])<min(first[1],second[1]):
+                        overlapping.update((index,other_index))
+            if overlapping:
+                actor=self.world.get_object_by_id(actor_id)
+                actor.set_skill_level(self.world.get_skill_dictionary(),'multi-action',1)
+                actor.set_skill_level(self.world.get_skill_dictionary(),'armed combat',20)
+                actor.set_skill_level(self.world.get_skill_dictionary(),'tumble',3)
+                actor.current.skills.weapon_skills['Dagger']=20
+                for rank,index in enumerate(sorted(overlapping)):
+                    penalties[index]=(0,3)[rank]
+        declared=tuple(ChoiceMember(str(index),action,priority_penalty=penalties.get(index))
+                       for index,action in enumerate(rows))
+        self.enc.schedule_choice(declared); values=iter(rolls)
         def roll(rng,dice):
             value=next(values);rng.trace.append(RandomDraw(rng.action_id,dice,int(dice[2:].split('+')[0]),value));return value
         with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(max(math.ceil(a.end_time) for a in actions))

@@ -163,6 +163,16 @@ def _expected_body_parts(meta, target_id, initial):
     return expected
 
 
+def _transfer_batches(meta, object_id):
+    batches = {}
+    for row in meta.effects.values():
+        effect = row.effect
+        if (type(effect) is ObjectGripEffect and effect.target_id == object_id
+                and effect.operation == 'transfer'):
+            batches.setdefault(row.identity.boundary, []).append(effect)
+    return batches
+
+
 def detached(value):
     global _ALLOWED
     if _ALLOWED is None:
@@ -316,19 +326,28 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                     and key not in tuple(owner.current.body_parts.values())
                     and obj.parent_container_id is None and obj.get_position()==CartesianPosition(*row.effect.position),
                     'unreceipted native Disarm release')
-            if type(row.effect) is ObjectGripEffect and row.effect.target_id==key and row.effect.operation=='transfer':
-                receiver=objects.get(row.effect.actor_id);holder=objects.get(row.effect.holder_id)
+            batches = _transfer_batches(meta, key)
+            for boundary, transfers in batches.items():
                 from being import BeingInstance
-                _require(type(receiver) is BeingInstance and type(holder) is BeingInstance
-                    and key in receiver.possessions and receiver.possessions.count(key)==1
-                    and key in receiver.weapons and receiver.weapons.count(key)==1
-                    and receiver.current.body_parts.get(row.effect.actor_hand)==key
+                holders = {effect.holder_id for effect in transfers}
+                receivers = {effect.actor_id for effect in transfers}
+                holder_id = next(iter(holders)) if len(holders) == 1 else None
+                receiver_ids = receivers
+                receiver_rows = [objects.get(identity) for identity in receiver_ids]
+                holder = objects.get(holder_id)
+                _require(len(holders) == 1 and type(holder) is BeingInstance
+                    and all(type(receiver) is BeingInstance for receiver in receiver_rows)
+                    and len(receiver_rows) == len(transfers)
+                    and all(key in receiver.possessions and receiver.possessions.count(key)==1
+                        and key in receiver.weapons and receiver.weapons.count(key)==1
+                        and receiver.current.body_parts.get(next(e.actor_hand for e in transfers
+                            if e.actor_id==receiver.id))==key for receiver in receiver_rows)
                     and key not in holder.possessions and key not in holder.weapons
                     and key not in holder.current.body_parts.values()
-                    and obj.parent_container_id==receiver.id and obj.spatial_state is None
+                    and obj.parent_container_id==min(receiver_ids) and obj.spatial_state is None
                     and not any(key in tuple(getattr(other,name,()) or ())
                         for other in objects.values() if type(other) is BeingInstance
-                        and other not in (receiver,holder)
+                        and other.id not in receiver_ids | {holder.id}
                         for name in ('possessions','weapons','body_parts','armor')),
                     'unreceipted same-ID Wrest custody transfer')
         if key in meta.projectile_states:

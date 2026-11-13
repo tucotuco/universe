@@ -606,6 +606,17 @@ class GeneratedArenaSession:
             object_name=self._display_names.get(object_id,evidence.name)
             holder_name=self._display_names.get(holder_id,holder.name)
             contact_status.append(f"You grip {object_name} with {actor_hand}; {holder_name} holds it in {holder_hand}")
+        from physical_contact import shared_object_holders
+        for object_id, obj in candidate.universe.object_registry.object_instances.items():
+            holders=shared_object_holders(candidate.encounter,object_id)
+            own_hand=next((hand for being_id,hand in holders
+                           if being_id==player.native.being.id),None)
+            if own_hand is None:
+                continue
+            evidence=next((item for item in ledger.current if item.entity_id==object_id),None)
+            if evidence is not None and evidence.present_state=='carried':
+                object_name=self._display_names.get(object_id,evidence.name)
+                contact_status.append(f"You jointly hold {object_name} in {own_hand}")
         feint_action = self._feint_action_view(candidate, player.native.being)
         feint_pending = feint_action is not None and feint_action["status"] == "executing"
         coup_de_grace_action = self._named_base_action_view(candidate, player.native.being, "coup de grace", "Coup de grace")
@@ -3457,6 +3468,7 @@ class GeneratedArenaSession:
         from weapon import WeaponInstance
 
         registry = candidate.universe.get_object_registry().object_instances
+        from physical_contact import shared_object_holders
         inventory = {"status": "available", "items": [], "carried_weight_pounds": 0.0,
                      "encumbrance_status": "No standalone native encumbrance category is stored."}
         try:
@@ -3486,10 +3498,15 @@ class GeneratedArenaSession:
                     raise ValueError("one native Object is assigned to multiple body parts")
                 body_slots[object_id] = slot
             reference_ids = list(dict.fromkeys(references))
+            jointly_held = {object_id for object_id in reference_ids
+                if any(holder_id == being.id for holder_id, _hand
+                       in shared_object_holders(candidate.encounter, object_id))}
             root_order = []
             for object_id in reference_ids:
                 item = registry.get(object_id)
                 if item is not None and getattr(item, "parent_container_id", None) in (None, being.id):
+                    root_order.append(object_id)
+                elif object_id in jointly_held:
                     root_order.append(object_id)
                 elif object_id in weapon_ids or object_id in body_slots or object_id == armor_id:
                     raise ValueError("equipped Object has conflicting container custody")
@@ -3518,7 +3535,7 @@ class GeneratedArenaSession:
                 if expected_parent_id is None:
                     if object_id not in root_order:
                         raise ValueError("native inventory reference has no directly owned root")
-                    if parent_id not in (None, being.id):
+                    if parent_id not in (None, being.id) and object_id not in jointly_held:
                         raise ValueError("native inventory Object has conflicting custody")
                     if item.get_position() is not None:
                         raise ValueError("native inventory Object is still spatially placed")

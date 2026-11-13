@@ -116,6 +116,7 @@ class EvaluationSnapshot:
     physical_grips: tuple = ()
     grapple_controls: tuple = ()
     object_grips: tuple = ()
+    moving_ids: tuple = ()
 
     def entity(self, identity):
         try:
@@ -297,7 +298,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id'):
             if key in ad:
                 selected[key] = freeze(ad[key])
         if type(action) is Action and ad['event_type'] == 'grab':
@@ -588,13 +589,31 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             data['free_hands']=tuple(hand for hand in data.get('free_hands',())
                 if (key,hand) not in object_grip_hands)
             entities[key]=replace(entity,data=MappingProxyType(data))
+    moving_ids = set()
+    if _stage is not None:
+        for key, position_value in _stage.positions.items():
+            if key not in objects or type(objects[key]) is not BeingInstance:
+                continue
+            spatial = object.__getattribute__(objects[key], '__dict__').get('spatial_state')
+            prior_position = None if spatial is None else spatial.position
+            if position_value != prior_position:
+                moving_ids.add(key)
+    for row in actions.values():
+        if (row.lifecycle == 'pending'
+                and row.start <= boundary <= row.nominal_end
+                and (row.family == 'run' or row.data.get('event_type')
+                     in ('trip', 'takedown', 'reverse', 'pin'))):
+            moving_ids.add(row.actor_id)
+            if row.data.get('event_type') in ('trip', 'takedown', 'reverse', 'pin'):
+                moving_ids.add(row.target_id)
     snapshot = EvaluationSnapshot(ed['id'], boundary, freeze(ed['difficulty_class']),
         MappingProxyType(entities), participants, MappingProxyType(actions), freeze(ed['awareness']),
         freeze(frame.to_dict()), freeze(profiles), freeze(random.getstate() if rng_state is None else rng_state),
         practice_inputs=practice_inputs, objective_inputs=objective_inputs,
         imported_practice_dependency=imported_dependency,
         encounter_map=freeze(ed.get('map')), physical_grips=grips,
-        grapple_controls=controls, object_grips=object_grips)
+        grapple_controls=controls, object_grips=object_grips,
+        moving_ids=tuple(sorted(moving_ids)))
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -944,6 +963,9 @@ def _combat(snapshot, action, rng, dependencies):
         if len(row) > 6 and row[6] in ('pin_top', 'pin_bottom'))
     if action.family == 'combat' and action.data['event_type'] == 'touch':
         distance = snapshot.distance(actor.id, target.id)
+        willing = action.data.get('touch_willing') is True
+        if willing and _helpless(actor):
+            return ActionProposal(action.id, actor.id, (target.id,), 'unable_to_act')
         if actor.position is None or target.position is None or distance is None:
             outcome = 'unplaced'
         else:
@@ -965,10 +987,29 @@ def _combat(snapshot, action, rng, dependencies):
                         reach, snapshot.physical_path(actor.id,target.id), layout)
                     if status != 'in_reach': outcome = status
             if outcome is None:
-                attack_total = (rng.roll('1d20') + actor.data['strategy']['attack']
-                                - (action.data.get('multiple_action_priority', 0) or 0))
-                defense_total = rng.roll('1d20') + target.data['strategy']['defense']
-                outcome = 'touched' if attack_total > defense_total else 'missed'
+                if willing:
+                    other_actions = tuple(row for row in snapshot.actions.values()
+                        if row.id != action.id and row.lifecycle == 'pending'
+                        and row.start <= snapshot.boundary <= row.nominal_end)
+                    actor_busy = any(row.actor_id == actor.id for row in other_actions)
+                    moving_ids = set(getattr(snapshot, 'moving_ids', ()))
+                    actor_moving = actor.id in moving_ids or any(
+                        row.actor_id == actor.id and row.family == 'run' for row in other_actions)
+                    target_moving = target.id in moving_ids or any(
+                        row.actor_id == target.id and row.family == 'run' for row in other_actions)
+                    check = actor_busy or actor_moving or target_moving
+                    if not check:
+                        outcome = 'touched'
+                    else:
+                        dice_count = 4 if actor_moving and target_moving else 3
+                        dexterity = actor.data['abilities'].get('DEX', 10)
+                        total = sum(rng.roll('1d6') for _ in range(dice_count))
+                        outcome = 'touched' if total <= dexterity else 'missed'
+                else:
+                    attack_total = (rng.roll('1d20') + actor.data['strategy']['attack']
+                                    - (action.data.get('multiple_action_priority', 0) or 0))
+                    defense_total = rng.roll('1d20') + target.data['strategy']['defense']
+                    outcome = 'touched' if attack_total > defense_total else 'missed'
         metadata = () if distance is None else (('distance', distance),)
         return ActionProposal(action.id, actor.id, (target.id,), outcome,
             (), (), metadata)
@@ -1235,7 +1276,7 @@ def _grappling(snapshot, action, rng):
         competing=[row for row in snapshot.actions.values() if row.lifecycle=='pending'
             and row.boundary==action.boundary and row.target_id==target.id
             and row.id!=action.id and row.data.get('event_type') in ('grab object','wrest')]
-        if competing:
+        if any(row.data.get('event_type')!=event_type for row in competing):
             return ActionProposal(action.id,actor.id,(target.id,),'contested')
         losing=[row for row in snapshot.actions.values() if row.lifecycle=='pending'
             and row.boundary==action.boundary and row.data.get('event_type')=='disarm'
@@ -1245,7 +1286,8 @@ def _grappling(snapshot, action, rng):
             and row.actor_id==holder.id and row.instrument_id==target.id]
         if losing or holder_use:
             return ActionProposal(action.id,actor.id,(target.id,),'custody_conflict')
-        existing=next((row for row in snapshot.object_grips if row[0]==target.id),None)
+        existing=next((row for row in snapshot.object_grips
+                       if row[0]==target.id and row[2]==actor.id),None)
         if event_type=='grab object':
             if existing is not None:
                 return ActionProposal(action.id,actor.id,(target.id,),'unavailable')

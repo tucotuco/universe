@@ -173,6 +173,9 @@ class Action(Event):
             if (self.instrument_id is not None
                     or self.end_time - self.start_time != 1):
                 raise ValueError('Touch is a one-second unarmed Action')
+            if ('touch_willing' in object.__getattribute__(self, '__dict__')
+                    and type(object.__getattribute__(self, '__dict__')['touch_willing']) is not bool):
+                raise ValueError('Touch willingness must be an explicit native Boolean')
             return PreparedSchedule.from_action(self)
         if self.event_type == 'strike object':
             from encounter import Encounter
@@ -331,8 +334,15 @@ class Action(Event):
                 if any(row[2]==actor.id and row[4]==actor_hand for row in grips):
                     raise ValueError('receiving hand already maintains an Object Grip')
                 if any(row[0]==target_obj.id for row in grips):
-                    raise ValueError('Object already has an established Object Grip')
+                    from physical_contact import shared_object_holders
+                    if shared_object_holders(encounter,target_obj.id):
+                        raise ValueError('Object has simultaneous holders; later Object contests are not adopted')
+                    if any(row[0]==target_obj.id and row[2]==actor.id for row in grips):
+                        raise ValueError('This Being already has an established Object Grip on the Object')
             else:
+                from physical_contact import shared_object_holders
+                if shared_object_holders(encounter,target_obj.id):
+                    raise ValueError('Subsequent Wrest contests between joint holders are not adopted')
                 grip=next((row for row in grips if row[0]==target_obj.id
                     and row[2]==actor.id and row[3]==holder.id),None)
                 if (grip is None or grip[4]!=actor_hand or grip[5]!=hands[0]

@@ -38,6 +38,58 @@ def request(session,path,payload=None):
 
 
 class TestNativeObjectWrest(unittest.TestCase):
+    @staticmethod
+    def _three_being_native_encounter():
+        from action import Action
+        from arena_hex_map import ArenaHexLayout, encounter_map_descriptor
+        from encounter import Encounter
+        from library import Library
+        from atomic_publication import RNGCursor
+        from spatial.geometry import Sphere
+        from spatial.state import CartesianPosition
+        from universe import Universe
+
+        world=Universe('Three-Being simultaneous custody',
+            library=Library(config_dir=str(ROOT/'src/config')))
+        actor=world.get_object_by_id(world.make_being('Human','First challenger'))
+        holder=world.get_object_by_id(world.make_being('Human','Object holder'))
+        third=world.get_object_by_id(world.make_being('Human','Second challenger'))
+        layout=ArenaHexLayout.rectangle(5,5)
+        origin=layout.center_position(layout.address_for_index(12))
+        actor.set_position(origin)
+        holder.set_position(CartesianPosition(origin.x+.3,origin.y,origin.z))
+        third.set_position(CartesianPosition(origin.x+.3,origin.y+.3,origin.z))
+        for being in (actor,holder,third):
+            being.set_geometry(Sphere(.1));being.set_hit_points(100)
+            being.size_category='medium';being.set_posture('standing')
+        actor.set_hex_facing(0);holder.set_hex_facing(6);third.set_hex_facing(9)
+        object_id=world.make_weapon_for_being(holder.id,'Dagger','One shared Dagger')
+        world.arm_being(holder.id,object_id,'right hand')
+        world.get_object_by_id(object_id).parent_container_id=holder.id
+        encounter=Encounter(world,20,0,initiated=True)
+        encounter.map=encounter_map_descriptor(layout)
+        for being in (actor,holder,third):encounter.add_being(being.id)
+        for observer in (actor,holder,third):
+            for target in (actor,holder,third):
+                if observer is not target:encounter.mark_aware(observer.id,target.id)
+            encounter.mark_aware(observer.id,object_id)
+        encounter.add_object(object_id);world.add_event(encounter)
+        encounter.enable_transactional_progression(quiescent=True,
+            rng_owner=RNGCursor(random.Random(17).getstate()))
+        actor.strategy.attack=1000;third.strategy.attack=1000;holder.strategy.defense=0
+        return world,encounter,actor,holder,third,object_id
+
+    @staticmethod
+    def _scripted_step(encounter,rolls):
+        from action_evaluation import _ProvisionalRandom,RandomDraw
+        from unittest.mock import patch
+        values=iter(rolls)
+        def scripted(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',scripted):encounter.step(1)
+
     def test_out_of_reach_and_missing_grip_are_closed_before_rng(self):
         session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
         request(session,'/api/generated/generate',{
@@ -313,87 +365,137 @@ class TestNativeObjectWrest(unittest.TestCase):
         with self.assertRaises(Exception):
             session.save_encounter_bytes()
 
-    def test_same_boundary_second_object_grab_is_rejected_without_priority(self):
+    def test_same_boundary_object_grabs_establish_independent_receipts(self):
         from action import Action
-        from action_choice import ChoiceRejected
-        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
-        request(session,'/api/generated/generate',{
-            'starting_experience':'10000','width_cells':'5','height_cells':'5',
-            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
-        candidate=session.active_candidate
-        actor=candidate.participants[0].native.being
-        holder=candidate.participants[1].native.being
-        object_id=holder.current.body_parts['right hand']
-        request(session,'/api/generated/run',{})
-        request(session,'/api/generated/advance',{'seconds':1})
-        handle=session._view_handles[object_id]
-        request(session,'/api/generated/inspect',{'handle':handle})
-        self.assertEqual(request(session,'/api/generated/grappling',{
-            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
-
-        third_id=candidate.universe.make_being('Human','Second would-be wrestler')
-        third=candidate.universe.get_object_by_id(third_id)
-        third.set_position(actor.get_position());third.set_hit_points(100)
-        third.size_category='medium'
-        third.current.body_parts['left hand']=None
-        candidate.encounter.add_being(third.id)
-        candidate.encounter.mark_aware(third.id,holder.id)
-        candidate.encounter.mark_aware(holder.id,third.id)
-        competing=Action(candidate.universe,candidate.encounter.time,
-            candidate.encounter.time+1,'grab object',third.id,object_id,None)
-        competing.holder_id=holder.id;competing.grab_hand='left hand'
-        competing.holder_hand='right hand'
-        before_rng=session._rng_cursor.state
-        with self.assertRaises(ChoiceRejected):
-            candidate.encounter.schedule_action(competing)
-        self.assertEqual(session._rng_cursor.state,before_rng)
+        from physical_contact import active_object_grip_state
+        world,encounter,actor,holder,third,object_id=self._three_being_native_encounter()
+        first=Action(world,0,1,'grab object',actor.id,object_id,None)
+        first.holder_id=holder.id;first.holder_hand='right hand';first.grab_hand='left hand'
+        second=Action(world,0,1,'grab object',third.id,object_id,None)
+        second.holder_id=holder.id;second.holder_hand='right hand';second.grab_hand='left hand'
+        encounter.schedule_choice((first,second))
+        self.assertEqual(sum(row.object_id==object_id
+            for row in encounter._choice_book._reservations),2)
+        self._scripted_step(encounter,[20,20])
+        actions=[row for row in world.event_history.values()
+                 if getattr(row,'event_type',None)=='grab object']
+        self.assertEqual([row.resolution.outcome for row in actions],['success','success'])
         self.assertEqual(holder.current.body_parts['right hand'],object_id)
-        self.assertEqual(candidate.universe.get_object_by_id(object_id).parent_container_id,holder.id)
-        self.assertEqual(len(active_object_grip_state(candidate.encounter)),0)
+        self.assertEqual(world.get_object_by_id(object_id).parent_container_id,holder.id)
+        grips=active_object_grip_state(encounter)
+        self.assertEqual({row[2] for row in grips},{actor.id,third.id})
 
-    def test_competing_three_being_wrest_reservation_is_rejected_without_rng(self):
+    def test_three_being_simultaneous_wrest_shares_same_object_and_persists(self):
         from action import Action
-        from action_choice import ChoiceRejected
-        session=GeneratedArenaSession(root_seed_factory=lambda:20261107)
-        request(session,'/api/generated/generate',{
-            'starting_experience':'10000','width_cells':'5','height_cells':'5',
-            'root_seed':'20261107','equipment_mode':'equipped','opponent_strategy':'none'})
-        candidate=session.active_candidate
-        actor=candidate.participants[0].native.being
-        holder=candidate.participants[1].native.being
-        object_id=holder.current.body_parts['right hand']
-        request(session,'/api/generated/run',{})
-        request(session,'/api/generated/advance',{'seconds':1})
-        handle=session._view_handles[object_id]
-        request(session,'/api/generated/inspect',{'handle':handle})
-        self.assertEqual(request(session,'/api/generated/grappling',{
-            'handle':handle,'action':'grab object','hand':'left hand'})[0],200)
-        request(session,'/api/generated/advance',{'seconds':1})
-        grip=active_object_grip_state(candidate.encounter)[0]
-        self.assertEqual(request(session,'/api/generated/grappling',{
-            'handle':handle,'action':'wrest'})[0],200)
+        from physical_contact import active_object_grip_state,shared_object_holders
+        world,encounter,actor,holder,third,object_id=self._three_being_native_encounter()
+        grab_one=Action(world,0,1,'grab object',actor.id,object_id,None)
+        grab_one.holder_id=holder.id;grab_one.holder_hand='right hand';grab_one.grab_hand='left hand'
+        grab_two=Action(world,0,1,'grab object',third.id,object_id,None)
+        grab_two.holder_id=holder.id;grab_two.holder_hand='right hand';grab_two.grab_hand='left hand'
+        encounter.schedule_choice((grab_one,grab_two))
+        self._scripted_step(encounter,[20,20])
+        grips=active_object_grip_state(encounter)
+        self.assertEqual({row[2] for row in grips},{actor.id,third.id})
 
-        third_id=candidate.universe.make_being('Human','Competing wrestler')
-        third=candidate.universe.get_object_by_id(third_id)
-        third.set_position(actor.get_position())
-        third.set_hit_points(100)
-        third.size_category='medium'
-        third.current.body_parts['left hand']=None
-        candidate.encounter.add_being(third.id)
-        candidate.encounter.mark_aware(third.id,holder.id)
-        candidate.encounter.mark_aware(third.id,object_id)
-        candidate.encounter.mark_aware(holder.id,third.id)
-        competing=Action(candidate.universe,candidate.encounter.time,
-            candidate.encounter.time+1,'wrest',third.id,object_id,None)
-        competing.holder_id=holder.id;competing.holder_hand='right hand'
-        competing.grab_hand='left hand';competing.object_grip_id=grip[1]
-        before_rng=session._rng_cursor.state
-        with self.assertRaises(ChoiceRejected):
-            candidate.encounter.schedule_action(competing)
-        self.assertEqual(session._rng_cursor.state,before_rng)
+        actor.current.abilities.abilities['STR']=30
+        third.current.abilities.abilities['STR']=30
+        holder.current.abilities.abilities['STR']=3
+        by_actor={row[2]:row for row in grips}
+        first=Action(world,2,3,'wrest',actor.id,object_id,None)
+        first.holder_id=holder.id;first.holder_hand='right hand'
+        first.grab_hand='left hand';first.object_grip_id=by_actor[actor.id][1]
+        second=Action(world,2,3,'wrest',third.id,object_id,None)
+        second.holder_id=holder.id;second.holder_hand='right hand'
+        second.grab_hand='left hand';second.object_grip_id=by_actor[third.id][1]
+        encounter.schedule_choice((first,second))
+        encounter.step(1)  # Activate both one-second contests at the common start fence.
+        self._scripted_step(encounter,[6,6,6,1,1,1,6,6,6,1,1,1])
+        self.assertEqual((first.resolution.outcome,second.resolution.outcome),('success','success'))
+        self.assertEqual(active_object_grip_state(encounter),())
+        self.assertEqual(set(shared_object_holders(encounter,object_id)),
+                         {(actor.id,'left hand'),(third.id,'left hand')})
+        obj=world.get_object_by_id(object_id)
+        self.assertEqual(obj.id,object_id)
+        self.assertEqual(obj.parent_container_id,min(actor.id,third.id))
+        self.assertNotIn(object_id,holder.current.body_parts.values())
+        self.assertNotIn(object_id,holder.weapons)
+        for receiver in (actor,third):
+            self.assertEqual(receiver.current.body_parts['left hand'],object_id)
+            self.assertEqual(receiver.weapons.count(object_id),1)
+            self.assertEqual(receiver.possessions.count(object_id),1)
+        from types import SimpleNamespace
+        projection=GeneratedArenaSession()
+        projection._view_handles[object_id]='opaque-shared-object'
+        projection._display_names[object_id]='One shared Dagger'
+        candidate=SimpleNamespace(universe=world,encounter=encounter)
+        for receiver in (actor,third):
+            inventory=projection._native_inventory_projection(candidate,receiver)
+            self.assertEqual(inventory['status'],'available')
+            self.assertEqual(sum(row['handle']=='opaque-shared-object'
+                for row in inventory['items']),1)
+            self.assertNotIn(object_id,json.dumps(inventory))
+        from transactional_progression import _BINDINGS
+        from arena_native_snapshot import capture,encode
+        saved=encode(capture(world,encounter,_BINDINGS[id(encounter)].rng_owner))
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'joint-hold.json';path.write_bytes(saved)
+            verify=("import sys; from arena_native_snapshot import decode,restore; "
+                "from physical_contact import shared_object_holders; "
+                "w,e,r=restore(decode(open(sys.argv[1],'rb').read())); oid=sys.argv[2]; "
+                "assert len(shared_object_holders(e,oid))==2; o=w.get_object_by_id(oid); "
+                "assert o.id==oid and o.parent_container_id==min(sys.argv[3],sys.argv[4]); "
+                "assert sum(w.get_object_by_id(x).current.body_parts.get('left hand')==oid "
+                "for x in e.being_list)==2")
+            child_env=dict(os.environ)
+            child_env['PYTHONPATH']=os.pathsep.join((str(ROOT/'tests'),str(ROOT/'src'),str(ROOT/'examples')))
+            restored=subprocess.run([sys.executable,'-c',verify,str(path),object_id,actor.id,third.id],
+                cwd=ROOT,env=child_env,check=False,capture_output=True,text=True,timeout=60)
+            self.assertEqual(restored.returncode,0,restored.stderr)
+
+    def test_simultaneous_wrest_late_fault_restores_all_custody_receipts_and_rng(self):
+        from action import Action
+        from atomic_publication import PublicationFailure
+        from physical_contact import active_object_grip_state
+        from tests.test_atomic_publication import raw_graph
+        from unittest.mock import patch
+        import atomic_publication
+
+        world,encounter,actor,holder,third,object_id=self._three_being_native_encounter()
+        grab_one=Action(world,0,1,'grab object',actor.id,object_id,None)
+        grab_one.holder_id=holder.id;grab_one.holder_hand='right hand';grab_one.grab_hand='left hand'
+        grab_two=Action(world,0,1,'grab object',third.id,object_id,None)
+        grab_two.holder_id=holder.id;grab_two.holder_hand='right hand';grab_two.grab_hand='left hand'
+        encounter.schedule_choice((grab_one,grab_two))
+        self._scripted_step(encounter,[20,20])
+        grips={row[2]:row for row in active_object_grip_state(encounter)}
+        actor.current.abilities.abilities['STR']=1000
+        third.current.abilities.abilities['STR']=1000
+        first=Action(world,1,2,'wrest',actor.id,object_id,None)
+        first.holder_id=holder.id;first.holder_hand='right hand'
+        first.grab_hand='left hand';first.object_grip_id=grips[actor.id][1]
+        second=Action(world,1,2,'wrest',third.id,object_id,None)
+        second.holder_id=holder.id;second.holder_hand='right hand'
+        second.grab_hand='left hand';second.object_grip_id=grips[third.id][1]
+        encounter.schedule_choice((first,second))
+        from transactional_progression import _BINDINGS
+        rng_owner=_BINDINGS[id(encounter)].rng_owner
+        before_rng=rng_owner.state
+        before=raw_graph(world,encounter)
+        publish=atomic_publication.publish_interval_candidate
+        def inject(target,interval,**kwargs):
+            return publish(target,interval,_fail_after='rng',**kwargs)
+        with patch('atomic_publication.publish_interval_candidate',side_effect=inject):
+            with self.assertRaises(PublicationFailure):encounter.step(1)
+        self.assertEqual(raw_graph(world,encounter),before)
+        self.assertEqual(rng_owner.state,before_rng)
+        self.assertEqual(world.get_object_by_id(object_id).parent_container_id,holder.id)
         self.assertEqual(holder.current.body_parts['right hand'],object_id)
-        self.assertEqual(candidate.universe.get_object_by_id(object_id).parent_container_id,holder.id)
-        self.assertEqual(active_object_grip_state(candidate.encounter),(grip,))
+        self.assertIsNone(actor.current.body_parts['left hand'])
+        self.assertIsNone(third.current.body_parts['left hand'])
+        self.assertEqual({row[2] for row in active_object_grip_state(encounter)},
+                         {actor.id,third.id})
+        self.assertIsNone(first.resolution);self.assertIsNone(second.resolution)
 
     def test_same_boundary_disarm_prevents_wrest_transfer(self):
         from action import Action

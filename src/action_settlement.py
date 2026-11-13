@@ -86,7 +86,7 @@ _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss',
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
     'history_request': frozenset(('unplaced', 'out_of_range', 'not_aware', 'heard')),
-    'combat': _ATTACK_OUTCOMES | {'weapon_unavailable', 'touched', 'missed',
+    'combat': _ATTACK_OUTCOMES | {'weapon_unavailable', 'touched', 'missed', 'unable_to_act',
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'unsupported_reach'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
@@ -254,11 +254,11 @@ def _copy_proposal(proposal, actions, entities):
     metadata = freeze(_tuple(proposal.metadata))
     _require(all(type(pair) is tuple and len(pair) == 2 and type(pair[0]) is str for pair in metadata), 'invalid outcome metadata')
     if action.family == 'combat' and action.data.get('event_type') == 'touch':
-        touch_outcomes = {'touched', 'missed', 'unplaced', 'out_of_reach', 'unsupported_reach', 'blocked', 'uncertain_path'}
+        touch_outcomes = {'touched', 'missed', 'unable_to_act', 'unplaced', 'out_of_reach', 'unsupported_reach', 'blocked', 'uncertain_path'}
         _require(proposal.outcome in touch_outcomes
                  and not proposal.effects and not proposal.defenses,
-                 'Touch must resolve only its opposed contact result')
-        if proposal.outcome == 'unplaced':
+                 'Touch must resolve only its adopted contact result')
+        if proposal.outcome in ('unplaced', 'unable_to_act'):
             _require(metadata == (), 'unplaced Touch must not claim a distance')
         else:
             _require(len(metadata) == 1 and metadata[0][0] == 'distance',

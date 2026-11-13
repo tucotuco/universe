@@ -420,10 +420,16 @@ def _preflight(encounter, boundary):
     # Reviewed native assertions are read-only and validate declarations/packets.
     encounter._pending_schedule()
     reservations = tuple(r for b in wd['_choice_books'] for r in b._reservations)
+    reservation_actions = {m.action.id:m.action for b in wd['_choice_books']
+        for record in b._choices.values() for m in record.members}
+    from action_choice import _compatible_simultaneous_object_claims
     for index,r in enumerate(reservations):
         _require(r.object_id in registry and r.start < r.boundary, 'invalid active-Object reservation')
         for old in reservations[:index]:
-            _require(not (r.object_id==old.object_id and max(r.start,old.start)<min(r.boundary,old.boundary)),
+            compatible=(r.object_id==old.object_id and _compatible_simultaneous_object_claims(
+                reservation_actions.get(r.action_id),reservation_actions.get(old.action_id),r.object_id))
+            _require(compatible or not (r.object_id==old.object_id
+                and max(r.start,old.start)<min(r.boundary,old.boundary)),
                 'overlapping or duplicate active-Object reservations')
     for cid, record in book._choices.items():
         _require(record.view.id==cid and record.view.action_ids==tuple(m.action.id for m in record.members)

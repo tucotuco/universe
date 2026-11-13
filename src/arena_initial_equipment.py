@@ -328,16 +328,31 @@ def validate_saved_equipment_row(row, being, source_record_bytes, universe, enco
                 transfers.sort(key=lambda row:row[0])
                 if not transfers or transfers[0][1].holder_id!=being.id:
                     raise ValueError('initial Arena weapon custody changed without a receipt-backed Wrest')
-                for prior,current in zip(transfers,transfers[1:]):
-                    if current[1].holder_id!=prior[1].actor_id:
-                        raise ValueError('saved Wrest custody receipt chain is discontinuous')
-                latest=transfers[-1][1]
+                batches=[]
+                for boundary,effect in transfers:
+                    if not batches or batches[-1][0]!=boundary:
+                        batches.append((boundary,[]))
+                    batches[-1][1].append(effect)
+                prior_receivers=None
+                for _boundary,batch in batches:
+                    holders={effect.holder_id for effect in batch}
+                    receiver_ids={effect.actor_id for effect in batch}
+                    if (len(holders)!=1 or len(receiver_ids)!=len(batch)
+                            or prior_receivers is not None
+                            and (len(prior_receivers)!=1 or next(iter(holders))!=next(iter(prior_receivers)))):
+                        raise ValueError('saved Wrest custody receipt chain is discontinuous or ambiguous')
+                    prior_receivers=receiver_ids
                 owner=universe.get_object_by_id(obj.parent_container_id)
+                latest_batch=batches[-1][1]
+                latest_receivers={effect.actor_id:effect for effect in latest_batch}
                 if (encounter is None or owner is None or owner.id not in encounter.being_list
-                        or latest.actor_id!=owner.id or obj.get_position() is not None
-                        or obj.id not in owner.possessions or owner.possessions.count(obj.id)!=1
-                        or obj.id not in owner.weapons or owner.weapons.count(obj.id)!=1
-                        or owner.current.body_parts.get(latest.actor_hand)!=obj.id
+                        or owner.id!=min(latest_receivers) or obj.get_position() is not None
+                        or any((receiver:=universe.get_object_by_id(receiver_id)) is None
+                            or receiver_id not in encounter.being_list
+                            or obj.id not in receiver.possessions or receiver.possessions.count(obj.id)!=1
+                            or obj.id not in receiver.weapons or receiver.weapons.count(obj.id)!=1
+                            or receiver.current.body_parts.get(effect.actor_hand)!=obj.id
+                            for receiver_id,effect in latest_receivers.items())
                         or obj.id in being.possessions or obj.id in being.weapons
                         or obj.id in being.current.body_parts.values()):
                     raise ValueError('saved Wrest destination disagrees with native Object identity/hand custody')

@@ -601,39 +601,53 @@ def _make_plan(encounter,candidate,rng_owner):
     wrests=[row.effect for row in supported.boundary.effects.values()
             if type(row.effect) is ObjectGripEffect and row.effect.operation=='transfer']
     from action import Action
-    if len({effect.target_id for effect in wrests})!=len(wrests):
-        raise PublicationRejected('simultaneous Wrest claims the same native Object')
+    wrest_by_object={}
     for effect in wrests:
-        source=events.get(effect.source_action_id)
-        receiver=objects.get(effect.actor_id);holder=objects.get(effect.holder_id)
-        obj=objects.get(effect.target_id)
-        if (type(source) is not Action or source.event_type!='wrest'
-                or type(receiver) is not BeingInstance or type(holder) is not BeingInstance
-                or type(obj) is not WeaponInstance or receiver is holder
-                or effect.actor_id not in encounter.being_list or effect.holder_id not in encounter.being_list
-                or receiver.current.body_parts.get(effect.actor_hand,'missing') is not None
-                or holder.current.body_parts.get(effect.holder_hand)!=effect.target_id
-                or holder.weapons.count(effect.target_id)!=1
-                or obj.parent_container_id!=holder.id or obj.spatial_state is not None
-                or effect.target_id in tuple(receiver.current.body_parts.values())
-                or effect.target_id in receiver.weapons or effect.target_id in receiver.possessions
-                or any(effect.target_id in tuple(getattr(other,name,()) or ())
-                       for key,other in objects.items() if type(other) is BeingInstance
-                       and other not in (receiver,holder)
-                       for name in ('possessions','weapons','body_parts','armor'))):
-            raise PublicationRejected('Wrest custody or receiving hand changed before atomic transfer')
-        hparts=dict(holder.current.body_parts);hparts[effect.holder_hand]=None
-        hweapons=list(holder.weapons);hweapons.remove(effect.target_id)
-        hposs=list(holder.possessions)
-        if effect.target_id in hposs:hposs.remove(effect.target_id)
-        rparts=dict(receiver.current.body_parts);rparts[effect.actor_hand]=effect.target_id
-        plan.contents('targets',holder.current.body_parts,hparts)
-        plan.contents('targets',holder.weapons,hweapons)
-        plan.contents('targets',holder.possessions,hposs)
-        plan.contents('targets',receiver.current.body_parts,rparts)
-        plan.contents('targets',receiver.weapons,receiver.weapons+[effect.target_id])
-        plan.contents('targets',receiver.possessions,receiver.possessions+[effect.target_id])
-        plan.attr('targets',obj,'parent_container_id',receiver.id)
+        wrest_by_object.setdefault(effect.target_id,[]).append(effect)
+    for object_id,effects in wrest_by_object.items():
+        first=effects[0]
+        holder=objects.get(first.holder_id);obj=objects.get(object_id)
+        receivers=[]
+        for effect in effects:
+            source=events.get(effect.source_action_id)
+            receiver=objects.get(effect.actor_id)
+            if (type(source) is not Action or source.event_type!='wrest'
+                    or type(receiver) is not BeingInstance or type(holder) is not BeingInstance
+                    or type(obj) is not WeaponInstance or receiver is holder
+                    or effect.actor_id not in encounter.being_list or effect.holder_id!=holder.id
+                    or effect.holder_hand!=first.holder_hand
+                    or effect.actor_id in {row.id for row in receivers}
+                    or receiver.current.body_parts.get(effect.actor_hand,'missing') is not None
+                    or holder.current.body_parts.get(effect.holder_hand)!=object_id
+                    or holder.weapons.count(object_id)!=1 or obj.parent_container_id!=holder.id
+                    or obj.spatial_state is not None
+                    or object_id in tuple(receiver.current.body_parts.values())
+                    or object_id in receiver.weapons or object_id in receiver.possessions):
+                raise PublicationRejected('Wrest custody or receiving hand changed before atomic transfer')
+            receivers.append(receiver)
+        receiver_ids={row.id for row in receivers}
+        if any(object_id in tuple(getattr(other,name,()) or ())
+               for other in objects.values() if type(other) is BeingInstance
+               and other.id not in receiver_ids | {holder.id}
+               for name in ('possessions','weapons','body_parts','armor')):
+            raise PublicationRejected('Wrest Object has an unrelated native custody reference')
+        holder_parts=dict(holder.current.body_parts);holder_parts[first.holder_hand]=None
+        holder_weapons=list(holder.weapons);holder_weapons.remove(object_id)
+        holder_possessions=list(holder.possessions)
+        if object_id in holder_possessions:holder_possessions.remove(object_id)
+        plan.contents('targets',holder.current.body_parts,holder_parts)
+        plan.contents('targets',holder.weapons,holder_weapons)
+        plan.contents('targets',holder.possessions,holder_possessions)
+        for effect,receiver in zip(effects,receivers):
+            receiver_parts=dict(receiver.current.body_parts)
+            receiver_parts[effect.actor_hand]=object_id
+            plan.contents('targets',receiver.current.body_parts,receiver_parts)
+            plan.contents('targets',receiver.weapons,receiver.weapons+[object_id])
+            plan.contents('targets',receiver.possessions,receiver.possessions+[object_id])
+        # parent_container_id is the stable containment anchor for legacy
+        # tree readers; every physical co-holder is represented in native
+        # hands, weapons and possessions, all referencing this one Object ID.
+        plan.attr('targets',obj,'parent_container_id',min(receiver_ids))
     initial={aid:_resolve_metadata(encounter,data) for aid,data in changes['action_metadata'].items()}
     endpoint_new={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.registered_action_ids}
     endpoint_started={aid for fence in candidate.start_fences if fence.phase=='after_settlement' for aid in fence.started_action_ids}
@@ -748,9 +762,11 @@ def _make_plan(encounter,candidate,rng_owner):
     pickup_owners = {row.effect.object_id: row.effect.target_id
                      for row in supported.boundary.effects.values()
                      if type(row.effect) is PickupEffect}
-    object_transfers = {row.effect.target_id: (row.effect.actor_id,row.effect.actor_hand)
-                        for row in supported.boundary.effects.values()
-                        if type(row.effect) is ObjectGripEffect and row.effect.operation=='transfer'}
+    object_transfers = {}
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is ObjectGripEffect and effect.operation=='transfer':
+            object_transfers.setdefault(effect.target_id,{})[effect.actor_id]=effect.actor_hand
     weapon_draws = {row.effect.object_id: (row.effect.target_id,row.effect.hand)
                     for row in supported.boundary.effects.values()
                     if type(row.effect) is ReadyWeaponEffect}
@@ -783,9 +799,8 @@ def _make_plan(encounter,candidate,rng_owner):
                     equipment_status = 'worn'
                 else:
                     slots=dict(owner_native.current.body_parts)
-                    if entity_id in object_transfers:
-                        _owner_id,hand=object_transfers[entity_id]
-                        slots[hand]=entity_id
+                    if owner_id in object_transfers.get(entity_id,{}):
+                        slots[object_transfers[entity_id][owner_id]]=entity_id
                     if entity_id in weapon_draws:
                         _owner_id,hand=weapon_draws[entity_id]
                         slots[hand]=entity_id

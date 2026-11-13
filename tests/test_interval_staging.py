@@ -159,13 +159,14 @@ class TestIntervalStaging(unittest.TestCase):
 
     def test_supported_mixed_observers_history_spot_and_run_have_complete_recipients(self):
         group=self.f.f.group();h=self.f.f.history();accounts=[]
-        one=self.f.observe(self.a,group,ledger=BeliefLedger(self.a.id),start=5);two=self.f.observe(self.b,group,ledger=BeliefLedger(self.b.id),start=5)
-        ask=AskAboutPastAction(self.world,self.c.id,self.a.id,5,episode_time=0,topic='lessons',generate=self.f.f.recipe(h),received_accounts=accounts)
-        spot=self.spot();run=RunAction(self.world,self.c.id,5,1,1,experience=7)
+        one=self.f.observe(self.a,group,ledger=BeliefLedger(self.a.id),start=6);two=self.f.observe(self.b,group,ledger=BeliefLedger(self.b.id),start=6)
+        ask=AskAboutPastAction(self.world,self.c.id,self.a.id,6,episode_time=0,topic='lessons',generate=self.f.f.recipe(h),received_accounts=accounts)
+        spot=self.spot();run=RunAction(self.world,self.c.id,6,1,1,experience=7)
         self.enable_native_step();self.enc.schedule_action(spot);self.enc.step(5)
-        self.enc.schedule_choice((one,two,ask,run));candidate=self.build(6,velocities={self.c.id:(1,0,0)})
+        self.enc.step(1)
+        self.enc.schedule_choice((one,two,ask,run));candidate=self.build(7,velocities={self.c.id:(1,0,0)})
         supported=candidate.supported_candidate
-        self.assertEqual(set(supported.boundary.actions),{a.id for a in (one,two,ask,spot,run)})
+        self.assertEqual(set(supported.boundary.actions),{a.id for a in (one,two,ask,run)})
         self.assertEqual(len(supported.recipients),3);self.assertEqual(accounts,[])
         self.assertEqual(supported.target(self.c.id).practice_state.skill_experience['run'],7)
         self.assertEqual(supported.target(self.a.id).practice_state.skill_experience['spot'],12)
