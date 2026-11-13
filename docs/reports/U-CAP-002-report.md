@@ -48,8 +48,9 @@ Run the generated session through `tests.test_arena_melee_attack.TestArenaMeleeA
 - `d657f18` — Verify generated Charge checkpoint persistence.
 - `4b752d3` — Choose clear route in sprint UI test.
 - `8605fb6` — Test uncertain ground-object route refusal.
+- `7b00901` — Apply represented-leg stability to rush contests and update U-CAP-002 status.
 - For each recent commit, staged `git diff --cached --check` and `tools/check_publication_safety.py --staged` passed with zero findings. The staged-safety scan also saw a pre-existing staged historical rename, which was left out of these scoped commits.
-- Branch: `main`. Remote: `origin` points to `https://github.com/tucotuco/universe.git`. No push was made. The unrelated staged move of `docs/reports/U-THROW-001-rule-sync-proposal.patch` into `docs/reports/archive/` remains untouched. Current uncommitted changes are the reviewed extra-leg contest implementation, its tests and catalog explanation, plus the aligned `TASKS.md` and report; no unrelated working-tree files are modified.
+- Branch: `main`; latest implementation/status commit is `7b00901`. Remote: `origin` points to `https://github.com/tucotuco/universe.git`. No push was made. The tracked working tree is clean at this checkpoint. The unrelated staged move of `docs/reports/U-THROW-001-rule-sync-proposal.patch` into `docs/reports/archive/` remains untouched and excluded from scoped commits.
 
 ## Remaining work and blockers
 
