@@ -55,7 +55,7 @@ The first generated landing fixture was refused because `trace_physical_path` tr
 - `9514d1b087b7796a7592e74e2499fe343c08f92f` — Close the bounded U-CAP-002 outcome in `TASKS.md` and align this report with the assignment matrix.
 - Before commit: `git diff --cached --check` passed. `.venv/bin/python -B tools/check_publication_safety.py --staged` reported **24 staged paths, 0 findings, PASS**; the count included the user's independently staged archive rename. `git commit --only` explicitly excluded that rename.
 - The movement-regression commit used the required staged audit (**3 staged paths, 0 findings, PASS**) and `git commit --only` excluded the user-staged rename. The `TASKS.md`/report closeout used the required staged audit (**4 staged paths, 0 findings, PASS**) and likewise excluded that rename.
-- Immediately before final report interval/evidence closeout, `HEAD=9514d1b087b7796a7592e74e2499fe343c08f92f` on `main`; the final report-only commit will be directly above this verified tip. The resulting HEAD is included in the final Codex response because a commit cannot embed its own hash.
+- Verified task closeout tip before report-only finalization: `HEAD=9514d1b087b7796a7592e74e2499fe343c08f92f` on `main`. The subsequent audited report-only commits are `33605eeb8c719fde405fbe737e66cec5d1e47100` and `09626210a0b0fb470a14e82b557958e2e627acd4`; this report-finalization commit is the resulting `main` tip. Its own identifier is returned in the Codex response because a commit cannot embed its own hash.
 - Remote remains `origin` (`https://github.com/tucotuco/universe.git`); no push was made.
 - No test weakened checkpoint fingerprints. The new `PositionEffect` type was added to the closed checkpoint field/type catalog and reconstructed through the existing fingerprinted format; generated pending and committed restores both pass.
 
@@ -69,6 +69,6 @@ Earlier starts whose ends were not captured are preserved without estimates. All
 | Earlier continuation | 2026-11-13T09:57:07-08:00 | Not captured | Not calculable |
 | Earlier continuation | 2026-11-13T10:20:30-08:00 | Not captured | Not calculable |
 | Earlier continuation | 2026-11-13T12:07:23-08:00 | Not captured | Not calculable |
-| Current execution | 2026-11-13T14:06:56-08:00 | 2026-11-13T15:21:15-08:00 | PT1H14M19S |
+| Current execution | 2026-11-13T14:06:56-08:00 | 2026-11-13T15:21:41-08:00 | PT1H14M45S |
 
 The assignment's original start predates the recorded intervals; it is unavailable and is not fabricated.
