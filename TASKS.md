@@ -135,7 +135,7 @@
 
 - [x] **U-ACT-001 — Break hold — DONE bounded.** One-second Strength-only contest against a named individual physical Grip, native atomic effect; advanced interference/other grapplers open.
 - [ ] **U-ACT-002 — Break weapon — PARTIAL.** One-second attempt against an opponent's actual pending strike weapon, with prior-second cancellation and same-second nonretroactivity; other weapon-use situations missing.
-- [ ] **U-ACT-003 — Bull rush — PARTIAL.** Native and generated one-second forward Strength/size/equipped-shield contest with strict tie failure and typed `success_pending_displacement`; no unsupported distance is invented. Willing-target resolution, stability facts, Yield nullification, continued contests, concerted/mounted cases and represented displacement remain open.
+- [ ] **U-ACT-003 — Bull rush — PARTIAL.** Native and generated one-second forward Strength/size/equipped-shield contest with strict tie failure, Tower-shield refusal and typed `success_pending_displacement`; no unsupported distance is invented. Willing-target resolution, stability facts, Yield nullification, continued contests, concerted/mounted cases and represented displacement remain open.
 - [ ] **U-ACT-004 — Pull — BLOCKED quantitative force/controlled displacement.** Qualitative grip/contest rules exist; do not invent Strength-to-force or kinematics.
 - [ ] **U-ACT-005 — Charge — OPEN.** Integrated run-in, relative velocity, timing, interceptions and damage consequences.
 - [ ] **U-ACT-006 — Coup de grace — PARTIAL.** Native helpless-target melee automatic critical and Fortitude consequence, Arena route; ranged branches absent.

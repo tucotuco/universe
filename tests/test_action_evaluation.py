@@ -803,7 +803,7 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.enc.inspect_committed(4).action(overrun.id).facts.outcome,'success')
         self.assertEqual(self.b.get_posture(),'lying')
 
-    def test_native_overrun_is_rejected_for_a_bearing_tower_shield(self):
+    def test_native_overrun_and_bull_rush_are_rejected_for_a_bearing_tower_shield(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.set_posture('standing'); self.b.set_posture('standing')
         self.a.set_hex_facing(0)
@@ -814,6 +814,9 @@ class TestActionEvaluation(unittest.TestCase):
         overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,None)
         with self.assertRaisesRegex(ValueError,'tower shield'):
             self.enc.prepare_action(overrun)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        with self.assertRaisesRegex(ValueError,'tower shield'):
+            self.enc.prepare_action(rush)
         self.assertEqual(self.enc.pending_action_list,[])
 
     def test_native_bull_rush_records_success_pending_displacement_without_moving_target(self):
@@ -851,6 +854,25 @@ class TestActionEvaluation(unittest.TestCase):
         with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
         self.assertEqual(self.enc.inspect_committed(1).action(rush.id).facts.outcome,'failed')
         self.assertEqual((self.a.get_position(),self.b.get_position()),before)
+
+    def test_native_bull_rush_uses_equipped_advanced_shield_bonus(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        shield_id=self.world.make_weapon_for_being(self.a.id,'Small shield','Bull Rush shield')
+        self.world.arm_being(self.a.id,shield_id,'shield hand')
+        self.a.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Small shield',2)
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,shield_id)
+        self.enc.schedule_action(rush)
+        values=iter([3,3,3,3,4,3])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        self.assertEqual(self.enc.inspect_committed(1).action(rush.id).facts.outcome,
+                         'success_pending_displacement')
 
     def test_native_trip_accepts_a_committed_successful_grab_as_contact(self):
         from physical_contact import trip_contact_kind
