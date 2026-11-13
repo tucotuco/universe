@@ -388,19 +388,16 @@ class TestArenaReadyWeapon(unittest.TestCase):
         session.advance_one_second()
         self.assertEqual(player.current.body_parts["right hand"], weapon.id)
 
-    def test_simultaneous_same_hand_and_weapon_claims_are_contested(self):
+    def test_overlapping_draw_claims_by_same_actor_are_rejected(self):
         session, candidate, player = arena(seed=20261113)
         weapon = add_authored_drawable_dagger(session, candidate, player)
         activate(session)
         start = int(candidate.encounter.time)
         first = ReadyWeaponAction(candidate.encounter, player.id, weapon.id, "right hand", start)
         second = ReadyWeaponAction(candidate.encounter, player.id, weapon.id, "right hand", start)
-        candidate.encounter.schedule_action(first)
-        candidate.encounter.schedule_action(second)
-        candidate.encounter.step(2)
-        record = candidate.encounter.inspect_committed(start + 2)
-        self.assertEqual(record.action(first.id).facts.outcome, "contested")
-        self.assertEqual(record.action(second.id).facts.outcome, "contested")
+        with self.assertRaisesRegex(ValueError, "require acquired Multi-action skill"):
+            candidate.encounter.schedule_choice((first, second))
+        self.assertEqual(candidate.encounter.time, start)
         self.assertEqual(player.possessions, [weapon.id])
         self.assertEqual(player.weapons, [])
         self.assertEqual(player.current.body_parts["right hand"], None)

@@ -1,6 +1,6 @@
 # U-CAP-001 — General Action composition report
 
-**Status:** ACTIVE, with the independently implementable general composition/UI work implemented. Conditional Delay/Ready and the weapon re-ready lifecycle remain bounded by missing adopted timing/state semantics listed below. This report is the current status narrative; prior dated U-ARENA-018 reports remain historical evidence.
+**Status:** ACTIVE. The general composition/UI capability is implemented. Revision 69 now adopts Draw, Ready preparation, and Delay waiting/pause semantics. Native integration, persistence, generated controls, and focused acceptance cases remain in progress. This report is the current status narrative; prior dated U-ARENA-018 reports remain historical evidence.
 
 ## Codex execution intervals
 
@@ -8,8 +8,9 @@
 |---|---|---|---|
 | U-CAP-001 implementation closeout | `2026-11-12T23:48:41-08:00` | `2026-11-13T00:31:37-08:00` | `PT42M56S` |
 | Permanent process amendment | `2026-11-13T00:36:28-08:00` | `2026-11-13T00:39:01-08:00` | `PT2M33S` |
+| Revision 69 rules and native integration | `2026-11-13T01:39:08-08:00` | in progress | in progress |
 
-The first interval is carried forward from its actual timestamps in the preceding Codex closeout; this report had not yet persisted them. There was a `PT4M51S` calendar gap between that interval's End and this session's Start. Total active execution time across these sessions: `PT45M29S`. Total calendar span from the first Start to the final End: `PT50M20S`.
+The first interval is carried forward from its actual timestamps in the preceding Codex closeout; this report had not yet persisted them. The earlier completed intervals total `PT45M29S` active time. This execution began at the timestamp shown above; its End, elapsed duration, and updated calendar span will be recorded at closeout.
 
 ## U-ARENA-018 parent reconciliation
 
