@@ -2364,6 +2364,42 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertNotIn(hidden.native.being.id, stream.getvalue())
         self.assertNotIn("seed=", stream.getvalue())
 
+    def test_geometryless_ground_object_passage_fails_closed_without_state_leak(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+            ground_item_descriptions=[{"source_item_id": "path-test-dagger",
+                "category": "weapon", "native_type_key": "Dagger", "quantity": 1,
+                "ordinary": True, "magical": False, "mechanics": None,
+                "origin": "movement-test.v1"}])
+        state = self.session.generate({"starting_experience": "10000",
+            "width_cells": "10", "height_cells": "5"})
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        placement = next(row for row in candidate.ground_objects
+                         if row.native_type_key == "Dagger")
+        target = next(row for row in state["entities"]
+                      if row["type"] == "Dagger" and row["category"] == "object")
+        self.assertNotEqual(candidate.arena_map.layout.cell_at_position(player.get_position()),
+                            HexAddress(placement.column, placement.row))
+        before = (player.get_position(), candidate.encounter.time,
+            self.session._rng_cursor.state, dict(candidate.universe.event_history),
+            dict(candidate.encounter._choice_book._choices), placement.native_object_id)
+        plan = self.session.choose_destination({"column": placement.column,
+            "row": placement.row, "rate": "sprint", "facing_policy": "turn"})
+        self.assertIsNotNone(plan["movement_plan"])
+        with self.assertRaises(ArenaBrowserRequestError) as refused:
+            self.session.advance_one_second()
+        self.assertEqual(refused.exception.movement_refusal["category"],
+                         "movement_prerequisite_not_met")
+        self.assertNotIn(placement.native_object_id, str(refused.exception))
+        self.assertEqual(before[:5], (player.get_position(), candidate.encounter.time,
+            self.session._rng_cursor.state, dict(candidate.universe.event_history),
+            dict(candidate.encounter._choice_book._choices)))
+        self.assertEqual(self.session.public_view()["movement_plan"]["destination_cell"],
+                         {"column": placement.column, "row": placement.row})
+        self.assertIsNone(candidate.universe.get_object_by_id(
+            placement.native_object_id).parent_container_id)
+        self.assertNotIn(candidate.participants[0].native.being.id, json.dumps(target))
+
     def test_sprint_before_destination_and_rapid_policy_rate_edits_use_latest_plan(self):
         stream = self.enable_trace()
         self.request("/api/generated/generate", {
