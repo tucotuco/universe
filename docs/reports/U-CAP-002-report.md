@@ -69,6 +69,6 @@ Earlier starts whose ends were not captured are preserved without estimates. All
 | Earlier continuation | 2026-11-13T09:57:07-08:00 | Not captured | Not calculable |
 | Earlier continuation | 2026-11-13T10:20:30-08:00 | Not captured | Not calculable |
 | Earlier continuation | 2026-11-13T12:07:23-08:00 | Not captured | Not calculable |
-| Current execution | 2026-11-13T14:06:56-08:00 | 2026-11-13T15:20:43-08:00 | PT1H13M47S |
+| Current execution | 2026-11-13T14:06:56-08:00 | 2026-11-13T15:21:15-08:00 | PT1H14M19S |
 
 The assignment's original start predates the recorded intervals; it is unavailable and is not fabricated.
