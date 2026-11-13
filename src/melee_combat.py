@@ -110,15 +110,18 @@ class MeleeStrike(Action):
 
     def __init__(self, encounter, actor_id, target_id, weapon_id,
                  motion='thrust', reach=None, strategy=None,
-                 feint_source_action_id=None):
+                 feint_source_action_id=None, charge=False):
         if motion not in ('swing', 'thrust'):
             raise ValueError('motion must be swing or thrust')
         if isinstance(reach, bool) or not isinstance(reach, (int, float)):
             raise TypeError('reach must be a numeric length in Encounter units')
         if not math.isfinite(reach) or reach <= 0:
             raise ValueError('reach must be finite and positive')
+        if type(charge) is not bool:
+            raise TypeError('charge declaration must be an explicit Boolean')
         self.encounter = encounter
         self.reach = float(reach)
+        self.charge = charge
         self.hit_type = None
         self.combat_result = None
         self._simultaneous_eligibility = None
@@ -190,6 +193,53 @@ class MeleeStrike(Action):
             raise ValueError('weapon does not support requested attack motion')
         if self.damage_potential() is None or self.damage_potential() <= 0:
             raise ValueError('non-damaging attack not implemented')
+        if self.charge:
+            # Engagement is directional and reach-based. Check every present
+            # Being that can reach and faces the actor, not only the declared
+            # charge victim.
+            if self._status(encounter)[0] == 'in_reach':
+                raise ValueError('must disengage from pressing opponents before beginning a Charge')
+            from arena_hex_map import layout_from_encounter_map
+            from action_calculations import melee_hex_path_status, melee_path_status
+            from hex_facing import FacingSector, classify_vector
+            layout = layout_from_encounter_map(encounter.map)
+            for opponent_id in encounter.being_list:
+                if opponent_id == actor.id:
+                    continue
+                opponent = encounter.get_being(opponent_id)
+                source, destination = opponent.get_position(), actor.get_position()
+                if source is None or destination is None or opponent.get_hit_points() <= 0:
+                    continue
+                facing = opponent.hex_facing
+                if facing is None or classify_vector(facing,
+                        (destination.x-source.x,destination.y-source.y,
+                         destination.z-source.z)) is not FacingSector.FRONT:
+                    continue
+                distances = []
+                for weapon_id in opponent.armed_with(encounter.universe).values():
+                    weapon = encounter.universe.get_object_by_id(weapon_id)
+                    if isinstance(weapon, WeaponInstance):
+                        try:
+                            distances.append(effective_melee_reach_meters(
+                                opponent.current,weapon.current,
+                                size_category=opponent.size_category))
+                        except ValueError:
+                            pass
+                if not distances:
+                    try:
+                        distances.append(reference_arm_length_inches(
+                            height_inches=opponent.current.height,
+                            length_inches=opponent.current.length,
+                            size_category=opponent.size_category)*INCHES_TO_METERS)
+                    except ValueError:
+                        continue
+                reach = max(distances)
+                distance = math.dist(source.as_tuple(),destination.as_tuple())
+                path = encounter.physical_path(opponent.id,actor.id)
+                status = (melee_hex_path_status(source,destination,reach,path,layout,facing)[0]
+                          if layout is not None else melee_path_status(distance,reach,path)[0])
+                if status == 'in_reach':
+                    raise ValueError('must disengage from pressing opponents before beginning a Charge')
         # Reach/path are evaluated at impact only; actors may wind up while
         # approaching a target, or anticipate movement into reach.
         return PreparedSchedule.from_action(self)
@@ -288,4 +338,5 @@ class MeleeStrike(Action):
         data['combat_result'] = (None if self.combat_result is None
                                  else self.combat_result.to_dict())
         data['reach'] = self.reach
+        data['charge'] = self.charge
         return json.dumps(data, indent=2)

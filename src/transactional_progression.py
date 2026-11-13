@@ -626,7 +626,7 @@ def _all_declarations(encounter,boundary,rng_owner):
             initial[aid]={key:value for key,value in packet.initialization if key!='start_position'}
             initial[aid].update(end_time=packet.end_time,parent_event_id=encounter.id)
             registered[aid]=(record.view.id,packet,declaration(member.action));states[aid]='registered'
-    fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initial,registered,states,{}, {})
+    fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initial,registered,states,{}, {}, {})
     return capture_observer_context(encounter,boundary,rng_state=rng,_stage=fence)
 
 

@@ -199,6 +199,7 @@ class _StagedReadFence:
     states: object
     positions: object
     facings: object
+    motion_velocities_m_s: object
 
 
 def _digest(value):
@@ -524,7 +525,7 @@ def _stage_start_fence(encounter, boundary, time, phase, positions, pending, eve
         action=events[aid]; data={'_activity_started':True}
         if type(action) is RunAction:data['start_position']=positions[action.actor_id]
         if type(action) is MeleeDefense:
-            fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initialization,registered,states,positions,{})
+            fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initialization,registered,states,positions,{}, {})
             snap=capture_snapshot(encounter,boundary,rng_state=rng_state,_objective=True,_stage=fence)
             strike=snap.actions.get(initialization.get(aid,{}).get('target_action_id',action.target_action_id))
             if strike is not None:
@@ -726,7 +727,7 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                    for key,value in positions.items()}
         fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),MappingProxyType(events),
             MappingProxyType(initialization),MappingProxyType(registered),MappingProxyType(states),MappingProxyType(positions),
-            MappingProxyType(facing_updates))
+            MappingProxyType(facing_updates), MappingProxyType(dict(motion)))
         context=capture_observer_context(encounter,next_boundary,rng_state=before_rng,
             _stage=fence,_restore_context=_restore_context)
         if adult_member_candidate is not None:

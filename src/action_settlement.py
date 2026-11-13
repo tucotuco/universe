@@ -90,7 +90,7 @@ _OUTCOMES = {
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'unsupported_reach'},
     'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
-        'parried', 'dodged', 'success', 'failure', 'ineligible_target'},
+        'parried', 'dodged', 'success', 'failure', 'ineligible_target', 'insufficient_charge_speed'},
     'object_strike': frozenset(('normal', 'critical', 'broken', 'miss', 'spectacular miss', 'drop weapon',
         'weapon_unavailable', 'unable_to_act', 'unsupported_object', 'attended_object',
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path','no_prior_second_attack')),
@@ -260,6 +260,7 @@ def _copy_proposal(proposal, actions, entities):
                               'out_of_reach', 'not_facing', 'blocked',
                               'uncertain_path', 'parried', 'dodged',
                               'ineligible_target', 'grapple_restricted',
+                              'insufficient_charge_speed',
                               })
     _require(proposal.outcome in allowed, 'outcome contradicts native Action family/lifecycle')
     targets = tuple(_identity(k) for k in _tuple(proposal.target_ids))

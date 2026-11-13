@@ -888,6 +888,57 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(result.facts.outcome,'out_of_reach')
         self.assertEqual(self.b.get_position(),moved)
 
+    def test_charge_uses_relative_speed_at_movement_culmination_for_bonus_damage(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(13.0,0,0))
+        self.a.set_hex_facing(0)
+        self.a.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Dagger',100)
+        self.enc.enable_transactional_progression(quiescent=True)
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',
+                           reach=2.0,strategy=Strategy(timing=3),charge=True)
+        self.assertEqual(charge.end_time,2)
+        self.enc.schedule_action(charge)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[10,1]):
+            self.enc.step(2,velocities={self.a.id:(4.5,0,0),self.b.id:(-1.0,0,0)})
+        result=self.enc.inspect_committed(2).action(charge.id)
+        self.assertEqual(result.facts.outcome,'normal')
+        self.assertEqual(self.b.get_hit_points(),98)
+
+    def test_charge_adds_adopted_two_point_hit_bonus(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(8.8,0,0))
+        self.a.set_hex_facing(0)
+        self.b.strategy = Strategy(defense=5)
+        self.enc.enable_transactional_progression(quiescent=True)
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',
+                           reach=2.0,strategy=Strategy(timing=3),charge=True)
+        self.enc.schedule_action(charge)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=[14,1]):
+            self.enc.step(2,velocities={self.a.id:(4.0,0,0)})
+        result=self.enc.inspect_committed(2).action(charge.id)
+        self.assertEqual(result.facts.outcome,'normal')
+        self.assertEqual(self.b.get_hit_points(),99)
+
+    def test_charge_below_relative_speed_threshold_fails_without_attack_rolls(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(7.4,0,0))
+        self.a.set_hex_facing(0)
+        self.enc.enable_transactional_progression(quiescent=True)
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',
+                           reach=2.0,strategy=Strategy(timing=3),charge=True)
+        self.enc.schedule_action(charge)
+        self.enc.step(2,velocities={self.a.id:(3.5,0,0)})
+        result=self.enc.inspect_committed(2).action(charge.id)
+        self.assertEqual(result.facts.outcome,'insufficient_charge_speed')
+        self.assertEqual(self.b.get_hit_points(),100)
+
+    def test_charge_declaration_refuses_when_actor_is_already_engaged(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.8,0,0))
+        self.a.set_hex_facing(0)
+        self.enc.enable_transactional_progression(quiescent=True)
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',
+                           reach=2.0,charge=True)
+        with self.assertRaisesRegex(ValueError,'disengage from pressing opponents'):
+            self.enc.prepare_action(charge)
+        self.assertEqual(self.enc.pending_action_list,[])
+
     def test_native_bull_rush_tie_fails_without_displacement(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.set_hex_facing(0)

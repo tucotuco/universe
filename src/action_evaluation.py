@@ -117,6 +117,7 @@ class EvaluationSnapshot:
     grapple_controls: tuple = ()
     object_grips: tuple = ()
     moving_ids: tuple = ()
+    motion_velocities_m_s: object = field(default_factory=lambda: MappingProxyType({}))
 
     def entity(self, identity):
         try:
@@ -310,7 +311,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge'):
             if key in ad:
                 selected[key] = freeze(ad[key])
         if type(action) is Action and ad['event_type'] == 'grab':
@@ -630,7 +631,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         imported_practice_dependency=imported_dependency,
         encounter_map=freeze(ed.get('map')), physical_grips=grips,
         grapple_controls=controls, object_grips=object_grips,
-        moving_ids=tuple(sorted(moving_ids)))
+        moving_ids=tuple(sorted(moving_ids)),
+        motion_velocities_m_s=MappingProxyType({} if _stage is None else
+            {key: freeze(value) for key,value in _stage.motion_velocities_m_s.items()}))
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -1019,6 +1022,7 @@ def _combat(snapshot, action, rng, dependencies):
     meta = []
     attempted = False
     outcome = None
+    charge_extra_damage = 0
     pinned_controls = tuple(row for row in snapshot.grapple_controls
         if len(row) > 6 and row[6] in ('pin_top', 'pin_bottom'))
     if action.family == 'combat' and action.data['event_type'] == 'touch':
@@ -1076,24 +1080,35 @@ def _combat(snapshot, action, rng, dependencies):
     if action.family == 'melee':
         status, distance = snapshot.melee_status(action)
         meta.append(('distance', distance))
-        if any(row[2] == actor.id for row in pinned_controls):
+        if action.data.get('charge') is True:
+            actor_velocity = snapshot.motion_velocities_m_s.get(actor.id)
+            target_velocity = snapshot.motion_velocities_m_s.get(target.id, (0.0, 0.0, 0.0))
+            if actor_velocity is None:
+                outcome = 'insufficient_charge_speed'
+            else:
+                relative_speed_yd_s = math.dist(actor_velocity, target_velocity) / 0.9144
+                if relative_speed_yd_s < 4.0:
+                    outcome = 'insufficient_charge_speed'
+                else:
+                    charge_extra_damage = math.floor((relative_speed_yd_s - 4.0) / 2.0)
+        if outcome is None and any(row[2] == actor.id for row in pinned_controls):
             outcome = 'unable_to_act'
-        elif any(row[1] == actor.id and row[2] == target.id
+        elif outcome is None and any(row[1] == actor.id and row[2] == target.id
                  for row in pinned_controls):
             outcome = 'grapple_restricted'
-        elif (any(actor.id in (row[1], row[2]) for row in snapshot.grapple_controls)
+        elif outcome is None and (any(actor.id in (row[1], row[2]) for row in snapshot.grapple_controls)
                 and not any({actor.id, target.id} == {row[1], row[2]}
                             for row in snapshot.grapple_controls)):
             outcome = 'grapple_restricted'
-        elif actor.hp <= 0 or actor.data['fatigue_level'] >= 5:
+        elif outcome is None and (actor.hp <= 0 or actor.data['fatigue_level'] >= 5):
             outcome = 'unable_to_act'
-        elif target.hp <= 0 and action.data['event_type'] != 'coup de grace':
+        elif outcome is None and target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
-        elif action.instrument_id not in actor.data['held'] or weapon is None or weapon.hp <= 0:
+        elif outcome is None and (action.instrument_id not in actor.data['held'] or weapon is None or weapon.hp <= 0):
             outcome = 'weapon_unavailable'
-        elif status != 'in_reach':
+        elif outcome is None and status != 'in_reach':
             outcome = status
-        elif any(d.eligible and d.success and d.kind in ('parry', 'dodge') for d in dependencies):
+        elif outcome is None and any(d.eligible and d.success and d.kind in ('parry', 'dodge') for d in dependencies):
             first = next(d for d in dependencies if d.eligible and d.success
                          and d.kind in ('parry', 'dodge'))
             outcome = 'parried' if first.kind == 'parry' else 'dodged'
@@ -1142,7 +1157,7 @@ def _combat(snapshot, action, rng, dependencies):
                 return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0)
                     + actor.data['strategy']['attack'] - priority_penalty
-                    + feint_bonus + pin_bonus,
+                    + feint_bonus + pin_bonus + (2 if action.data.get('charge') is True else 0),
                     target_defense + parry_bonus, dc - adjustment)
             if action.family == 'melee' and action.data['event_type'] == 'feint':
                 if (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0) <= 1:
@@ -1217,7 +1232,9 @@ def _combat(snapshot, action, rng, dependencies):
                 effects.append(DamageEffect(action.id, recipient.id, ordinary, 'body'))
                 if outcome == 'critical':
                     effects.append(DamageEffect(action.id, recipient.id, critical, 'critical_bypass'))
-            damage_path(outcome, potential, action.data['strategy']['extra_damage'], rng.roll, shield, armor, body)
+            damage_path(outcome, potential,
+                action.data['strategy']['extra_damage'] + charge_extra_damage,
+                rng.roll, shield, armor, body)
             if coup_de_grace:
                 damage_dealt = sum(effect.amount for effect in effects
                     if type(effect) is DamageEffect and effect.target_id == target.id
