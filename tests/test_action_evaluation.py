@@ -803,6 +803,19 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.enc.inspect_committed(4).action(overrun.id).facts.outcome,'success')
         self.assertEqual(self.b.get_posture(),'lying')
 
+    def test_native_overrun_is_rejected_for_a_bearing_tower_shield(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        shield_id=self.world.make_weapon_for_being(self.a.id,'Tower shield','Tower shield')
+        self.world.arm_being(self.a.id,shield_id,'shield hand')
+        self.enc.enable_transactional_progression(quiescent=True)
+        overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,None)
+        with self.assertRaisesRegex(ValueError,'tower shield'):
+            self.enc.prepare_action(overrun)
+        self.assertEqual(self.enc.pending_action_list,[])
+
     def test_native_trip_accepts_a_committed_successful_grab_as_contact(self):
         from physical_contact import trip_contact_kind
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))

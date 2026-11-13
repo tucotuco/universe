@@ -347,6 +347,19 @@ class TestNativeMovementIntent(unittest.TestCase):
         result = self.resolve_postmovement_withdrawal(HexAddress(1, 3), reach=1.7)
         self.assertNotEqual(result.facts.outcome, "out_of_reach")
 
+    def test_pinned_being_cannot_use_ordinary_movement_intent(self):
+        from types import SimpleNamespace
+        from movement_intent import validate_grip_relative_movement
+        snapshot = SimpleNamespace(grapple_controls=(("pin", self.opponent.id,
+            self.player.id, 1, "prone", "immobilized", "pin_top"),),
+            physical_grips=())
+        intent = SimpleNamespace(actor_id=self.player.id,
+            destination=self.layout.center_position(HexAddress(1, 1)))
+        prepared = SimpleNamespace(intent=intent)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            validate_grip_relative_movement((prepared,), snapshot)
+        self.assertEqual(refused.exception.code, "pinned")
+
     def test_rate_categories_and_run_skill_increment_follow_adopted_units(self):
         conditions = self.conditions()
         self.assertEqual(self.player.get_fatigue_level(), 0)
