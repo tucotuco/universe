@@ -1,9 +1,11 @@
 # U-CAP-001 — Complete playable general Action composition
 
 **Repository:** active `~/Projects/universe` only
-**Install:** `docs/assignments/U-CAP-001.md`
-**Report:** `docs/reports/U-CAP-001-report.md`
-**Invocation:** `Execute docs/assignments/U-CAP-001.md.`
+**Archive:** `docs/assignments/archive/U-CAP-001.md`
+**Originally installed as:** `docs/assignments/U-CAP-001.md`
+**Accepted report:** `docs/reports/archive/U-CAP-001-report.md`
+**Original invocation (historical):** `Execute docs/assignments/U-CAP-001.md.`
+**Archive status:** ChatGPT confirmed completion against the acceptance criteria; see the accepted report linked above.
 **Authorization:** routine in-scope edits, tests, documentation and audited local commits are authorized. **No remote push, history rewrite, reset/clean, deletion of unrelated files, or changes to sibling repositories/backups.**
 
 ## Primary outcome
@@ -56,6 +58,6 @@ This assignment is complete only when: (a) the parent U-ARENA-018 original accep
 ## Git/communication closeout
 
 - Before each coherent local commit, review staged file names/diff, run `git diff --cached --check` and `.venv/bin/python -B tools/check_publication_safety.py --staged`; commit only explicitly inspected files. Never blanket-stage unrelated user input. Do not push to GitHub; this assignment does not authorize remote publication.
-- Put detailed work in `docs/reports/U-CAP-001-report.md` and the parent closeout when supported. **Chat response: six brief lines maximum**, covering outcome, user-visible demonstration, focused-test status, commits, precise blocker if any, and report location.
+- Put detailed work in `docs/reports/archive/U-CAP-001-report.md` and the parent closeout when supported. **Chat response: six brief lines maximum**, covering outcome, user-visible demonstration, focused-test status, commits, precise blocker if any, and report location.
 
-**Exact prompt:** `Execute docs/assignments/U-CAP-001.md.`
+**Historical exact prompt:** `Execute docs/assignments/U-CAP-001.md.`

@@ -1,6 +1,6 @@
 # U-CAP-001 — General Action composition closeout
 
-**Status: DONE (bounded).** The full U-CAP-001 acceptance criteria are met for the eligible native Action families currently supported by the generated Arena. Revision 69 Draw, nonconditional weapon Ready, Delay, eligible pause/resume, composition, interruption, repetition and persistence are integrated. Broader native Actions and optional variants remain in their existing task IDs; they do not block this bounded assignment. No rule decision remains outstanding for this scope.
+**Status: DONE (bounded).** Assignment: [U-CAP-001](../../assignments/archive/U-CAP-001.md). The full U-CAP-001 acceptance criteria are met for the eligible native Action families currently supported by the generated Arena. Revision 69 Draw, nonconditional weapon Ready, Delay, eligible pause/resume, composition, interruption, repetition and persistence are integrated. Broader native Actions and optional variants remain in their existing task IDs; they do not block this bounded assignment. No rule decision remains outstanding for this scope.
 
 ## Codex execution intervals
 
@@ -14,7 +14,7 @@ The first two intervals are carried forward from the actual prior closeouts. The
 
 ## Rules, implementation and boundaries
 
-Revision 69 is controlling in [the adopted rules package](../encounters/README.md) and [the r69 supplement](../encounters/encounters-consistency-decisions-r69.md). It replaces conditional-trigger Ready. Ready creates only a motion-specific weapon preparation; it creates no target, event trigger, condition watcher or later Action commitment. Ordinary Draw takes two seconds and does not Ready the weapon. Ready lasts through Delay and is consumed when the weapon is next used; matching Strike timing receives the adopted reduction with a one-second minimum. Event readiness and assumed drawable locations/hands remain outside scope.
+Revision 69 is controlling in [the adopted rules package](../../encounters/README.md) and [the r69 supplement](../../encounters/encounters-consistency-decisions-r69.md). It replaces conditional-trigger Ready. Ready creates only a motion-specific weapon preparation; it creates no target, event trigger, condition watcher or later Action commitment. Ordinary Draw takes two seconds and does not Ready the weapon. Ready lasts through Delay and is consumed when the weapon is next used; matching Strike timing receives the adopted reduction with a one-second minimum. Event readiness and assumed drawable locations/hands remain outside scope.
 
 Delay is a native one-second wait Action that records its selected defense. Repeating Delay waits to a later declaration boundary. An eligible pending Action can be paused only between committed seconds and resumed under its original identity with its saved remaining active duration. Spellcasting and momentum-dependent Actions, including strikes and charge, are rejected. The paused lifecycle is omitted from due Action resolution, validated in native interval preflight, and preserved by native Arena Save/Load.
 
@@ -28,7 +28,7 @@ This execution began at HEAD `33ba09f68fc0d11a612b8b1ebc1fb3380f07f14e` on local
 
 | U-CAP-001 criterion | Result | Verified evidence / boundary |
 |---|---|---|
-| Reconcile original U-ARENA-018 minimum and Sections A–D | Met | [Parent closeout](U-ARENA-018-closeout.md), commit `51249f5`; U-ARENA-018 is DONE (bounded), with Stun/Subdue and optional Disarm variants separate. |
+| Reconcile original U-ARENA-018 minimum and Sections A–D | Met | [Parent closeout](../U-ARENA-018-closeout.md), commit `51249f5`; U-ARENA-018 is DONE (bounded), with Stun/Subdue and optional Disarm variants separate. |
 | General ordered composer for every eligible Action in the supported Arena catalog | Met (bounded) | Native Choice remains the single validator/publication path. Generated UI exposes action families with complete native Arena submission contracts, opaque observer handles, timing, resources, priority and reasons. General HTTP composer tests and earlier shipped-browser Touch + Dagger Swing interaction are retained. |
 | Mixed-duration overlap, sequential work, contention, resources, priority, simultaneous effects and RNG safety | Met | `tests.test_action_choices`; generated HTTP overlap/no-skill refusal preserves RNG state; mixed Touch + Thrust test verifies component timing/penalty and simultaneous outcomes. |
 | Interruption, cancellation and repeat-until-abort | Met | Native Choice regressions; generated general program cancellation; Multiple Touch repeated-cycle test restores, executes a fresh-identity cycle and cancels the successor. |
@@ -65,7 +65,7 @@ The actual Chrome interaction was a live local generated Arena session. The full
 - Idea inbox check: `docs/ideas/inbox/` does not exist; no intake note or ID mapping was available. No new idea was inferred.
 - No new assignment was created or started. `TASKS.md` records no implementation program ACTIVE and leaves U-CAP-002 as the next candidate.
 
-The permanent [development-process document](../process/DEVELOPMENT-PROCESS.md) requires actual timezone-qualified ISO 8601 Start/End timestamps and calculated elapsed durations in both reports and chat, per execution interval. The current interval will be finalized below.
+The permanent [development-process document](../../process/DEVELOPMENT-PROCESS.md) requires actual timezone-qualified ISO 8601 Start/End timestamps and calculated elapsed durations in both reports and chat, per execution interval. The archival workflow execution interval is recorded below.
 
 ## Git, safety and closeout
 
