@@ -1898,6 +1898,9 @@ class GeneratedArenaSession:
                 elif kind == "melee" and motion in ("swing", "thrust"):
                     action, _, _, _, _ = self._melee_strike_preflight(
                         candidate, player, entity_id, evidence, motion)
+                elif kind == "charge" and motion in ("swing", "thrust"):
+                    action, _, _, _, _ = self._melee_strike_preflight(
+                        candidate, player, entity_id, evidence, motion, charge=True)
                 elif kind == "feint" and motion in ("swing", "thrust"):
                     action, _ = self._feint_preflight(
                         candidate, player, entity_id, evidence, motion)
@@ -2312,7 +2315,7 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _melee_strike_preflight(self, candidate, player, entity_id, evidence, motion,
-                                supported=True):
+                                supported=True, charge=False):
         if motion not in ("swing", "thrust"):
             raise ArenaBrowserRequestError("Choose the native Dagger Swing or Thrust motion.")
         if not supported or not _has_native_transactional_action_contract(MeleeStrike):
@@ -2348,7 +2351,7 @@ class GeneratedArenaSession:
         feint_source = self._available_feint_source(candidate, player, target.id)
         action = MeleeStrike(encounter, player.id, target.id, weapon.id,
                              motion=motion, reach=reach,
-                             feint_source_action_id=feint_source)
+                             feint_source_action_id=feint_source, charge=charge)
         try:
             prepared = encounter.prepare_action(action)
         except Exception as exc:
@@ -2673,8 +2676,10 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def choose_melee_strike(self, payload):
-        if type(payload) is not dict or set(payload) != {"handle", "motion"}:
-            raise ArenaBrowserRequestError("melee attack requires exactly one perceived target and motion")
+        if (type(payload) is not dict or set(payload) not in
+                (frozenset(("handle", "motion")), frozenset(("handle", "motion", "charge")))
+                or ("charge" in payload and type(payload["charge"]) is not bool)):
+            raise ArenaBrowserRequestError("melee attack requires a perceived target, motion, and optional Boolean Charge declaration")
         handle, motion = payload["handle"], payload["motion"]
         if type(handle) is not str or type(motion) is not str:
             raise ArenaBrowserRequestError("melee target and motion must be text")
@@ -2691,7 +2696,8 @@ class GeneratedArenaSession:
             evidence = None if entity_id is None else next(
                 (row for row in ledger.current if row.entity_id == entity_id), None)
             action, _, prepared, _, _ = self._melee_strike_preflight(
-                candidate, player, entity_id, evidence, motion)
+                candidate, player, entity_id, evidence, motion,
+                charge=payload.get("charge", False))
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -3389,6 +3395,33 @@ class GeneratedArenaSession:
                 "is_melee": source_row["is_melee"],
                 "status": "not_implemented", "reason": reason,
             })
+
+        if (entity_id is not None and evidence is not None
+                and evidence.category == "being"
+                and evidence.present_state == "present"):
+            charge_status, charge_reason, charge_duration = (
+                "unavailable", "Select an aware opponent with a legal approach route.", None)
+            try:
+                _charge, _weapon, charge_prepared, _distance, _reach = (
+                    self._melee_strike_preflight(candidate, player, entity_id,
+                        evidence, "thrust", charge=True))
+                charge_status = "available"
+                charge_duration = charge_prepared.end_time-charge_prepared.start_time
+                charge_reason = ("Native Charge uses the actual relative movement speed at impact; "
+                    "the legal movement plan must culminate at 4 yd/s or faster and within weapon reach. "
+                    "The native resolver applies +2 to hit and its adopted speed-based damage increment.")
+            except ArenaBrowserRequestError as exc:
+                charge_reason = str(exc)
+            catalog_rows.append({"name": "Charge", "group": "Being targets",
+                "target_type": "being", "required_skill": "none", "is_melee": True,
+                "status": charge_status, "display_name":
+                    f"Dagger Charge · thrust ({charge_duration:g} s)" if charge_duration is not None
+                    else "Dagger Charge · thrust", "reason": charge_reason,
+                "target": {"handle": handle, "name": selected["name"],
+                           "type": selected["type"],
+                           "present_state": selected["present_state"]},
+                "motion": "thrust", "charge": True,
+                "duration_seconds": charge_duration})
 
         if supported_actions.get(RunAction):
             run_available = (self._player_action_id is None and not candidate.encounter.initiated)

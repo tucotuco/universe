@@ -45,12 +45,15 @@ class TestArenaMeleeAttack(unittest.TestCase):
             value = json.loads(json.dumps(value) if type(value) is not str else value)
         return result["status"], value
 
-    def generate(self, *, equipment_mode="equipped", size_categories=None):
+    def generate(self, *, equipment_mode="equipped", size_categories=None,
+                 opponent_strategy=None):
         payload = {
             "starting_experience": "10000", "width_cells": "10",
             "height_cells": "5", "equipment_mode": equipment_mode}
         if size_categories is not None:
             payload["size_categories"] = size_categories
+        if opponent_strategy is not None:
+            payload["opponent_strategy"] = opponent_strategy
         status, view = self.request("/api/generated/generate", payload)
         self.assertEqual(status, 200, view)
         return view
@@ -109,6 +112,43 @@ class TestArenaMeleeAttack(unittest.TestCase):
         self.assertEqual((action.actor_id, action.target_id, action.instrument_id),
                          (player.id, candidate.participants[1].native.being.id, weapon_id))
         return accepted, target, action, weapon_id, distance, reach
+
+    def test_generated_charge_selector_schedules_native_charge_without_exposing_ids(self):
+        view = self.generate(opponent_strategy="none")
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        view = self.session.public_view()
+        candidate = self.session.active_candidate
+        player = candidate.participants[0].native.being
+        target_id = candidate.participants[1].native.being.id
+        provenance = candidate.initial_equipment_provenance[0]
+        unit = next(row for row in provenance["specification"]["equipment"]["units"]
+                    if row.get("role") == "primary_weapon")
+        weapon_id = provenance["object_ids"][unit["equipment_id"]]
+        target = next(row for row in view["entities"]
+                      if row["category"] == "being" and row["name"] != view["player"]["name"])
+        status, inspected = self.request("/api/generated/inspect", {"handle": target["handle"]})
+        self.assertEqual(status, 200, inspected)
+        charge = next(row for row in inspected["action_catalog"]["entries"]
+                      if row["name"] == "Charge")
+        self.assertEqual(charge["status"], "available", charge["reason"])
+        self.assertTrue(charge["charge"])
+        self.assertEqual(charge["motion"], "thrust")
+        status, accepted = self.request("/api/generated/melee-strike", {
+            "handle": target["handle"], "motion": "thrust", "charge": True})
+        self.assertEqual(status, 200, accepted)
+        action = self.session._player_melee_action(candidate, player)
+        self.assertIs(type(action), MeleeStrike)
+        self.assertTrue(action.charge)
+        self.assertEqual((action.actor_id, action.target_id, action.instrument_id),
+                         (player.id, target_id, weapon_id))
+        self.assertEqual(accepted["melee_action"]["status"], "executing")
+        self.assertNotIn(player.id, json.dumps(charge))
+        self.assertNotIn(target_id, json.dumps(charge))
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn('action.name===\'Charge\'', page)
+        self.assertIn("submitMeleeStrike(action.target.handle,action.motion,true)", page)
 
     def test_native_strike_browser_route_and_pending_completed_save_load(self):
         accepted, target, action, weapon_id, distance, reach = self.schedule_thrust()
