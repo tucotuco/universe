@@ -321,7 +321,8 @@ def _describe_accepted_choice_locked(world, encounter, book, choice_id):
              'choice identity is absent or ambiguous')
     _require(record.view.state == 'accepted',
              'only accepted prepublication choices are supported')
-    _require(record.origin in ('choice','single-adapter'), 'choice origin is unsupported')
+    _require(record.origin in ('choice','single-adapter','multiple-action-cycle'),
+             'choice origin is unsupported')
     _require(type(record.view) is ChoiceView and type(record.view.version) is int
              and record.view.version > 0, 'invalid native choice view')
     _require(type(record.members) is tuple and type(record.prepared) is tuple

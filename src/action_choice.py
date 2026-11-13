@@ -527,6 +527,66 @@ class ChoiceBook:
                                               _abort_program=False)
             return self._choices[choice_id].view
 
+    def _repeat_completed_programs(self, boundary):
+        """Queue one unchanged successor cycle for each completed program."""
+        from action import Action
+        from copy import copy
+        from identifiable import Identifiable
+
+        with self.lock:
+            completed = tuple(record for record in self._choices.values()
+                if record.view.state == 'finished'
+                and record.origin in ('choice', 'multiple-action-cycle')
+                and len(record.members) > 1
+                and any(member.priority_penalty is not None for member in record.members)
+                and all(self._states.get(aid) == 'finished' for aid in record.view.action_ids))
+            for record in completed:
+                if (self.encounter.end_time is not None
+                        and boundary >= self.encounter.end_time):
+                    self._choices[record.view.id] = replace(
+                        record, origin='multiple-action-cycle-complete')
+                    continue
+                if any(not isinstance(member.action, Action)
+                       or any(callable(object.__getattribute__(member.action, '__dict__').get(name))
+                              for name in ('on_schedule', 'on_completed', 'resolve'))
+                       or getattr(member.action, 'target_action_id', None) is not None
+                       for member in record.members):
+                    self._choices[record.view.id] = replace(
+                        record, origin='multiple-action-cycle-complete')
+                    continue
+                first_start = min(packet.start_time for packet in record.prepared)
+                last_end = max(packet.end_time for packet in record.prepared)
+                cycle_length = last_end - first_start
+                if cycle_length <= 0 or (self.encounter.end_time is not None
+                                         and boundary + cycle_length > self.encounter.end_time):
+                    self._choices[record.view.id] = replace(
+                        record, origin='multiple-action-cycle-complete')
+                    continue
+                members = []
+                for member, packet in zip(record.members, record.prepared):
+                    action = copy(member.action)
+                    data = object.__getattribute__(action, '__dict__')
+                    start = boundary + packet.start_time - first_start
+                    duration = packet.end_time - packet.start_time
+                    data.update(start_time=start, end_time=start + duration,
+                                parent_event_id=None, resolution=None)
+                    for name in ('result', 'combat_result', 'hit_type', 'canceled_at',
+                                 'cancellation_reason', '_activity_started',
+                                 '_atomic_acknowledged_boundary', '_atomic_effect_ids',
+                                 '_atomic_lifecycle'):
+                        data.pop(name, None)
+                    Identifiable.__init__(action, data.get('name'))
+                    if data.get('strategy') is not None:
+                        data['strategy'] = data['strategy'].copy()
+                    members.append(ChoiceMember(member.key, action,
+                        target_action_key=member.target_action_key,
+                        priority_penalty=member.priority_penalty))
+                self._choices[record.view.id] = replace(
+                    record, origin='multiple-action-cycle-complete')
+                view = self.encounter.schedule_choice(tuple(members))
+                self._choices[view.id] = replace(self._choices[view.id],
+                                                  origin='multiple-action-cycle')
+
     @property
     def reservations(self):
         with self.lock:

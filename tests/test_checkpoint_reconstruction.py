@@ -1,6 +1,7 @@
 """Focused tests for inactive, quarantined initial Run/Spot reconstruction."""
 import json
 import random
+from dataclasses import replace
 from pathlib import Path
 import subprocess
 import sys
@@ -82,8 +83,10 @@ def build_source(*, future=False, arena_activation_enabled=False, initiated=True
                                        duration=6, die_roll=14),
                             SpotAction(world, observer.id, target.id, 2.375,
                                        duration=6, die_roll=15)))
-            encounter.schedule_choice((ChoiceMember('first', actions[0], priority_penalty=0),
-                                       ChoiceMember('second', actions[1], priority_penalty=3)))
+            view = encounter.schedule_choice((ChoiceMember('first', actions[0], priority_penalty=0),
+                                              ChoiceMember('second', actions[1], priority_penalty=3)))
+            encounter._choice_book._choices[view.id] = replace(
+                encounter._choice_book._choices[view.id], origin='multiple-action-cycle')
         else:
             actions.append(RunAction(world, observer.id, 2.375, 1.25, 0.5, experience=3))
             actions.append(SpotAction(world, observer.id, target.id, 4.25, duration=6,
@@ -274,6 +277,7 @@ class TestInitialNativeReconstruction(unittest.TestCase):
             encode_run_spot_envelope(envelope)))
         native_world, native_encounter, _ = _NATIVE_GRAPHS[result]
         record = next(iter(native_encounter._choice_book._choices.values()))
+        self.assertEqual(record.origin, 'multiple-action-cycle')
         self.assertEqual(tuple(member.priority_penalty for member in record.members), (0, 3))
         from checkpoint_choices import describe_accepted_choice
         self.assertEqual(describe_accepted_choice(native_world, native_encounter,

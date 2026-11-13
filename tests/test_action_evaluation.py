@@ -1150,6 +1150,29 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(snapshot.actions[first.id].data['multiple_action_priority'], 0)
         self.assertEqual(snapshot.actions[second.id].data['multiple_action_priority'], 3)
 
+    def test_multiple_action_repeats_with_fresh_ids_and_stops_on_abort(self):
+        first, second = self.strike(self.w1), self.strike(self.w2)
+        self.schedule(first, second)
+        self.enc.enable_transactional_progression(quiescent=True)
+        self.enc.step(6)
+        repeated = [record for record in self.enc._choice_book._choices.values()
+                    if record.origin == 'multiple-action-cycle']
+        self.assertEqual(len(repeated), 1)
+        cycle = repeated[0]
+        self.assertEqual(tuple(member.priority_penalty for member in cycle.members), (0, 3))
+        self.assertTrue(all(member.action.id not in (first.id, second.id)
+                            for member in cycle.members))
+        self.assertEqual(cycle.view.first_start,
+                         max(first.end_time, second.end_time))
+        self.assertEqual(self.enc.get_choice(cycle.view.id).state, 'executing')
+        self.enc.cancel_action(cycle.view.action_ids[0])
+        self.assertTrue(all(self.enc._choice_book._states[action_id] == 'cancelled'
+                            for action_id in cycle.view.action_ids))
+        self.enc.step(1)
+        self.assertFalse(any(item.origin == 'multiple-action-cycle'
+                             and item.view.id != cycle.view.id
+                             for item in self.enc._choice_book._choices.values()))
+
     def test_multiple_designated_defenses_all_retained_no_stacking(self):
         attack = self.strike()
         parry = MeleeDefense(self.enc, self.b.id, self.a.id, kind='parry', parry_motion='swing', target_action_id=attack.id, weapon_id=self.w3)

@@ -821,8 +821,10 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                     # one interval; later boundaries in a long step are normal.
                     adult_member_candidate=None
                 finally:_ROUTED_OWNERSHIP.pop(id(encounter),None)
-        return EncounterStep(start,end,tuple(motion),tuple(completed),tuple(movement_decision_ids))
+        result=EncounterStep(start,end,tuple(motion),tuple(completed),tuple(movement_decision_ids))
     finally:binding.running.release()
+    encounter._choice_book._repeat_completed_programs(encounter.last_processed_boundary)
+    return result
 
 
 def recover_transactional_progression(encounter,token):

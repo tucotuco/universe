@@ -3,7 +3,7 @@
 This is a developer/test adapter for already decoded wire data. It is not a
 load/restore API and never authenticates bytes or issues committed receipts.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from copy import deepcopy
 import json
 import math
@@ -866,6 +866,8 @@ def _rebuild_future_choices(graph, choices, world, encounter, native_objects):
         view = encounter.schedule_choice(tuple(actions))
         _need(view.id == choice_id and view.action_ids == tuple(a.action.id for a in actions),
               'native choice acceptance did not preserve logical choice references')
+        encounter._choice_book._choices[view.id] = replace(
+            encounter._choice_book._choices[view.id], origin=descriptor[4])
         from checkpoint_choices import describe_accepted_choice
         rebuilt = describe_accepted_choice(world, encounter, choice_id).to_data()
         _need(rebuilt == descriptor, 'rebuilt native scheduling descriptor differs from captured declaration')
