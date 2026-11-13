@@ -1,59 +1,80 @@
-# U-CAP-001 — General Action composition report
+# U-CAP-001 — General Action composition closeout
 
-**Status:** ACTIVE. The general composition/UI capability is implemented. Revision 69 now adopts Draw, Ready preparation, and Delay waiting/pause semantics. Native integration, persistence, generated controls, and focused acceptance cases remain in progress. This report is the current status narrative; prior dated U-ARENA-018 reports remain historical evidence.
+**Status: DONE (bounded).** The full U-CAP-001 acceptance criteria are met for the eligible native Action families currently supported by the generated Arena. Revision 69 Draw, nonconditional weapon Ready, Delay, eligible pause/resume, composition, interruption, repetition and persistence are integrated. Broader native Actions and optional variants remain in their existing task IDs; they do not block this bounded assignment. No rule decision remains outstanding for this scope.
 
 ## Codex execution intervals
 
 | Session | Start (ISO 8601) | End (ISO 8601) | Elapsed (ISO 8601 duration) |
 |---|---|---|---|
 | U-CAP-001 implementation closeout | `2026-11-12T23:48:41-08:00` | `2026-11-13T00:31:37-08:00` | `PT42M56S` |
-| Permanent process amendment | `2026-11-13T00:36:28-08:00` | `2026-11-13T00:39:01-08:00` | `PT2M33S` |
-| Revision 69 rules and native integration | `2026-11-13T01:39:08-08:00` | in progress | in progress |
+| Permanent development-process amendment | `2026-11-13T00:36:28-08:00` | `2026-11-13T00:39:01-08:00` | `PT2M33S` |
+| Revision 69 rules and Draw/Ready/Delay implementation | `2026-11-13T01:39:08-08:00` | `2026-11-13T02:40:29-08:00` | `PT1H1M21S` |
 
-The first interval is carried forward from its actual timestamps in the preceding Codex closeout; this report had not yet persisted them. The earlier completed intervals total `PT45M29S` active time. This execution began at the timestamp shown above; its End, elapsed duration, and updated calendar span will be recorded at closeout.
+The first two intervals are carried forward from the actual prior closeouts. The third interval lasted `PT1H1M21S`. Total active execution time across these three recorded intervals is `PT1H46M50S`; total calendar time from the first Start to the final End is `PT2H51M48S`.
 
-## U-ARENA-018 parent reconciliation
+## Rules, implementation and boundaries
 
-The original U-ARENA-018 acceptance minimum is reconciled and closed as DONE (bounded) in [the parent closeout](U-ARENA-018-closeout.md), commit `51249f5`. The original minimum's authentic generated-Arena Chrome contact/grappling walkthrough and required native Takedown/Reverse/Pin plus Trip-or-Wrest are evidenced in the closed U-ARENA-018D report; this does not close optional Stun, Subdue or complete Disarm variants. U-ACT stable IDs remain open where their broader scopes remain unfinished. The task register preserves one ACTIVE program, U-CAP-001.
+Revision 69 is controlling in [the adopted rules package](../encounters/README.md) and [the r69 supplement](../encounters/encounters-consistency-decisions-r69.md). It replaces conditional-trigger Ready. Ready creates only a motion-specific weapon preparation; it creates no target, event trigger, condition watcher or later Action commitment. Ordinary Draw takes two seconds and does not Ready the weapon. Ready lasts through Delay and is consumed when the weapon is next used; matching Strike timing receives the adopted reduction with a one-second minimum. Event readiness and assumed drawable locations/hands remain outside scope.
 
-## Implemented outcome
+Delay is a native one-second wait Action that records its selected defense. Repeating Delay waits to a later declaration boundary. An eligible pending Action can be paused only between committed seconds and resumed under its original identity with its saved remaining active duration. Spellcasting and momentum-dependent Actions, including strikes and charge, are rejected. The paused lifecycle is omitted from due Action resolution, validated in native interval preflight, and preserved by native Arena Save/Load.
 
-- Generated Arena provides an observer-authorized general composer for one-to-four ordered components from currently eligible, native-supported catalog entries. Current mappings cover Touch; armed melee/Feint/Disarm/Coup de grace/object strike/Break weapon; pickup and ordinary weapon Draw; Dodge preparation/use, Block, Parry, Yield; supported Being contact and Object contact/Wrest Actions.
-- Target selection uses current observer handles, and the endpoint rejects unknown selectors, malformed resources, invalid timing order, unsupported catalog families and native-invalid combinations before whole-set Choice publication. Native `schedule_choice` remains the single validator and publication path.
-- Component start offsets, per-component resource allocations and overlap priority penalties are explicit. The UI presents skill/STR/DEX and weapon-rank context. Native validation retains the adopted Multiple-action eligibility, resource and priority rules.
-- Current program state projects order, event label, authorized target name, interval, remaining time, priority and resource allocation without Action or Choice IDs. One cancellation control undoes an accepted set or cancels all unfinished members of an executing set.
-- Save/Load persists the accepted and running native Choice program; repeat cycles use fresh Action identities. The user's supplied UI composer was exercised in an actual seeded generated Arena browser session: Touch plus Dagger Swing with the second component offset one second was accepted by the shipped control and displayed both component timings/resources.
-- No-cost automatic Hold maintenance and the revision-68 willing-Touch exception continue to use their distinct native contracts. Stun/Subdue, unmodeled action families and optional Disarm variants are not misrepresented as eligible.
+The general generated-Arena composer submits through native Choice validation and publication. It exposes the eligible supported catalog, ordered timing, target handles, strategy/resource allocation, priority, status, cancellation and persistence. It does not manufacture source locations, hand occupancy, unsupported Action families or readiness of Events. No conditional Ready interpretation remains in the active implementation or user-facing controls.
+
+## Repository and preservation
+
+This execution began at HEAD `33ba09f68fc0d11a612b8b1ebc1fb3380f07f14e` on local `main`, after the prior task/report interval commit. Only U-CAP-001 source, tests, and its report/register state were changed. Pre-existing untracked assignment inputs and Arena/save/report files remain untouched. `.venv`, ignored `legacy/`, saved-world data, independent repositories and all backups remain protected.
 
 ## Acceptance verification matrix
 
-| Requirement | Result | Evidence / boundary |
+| U-CAP-001 criterion | Result | Verified evidence / boundary |
 |---|---|---|
-| Reconcile U-ARENA-018 original criteria first | Met | `docs/reports/U-ARENA-018-closeout.md`, committed as `51249f5`; U-CAP-001 is the sole ACTIVE program. |
-| General eligible generated-Arena composer | Met for the native-supported catalog | Browser/session endpoint, opaque handles, resource/order/timing/priority controls and native all-or-none Choice validation; actual browser acceptance observed. |
-| Sequential and mixed-duration overlap; execution and repeat | Met | Focused HTTP tests cover sequential Touch Save/Load, mixed Touch + Thrust, common start, completion, repeat with fresh IDs and cancellation. |
-| Invalid overlap and no unintended RNG | Met | Generated browser test rejects two overlapping Touches without Multi-action skill and verifies RNG cursor unchanged. Native Choice suite covers transactional validation/publication and concurrency. |
-| Program status, cancellation and persistence | Met for accepted/running general programs | New HTTP tests cover accepted cancellation, running sequential cancellation and fresh-process restoration; existing native tests cover repeat/abort and `/2` state. |
-| Native simultaneous resolution, capacity, resource reservations, interruption, rollback | Met by shared native Choice infrastructure, with regression cohort | Existing native Choice tests cover priority/resource/endpoint behavior, competition, atomic rollback and interruption. See exact cohort result below. |
-| Adopted Delay | Remaining rule/state boundary | Adopted text (r61) permits deferring a chosen Action, deciding in any later round, or pausing mid-action, with no specified native retained-action/resume boundary; defenses apply when Delay is independent. Native transactional state has no resumable paused Action. Do not invent when pause is sampled, how it resumes, or which completion boundary releases capacity. |
-| Conditional Ready | Remaining rule boundary | Adopted text says a prepared Action triggers when a condition occurs and usually permits movement. It gives an example trigger but no trigger-observation authority, sampling boundary, or declaration/resolution ordering against concurrent Actions. A trigger resolver cannot safely infer hidden Reality or invent a same-boundary priority. |
-| Ordinary Draw and weapon re-ready | Draw met; re-ready lifecycle remains | Revision 61 distinguishes two-second ordinary Draw from post-attack re-ready time and timing reduction. Native equipment exposes held/readied ownership but no consumed/unready state after a strike. Applying the reduction alone would silently grant repeat attacks without modeling the required re-ready interval/state. Revision 66 rejects assumptions about initial hand/readiness scope. |
-| Adjacent Stun/Subdue and other open Actions | Out of scope and still open | Preserved under U-ACT-020/U-ACT-021 and other stable IDs; composer offers only complete currently supported native contracts. |
+| Reconcile original U-ARENA-018 minimum and Sections A–D | Met | [Parent closeout](U-ARENA-018-closeout.md), commit `51249f5`; U-ARENA-018 is DONE (bounded), with Stun/Subdue and optional Disarm variants separate. |
+| General ordered composer for every eligible Action in the supported Arena catalog | Met (bounded) | Native Choice remains the single validator/publication path. Generated UI exposes action families with complete native Arena submission contracts, opaque observer handles, timing, resources, priority and reasons. General HTTP composer tests and earlier shipped-browser Touch + Dagger Swing interaction are retained. |
+| Mixed-duration overlap, sequential work, contention, resources, priority, simultaneous effects and RNG safety | Met | `tests.test_action_choices`; generated HTTP overlap/no-skill refusal preserves RNG state; mixed Touch + Thrust test verifies component timing/penalty and simultaneous outcomes. |
+| Interruption, cancellation and repeat-until-abort | Met | Native Choice regressions; generated general program cancellation; Multiple Touch repeated-cycle test restores, executes a fresh-identity cycle and cancels the successor. |
+| Accepted, running mixed-duration, aborted and repeating program persistence through a fresh process | Met | `test_general_action_program_http_accepts_sequential_and_validated_overlap` restores an accepted not-yet-started program. `test_general_action_program_composes_mixed_duration_touch_and_melee` now saves/restores that program while running, then saves/restores its aborted state. `test_native_multiple_touch_cycle_survives_live_and_recurring_fresh_process_saves` covers repeated cycles in child processes. |
+| Revision-69 Draw, Ready, Delay and nonconditional Ready | Met (supported weapons) | Native and generated HTTP/session controls cover two-second Draw, motion options, readiness persistence, Ready → Delay → Strike, Longsword 6/2/4-second timing, ordinary/unready and repeated Strike timing, and consumption after use. No Event-readying or unsupported drawable facts are offered. |
+| Eligible pause/resume with remaining duration and prohibited momentum pause | Met | Six-second Spot pauses after two committed seconds, waits three seconds, resumes the same identity for four remaining seconds and resolves at the shifted boundary. Paused state is Save/Load-restored in a fresh Python process. Strike pause refusal has focused coverage. |
+| Observation privacy, rollback, competing resources, retained defense and no-cost maintenance regressions | Met in the shared Choice/interval cohort | `tests.test_action_choices` and existing Action settlement/atomic publication cases. The generated projection contains no native Action IDs; forged handles and rejected declarations remain refused without RNG advancement. |
+| Actual browser attempt and shipped-control evidence | Attempted; HTTP/session verified | Chrome opened the generated Arena at seed `20261140`; Generate produced the ordinary equipped Encounter and the page displayed Pause/Resume controls. Before the first observed/action boundary, the player popup correctly reported Action availability as unknown, so this visit did not claim an Action click. The ordinary HTTP/session control tests and prior recorded seeded composer browser interaction supply the executable evidence; no file-picker Load claim is made. |
+| Unimplemented Actions outside assignment | Separate OPEN/PARTIAL scope | Stun/Subdue, optional Disarm branches, other Object/weapon variants and any later contest between joint Object holders remain under their existing IDs. They do not require a missing rule decision for this assignment. |
 
-## Exact rule decisions needed to complete temporal branches
+## Reproduction and test results
 
-1. **Delay retention:** should an independent Delay be (A) a retained wait that completes only when the player explicitly chooses a new Action at a later one-second boundary, or (B) a condition-triggered wait that starts a selected Action on a trigger? A keeps the actor waiting for a player decision; B needs the trigger policy in item 2. Separately, the adopted text does not identify the legal mid-action pause boundary or whether resume continues remaining duration or restarts timing, so that branch remains out until specified.
-2. **Ready/condition trigger:** should triggers be sampled (A) from this Being's observer-authorized evidence at each committed one-second boundary, or (B) from Reality events, including unobserved events? A preserves observation limits and starts the prepared Action at the next sampled boundary; B permits unseen triggers and needs a privacy/order contract. The adopted text does not say which controls, or how two prepared Actions triggered at one boundary contend.
-3. **Weapon re-ready:** should a strike (A) consume the weapon's ready state and impose the one-third-timing re-ready interval before another strike, or (B) treat the one-third value only as a timing allocation discount without a consumed readiness state? These produce different strike cadence and save-state requirements. Revision 61 states the one-third rule but the current Encounter has neither a consumed-ready state nor a native re-ready interval; revision 66 rules out assumed initial-hand/readiness behavior.
+Focused checks (repository `.venv`, Python `-B`):
 
-No user decision is needed for the general composer or its native Choice integration. The independently implementable general composition scope is complete for the currently supported native catalog; leave this program ACTIVE pending temporal rule decisions.
+- `PYTHONPATH=src:examples .venv/bin/python -B -m unittest tests.test_action_choices tests.test_arena_ready_weapon tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_ready_delay_http_controls_and_visible_motion_timing tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_pause_resume_http_controls_keep_action_identity_and_remaining_time` — **79 tests passed** in 15.476 s. An earlier run exposed a missing weapon in the newly added negative pause-test fixture; the fixture was corrected and the full focused command rerun successfully.
+- `PYTHONPATH=src:examples .venv/bin/python -B -m unittest tests.test_arena_persistence tests.test_arena_checkpoint_activation` — **8 tests passed** in 12.148 s.
+- Four focused generated HTTP tests for sequential/overlapping composition, cancellation, mixed-duration Actions and Grapple + Break-hold — **4 passed** in 4.253 s.
+- Extended fresh-process mixed-duration accepted → running → aborted Save/Load test — **1 passed** in 3.110 s.
+- `test_actual_shipped_javascript_runs_fresh_authored_draw_scenario` and `test_native_multiple_touch_cycle_survives_live_and_recurring_fresh_process_saves` — **2 passed** in 3.307 s.
+- Python compile check for the touched runtime, Arena and test modules passed before final commit. The full repository suite was not run.
 
-## Verification and Git
+The actual Chrome interaction was a live local generated Arena session. The full temporal transitions were exercised through native tests, HTTP routes and separate Python subprocesses; these evidence levels are distinguished above. The extension's local-file Load limitation was not used to infer Save/Load success; fresh-process native serialization supplied that proof.
 
-- Actual browser interaction: shipped generated Arena UI accepted an ordered Touch + Dagger Swing program with the second start offset at one second. It showed component timing and resource allocations without native identities.
-- `py_compile`: `PYTHONPATH=src:examples .venv/bin/python -B -m py_compile src/arena_browser_session.py examples/arena_web.py tests/test_generated_arena_browser.py` passed with the corrected assertion.
-- Focused composer + label regression: four HTTP tests (the three `test_general_action_program_*` cases and the existing repeat/save control test) passed in 4.527 s.
-- Native evaluator regressions: five focused tests for willing Touch, paralysis refusal without RNG, Grapple + Break-hold continuation, frozen priority and fresh-ID repeat/abort passed in 3.304 s.
-- Combined command `PYTHONPATH=src:examples .venv/bin/python -B -m unittest tests.test_action_choices tests.test_generated_arena_browser` passed **118 tests in 87.246 s**. A preceding run had one stale assertion expecting the former `Abort Multiple actions` catalog label; updated the assertion to `Cancel Action program` and reran the full cohort successfully. `git diff --check` also passed. The full repository suite was not run.
-- Idea inbox: `docs/ideas/inbox/` does not exist; no intake mapping or pending note.
-- Starting HEAD for this work: `51249f5` (parent closeout). Implementation commit: `cea1708` (`Add generated Arena Action program composer`). Task/report state commit: `05d4395` (`Record U-CAP-001 composition status`). Permanent process amendment commit: `5db30e4` (`Require timestamped Codex execution closeouts`). The final report-only closeout commit and resulting HEAD are recorded in the final response. Implementation staged audit passed `git diff --cached --check` and `.venv/bin/python -B tools/check_publication_safety.py --staged` (`3 files; 0 findings`); task/report staged audit passed both checks (`2 files; 0 findings`). No push is authorized or performed.
+## Task register and process
+
+`TASKS.md` transitions in the closeout commit:
+
+- `U-CAP-001`: ACTIVE → DONE (bounded), with this complete acceptance matrix.
+- `U-ACT-007` Delay: OPEN/ACTIVE → DONE (bounded).
+- `U-ACT-013` Multiple actions: PARTIAL/ACTIVE → DONE (bounded for supported native Arena catalog); broader native Action families remain separate.
+- `U-ACT-015` Ready: PARTIAL/ACTIVE → DONE (bounded for weapons); other Objects require separately established preparation and Event readiness is not adopted.
+- `U-ACT-035` Draw: DONE (bounded) clarified to distinguish Draw from Ready and require represented source/hand facts.
+- `U-UI-001`, Stun/Subdue, optional Disarm variants and other open Actions remain unchanged.
+- Idea inbox check: `docs/ideas/inbox/` does not exist; no intake note or ID mapping was available. No new idea was inferred.
+- No new assignment was created or started. `TASKS.md` records no implementation program ACTIVE and leaves U-CAP-002 as the next candidate.
+
+The permanent [development-process document](../process/DEVELOPMENT-PROCESS.md) requires actual timezone-qualified ISO 8601 Start/End timestamps and calculated elapsed durations in both reports and chat, per execution interval. The current interval will be finalized below.
+
+## Git, safety and closeout
+
+- Rules supplement commit: `43bf86d727af4b632050de10ab52d145d78bb8da` (`Adopt revision 69 Draw Ready and Delay rules`).
+- Implementation commit: `3b07d78` (`Implement Draw Ready and Delay Actions`). It contains 20 explicitly staged source/test files; `git diff --cached --check` passed and `tools/check_publication_safety.py --staged` reported 20 files, 0 findings.
+- The task-register/report closeout is the final documentation commit; its resulting HEAD is included in the final chat closeout. Its staged audit is repeated after timestamp insertion.
+- The pre-existing unrelated untracked assignment files, saved Arena JSON and `docs/reports/U-REPO-010-report.md` were preserved and not staged. `.venv`, ignored `legacy/`, saved-world data, independent repositories and backups were not modified.
+- No remote push or history rewrite was performed.
+
+## Remaining limits
+
+There is no genuine rule or external blocker for the accepted U-CAP-001 scope. Unimplemented Action families, optional Disarm variants, Event readiness, unrepresented drawable locations/hands, and broader world/UI/persistence work are precisely bounded and tracked separately. This assignment is complete (bounded).
