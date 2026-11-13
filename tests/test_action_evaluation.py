@@ -874,6 +874,39 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.enc.inspect_committed(1).action(rush.id).facts.outcome,
                          'success_pending_displacement')
 
+    def test_native_bull_rush_refuses_target_more_than_one_size_category_larger(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category='small'; self.b.size_category='large'
+        self.enc.enable_transactional_progression(quiescent=True)
+        before=(self.enc.time,tuple(self.enc.pending_action_list),random.getstate())
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        with self.assertRaisesRegex(ValueError,'more than one size category larger'):
+            self.enc.prepare_action(rush)
+        self.assertEqual((self.enc.time,tuple(self.enc.pending_action_list),
+                          random.getstate()),before)
+
+    def test_multiple_action_priority_penalty_applies_to_bull_rush_contest(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.a.current.skills.skills['multi-action']=1
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        touch=Action(self.world,0,1,'touch',self.a.id,self.b.id,None)
+        touch.end_time=1
+        self.enc.schedule_choice((ChoiceMember('rush',rush,priority_penalty=3),
+                                  ChoiceMember('touch',touch,priority_penalty=0)))
+        values=iter([3,3,3,2,2,2,20,20])
+        def roll(ctx,dice):
+            value=next(values)
+            sides=int(dice.split('d')[1])
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,sides,value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        result=self.enc.inspect_committed(1)
+        self.assertEqual(result.action(rush.id).facts.outcome,'failed')
+
     def test_native_trip_accepts_a_committed_successful_grab_as_contact(self):
         from physical_contact import trip_contact_kind
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
