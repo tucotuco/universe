@@ -155,6 +155,34 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual((self.encounter.time, tuple(actor.get_position() for actor in actors),
                           self.rng.state), before)
 
+    def test_three_simultaneous_movers_contending_for_one_hex_are_refused_atomically(self):
+        self.activate_run_observer()
+        third_id = self.candidate.universe.make_being("Human", "Third movement contender")
+        third = self.candidate.universe.get_object_by_id(third_id)
+        third.current.race = "human"
+        self.encounter.add_being(third_id)
+        actors = (self.player, self.opponent, third)
+        starts = (HexAddress(1, 2), HexAddress(2, 1), HexAddress(3, 2))
+        destination = self.layout.center_position(HexAddress(2, 2))
+        for actor, cell in zip(actors, starts):
+            actor.set_position(self.layout.center_position(cell))
+            actor.set_hit_points(100)
+            actor.set_hex_facing(0)
+            actor.set_posture("standing")
+        intents = tuple(MovementIntent(actor.id, destination, "sprint",
+            f"three-way-contest:{actor.id}", 1) for actor in actors)
+        conditions = {actor.id: MovementRateConditions(
+            terrain_multiplier=1.0, hampered_multiplier=1.0,
+            direction="forward", concurrent_demanding_action=False) for actor in actors}
+        before = (self.encounter.time, tuple(actor.get_position() for actor in actors),
+                  self.rng.state, random.getstate())
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intents=intents,
+                                movement_conditions=conditions)
+        self.assertEqual(refused.exception.code, "conflicting_routes")
+        self.assertEqual((self.encounter.time, tuple(actor.get_position() for actor in actors),
+                          self.rng.state, random.getstate()), before)
+
     def conditions(self, *, demanding=False):
         # Explicit test-only rate premises. ``demanding`` is an authored
         # context fact and is never inferred from a co-resolving RunAction.
