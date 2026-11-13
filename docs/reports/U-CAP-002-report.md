@@ -49,7 +49,11 @@ The first generated landing fixture was refused because `trace_physical_path` tr
 
 ## Commits and audit
 
-To be completed after the final scoped review: list exact local commit hashes, staged paths, staged publication-safety findings, final `HEAD`, and working-tree status. The staged historical rename remains outside the task commit.
+- `1694f62e0fe4ecef216c88b15e3754386a8d3b42` — Integrate bounded Charge and Bull Rush continuations. This commit contains 22 explicitly scoped implementation, test, `TASKS.md`, and report paths.
+- Before commit: `git diff --cached --check` passed. `.venv/bin/python -B tools/check_publication_safety.py --staged` reported **24 staged paths, 0 findings, PASS**; the count included the user's independently staged archive rename. `git commit --only` explicitly excluded that rename.
+- At the implementation commit: `HEAD=1694f62e0fe4ecef216c88b15e3754386a8d3b42`, branch `main`. After commit the only staged change was the pre-existing user rename; there were no unstaged task changes. A final report-only correction commit is being recorded below in Git history and closeout.
+- Remote remains `origin` (`https://github.com/tucotuco/universe.git`); no push was made.
+- No test weakened checkpoint fingerprints. The new `PositionEffect` type was added to the closed checkpoint field/type catalog and reconstructed through the existing fingerprinted format; generated pending and committed restores both pass.
 
 ## Execution intervals
 
