@@ -1330,6 +1330,16 @@ def _grapple_roll(rng, being, *, escape=False, strength_only=False, bonus=0):
     return sum(dice) + modifier + bonus
 
 
+def _represented_extra_legs(being):
+    """Apply the adopted +2 stability modifier from explicit named leg slots."""
+    parts = being.data.get('body_parts')
+    if type(parts) not in (dict, MappingProxyType):
+        return 0
+    count = sum(1 for name in parts
+                if type(name) is str and name.casefold().strip().endswith(' leg'))
+    return 2 if count > 2 else 0
+
+
 def _grappling(snapshot, action, rng, dependencies=()):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     event_type = action.data['event_type']
@@ -1467,10 +1477,11 @@ def _grappling(snapshot, action, rng, dependencies=()):
             shield_bonus = 2 if shield_rank > 1 else 1
         actor_total=(sum(rng.roll('1d6') for _ in range(3))
                      +(actor_size-10)//2+(actor_dex-10)//2
-                     +max(0,size_modifier)+shield_bonus-priority_penalty)
+                     +max(0,size_modifier)+shield_bonus
+                     +_represented_extra_legs(actor)-priority_penalty)
         target_total=(sum(rng.roll('1d6') for _ in range(3))
                       +(target_size-10)//2+(target_dex-10)//2
-                      +max(0,-size_modifier))
+                      +max(0,-size_modifier)+_represented_extra_legs(target))
         if actor_total<=target_total:
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
@@ -1514,10 +1525,11 @@ def _grappling(snapshot, action, rng, dependencies=()):
             shield_bonus=2 if shield_rank>1 else 1
         actor_total=(sum(rng.roll('1d6') for _ in range(3))
                      +(actor.data['abilities'].get('STR',10)-10)//2
-                     +4*max(0,difference)+shield_bonus-priority_penalty)
+                     +4*max(0,difference)+shield_bonus
+                     +_represented_extra_legs(actor)-priority_penalty)
         target_total=(sum(rng.roll('1d6') for _ in range(3))
                       +(target.data['abilities'].get('STR',10)-10)//2
-                      +4*max(0,-difference))
+                      +4*max(0,-difference)+_represented_extra_legs(target))
         outcome='success_pending_displacement' if actor_total>target_total else 'failed'
         return ActionProposal(action.id,actor.id,(target.id,),outcome)
     if event_type == 'grab':

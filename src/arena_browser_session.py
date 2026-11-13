@@ -3295,8 +3295,8 @@ class GeneratedArenaSession:
                             "reverse":"One opposed Grapple check at the next control boundary from a disadvantaged position; requires explicit size categories.",
                             "pin":"One opposed Grapple check at the next control boundary; target becomes prone and immobilized.",
                             "trip":"Two-second Strength versus defender-chosen Strength/Dexterity contest after this player's successful Touch; size category is required.",
-                            "bull rush":"One-second native Strength contest within one yard and ahead; success records pending displacement without inventing a distance.",
-                            "overrun":"Four-second native Strength + Dexterity contest against a standing Being within one yard and ahead; success leaves the target prone without invented displacement.",
+                            "bull rush":"One-second native Strength contest within one yard and ahead, including +2 for an explicitly represented side with more than two named legs; success records pending displacement without inventing a distance.",
+                            "overrun":"Four-second native Strength + Dexterity contest against a standing Being within one yard and ahead, including +2 for an explicitly represented side with more than two named legs; success leaves the target prone without invented displacement.",
                         }[event_type]
                     except ArenaBrowserRequestError as exc:
                         reason = str(exc)

@@ -783,6 +783,27 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.enc.inspect_committed(4).action(overrun.id).facts.outcome,'failed')
         self.assertEqual(self.b.get_posture(),'standing')
 
+    def test_native_overrun_applies_stability_for_explicitly_represented_extra_legs(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_posture('standing'); self.b.set_posture('standing')
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.a.current.body_parts={name:None for name in
+            ('front left leg','front right leg','rear left leg','rear right leg')}
+        self.b.current.body_parts={'left leg':None,'right leg':None}
+        self.enc.enable_transactional_progression(quiescent=True)
+        overrun=Action(self.world,0,4,'overrun',self.a.id,self.b.id,None)
+        self.enc.schedule_action(overrun)
+        values=iter([2,2,2,2,2,2])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(4)
+        result=self.enc.inspect_committed(4).action(overrun.id)
+        self.assertEqual(result.facts.outcome,'success')
+        self.assertEqual(self.b.get_posture(),'lying')
+
     def test_native_overrun_uses_advanced_equipped_shield_bonus(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.set_posture('standing'); self.b.set_posture('standing')
@@ -974,6 +995,25 @@ class TestActionEvaluation(unittest.TestCase):
         with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
         self.assertEqual(self.enc.inspect_committed(1).action(rush.id).facts.outcome,
                          'success_pending_displacement')
+
+    def test_native_bull_rush_applies_stability_for_explicitly_represented_extra_legs(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.a.current.body_parts={name:None for name in
+            ('front left leg','front right leg','rear left leg','rear right leg')}
+        self.b.current.body_parts={'left leg':None,'right leg':None}
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        self.enc.schedule_action(rush)
+        values=iter([2,2,2,2,2,2])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        result=self.enc.inspect_committed(1).action(rush.id)
+        self.assertEqual(result.facts.outcome,'success_pending_displacement')
 
     def test_native_bull_rush_refuses_target_more_than_one_size_category_larger(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
