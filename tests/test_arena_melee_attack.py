@@ -142,6 +142,14 @@ class TestArenaMeleeAttack(unittest.TestCase):
         self.assertTrue(action.charge)
         self.assertEqual((action.actor_id, action.target_id, action.instrument_id),
                          (player.id, target_id, weapon_id))
+        restored = GeneratedArenaSession()
+        loaded_view = restored.load_encounter_bytes(self.session.save_encounter_bytes())
+        loaded_action = restored._player_melee_action(
+            restored.active_candidate,
+            restored.active_candidate.participants[0].native.being)
+        self.assertTrue(loaded_action.charge)
+        self.assertEqual(loaded_action.id, action.id)
+        self.assertEqual(loaded_view["melee_action"]["status"], "executing")
         self.assertEqual(accepted["melee_action"]["status"], "executing")
         self.assertNotIn(player.id, json.dumps(charge))
         self.assertNotIn(target_id, json.dumps(charge))
