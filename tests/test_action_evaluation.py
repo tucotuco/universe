@@ -1041,6 +1041,32 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertIsNone(dropped.parent_container_id)
         self.assertEqual(dropped.get_position(),self.b.get_position())
 
+    def test_grappled_disarm_defender_loses_the_five_point_defense_bonus(self):
+        from dataclasses import replace
+        from types import MappingProxyType
+        from action_evaluation import ActionView,_disarm
+        self.a.current.skills.skills['unarmed combat']=1
+        self.a.current.body_parts['left hand']=None
+        self.b.set_position(CartesianPosition(.2,0,0))
+        original=self.strike();self.schedule(original)
+        snapshot=self.snapshot()
+        data=dict(snapshot.actions[original.id].data)
+        from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
+        data.update(event_type='disarm',disarm_weapon_id=self.w3,
+                    disarm_motion='thrust',reach=reference_arm_length_inches(
+                        height_inches=self.a.current.height,
+                        length_inches=self.a.current.length)*INCHES_TO_METERS)
+        action=replace(snapshot.actions[original.id],family='disarm',instrument_id=None,
+                       data=MappingProxyType(data))
+        snapshot=replace(snapshot,actions=MappingProxyType({action.id:action}),
+            grapple_controls=(('control',self.a.id,self.b.id,6,'standing'),))
+        class ScriptedRolls:
+            values=iter((10,10))
+            def roll(self,_dice):return next(self.values)
+        result=_disarm(snapshot,action,ScriptedRolls())
+        self.assertEqual(result.outcome,'disarmed')
+        self.assertEqual(dict(result.metadata)['margin'],1)
+
     def test_native_break_weapon_uses_pending_attack_motion_and_disables_it_next_boundary(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.current.skills.weapon_skills['Dagger']=2
