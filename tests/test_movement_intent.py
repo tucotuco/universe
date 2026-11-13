@@ -110,6 +110,27 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(refused.exception.code, "uncertain_path")
         self.assertEqual(self.encounter.time, 0)
 
+    def test_explicit_movement_can_end_in_geometryless_ground_object_cell(self):
+        self.activate_run_observer()
+        origin, item_cell = HexAddress(1, 2), HexAddress(2, 2)
+        self.player.set_position(self.layout.center_position(origin))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
+        self.player.set_hex_facing(0)
+        object_id = self.candidate.universe.make_object("Rock", "terminal contact rock")
+        rock = self.candidate.universe.get_object_by_id(object_id)
+        rock.set_position(self.layout.center_position(item_cell))
+        self.encounter.add_object(object_id)
+        intent = MovementIntent(self.player.id, self.layout.center_position(item_cell),
+                                "walk", "terminal-object-contact", 1,
+                                facing_policy="turn")
+        self.encounter.step(1, movement_intent=intent,
+            movement_conditions=MovementRateConditions(
+                terrain_multiplier=1.0, hampered_multiplier=1.0,
+                direction="forward", concurrent_demanding_action=False))
+        self.assertEqual(self.player.get_position(),
+                         truncate_position(self.layout.center_position(item_cell)))
+        self.assertEqual(self.encounter.time, 1)
+
     def test_movement_refuses_intersection_with_modeled_ground_object(self):
         from spatial.geometry import Sphere
         self.activate_run_observer()

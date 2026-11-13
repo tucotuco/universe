@@ -160,11 +160,12 @@ def _movement_hexes(start, end, layout):
     return frozenset(touched)
 
 
-def _validate_arena_routes(routes, snapshot):
+def _validate_arena_routes(routes, snapshot, *, terminal_object_cells=None):
     from arena_hex_map import layout_from_encounter_map
     layout = layout_from_encounter_map(snapshot.encounter_map)
     if layout is None:
         return
+    terminal_object_cells = {} if terminal_object_cells is None else dict(terminal_object_cells)
     moving = set(routes)
     occupied_routes = {}
     trajectories = {}
@@ -198,6 +199,14 @@ def _validate_arena_routes(routes, snapshot):
             for object_id in ground_objects.get(cell, ()):
                 obstacle = snapshot.entity(object_id)
                 if obstacle.geometry is None:
+                    # The current Arena Pick up contract intentionally permits
+                    # ending in the ground Object's reference cell. This is a
+                    # terminal interaction convention, not evidence that the
+                    # geometryless Object is passable along an intermediate
+                    # route cell.
+                    if (terminal_object_cells.get(actor_id) == cell
+                            and layout.cell_at_position(trajectories[actor_id][1]) == cell):
+                        continue
                     raise MovementIntentRefusal("uncertain_path", "movement crosses a ground Object cell without supported clearance geometry")
                 if obstacle.segment_intersection(*trajectories[actor_id]) is not None:
                     raise MovementIntentRefusal("blocked_path", "movement intersects a modeled ground Object")
@@ -218,6 +227,8 @@ def validate_arena_movement_paths(prepared, snapshot):
     no Being footprint or body clearance is inferred. The same starting cell
     may contain a contact/grip already represented by the Encounter.
     """
+    from arena_hex_map import layout_from_encounter_map
+    layout = layout_from_encounter_map(snapshot.encounter_map)
     routes = {}
     for row in prepared:
         end = (row.intent.destination
@@ -227,7 +238,21 @@ def validate_arena_movement_paths(prepared, snapshot):
                    row.start_position.y + row.velocity_meters_per_second[1],
                    row.start_position.z + row.velocity_meters_per_second[2]))
         routes[row.intent.actor_id] = (row.start_position, end)
-    _validate_arena_routes(routes, snapshot)
+    terminal_object_cells = {}
+    for row in prepared:
+        if layout is None:
+            continue
+        cell = layout.cell_at_position(row.intent.destination)
+        if cell is None:
+            continue
+        if any(entity.category in ("object", "weapon", "armor")
+               and entity.data.get("parent_container_id") is None
+               and entity.position is not None
+               and layout.cell_at_position(entity.position) == cell
+               and entity.geometry is None
+               for entity in snapshot.entities.values()):
+            terminal_object_cells[row.intent.actor_id] = cell
+    _validate_arena_routes(routes, snapshot, terminal_object_cells=terminal_object_cells)
 
 
 def validate_arena_velocity_paths(velocities, snapshot, duration):

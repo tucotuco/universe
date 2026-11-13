@@ -2162,7 +2162,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance(self):
         stream = self.enable_trace()
         loadout_profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
-        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 1,
             trace_ui=True, trace_stream=stream, ground_loadout_profile=loadout_profile)
         _, page = self.request("/")
         self.assertNotIn('id="characterPanel"', page)
@@ -2170,7 +2170,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertNotIn('id="characterButton"', page)
         self.assertIn('function openCharacterPopup(trigger)', page)
         state = self.session.generate({
-            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "opponent_strategy": "none"})
         player = self.session.active_candidate.participants[0].native.being
         player.current.body_parts["right hand"] = None
         state = self.session.public_view()
@@ -2364,8 +2365,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertNotIn(hidden.native.being.id, stream.getvalue())
         self.assertNotIn("seed=", stream.getvalue())
 
-    def test_geometryless_ground_object_passage_fails_closed_without_state_leak(self):
-        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+    def test_geometryless_ground_object_intermediate_passage_fails_closed_without_state_leak(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 1,
             ground_item_descriptions=[{"source_item_id": "path-test-dagger",
                 "category": "weapon", "native_type_key": "Dagger", "quantity": 1,
                 "ordinary": True, "magical": False, "mechanics": None,
@@ -2383,8 +2384,15 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         before = (player.get_position(), candidate.encounter.time,
             self.session._rng_cursor.state, dict(candidate.universe.event_history),
             dict(candidate.encounter._choice_book._choices), placement.native_object_id)
-        plan = self.session.choose_destination({"column": placement.column,
-            "row": placement.row, "rate": "sprint", "facing_policy": "turn"})
+        destination = HexAddress(4, 2)
+        from movement_intent import _movement_hexes
+        route = _movement_hexes(player.get_position(),
+            candidate.arena_map.layout.center_position(destination,
+                z=player.get_position().z), candidate.arena_map.layout)
+        self.assertIn(HexAddress(placement.column, placement.row), route)
+        self.assertNotEqual(destination, HexAddress(placement.column, placement.row))
+        plan = self.session.choose_destination({"column": destination.column,
+            "row": destination.row, "rate": "sprint", "facing_policy": "turn"})
         self.assertIsNotNone(plan["movement_plan"])
         with self.assertRaises(ArenaBrowserRequestError) as refused:
             self.session.advance_one_second()
@@ -2395,7 +2403,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             self.session._rng_cursor.state, dict(candidate.universe.event_history),
             dict(candidate.encounter._choice_book._choices)))
         self.assertEqual(self.session.public_view()["movement_plan"]["destination_cell"],
-                         {"column": placement.column, "row": placement.row})
+                         {"column": destination.column, "row": destination.row})
         self.assertIsNone(candidate.universe.get_object_by_id(
             placement.native_object_id).parent_container_id)
         self.assertNotIn(candidate.participants[0].native.being.id, json.dumps(target))
