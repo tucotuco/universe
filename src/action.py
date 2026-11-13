@@ -267,20 +267,36 @@ class Action(Event):
                     or self.actor_id not in encounter.being_list or self.target_id not in encounter.being_list
                     or not encounter.is_aware(self.actor_id,self.target_id)):
                 raise ValueError('Disarm requires two aware participating Beings')
-            if (type(weapon) is not WeaponInstance or weapon.id not in actor.armed_with(encounter.universe).values()
-                    or type(target_weapon) is not WeaponInstance
+            if (type(target_weapon) is not WeaponInstance
                     or target_weapon.id not in defender.armed_with(encounter.universe).values()):
-                raise ValueError('Disarm requires an attacking held weapon and a specifically held target weapon')
-            if (actor.current.skills.weapon_skills.get(weapon.original.obj_type,0)<=1
-                    or motion not in ('swing','thrust') or motion not in weapon.get_melee_types()):
-                raise ValueError('armed Disarm requires advanced weapon skill and a supported attack motion')
-            timing=weapon.St() if motion=='swing' else weapon.Tt()
+                raise ValueError('Disarm requires a specifically held target weapon')
+            if motion not in ('swing','thrust'):
+                raise ValueError('Disarm requires a supported swing or thrust motion')
+            if weapon is None:
+                from melee_combat import reference_arm_length_inches, INCHES_TO_METERS
+                from weapon import WeaponInstance
+                if (actor.current.skills.get_skill_level('unarmed combat') or 0)<=0:
+                    raise ValueError('unarmed Disarm requires Unarmed combat skill')
+                if not any(hand in ('left hand','right hand') and value is None
+                           for hand,value in actor.current.body_parts.items()):
+                    raise ValueError('unarmed Disarm requires an available arm')
+                timing={'swing':4,'thrust':3}[motion]
+                expected_reach=reference_arm_length_inches(
+                    height_inches=actor.current.height,length_inches=actor.current.length,
+                    size_category=getattr(actor,'size_category',None))*INCHES_TO_METERS
+            else:
+                if (type(weapon) is not WeaponInstance or weapon.id not in actor.armed_with(encounter.universe).values()
+                        or actor.current.skills.weapon_skills.get(weapon.original.obj_type,0)<=1
+                        or motion not in weapon.get_melee_types()):
+                    raise ValueError('armed Disarm requires an actually held weapon, advanced skill, and supported motion')
+                timing=weapon.St() if motion=='swing' else weapon.Tt()
+                from melee_combat import effective_melee_reach_meters
+                expected_reach=effective_melee_reach_meters(actor.current,weapon.current)
             if (type(timing) not in (int,float) or timing<=0
                     or self.end_time-self.start_time!=max(1,timing-self.strategy.timing_adjustment())
                     or type(reach) not in (int,float) or not math.isfinite(reach) or reach<=0):
                 raise ValueError('Disarm timing or reach is invalid')
-            from melee_combat import effective_melee_reach_meters
-            if not math.isclose(reach,effective_melee_reach_meters(actor.current,weapon.current),rel_tol=1e-12,abs_tol=1e-12):
+            if not math.isclose(reach,expected_reach,rel_tol=1e-12,abs_tol=1e-12):
                 raise ValueError('Disarm reach differs from native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
         if self.event_type in ('grab object','wrest'):

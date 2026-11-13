@@ -536,10 +536,10 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or data.get('break_motion') != 'swing'):
             raise TransactionalProgressionError('native Break weapon requires both weapon identities and swing motion')
     if type(action) is Action and data['event_type'] == 'disarm':
-        if (data.get('instrument_id') is None or data.get('target_id') is None
+        if (data.get('target_id') is None
                 or type(data.get('disarm_weapon_id')) is not str
                 or data.get('disarm_motion') not in ('swing','thrust')):
-            raise TransactionalProgressionError('native Disarm requires two weapon identities and attack motion')
+            raise TransactionalProgressionError('native Disarm requires a target weapon and attack motion')
     if type(action) is Action and data['event_type'] in ('grab object','wrest'):
         expected=('holder_id','holder_hand','grab_hand') + (('object_grip_id',) if data['event_type']=='wrest' else ())
         if (any(type(data.get(key)) is not str or not data[key] for key in expected)

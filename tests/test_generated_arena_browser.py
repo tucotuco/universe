@@ -1221,7 +1221,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
 
     def test_disarm_http_pending_save_load_commits_exact_weapon_to_ground(self):
         page=self.request("/")[1]
-        self.assertIn("function submitDisarm(handle,motion)",page)
+        self.assertIn("function submitDisarm(handle,motion,unarmed=false)",page)
         profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text())
         self.session=GeneratedArenaSession(root_seed_factory=lambda:20261108,
             ground_loadout_profile=profile)
@@ -1294,11 +1294,57 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(view['disarm_action']['status'],'completed')
         self.assertEqual(view['disarm_action']['outcome'],'disarmed')
         self.assertGreaterEqual(view['disarm_action']['maximum_landing_hexes'],0)
+
+    def test_generated_arena_exposes_and_accepts_unarmed_disarm(self):
+        profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text())
+        self.session=GeneratedArenaSession(root_seed_factory=lambda:20261108,
+            ground_loadout_profile=profile)
+        status,_=self.request("/api/generated/generate",{
+            "starting_experience":"10000","width_cells":"10","height_cells":"5",
+            "equipment_mode":"equipped","opponent_strategy":"none"})
+        self.assertEqual(status,200)
+        candidate=self.session.active_candidate
+        player=candidate.participants[0].native.being;defender=candidate.participants[1].native.being
+        player.current.skills.skills['unarmed combat']=1
+        player.strategy.attack=100
+        defender.strategy.defense=0
+        free_hand=next((hand for hand in ('left hand','right hand')
+                        if player.current.body_parts.get(hand) is None),None)
+        if free_hand is None:
+            free_hand='left hand';player.current.body_parts[free_hand]=None
+        target_weapon=candidate.universe.get_object_by_id(defender.weapons[0])
+        origin=player.get_position()
+        defender.set_position(CartesianPosition(origin.x+.1,origin.y,origin.z))
+        player.set_hex_facing(nearest_facing((.1,0,0)))
+        self.assertEqual(self.request("/api/generated/run",{})[0],200)
+        self.assertEqual(self.request("/api/generated/advance",{"seconds":1})[0],200)
+        handle=self.session._view_handles[target_weapon.id]
+        inspected=self.request("/api/generated/inspect",{"handle":handle})[1]
+        row=next(item for item in inspected["action_catalog"]["entries"]
+                 if item["name"]=="disarm (unarmed)")
+        self.assertEqual(row["status"],"available",row["reason"])
+        self.assertEqual({item["motion"] for item in row["motions"]},{"swing","thrust"})
+        status,accepted=self.request("/api/generated/disarm",{
+            "handle":handle,"motion":"thrust","unarmed":True})
+        self.assertEqual(status,200,accepted)
+        self.assertEqual(accepted["disarm_action"]["status"],"executing")
+        wire=self.session.save_encounter_bytes()
+        restored=GeneratedArenaSession(root_seed_factory=lambda:3)
+        view=restored.load_encounter_bytes(wire)
+        from action_evaluation import _ProvisionalRandom,RandomDraw
+        rolls=iter((20,1))
+        def roll(ctx,dice):
+            value=next(rolls)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):
+            while view['disarm_action']['status']=='executing':
+                view=restored.advance_one_second()
+        self.assertEqual(view['disarm_action']['outcome'],'disarmed')
         dropped=restored.active_candidate.universe.get_object_by_id(target_weapon.id)
+        restored_defender=restored.active_candidate.encounter.get_being(defender.id)
         self.assertIsNone(dropped.parent_container_id)
-        self.assertIsNotNone(dropped.spatial_state)
-        inspection=restored.active_candidate.encounter.inspect_committed()
-        self.assertEqual(inspection.target(target_weapon.id).position,dropped.get_position())
+        self.assertEqual(dropped.get_position(),restored_defender.get_position())
 
     def test_armed_feint_uses_browser_route_and_pending_save_load(self):
         status, page = self.request("/")

@@ -1610,27 +1610,45 @@ def _object_strike(snapshot, action, rng):
 
 def _disarm(snapshot, action, rng):
     actor,defender=snapshot.entity(action.actor_id),snapshot.entity(action.target_id)
-    attacker_weapon=snapshot.entity(action.instrument_id)
+    attacker_weapon=(snapshot.entity(action.instrument_id)
+                     if action.instrument_id is not None else None)
     target_weapon=snapshot.entity(action.data['disarm_weapon_id'])
     distance=snapshot.distance(actor.id,defender.id)
     metadata=[] if distance is None else [('distance',distance)]
     if actor.hp<=0 or actor.data['fatigue_level']>=5:
         return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
-    if (attacker_weapon.hp<=0 or action.instrument_id not in actor.data['held']
-            or target_weapon.hp<=0 or target_weapon.id not in defender.data['held']):
+    if (target_weapon.hp<=0 or target_weapon.id not in defender.data['held']):
+        return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
+    unarmed = attacker_weapon is None
+    if unarmed:
+        if ((actor.data['skills'].get('unarmed combat',0) or 0)<=0
+                or not any(hand in ('left hand','right hand') and value is None
+                           for hand,value in actor.data.get('body_parts',{}).items())):
+            return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
+        from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
+        try:
+            reach=reference_arm_length_inches(height_inches=actor.data.get('height'),
+                length_inches=actor.data.get('length'),size_category=actor.data.get('size_category'))*INCHES_TO_METERS
+        except ValueError:
+            return ActionProposal(action.id,actor.id,(defender.id,),'unsupported_reach',metadata=tuple(metadata))
+        if not math.isclose(action.data.get('reach',-1),reach,rel_tol=1e-12,abs_tol=1e-12):
+            raise EvaluationIntegrityError('unarmed Disarm reach differs from native arm dimensions')
+    elif attacker_weapon.hp<=0 or action.instrument_id not in actor.data['held']:
         return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
     status,distance=snapshot.melee_status(action)
     if status!='in_reach':
         return ActionProposal(action.id,actor.id,(defender.id,),status,metadata=tuple(metadata))
-    skill=actor.data['weapon_skills'].get(attacker_weapon.data['original_type'],0)
-    if skill<=1:
+    skill=((actor.data['skills'].get('unarmed combat',0) or 0) if unarmed else
+           actor.data['weapon_skills'].get(attacker_weapon.data['original_type'],0))
+    if skill <= (0 if unarmed else 1):
         return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
     adjustment=actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
     if adjustment is None:
         return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
     priority_penalty=action.data.get('multiple_action_priority',0) or 0
     attacker_total=rng.roll('1d20')+skill+actor.data['strategy']['attack']-priority_penalty-adjustment
-    defender_total=rng.roll('1d20')+defender.data['strategy']['defense']+5
+    grappled=any(row[2]==defender.id for row in snapshot.grapple_controls)
+    defender_total=rng.roll('1d20')+defender.data['strategy']['defense']+(0 if grappled else 5)
     margin=attacker_total-defender_total
     metadata.extend((('margin',margin),('maximum_landing_hexes',max(0,margin//3))))
     if margin<=0:

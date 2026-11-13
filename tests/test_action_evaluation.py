@@ -1015,6 +1015,32 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(dropped.get_position(),self.b.get_position())
         self.assertIs(dropped,self.world.get_object_by_id(self.w3))
 
+    def test_native_unarmed_disarm_uses_arm_profile_and_opposed_attack_roll(self):
+        self.a.current.skills.skills['unarmed combat']=1
+        self.a.current.body_parts['left hand']=None
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,None)
+        action.disarm_weapon_id=self.w3
+        action.disarm_motion='thrust'
+        from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
+        action.reach=reference_arm_length_inches(height_inches=self.a.current.height,
+            length_inches=self.a.current.length)*INCHES_TO_METERS
+        action.end_time=3
+        self.enc.schedule_action(action)
+        iterator=iter([20,1])
+        def roll(ctx,dice):
+            value=next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(3)
+        receipt=self.enc.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertIsNone(self.b.current.body_parts['right hand'])
+        dropped=self.world.get_object_by_id(self.w3)
+        self.assertIsNone(dropped.parent_container_id)
+        self.assertEqual(dropped.get_position(),self.b.get_position())
+
     def test_native_break_weapon_uses_pending_attack_motion_and_disables_it_next_boundary(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.current.skills.weapon_skills['Dagger']=2

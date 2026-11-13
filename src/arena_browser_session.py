@@ -2093,7 +2093,7 @@ class GeneratedArenaSession:
                 f'action=strike_object motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
             return self._view_unlocked()
 
-    def _disarm_preflight(self,candidate,player,entity_id,evidence,motion):
+    def _disarm_preflight(self,candidate,player,entity_id,evidence,motion,unarmed=False):
         if motion not in ('swing','thrust') or evidence is None or evidence.category!='object' or evidence.present_state!='carried':
             raise ArenaBrowserRequestError('Select a perceived weapon held by the opposing Being.')
         owner_id=evidence.owner_id
@@ -2106,28 +2106,44 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError('The selected Object is not an opposing Being\'s currently held weapon.')
         if not encounter.initiated or encounter.progression_mode!='transactional':
             raise ArenaBrowserRequestError('Activate the native Encounter before Disarm.')
-        attacking_id=self._initial_ready_dagger_id(candidate,player)
-        attacking=candidate.universe.get_object_by_id(attacking_id) if type(attacking_id) is str else None
-        if (type(attacking) is not WeaponInstance or attacking.current.hit_points<=0
-                or attacking.id not in player.armed_with(candidate.universe).values()):
-            raise ArenaBrowserRequestError('Disarm requires a usable weapon actually held by the player.')
-        if (player.current.skills.weapon_skills.get(attacking.original.obj_type,0)<=1
-                or motion not in attacking.get_melee_types()):
-            raise ArenaBrowserRequestError('Armed Disarm requires advanced native skill and a supported motion.')
-        action=Action(candidate.universe,encounter.time,encounter.time+1,'disarm',player.id,defender.id,attacking.id)
+        if unarmed:
+            if (player.current.skills.get_skill_level('unarmed combat') or 0)<=0:
+                raise ArenaBrowserRequestError('Unarmed Disarm requires Unarmed combat skill.')
+            if not any(hand in ('left hand','right hand') and value is None
+                       for hand,value in player.current.body_parts.items()):
+                raise ArenaBrowserRequestError('Unarmed Disarm requires an available arm.')
+            from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
+            reach=reference_arm_length_inches(height_inches=player.current.height,
+                length_inches=player.current.length,size_category=getattr(player,'size_category',None))*INCHES_TO_METERS
+            timing={'swing':4,'thrust':3}[motion]
+            instrument_id=None
+        else:
+            attacking_id=self._initial_ready_dagger_id(candidate,player)
+            attacking=candidate.universe.get_object_by_id(attacking_id) if type(attacking_id) is str else None
+            if (type(attacking) is not WeaponInstance or attacking.current.hit_points<=0
+                    or attacking.id not in player.armed_with(candidate.universe).values()):
+                raise ArenaBrowserRequestError('Disarm requires a usable weapon actually held by the player.')
+            if (player.current.skills.weapon_skills.get(attacking.original.obj_type,0)<=1
+                    or motion not in attacking.get_melee_types()):
+                raise ArenaBrowserRequestError('Armed Disarm requires advanced native skill and a supported motion.')
+            from melee_combat import effective_melee_reach_meters
+            reach=effective_melee_reach_meters(player.current,attacking.current)
+            timing=attacking.St() if motion=='swing' else attacking.Tt()
+            instrument_id=attacking.id
+        action=Action(candidate.universe,encounter.time,encounter.time+1,'disarm',player.id,defender.id,instrument_id)
         action.disarm_weapon_id=weapon.id;action.disarm_motion=motion
-        from melee_combat import effective_melee_reach_meters
-        action.reach=effective_melee_reach_meters(player.current,attacking.current)
-        timing=attacking.St() if motion=='swing' else attacking.Tt()
+        action.reach=reach
         action.end_time=encounter.time+max(1,timing-action.strategy.timing_adjustment())
         try:prepared=encounter.prepare_action(action)
         except Exception as exc:raise ArenaBrowserRequestError('Native Disarm prerequisites are not satisfied.') from exc
         return action,prepared,defender
 
     def choose_disarm(self,payload):
-        if type(payload) is not dict or set(payload)!={'handle','motion'}:
+        if (type(payload) is not dict or not {'handle','motion'}<=set(payload)
+                or set(payload)-{'handle','motion','unarmed'}
+                or ('unarmed' in payload and type(payload['unarmed']) is not bool)):
             raise ArenaBrowserRequestError('Disarm requires a perceived held-weapon handle and attack motion.')
-        handle,motion=payload['handle'],payload['motion']
+        handle,motion=payload['handle'],payload['motion'];unarmed=payload.get('unarmed',False)
         with self._lock:
             if self._active is None:raise ArenaBrowserRequestError('Generate an Encounter first.')
             candidate=self._active;player=candidate.participants[0].native.being
@@ -2135,11 +2151,11 @@ class GeneratedArenaSession:
             ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
             if ledger is None or ledger.observer_id!=player.id:raise ArenaBrowserRequestError('Player perception evidence is unavailable.')
             evidence=None if entity_id is None else next((row for row in ledger.current if row.entity_id==entity_id),None)
-            action,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion)
+            action,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion,unarmed)
             try:candidate.encounter.schedule_action(action)
             except Exception as exc:raise ArenaBrowserRequestError('Native Disarm Choice refused; Arena state is unchanged.') from exc
             self._selected_entity_handle=handle
-            self._trace.native_advance(None,None,f'action=disarm motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
+            self._trace.native_advance(None,None,f'action=disarm mode={"unarmed" if unarmed else "armed"} motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
             return self._view_unlocked()
 
     def _break_weapon_preflight(self,candidate,player,entity_id,evidence):
@@ -2832,6 +2848,26 @@ class GeneratedArenaSession:
                     "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
                     "status":status,"display_name":"Disarm held weapon","reason":reason,
                     "target":target_view,"motions":motions,
+                    "duration_seconds":None if not motions else motions[0]["duration_seconds"]})
+                continue
+            elif name.casefold()=="disarm (unarmed)":
+                status,reason="unavailable","Select an opposing Being's perceived held weapon; Unarmed combat skill and a free arm are required."
+                motions=[]
+                target_view=(None if selected is None else {"handle":handle,"name":selected["name"],
+                    "type":selected["type"],"present_state":selected["present_state"]})
+                if supported_actions.get(Action,False):
+                    for motion in ('swing','thrust'):
+                        try:
+                            _,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion,True)
+                            motions.append({"motion":motion,"duration_seconds":prepared.end_time-prepared.start_time})
+                        except ArenaBrowserRequestError as exc:reason=str(exc)
+                    if motions:
+                        status="available"
+                        reason="Native unarmed opposed Disarm; success releases this exact weapon in the defender's occupied hex."
+                catalog_rows.append({"name":name,"group":"Held Object actions","target_type":"weapon",
+                    "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
+                    "status":status,"display_name":"Unarmed Disarm held weapon","reason":reason,
+                    "target":target_view,"motions":motions,"unarmed":True,
                     "duration_seconds":None if not motions else motions[0]["duration_seconds"]})
                 continue
             elif name.casefold()=="break weapon (armed)":
