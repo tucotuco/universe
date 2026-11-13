@@ -520,6 +520,42 @@ class GeneratedArenaSession:
                  self._ready_weapon_action_outcome,self._ready_weapon_end_time)=old
                 raise
 
+    def _action_program_views(self, candidate, player, ledger):
+        """Project live declared program members without exposing native IDs."""
+        result = []
+        now = candidate.encounter.time
+        for record in candidate.encounter._choice_book._choices.values():
+            if (record.view.state not in ("accepted", "executing")
+                    or len(record.members) < 2
+                    or not any(member.action.actor_id == player.id for member in record.members)):
+                continue
+            components = []
+            for index, (member, packet) in enumerate(zip(record.members, record.prepared), 1):
+                action = member.action
+                if action.actor_id != player.id:
+                    continue
+                target_evidence = (None if action.target_id is None else next(
+                    (row for row in ledger.current if row.entity_id == action.target_id), None))
+                components.append({
+                    "order": index,
+                    "name": action.event_type.replace("_", " ").title(),
+                    "status": "executing" if action.id in candidate.encounter.pending_action_list
+                        else "accepted",
+                    "start_seconds": packet.start_time,
+                    "end_seconds": packet.end_time,
+                    "duration_seconds": packet.end_time - packet.start_time,
+                    "seconds_remaining": max(0, math.ceil(packet.end_time - now)),
+                    "priority_penalty": member.priority_penalty,
+                    "target_name": (None if target_evidence is None else
+                        self._display_names.get(target_evidence.entity_id, target_evidence.name)),
+                    "resources": {name: getattr(action.strategy, name, 0)
+                        for name in ("attack", "defense", "timing", "extra_damage")},
+                })
+            result.append({"status": record.view.state,
+                           "first_start_seconds": record.view.first_start,
+                           "components": components})
+        return result
+
     def _view_unlocked(self):
         if self._active is None:
             return {
@@ -683,6 +719,8 @@ class GeneratedArenaSession:
             candidate, player, position, cell, movement_plan)
         action_catalog = self._action_catalog_unlocked(
             candidate, player.native.being, selected, supported_actions)
+        action_programs = self._action_program_views(
+            candidate, player.native.being, ledger)
         return {
             "state": "active",
             "starter_ground_equipment_available": self._ground_loadout_profile is not None,
@@ -732,6 +770,7 @@ class GeneratedArenaSession:
             "entities": perceived,
             "selected_entity": selected,
             "action_catalog": action_catalog,
+            "action_programs": action_programs,
             "run_available": self._player_action_id is None and not candidate.encounter.initiated,
             "advance_available": ((self._player_action_id is not None
                                     and self._player_action_outcome is None)
@@ -1564,7 +1603,8 @@ class GeneratedArenaSession:
                 "duration_seconds": action.end_time-action.start_time,
                 "seconds_remaining": 0}
 
-    def _touch_preflight(self, candidate, player, entity_id, evidence, supported=True):
+    def _touch_preflight(self, candidate, player, entity_id, evidence, supported=True,
+                         allow_composition=False):
         if not supported or not _has_native_transactional_action_contract(Action):
             raise ArenaBrowserRequestError("The native one-second Touch Action contract is unavailable.")
         if evidence is None or evidence.category != "being" or evidence.present_state != "present":
@@ -1576,9 +1616,9 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("Touch requires an aware participating opposing Being.")
         if not encounter.initiated or encounter.progression_mode != "transactional":
             raise ArenaBrowserRequestError("Activate the native Encounter before choosing Touch.")
-        if (encounter._choice_book.actor_planned_now(player.id)
+        if (not allow_composition and (encounter._choice_book.actor_planned_now(player.id)
                 or self._melee_action_pending(candidate, self._player_melee_action(candidate, player))
-                or self._melee_action_pending(candidate, self._player_touch_action(candidate, player))):
+                or self._melee_action_pending(candidate, self._player_touch_action(candidate, player)))):
             raise ArenaBrowserRequestError("The player already has an accepted Action resolving.")
         action = Action(candidate.universe, encounter.time, encounter.time + 1,
                         "touch", player.id, target.id, None)
@@ -1709,6 +1749,195 @@ class GeneratedArenaSession:
                 f"action=multiple_grapple_break order={','.join(payload['actions'])} choice={view.state}")
             return self._view_unlocked()
 
+    def choose_action_program(self, payload):
+        """Submit an ordered, one-to-four member program using native Choice validation.
+
+        Component selectors are intentionally limited to actions with complete Arena
+        preflight contracts. The browser supplies observer-owned handles, never native
+        entity identifiers. Start offsets and resource allocations remain explicit.
+        """
+        from action_choice import ChoiceMember
+        from strategy import Strategy
+        if (type(payload) is not dict or set(payload) != {"components"}
+                or type(payload["components"]) is not list
+                or not 1 <= len(payload["components"]) <= 4):
+            raise ArenaBrowserRequestError("An Action program needs one to four ordered components.")
+        allowed = {"kind", "handle", "action", "motion", "hand", "position", "unarmed",
+                   "shield_handle",
+                   "weapon_handle",
+                   "start_offset_seconds", "priority_penalty", "strategy"}
+        normalized = []
+        for component in payload["components"]:
+            targetless = (type(component) is dict
+                          and component.get("kind") == "dodge-prepare")
+            if (type(component) is not dict or set(component) - allowed
+                    or not {"kind"}.issubset(component)
+                    or (not targetless and "handle" not in component)
+                    or (targetless and component.get("handle") is not None)
+                    or type(component["kind"]) is not str
+                    or (not targetless and type(component["handle"]) is not str)
+                    or type(component.get("start_offset_seconds", 0)) is not int
+                    or component.get("start_offset_seconds", 0) < 0
+                    or ("priority_penalty" in component
+                        and type(component["priority_penalty"]) is not int)):
+                raise ArenaBrowserRequestError("An Action program component has malformed selectors or timing.")
+            strategy = component.get("strategy", {})
+            if (type(strategy) is not dict
+                    or set(strategy) - {"attack", "defense", "timing", "extra_damage"}
+                    or any(type(value) is not int or value < 0 for value in strategy.values())):
+                raise ArenaBrowserRequestError("Each component strategy uses nonnegative integer allocations.")
+            if "unarmed" in component and type(component["unarmed"]) is not bool:
+                raise ArenaBrowserRequestError("The Disarm mode selector must be boolean.")
+            normalized.append(component)
+        offsets = [component.get("start_offset_seconds", 0) for component in normalized]
+        if offsets != sorted(offsets):
+            raise ArenaBrowserRequestError("Component order must follow nondecreasing start offsets.")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before declaring an Action program.")
+            candidate = self._active
+            encounter = candidate.encounter
+            player = candidate.participants[0].native.being
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if ledger is None or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("Player-owned perception evidence is unavailable.")
+            members = []
+            selected_handles = []
+            for index, component in enumerate(normalized):
+                entity_id = (None if component["kind"] == "dodge-prepare" else
+                    next((key for key, value in self._view_handles.items()
+                          if value == component["handle"]), None))
+                evidence = None if entity_id is None else next(
+                    (row for row in ledger.current if row.entity_id == entity_id), None)
+                kind = component["kind"]
+                motion = component.get("motion")
+                if kind == "touch":
+                    action, _ = self._touch_preflight(candidate, player, entity_id,
+                        evidence, allow_composition=True)
+                elif kind == "melee" and motion in ("swing", "thrust"):
+                    action, _, _, _, _ = self._melee_strike_preflight(
+                        candidate, player, entity_id, evidence, motion)
+                elif kind == "feint" and motion in ("swing", "thrust"):
+                    action, _ = self._feint_preflight(
+                        candidate, player, entity_id, evidence, motion)
+                elif kind == "disarm" and motion in ("swing", "thrust"):
+                    action, _, _ = self._disarm_preflight(candidate, player,
+                        entity_id, evidence, motion, component.get("unarmed", False))
+                elif kind == "object-strike" and motion in ("swing", "thrust"):
+                    action, _, _, _ = self._object_strike_preflight(
+                        candidate, player, entity_id, evidence, motion)
+                elif kind == "coup-de-grace" and motion in ("swing", "thrust"):
+                    action, _ = self._coup_de_grace_preflight(
+                        candidate, player, entity_id, evidence, motion)
+                elif kind == "break-weapon":
+                    action, _, _ = self._break_weapon_preflight(
+                        candidate, player, entity_id, evidence)
+                elif kind == "pickup":
+                    from activities import PickUpAction
+                    self._pickup_target_unlocked(candidate, player, entity_id, evidence)
+                    action = PickUpAction(encounter, player.id, entity_id,
+                        encounter.time, map_width_cells=candidate.arena_map.width_cells,
+                        map_height_cells=candidate.arena_map.height_cells)
+                elif kind == "ready-weapon":
+                    from activities import ReadyWeaponAction
+                    if evidence is None or evidence.category not in ("object", "weapon"):
+                        raise ArenaBrowserRequestError("Ready weapon needs a currently perceived carried Weapon.")
+                    hand = component.get("hand")
+                    action = ReadyWeaponAction(encounter, player.id, entity_id,
+                        hand, encounter.time)
+                elif kind == "dodge":
+                    action, _, _ = self._player_dodge_preflight(candidate, player,
+                        entity_id, evidence, allow_composition=True)
+                elif kind == "dodge-prepare":
+                    strategy = component.get("strategy", {})
+                    pool = MeleeDefense.dodge_strategy_pool(player, candidate.universe)
+                    if strategy.get("defense", 0) + strategy.get("timing", 0) != pool:
+                        raise ArenaBrowserRequestError(
+                            f"Dodge preparation must allocate its current {pool}-point pool between defense and timing.")
+                    action = MeleeDefense(encounter, player.id, kind="dodge",
+                        strategy=Strategy(defense=strategy.get("defense", 0),
+                                           timing=strategy.get("timing", 0)))
+                elif kind == "block":
+                    shield_id = next((key for key, value in self._view_handles.items()
+                                      if value == component.get("shield_handle")), None)
+                    action, _, _ = self._player_block_preflight(candidate, player,
+                        entity_id, evidence, shield_id)
+                elif kind == "parry":
+                    attacker = encounter.get_being(entity_id) if type(entity_id) is str else None
+                    weapon_id = next((key for key, value in self._view_handles.items()
+                                      if value == component.get("weapon_handle")), None)
+                    source = (None if weapon_id is None else
+                              self._retained_defense(candidate, player, "parry", weapon_id))
+                    strike = self._visible_incoming_strike(candidate, player, attacker, ledger)
+                    if attacker is None or source is None or strike is None:
+                        raise ArenaBrowserRequestError("Parry needs a retained weapon preparation and observed incoming strike.")
+                    action = MeleeDefense(encounter, player.id, attacker.id,
+                        kind="parry", target_action_id=strike.id,
+                        prepared_defense_action_id=source.id, weapon_id=weapon_id,
+                        parry_motion=component.get("motion"))
+                    encounter.prepare_action(action)
+                elif kind == "yield":
+                    action, _, _ = self._player_yield_preflight(candidate, player,
+                        entity_id, evidence)
+                elif kind == "contact" and component.get("action") in (
+                        "break hold", "release grip", "grapple", "grapple escape",
+                        "takedown", "reverse", "pin", "trip", "grab"):
+                    action, _ = self._grappling_preflight(candidate, player,
+                        entity_id, evidence, component["action"],
+                        component.get("hand"), component.get("position"),
+                        allow_composition=True)
+                elif kind == "object-contact" and component.get("action") in ("grab object", "wrest"):
+                    action, _ = self._object_grappling_preflight(candidate, player,
+                        entity_id, evidence, component["action"], component.get("hand"))
+                else:
+                    raise ArenaBrowserRequestError(
+                        f"Component {index + 1} is not a supported native Arena Action selector.")
+                offset = component.get("start_offset_seconds", 0)
+                action.start_time += offset
+                action.end_time += offset
+                effort = component.get("strategy", {})
+                action.strategy = Strategy(*(effort.get(key, 0) for key in
+                    ("attack", "defense", "timing", "extra_damage")))
+                if effort.get("timing", 0):
+                    # Apply the same native timing reduction as the corresponding
+                    # single Action preflight, with a one-second floor.
+                    adjustment = action.strategy.timing_adjustment()
+                    event_type = action.event_type
+                    if event_type == "touch":
+                        pass  # Touch's adopted duration is fixed at one second.
+                    elif event_type == "feint":
+                        from weapon import WeaponInstance
+                        weapon = candidate.universe.get_object_by_id(action.instrument_id)
+                        native = weapon.St() if action.feint_motion == "swing" else weapon.Tt()
+                        action.end_time = action.start_time + max(1, math.ceil(native / 2) - adjustment)
+                    elif event_type in ("swing", "thrust", "strike object", "disarm",
+                                        "coup de grace", "break weapon"):
+                        instrument = candidate.universe.get_object_by_id(action.instrument_id)
+                        if event_type == "disarm" and action.instrument_id is None:
+                            base = 4 if action.disarm_motion == "swing" else 3
+                        else:
+                            motion_name = (getattr(action, "object_motion", None)
+                                or getattr(action, "disarm_motion", None)
+                                or getattr(action, "coup_motion", None)
+                                or getattr(action, "break_motion", None)
+                                or motion)
+                            base = instrument.St() if motion_name == "swing" else instrument.Tt()
+                        action.end_time = action.start_time + max(1, base - adjustment)
+                key = f"component-{index + 1}"
+                members.append(ChoiceMember(key, action,
+                    priority_penalty=component.get("priority_penalty")))
+                selected_handles.append(component.get("handle"))
+            try:
+                view = encounter.schedule_choice(tuple(members))
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    f"Native Action program rejected the complete declaration; no component was scheduled: {exc}") from exc
+            if selected_handles[0] is not None:
+                self._selected_entity_handle = selected_handles[0]
+            self._trace.native_advance(None, None,
+                f"action=general_program components={len(members)} state={view.state}")
+            return self._view_unlocked()
+
     def cancel_multiple_action(self, payload):
         """Stop the player's own declared Multiple-action program without exposing IDs."""
         if payload != {}:
@@ -1722,22 +1951,29 @@ class GeneratedArenaSession:
             book = encounter._choice_book
             records = [record for record in book._choices.values()
                 if record.view.state in ("accepted", "executing")
-                and any(member.action.actor_id == player_id and member.priority_penalty is not None
+                and len(record.members) > 1
+                and any(member.action.actor_id == player_id
                         for member in record.members)]
             if len(records) != 1:
-                raise ArenaBrowserRequestError("There is no single active player Multiple-action program to cancel.")
+                raise ArenaBrowserRequestError("There is no single active player Action program to cancel.")
             record = records[0]
             try:
                 if record.view.state == "accepted":
                     book.undo(record.view.id)
-                else:
+                elif any(member.priority_penalty is not None for member in record.members):
                     book.abort_multiple_action(record.view.id)
+                else:
+                    for action_id in tuple(record.view.action_ids):
+                        if action_id in encounter.pending_action_list:
+                            encounter._cancel_action(action_id, reason="program_cancelled",
+                                _abort_program=False)
             except (ValueError, RuntimeError) as exc:
-                raise ArenaBrowserRequestError("Native Multiple-action cancellation was refused.") from exc
+                raise ArenaBrowserRequestError("Native Action-program cancellation was refused.") from exc
             return self._view_unlocked()
 
     def _grappling_preflight(self, candidate, player, entity_id, evidence,
-                             event_type, hand=None, position=None):
+                             event_type, hand=None, position=None,
+                             allow_composition=False):
         """Prepare one supported physical-contact Action from player evidence."""
         from physical_contact import active_contact_state, successful_touch
         encounter = candidate.encounter
@@ -1828,12 +2064,12 @@ class GeneratedArenaSession:
             duration = 2
         else:
             raise ArenaBrowserRequestError("Unsupported native physical-contact Action.")
-        if (encounter._choice_book.actor_planned_now(player.id)
+        if (not allow_composition and (encounter._choice_book.actor_planned_now(player.id)
                 or any(getattr(candidate.universe.get_event_by_id(action_id), "actor_id", None) == player.id
                        and getattr(candidate.universe.get_event_by_id(action_id), "event_type", None) != "hold"
                        for action_id in encounter.pending_action_list)
                 or self._melee_action_pending(candidate, self._player_melee_action(candidate, player))
-                or self._melee_action_pending(candidate, self._player_touch_action(candidate, player))):
+                or self._melee_action_pending(candidate, self._player_touch_action(candidate, player)))):
             raise ArenaBrowserRequestError("The player already has an accepted Action resolving.")
         action = Action(candidate.universe, encounter.time, encounter.time + duration,
                         event_type, player.id, target.id, None)
@@ -2369,7 +2605,7 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _player_dodge_preflight(self, candidate, player, entity_id, evidence,
-                                supported=True):
+                                supported=True, allow_composition=False):
         if not supported or not _has_native_transactional_action_contract(MeleeDefense):
             raise ArenaBrowserRequestError("The native MeleeDefense scheduler or resolver contract is unavailable.")
         if evidence is None or evidence.category != "being" or evidence.present_state != "present":
@@ -2381,7 +2617,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("The selected Entity is not an aware participating attacker.")
         if not encounter.initiated or encounter.progression_mode != "transactional":
             raise ArenaBrowserRequestError("Activate the native Encounter before choosing Dodge.")
-        if encounter._choice_book.actor_planned_now(player.id):
+        if not allow_composition and encounter._choice_book.actor_planned_now(player.id):
             raise ArenaBrowserRequestError("The player already has a native Action accepted or resolving.")
         current_defense = self._latest_melee_defense(candidate, player)
         if self._melee_defense_pending(candidate, current_defense):
@@ -3219,13 +3455,26 @@ class GeneratedArenaSession:
         book = candidate.encounter._choice_book
         player_id = player.id
         has_active_program = any(record.view.state in ("accepted", "executing")
-            and any(member.action.actor_id == player_id and member.priority_penalty is not None
-                    for member in record.members)
+            and len(record.members) > 1
+            and any(member.action.actor_id == player_id for member in record.members)
             for record in book._choices.values())
         if has_active_program:
-            arena_rows.append({"name": "Abort Multiple actions", "group": "Active actions",
-                "status": "available", "reason": "Cancel the player's declared program and stop future cycles."})
-        return {"catalog_source": "native Action catalog", "entries": catalog_rows + arena_rows}
+            arena_rows.append({"name": "Cancel Action program", "group": "Active actions",
+                "status": "available", "reason": "Cancel an accepted ordered program or stop its unresolved members and future cycles."})
+        skill_ranks = sorted((str(name), rank) for name, rank in
+            player.current.skills.get_skills().items()
+            if type(name) is str and type(rank) is int and rank >= 0)
+        weapon_ranks = sorted((str(name), rank) for name, rank in
+            player.current.skills.weapon_skills.items()
+            if type(name) is str and type(rank) is int and rank >= 0)
+        resources = {"multi_action_skill": player.get_skill_level("multi-action") or 0,
+            "strength_points": max(0, (player.STR() - 10) // 2),
+            "dexterity_points": max(0, (player.DEX() - 10) // 2),
+            "skill_ranks": [{"name": name, "rank": rank} for name, rank in skill_ranks],
+            "weapon_ranks": [{"name": name, "rank": rank} for name, rank in weapon_ranks]}
+        return {"catalog_source": "native Action catalog",
+                "entries": catalog_rows + arena_rows,
+                "program_resources": resources}
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
                                          movement_plan):

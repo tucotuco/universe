@@ -3,6 +3,7 @@
 import json
 import io
 import math
+import os
 from pathlib import Path
 import random
 import shutil
@@ -70,6 +71,179 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         if result["content_type"].startswith("application/json"):
             body = json.loads(json.dumps(body) if type(body) is not str else body)
         return result["status"], body
+
+    def test_general_action_program_http_accepts_sequential_and_validated_overlap(self):
+        from dataclasses import replace
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261116,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("Compose an ordered native Action program", page)
+        self.assertIn("/api/generated/action-program", page)
+        self.assertIn("action.name==='Cancel Action program'", page)
+        self.assertIn("button.addEventListener('click',abortMultipleAction)", page)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "1000", "width_cells": "5", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        player.set_position(CartesianPosition(1.0, 1.0, 0))
+        target.set_position(CartesianPosition(1.1, 1.0, 0))
+        target.set_hex_facing(nearest_facing((player.get_position().x-target.get_position().x,
+            player.get_position().y-target.get_position().y,0)))
+        evidence = replace(player._arena_perception_ledger._current[target.id],
+                           position=target.get_position())
+        player._arena_perception_ledger._current[target.id] = evidence
+        player._arena_perception_ledger._history = [evidence if row.entity_id == target.id else row
+            for row in player._arena_perception_ledger._history]
+        encounter.mark_aware(player.id, target.id)
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        handle = self.session._view_handles[target.id]
+        before_rng = self.session._rng_cursor.state
+        overlapping = {"components": [
+            {"kind": "touch", "handle": handle, "priority_penalty": 0},
+            {"kind": "touch", "handle": handle, "priority_penalty": 3}]}
+        status, refusal = self.request("/api/generated/action-program", overlapping)
+        self.assertEqual(status, 409)
+        self.assertIn("Multi-action skill", refusal["error"])
+        self.assertEqual(self.session._rng_cursor.state, before_rng)
+        player.set_skill_level(candidate.universe.get_skill_dictionary(), "multi-action", 1)
+        sequential = {"components": [
+            {"kind": "touch", "handle": handle, "start_offset_seconds": 0,
+             "strategy": {"attack": 0, "defense": 0, "timing": 0, "extra_damage": 0}},
+            {"kind": "touch", "handle": handle, "start_offset_seconds": 1}]}
+        status, accepted = self.request("/api/generated/action-program", sequential)
+        self.assertEqual(status, 200, accepted)
+        record = next(row for row in encounter._choice_book._choices.values()
+                      if len(row.members) == 2 and all(m.action.event_type == "touch" for m in row.members))
+        self.assertEqual(tuple((m.action.start_time, m.action.end_time, m.priority_penalty)
+                               for m in record.members), ((0, 1, None), (1, 2, None)))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ordered-program.json"
+            path.write_bytes(self.session.save_encounter_bytes())
+            code = ("import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:3); s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "e=s.active_candidate.encounter; r=next(r for r in e._choice_book._choices.values() if len(r.members)==2); "
+                "print(json.dumps({'state':r.view.state,'members':[(m.action.start_time,m.action.end_time,m.priority_penalty) for m in r.members]}))")
+            env = dict(os.environ, PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}")
+            restored = subprocess.run([sys.executable, "-B", "-c", code, str(path)],
+                cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+        restored_program = json.loads(restored.stdout)
+        self.assertEqual(restored_program, {"state": "accepted",
+            "members": [[0, 1, None], [1, 2, None]]})
+        self.assertEqual(self.request("/api/generated/multiple-actions/abort", {})[0], 200)
+        self.assertFalse(any(row.view.id == record.view.id
+            for row in encounter._choice_book._choices.values()))
+
+    def test_general_action_program_cancels_running_sequential_members(self):
+        from dataclasses import replace
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261118,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        self.assertEqual(self.request("/api/generated/generate", {
+            "starting_experience": "1000", "width_cells": "5", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})[0], 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        player.set_position(CartesianPosition(1.0, 1.0, 0))
+        target.set_position(CartesianPosition(1.1, 1.0, 0))
+        target.set_hex_facing(nearest_facing((player.get_position().x-target.get_position().x,
+            player.get_position().y-target.get_position().y,0)))
+        evidence = replace(player._arena_perception_ledger._current[target.id],
+                           position=target.get_position())
+        player._arena_perception_ledger._current[target.id] = evidence
+        player._arena_perception_ledger._history = [evidence if row.entity_id == target.id else row
+            for row in player._arena_perception_ledger._history]
+        encounter.mark_aware(player.id, target.id)
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        handle = self.session._view_handles[target.id]
+        status, _ = self.request("/api/generated/action-program", {"components": [
+            {"kind": "touch", "handle": handle},
+            {"kind": "touch", "handle": handle, "start_offset_seconds": 1}]})
+        self.assertEqual(status, 200)
+        record = next(row for row in encounter._choice_book._choices.values()
+                      if len(row.members) == 2 and all(m.action.event_type == "touch" for m in row.members))
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        record = encounter._choice_book._choices[record.view.id]
+        self.assertEqual(record.view.state, "executing")
+        remaining = [aid for aid in record.view.action_ids if aid in encounter.pending_action_list]
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(self.request("/api/generated/multiple-actions/abort", {})[0], 200)
+        self.assertFalse(any(aid in encounter.pending_action_list for aid in record.view.action_ids))
+        self.assertIn(remaining[0], encounter.cancelled_action_list)
+
+    def test_general_action_program_composes_mixed_duration_touch_and_melee(self):
+        from dataclasses import replace
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261117,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        player.set_skill_level(candidate.universe.get_skill_dictionary(), "multi-action", 1)
+        player.set_ability("dexterity", 12)
+        target.set_position(CartesianPosition(player.get_position().x + 0.1,
+            player.get_position().y, player.get_position().z))
+        target.set_hex_facing(nearest_facing((player.get_position().x-target.get_position().x,
+            player.get_position().y-target.get_position().y,0)))
+        ledger = player._arena_perception_ledger
+        evidence = replace(ledger._current[target.id], position=target.get_position())
+        ledger._current[target.id] = evidence
+        ledger._history = [evidence if row.entity_id == target.id else row for row in ledger._history]
+        encounter.mark_aware(player.id, target.id)
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        handle = self.session._view_handles[target.id]
+        status, accepted = self.request("/api/generated/action-program", {"components": [
+            {"kind": "touch", "handle": handle, "priority_penalty": 0},
+            {"kind": "melee", "handle": handle, "motion": "thrust",
+             "priority_penalty": 3,
+             "strategy": {"attack": 0, "defense": 0, "timing": 1, "extra_damage": 0}}]})
+        self.assertEqual(status, 200, accepted)
+        record = next(row for row in encounter._choice_book._choices.values()
+            if len(row.members) == 2 and any(member.priority_penalty is not None for member in row.members))
+        touch, strike = (member.action for member in record.members)
+        self.assertEqual((touch.event_type, strike.event_type), ("touch", "thrust"))
+        self.assertEqual(touch.start_time, strike.start_time)
+        self.assertEqual(touch.end_time-touch.start_time, 1)
+        self.assertGreater(strike.end_time-strike.start_time, 1)
+        self.assertEqual(strike.strategy.timing, 1)
+        self.assertEqual(record.view.state, "accepted")
+        projected = self.session._view_unlocked()["action_programs"]
+        self.assertEqual(projected[0]["status"], "accepted")
+        self.assertEqual([component["name"] for component in projected[0]["components"]],
+                         ["Touch", "Thrust"])
+        self.assertEqual([component["priority_penalty"] for component in projected[0]["components"]],
+                         [0, 3])
+        self.assertNotIn(touch.id, json.dumps(projected))
+        for _ in range(3):
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        cycles = [row for row in encounter._choice_book._choices.values()
+                  if row.origin == "multiple-action-cycle"]
+        self.assertEqual(len(cycles), 1, [(row.view.state, row.origin,
+            [(member.action.event_type, member.action.start_time, member.action.end_time)
+             for member in row.members]) for row in encounter._choice_book._choices.values()])
+        self.assertEqual(cycles[0].view.first_start, 3)
+        self.assertTrue(all(member.action.id not in record.view.action_ids
+                            for member in cycles[0].members))
+        self.assertIsNotNone(touch.resolution)
+        self.assertIsNotNone(strike.resolution)
+        self.assertEqual(self.request("/api/generated/multiple-actions/abort", {})[0], 200)
+        self.assertTrue(all(action_id not in encounter.pending_action_list
+                            for action_id in cycles[0].view.action_ids))
 
     def test_generate_page_exposes_profile_chooser_upload_and_native_equipment_mode(self):
         status, html = self.request("/")
@@ -753,7 +927,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "handle": target_handle, "priorities": [1, 2]})
         self.assertEqual(status, 200)
         self.assertEqual(next(row for row in accepted_view["action_catalog"]["entries"]
-                              if row["name"] == "Abort Multiple actions")["status"], "available")
+                          if row["name"] == "Cancel Action program")["status"], "available")
         accepted = next(record for record in encounter._choice_book._choices.values()
                         if record.view.state == "accepted")
         self.assertEqual(tuple(member.priority_penalty for member in accepted.members), (1, 2))
