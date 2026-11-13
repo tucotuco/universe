@@ -585,6 +585,36 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual(self.rng.state, random.Random(self.candidate.root_seed).getstate())
         self.assertEqual(random.getstate(), self.global_rng)
 
+    def test_simultaneous_attempt_to_pass_through_each_others_occupied_cell_is_refused_atomically(self):
+        self.activate_run_observer()
+        first, second = HexAddress(1, 2), HexAddress(2, 2)
+        first_position, second_position = (self.layout.center_position(first),
+                                           self.layout.center_position(second))
+        self.player.set_position(first_position)
+        self.opponent.set_position(second_position)
+        self.player.set_hit_points(10)
+        self.opponent.set_hit_points(10)
+        self.player.set_hex_facing(0)
+        self.opponent.set_hex_facing(3)
+        intents = (
+            MovementIntent(self.player.id, second_position, "walk", "swap-player", 1,
+                           facing_policy="turn"),
+            MovementIntent(self.opponent.id, first_position, "walk", "swap-opponent", 1,
+                           facing_policy="turn"),
+        )
+        conditions = {self.player.id: self.conditions(),
+                      self.opponent.id: self.conditions()}
+        before = (self.player.get_position(), self.player.hex_facing,
+                  self.opponent.get_position(), self.opponent.hex_facing,
+                  self.rng.state, random.getstate(), self.encounter.time)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intents=intents,
+                                movement_conditions=conditions)
+        self.assertIn(refused.exception.code, ("occupied_path", "conflicting_routes"))
+        self.assertEqual((self.player.get_position(), self.player.hex_facing,
+                          self.opponent.get_position(), self.opponent.hex_facing,
+                          self.rng.state, random.getstate(), self.encounter.time), before)
+
     def test_two_actor_movement_rolls_back_as_one_publication(self):
         action = self.activate_run_observer()
         self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
