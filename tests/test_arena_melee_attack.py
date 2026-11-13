@@ -3,8 +3,11 @@
 import io
 import json
 import math
+import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -442,6 +445,52 @@ class TestArenaMeleeAttack(unittest.TestCase):
         self.assertEqual(accepted["grappling_action"]["status"], "completed")
         self.assertEqual(target.get_posture(), "lying")
         self.assertEqual((player.get_position(), target.get_position()), before)
+
+    def test_generated_overrun_pending_and_committed_state_restore_in_fresh_processes(self):
+        view = self.generate(size_categories={"player": "medium", "opponent": "medium"})
+        view, target_row, _weapon_id, _distance, _reach = self.move_to_target_neighbor(view)
+        status, accepted = self.request("/api/generated/grappling", {
+            "handle": target_row["handle"], "action": "overrun"})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["grappling_action"]["status"], "executing")
+        with tempfile.TemporaryDirectory() as directory:
+            pending_path = Path(directory) / "pending.json"
+            committed_path = Path(directory) / "committed.json"
+            pending_path.write_bytes(self.session.save_encounter_bytes())
+            env = dict(os.environ, PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}")
+            code = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 9); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "v=s.public_view(); assert v['grappling_action']['status']=='executing'; "
+                "target=s.active_candidate.participants[1].native.being; "
+                "[s.advance_one_second() for _ in range(4)]; "
+                "v=s.public_view(); print(json.dumps({'time':v['time_seconds'], "
+                "'status':v['grappling_action']['status'], "
+                "'outcome':v['grappling_action']['outcome'], 'posture':target.get_posture()})); "
+                "open(sys.argv[2],'wb').write(s.save_encounter_bytes())"
+            )
+            first = subprocess.run([sys.executable, "-B", "-c", code,
+                str(pending_path), str(committed_path)], cwd=ROOT, env=env,
+                check=True, capture_output=True, text=True)
+            result = json.loads(first.stdout)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["outcome"], "success")
+            self.assertEqual(result["posture"], "lying")
+            verify = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 11); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "v=s.public_view(); print(json.dumps({'time':v['time_seconds'], "
+                "'status':v['grappling_action']['status'], 'outcome':v['grappling_action']['outcome'], "
+                "'posture':s.active_candidate.participants[1].native.being.get_posture()}))"
+            )
+            second = subprocess.run([sys.executable, "-B", "-c", verify,
+                str(committed_path)], cwd=ROOT, env=env,
+                check=True, capture_output=True, text=True)
+            restored = json.loads(second.stdout)
+            self.assertEqual(restored, {"time": result["time"],
+                "status": "completed", "outcome": "success", "posture": "lying"})
 
 
 if __name__ == "__main__":
