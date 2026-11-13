@@ -60,7 +60,7 @@ class CheckpointValidation:
 _ISSUED = {}  # Same-process validation only; excluded from the candidate.
 _CATALOG = {
     'universe':'Universe', 'encounter':'Encounter EncounterInitiation ArenaActionActivation ArenaMovementActivation', 'event':'Event',
-    'action':'Action', 'activities':'RunAction SpotAction PickUpAction ReadyWeaponAction', 'melee_combat':'MeleeStrike MeleeResult',
+    'action':'Action', 'activities':'RunAction SpotAction PickUpAction ReadyWeaponAction ReadyPreparationAction DelayAction', 'melee_combat':'MeleeStrike MeleeResult',
     'melee_defense':'MeleeDefense', 'group_observation':'ObserveGroupAction SampledGroupObservation',
     'history_conversation':'AskAboutPastAction HeardAccount',
     'being':'BeingInstance BeingDefinition BeingDictionary',
@@ -87,7 +87,7 @@ _CATALOG = {
     'scheduling':'PreparedSchedule', 'action_settlement':'TargetCandidate',
     'atomic_publication':'PublishedInterval TargetIntervalRecord ObjectiveCommitProvenance',
     'encounter_inspection':'CommittedBoundaryRecord EntityInspection',
-    'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect DropObjectEffect GrappleStateEffect ObjectGripEffect',
+    'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect DelayDefenseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect GrappleStateEffect ObjectGripEffect',
     'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectiveUse',
     'interval_staging':'AuthorityReference StartFence RegistrationIntent QueueProjection',
 }

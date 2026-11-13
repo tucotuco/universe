@@ -119,6 +119,94 @@ class PickUpAction(Action):
         raise RuntimeError('PickUpAction resolves only through native transactional publication')
 
 
+class ReadyPreparationAction(Action):
+    """Prepare a held Weapon for one explicitly selected attack motion."""
+
+    def __init__(self, encounter, actor_id, weapon_id, motion, start_time=None, *, id=None):
+        from weapon import WeaponInstance, weapon_readying_time
+        if type(motion) is not str or motion not in ('swing', 'thrust'):
+            raise ValueError('weapon Ready requires an explicitly selected swing or thrust motion')
+        weapon = encounter.universe.get_object_by_id(weapon_id)
+        if type(weapon) is not WeaponInstance:
+            raise ValueError('weapon Ready requires an exact native WeaponInstance')
+        seconds = weapon_readying_time(weapon, motion)
+        start = encounter.time if start_time is None else start_time
+        if (type(start) not in (int, float) or not math.isfinite(start)
+                or start < 0 or not float(start).is_integer()):
+            raise ValueError('Ready must begin at an integer Encounter second')
+        super().__init__(encounter.universe, start, start + seconds, 'ready object',
+                         actor_id, weapon_id, instrument_id=None,
+                         parent_event_id=encounter.id, id=id)
+        self.encounter = encounter
+        self.ready_motion = motion
+        self.readying_seconds = seconds
+        self.end_time = start + seconds
+
+    def prepare_schedule(self, encounter):
+        from being import BeingInstance
+        from weapon import WeaponInstance, native_ready_preparation
+        from atomic_publication import publication_owned
+        activation = (encounter.arena_activation_enabled and publication_owned(encounter)
+                      and (not encounter.initiated or encounter.arena_activation is not None))
+        if (encounter is not self.encounter
+                or (encounter.progression_mode != 'transactional' and not activation)):
+            raise ValueError('weapon Ready requires its native transactional Encounter')
+        actor = encounter.get_being(self.actor_id)
+        weapon = encounter.universe.get_object_by_id(self.target_id)
+        if (type(actor) is not BeingInstance or type(weapon) is not WeaponInstance
+                or self.target_id not in actor.weapons
+                or self.target_id not in actor.armed_with(encounter.universe).values()):
+            raise ValueError('Ready requires a currently held weapon')
+        if native_ready_preparation(weapon) is not None:
+            raise ValueError('weapon already has completed Ready preparation')
+        if self.start_time < encounter.time:
+            raise ValueError('Ready cannot begin before current Encounter time')
+        return PreparedSchedule.from_action(self)
+
+    def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
+        raise RuntimeError('ReadyPreparationAction resolves only through native transactional publication')
+
+
+class DelayAction(Action):
+    """One committed second of waiting with an explicitly selected defense allocation."""
+    DURATION_SECONDS = 1
+
+    def __init__(self, encounter, actor_id, defense=0, start_time=None, *, id=None):
+        if type(defense) not in (int, float) or not math.isfinite(defense) or defense < 0:
+            raise ValueError('Delay defense allocation must be finite and nonnegative')
+        start = encounter.time if start_time is None else start_time
+        if (type(start) not in (int, float) or not math.isfinite(start)
+                or start < 0 or not float(start).is_integer()):
+            raise ValueError('Delay must begin at an integer Encounter second')
+        from strategy import Strategy
+        super().__init__(encounter.universe, start, start + self.DURATION_SECONDS,
+                         'delay', actor_id, None, instrument_id=None,
+                         strategy=Strategy(defense=defense),
+                         parent_event_id=encounter.id, id=id)
+        self.encounter = encounter
+        self.end_time = start + self.DURATION_SECONDS
+
+    def prepare_schedule(self, encounter):
+        from being import BeingInstance
+        from atomic_publication import publication_owned
+        activation = (encounter.arena_activation_enabled and publication_owned(encounter)
+                      and (not encounter.initiated or encounter.arena_activation is not None))
+        if (encounter is not self.encounter
+                or (encounter.progression_mode != 'transactional' and not activation)):
+            raise ValueError('Delay requires its native transactional Encounter')
+        actor = encounter.get_being(self.actor_id)
+        if type(actor) is not BeingInstance or actor.current.hit_points <= 0 or actor.is_helpless():
+            raise ValueError('Delay requires a Being able to take a voluntary Action')
+        if self.start_time < encounter.time:
+            raise ValueError('Delay cannot begin before the current committed boundary')
+        return PreparedSchedule.from_action(self)
+
+    def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
+        raise RuntimeError('DelayAction resolves only through native transactional publication')
+
+
 class ReadyWeaponAction(Action):
     """Candidate ordinary weapon draw; resolution follows the native boundary."""
 

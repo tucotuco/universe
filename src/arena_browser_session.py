@@ -539,12 +539,14 @@ class GeneratedArenaSession:
                 components.append({
                     "order": index,
                     "name": action.event_type.replace("_", " ").title(),
-                    "status": "executing" if action.id in candidate.encounter.pending_action_list
-                        else "accepted",
+                    "status": ("paused" if candidate.encounter._choice_book.is_paused(action.id)
+                        else "executing" if action.id in candidate.encounter.pending_action_list
+                        else "accepted"),
                     "start_seconds": packet.start_time,
                     "end_seconds": packet.end_time,
                     "duration_seconds": packet.end_time - packet.start_time,
-                    "seconds_remaining": max(0, math.ceil(packet.end_time - now)),
+                    "seconds_remaining": max(0, math.ceil(
+                        candidate.encounter._choice_book.effective_end(action) - now)),
                     "priority_penalty": member.priority_penalty,
                     "target_name": (None if target_evidence is None else
                         self._display_names.get(target_evidence.entity_id, target_evidence.name)),
@@ -572,7 +574,7 @@ class GeneratedArenaSession:
                 "default_equipment_mode": self._default_equipment_mode,
             }
         candidate = self._active
-        from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction
+        from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
         player = candidate.participants[0]
         from arena_perception import ArenaPerceptionLedger
         ledger = object.__getattribute__(player.native.being, "__dict__").get("_arena_perception_ledger")
@@ -598,6 +600,43 @@ class GeneratedArenaSession:
                 "status": "completed" if self._ready_weapon_action_outcome is not None else "executing",
                 "outcome": self._ready_weapon_action_outcome,
                 "duration_seconds": duration, "seconds_remaining": remaining}
+        ready_preparation_action = None
+        ready_action = self._player_base_action(candidate, player.native.being, "ready object")
+        if ready_action is not None:
+            active_choice = any(ready_action.id in row.view.action_ids
+                and row.view.state in ("accepted", "executing")
+                for row in candidate.encounter._choice_book._choices.values())
+            if ready_action.id in candidate.encounter.pending_action_list or active_choice:
+                ready_preparation_action = {"name": "Ready",
+                    "status": "executing", "outcome": None,
+                    "motion": ready_action.ready_motion,
+                    "duration_seconds": ready_action.readying_seconds,
+                    "seconds_remaining": max(0, math.ceil(ready_action.end_time-candidate.encounter.time))}
+            elif ready_action.id in candidate.encounter.cancelled_action_list:
+                ready_preparation_action = {"name": "Ready", "status": "cancelled",
+                    "outcome": None, "motion": ready_action.ready_motion,
+                    "duration_seconds": ready_action.readying_seconds, "seconds_remaining": 0}
+            else:
+                record = candidate.encounter.inspect_committed(int(ready_action.end_time)).action(ready_action.id)
+                ready_preparation_action = {"name": "Ready", "status": "completed",
+                    "outcome": record.facts.outcome, "motion": ready_action.ready_motion,
+                    "duration_seconds": ready_action.readying_seconds, "seconds_remaining": 0}
+        delay_action = self._named_base_action_view(candidate, player.native.being,
+                                                    "delay", "Delay")
+        book=candidate.encounter._choice_book
+        pending_owned=[candidate.universe.get_event_by_id(aid)
+            for aid in candidate.encounter.pending_action_list
+            if candidate.universe.get_event_by_id(aid) is not None
+            and candidate.universe.get_event_by_id(aid).actor_id==player.native.being.id]
+        paused_action=next((action for action in pending_owned if book.is_paused(action.id)),None)
+        pause_candidates=[action for action in pending_owned if not book.is_paused(action.id)
+            and action.start_time<candidate.encounter.time
+            and action.event_type not in ('swing','thrust','charge','spell','cast','spellcasting')
+            and book._states.get(action.id)=='executing']
+        pause_resume={"paused_action":(None if paused_action is None else {
+                "name":paused_action.event_type.replace('_',' ').title(),
+                "seconds_remaining":book._paused[paused_action.id]['remaining']}),
+            "pause_available":bool(pause_candidates),"resume_available":paused_action is not None}
         melee_action = self._melee_action_view(candidate, player.native.being)
         melee_pending = (melee_action is not None and melee_action["status"] == "executing")
         touch_action = self._touch_action_view(candidate, player.native.being)
@@ -688,7 +727,7 @@ class GeneratedArenaSession:
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
             for action_type in (Action, RunAction, SpotAction, PickUpAction, ReadyWeaponAction,
-                                MeleeStrike, MeleeDefense)
+                                ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense)
         }
         perceived = []
         for evidence in ledger.current:
@@ -746,6 +785,9 @@ class GeneratedArenaSession:
             "player_action": action,
             "pickup_action": pickup_action,
             "ready_weapon_action": ready_weapon_action,
+            "ready_preparation_action": ready_preparation_action,
+            "delay_action": delay_action,
+            **pause_resume,
             "melee_action": melee_action,
             "touch_action": touch_action,
             "grappling_action": grappling_action,
@@ -778,6 +820,10 @@ class GeneratedArenaSession:
                                        and self._pickup_action_outcome is None)
                                    or (self._ready_weapon_action_id is not None
                                        and self._ready_weapon_action_outcome is None)
+                                   or (ready_preparation_action is not None
+                                       and ready_preparation_action["status"] == "executing")
+                                   or (delay_action is not None
+                                       and delay_action["status"] == "executing")
                                    or melee_pending
                                    or touch_pending
                                    or grappling_pending
@@ -888,6 +934,40 @@ class GeneratedArenaSession:
             "Native Draw from the explicitly authored worn sheath takes 2 seconds. "
             "Post-strike re-ready timing is separate."
         )
+
+    def _ready_preparation_options_unlocked(self, candidate, player, entity_id, evidence):
+        from weapon import (WeaponInstance, native_ready_preparation,
+                            weapon_readying_time)
+        if evidence is None or evidence.category != "object":
+            return (), "Select a currently perceived Weapon first."
+        weapon = candidate.universe.get_object_by_id(entity_id)
+        if type(weapon) is not WeaponInstance:
+            return (), "Ready requires a native Weapon Object."
+        if (entity_id not in player.weapons
+                or entity_id not in player.armed_with(candidate.universe).values()
+                or entity_id not in player.current.body_parts.values()):
+            return (), "Draw the Weapon and hold it in an explicitly represented hand before Ready."
+        if player.current.hit_points <= 0 or player.is_helpless():
+            return (), "The player Being cannot perform a voluntary Action in its current native condition."
+        try:
+            preparation = native_ready_preparation(weapon)
+        except (TypeError, ValueError):
+            return (), "The native Weapon Ready-preparation record is malformed."
+        if preparation is not None:
+            return (), "This Weapon already has completed preparation; use it or wait without re-readying."
+        options = []
+        reasons = []
+        for motion in weapon.get_melee_types():
+            try:
+                seconds = weapon_readying_time(weapon, motion)
+            except ValueError as exc:
+                reasons.append(f"{motion}: {exc}")
+                continue
+            options.append({"motion": motion, "duration_seconds": seconds})
+        if not options:
+            return (), ("No supported weapon motion can be readied as a positive-duration native Action. "
+                        + "; ".join(reasons))
+        return tuple(options), "Ready prepares only the selected motion; the benefit remains until this Weapon is used."
 
     @staticmethod
     def _initial_ready_dagger_id(candidate, player):
@@ -1085,6 +1165,7 @@ class GeneratedArenaSession:
 
     @staticmethod
     def _player_base_action(candidate, player, event_type):
+        from activities import ReadyPreparationAction, DelayAction
         event_by_id=dict(candidate.universe.event_history)
         ids=(set(candidate.encounter.pending_action_list)|set(candidate.encounter.finished_action_list)
              |set(candidate.encounter.cancelled_action_list))
@@ -1092,9 +1173,9 @@ class GeneratedArenaSession:
             if choice.view.state not in ("accepted","executing","finished"):continue
             ids.update(choice.view.action_ids)
             for member in choice.members:
-                if type(member.action) is Action and member.action.event_type==event_type:
+                if type(member.action) in (Action,ReadyPreparationAction,DelayAction) and member.action.event_type==event_type:
                     event_by_id[member.action.id]=member.action
-        rows=[event for event in event_by_id.values() if type(event) is Action
+        rows=[event for event in event_by_id.values() if type(event) in (Action,ReadyPreparationAction,DelayAction)
             and event.actor_id==player.id and event.event_type==event_type and event.id in ids]
         return max(rows,key=lambda action:(action.start_time,action.id),default=None)
 
@@ -1769,7 +1850,7 @@ class GeneratedArenaSession:
         normalized = []
         for component in payload["components"]:
             targetless = (type(component) is dict
-                          and component.get("kind") == "dodge-prepare")
+                          and component.get("kind") in ("dodge-prepare", "delay"))
             if (type(component) is not dict or set(component) - allowed
                     or not {"kind"}.issubset(component)
                     or (not targetless and "handle" not in component)
@@ -1804,7 +1885,7 @@ class GeneratedArenaSession:
             members = []
             selected_handles = []
             for index, component in enumerate(normalized):
-                entity_id = (None if component["kind"] == "dodge-prepare" else
+                entity_id = (None if component["kind"] in ("dodge-prepare", "delay") else
                     next((key for key, value in self._view_handles.items()
                           if value == component["handle"]), None))
                 evidence = None if entity_id is None else next(
@@ -1845,6 +1926,19 @@ class GeneratedArenaSession:
                     hand = component.get("hand")
                     action = ReadyWeaponAction(encounter, player.id, entity_id,
                         hand, encounter.time)
+                elif kind == "ready-preparation" and motion in ("swing", "thrust"):
+                    from activities import ReadyPreparationAction
+                    options, reason = self._ready_preparation_options_unlocked(
+                        candidate, player, entity_id, evidence)
+                    if not any(row["motion"] == motion for row in options):
+                        raise ArenaBrowserRequestError(reason)
+                    action = ReadyPreparationAction(encounter, player.id,
+                        entity_id, motion, encounter.time)
+                elif kind == "delay":
+                    from activities import DelayAction
+                    action = DelayAction(encounter, player.id,
+                        component.get("strategy", {}).get("defense", 0),
+                        encounter.time)
                 elif kind == "dodge":
                     action, _, _ = self._player_dodge_preflight(candidate, player,
                         entity_id, evidence, allow_composition=True)
@@ -1898,7 +1992,7 @@ class GeneratedArenaSession:
                 effort = component.get("strategy", {})
                 action.strategy = Strategy(*(effort.get(key, 0) for key in
                     ("attack", "defense", "timing", "extra_damage")))
-                if effort.get("timing", 0):
+                if effort.get("timing", 0) and action.event_type not in ("ready object", "delay"):
                     # Apply the same native timing reduction as the corresponding
                     # single Action preflight, with a one-second floor.
                     adjustment = action.strategy.timing_adjustment()
@@ -2897,7 +2991,7 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
-        from activities import PickUpAction, RunAction, SpotAction
+        from activities import PickUpAction, RunAction, SpotAction, ReadyPreparationAction, DelayAction
 
         handle = None if selected is None else selected.get("handle")
         entity_id = (None if type(handle) is not str else
@@ -3241,7 +3335,34 @@ class GeneratedArenaSession:
                 })
                 continue
             elif name.casefold() == "ready object":
-                reason = "No native transactional ready-object Action is implemented for the generated Arena."
+                options, reason = self._ready_preparation_options_unlocked(
+                    candidate, player, entity_id, evidence)
+                if not supported_actions.get(ReadyPreparationAction, False):
+                    options = ()
+                    reason = "The native Ready-preparation Action contract is unavailable."
+                catalog_rows.append({"name": name, "group": "Arena Actions",
+                    "display_name": "Ready Object", "target_type": "object",
+                    "required_skill": source_row["required_skill"],
+                    "is_melee": source_row["is_melee"],
+                    "status": "available" if options else "unavailable",
+                    "reason": reason,
+                    "target": (None if selected is None else {"handle": handle,
+                        "name": selected["name"], "type": selected["type"],
+                        "present_state": selected["present_state"]}),
+                    "motions": list(options)})
+                continue
+            elif name.casefold() == "delay":
+                available = supported_actions.get(DelayAction, False)
+                catalog_rows.append({"name": name, "group": "Arena Actions",
+                    "display_name": "Delay (1 s)", "target_type": "none",
+                    "required_skill": source_row["required_skill"],
+                    "is_melee": source_row["is_melee"],
+                    "status": "available" if available else "unavailable",
+                    "reason": ("Wait one committed second with the selected native defense allocation; "
+                               "choose another Action at the next boundary. Repeat Delay to keep waiting."),
+                    "target": None,
+                    "defense_default": player.strategy.defense})
+                continue
             elif name.casefold().startswith("parry"):
                 continue
             elif name.casefold() == "throw":
@@ -4281,6 +4402,102 @@ class GeneratedArenaSession:
             self._selected_entity_handle = handle
             return self._view_unlocked()
 
+    def choose_ready_preparation(self, payload):
+        from activities import ReadyPreparationAction
+        from arena_perception import ArenaPerceptionLedger
+        if type(payload) is not dict or set(payload) != {"handle", "motion"}:
+            raise ArenaBrowserRequestError("Ready requires a visible Weapon handle and selected motion")
+        handle, motion = payload["handle"], payload["motion"]
+        with self._lock:
+            if self._active is None or type(handle) is not str or type(motion) is not str:
+                raise ArenaBrowserRequestError("Ready target or attack motion is unavailable")
+            if not _has_native_transactional_action_contract(ReadyPreparationAction):
+                raise ArenaBrowserRequestError("The native Ready-preparation Choice contract is unavailable")
+            entity_id = next((key for key, value in self._view_handles.items()
+                              if value == handle), None)
+            player = self._active.participants[0].native.being
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            options, reason = self._ready_preparation_options_unlocked(
+                self._active, player, entity_id, evidence)
+            option = next((row for row in options if row["motion"] == motion), None)
+            if option is None:
+                raise ArenaBrowserRequestError(reason)
+            action = ReadyPreparationAction(self._active.encounter, player.id,
+                entity_id, motion, self._active.encounter.time)
+            try:
+                if not self._active.encounter.initiated:
+                    self._active.encounter.activate_arena_for_player_action(
+                        player.id, action, rng_owner=self._rng_cursor)
+                else:
+                    self._active.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Ready Choice was not accepted; Arena state is unchanged") from exc
+            self._selected_entity_handle = handle
+            return self._view_unlocked()
+
+    def choose_delay(self, payload):
+        from activities import DelayAction
+        if type(payload) is not dict or set(payload) != {"defense"}:
+            raise ArenaBrowserRequestError("Delay requires a selected defense allocation")
+        defense = payload["defense"]
+        if type(defense) is not int or defense < 0:
+            raise ArenaBrowserRequestError("Delay defense allocation must be a nonnegative whole number")
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before choosing Delay")
+            if not _has_native_transactional_action_contract(DelayAction):
+                raise ArenaBrowserRequestError("The native Delay Action contract is unavailable")
+            player = self._active.participants[0].native.being
+            action = DelayAction(self._active.encounter, player.id, defense,
+                                 self._active.encounter.time)
+            try:
+                if not self._active.encounter.initiated:
+                    self._active.encounter.activate_arena_for_player_action(
+                        player.id, action, rng_owner=self._rng_cursor)
+                else:
+                    self._active.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Delay Choice was not accepted; Arena state is unchanged") from exc
+            return self._view_unlocked()
+
+    def choose_pause_action(self, payload):
+        if payload!={}:raise ArenaBrowserRequestError("Pause accepts an empty request")
+        with self._lock:
+            if self._active is None:raise ArenaBrowserRequestError("Generate an Encounter before pausing")
+            candidate=self._active; player=candidate.participants[0].native.being
+            book=candidate.encounter._choice_book
+            action=next((candidate.universe.get_event_by_id(aid)
+                for aid in candidate.encounter.pending_action_list
+                if candidate.universe.get_event_by_id(aid) is not None
+                and candidate.universe.get_event_by_id(aid).actor_id==player.id
+                and book._states.get(aid)=='executing' and not book.is_paused(aid)),None)
+            if action is None:raise ArenaBrowserRequestError("No eligible started player Action can be paused")
+            try:book.pause_action(action.id)
+            except Exception as exc:raise ArenaBrowserRequestError(str(exc)) from exc
+            return self._view_unlocked()
+
+    def choose_resume_action(self, payload):
+        if payload!={}:raise ArenaBrowserRequestError("Resume accepts an empty request")
+        with self._lock:
+            if self._active is None:raise ArenaBrowserRequestError("Generate an Encounter before resuming")
+            candidate=self._active; player=candidate.participants[0].native.being
+            book=candidate.encounter._choice_book
+            action=next((candidate.universe.get_event_by_id(aid)
+                for aid in candidate.encounter.pending_action_list
+                if candidate.universe.get_event_by_id(aid) is not None
+                and candidate.universe.get_event_by_id(aid).actor_id==player.id
+                and book.is_paused(aid)),None)
+            if action is None:raise ArenaBrowserRequestError("No paused player Action is available to resume")
+            try:book.resume_action(action.id)
+            except Exception as exc:raise ArenaBrowserRequestError(str(exc)) from exc
+            return self._view_unlocked()
+
     def advance_one_second(self, *, trace_request_id=None, trace_client_sequence=None):
         """Commit exactly the native next boundary for the accepted player decision."""
         with self._lock:
@@ -4292,6 +4509,10 @@ class GeneratedArenaSession:
             before_position = player.get_position()
             before_cell = self._trace_cell(candidate, before_position)
             accepted_plan = self._movement_plan
+            ready_preparation_action = self._player_base_action(candidate, player, "ready object")
+            ready_preparation_pending = self._melee_action_pending(candidate, ready_preparation_action)
+            delay_pending = self._melee_action_pending(candidate,
+                self._player_base_action(candidate, player, "delay"))
             melee_action = self._player_melee_action(candidate, player)
             melee_pending = self._melee_action_pending(candidate, melee_action)
             touch_action = self._player_touch_action(candidate, player)
@@ -4323,6 +4544,8 @@ class GeneratedArenaSession:
             self._opponent_attack_refusal = opponent_decision["reason"]
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
+                    and not ready_preparation_pending
+                    and not delay_pending
                     and not touch_pending
                     and not grappling_pending
                     and not contact_wait_pending
@@ -4340,6 +4563,8 @@ class GeneratedArenaSession:
                     and self._player_action_outcome is not None
                     and not (self._ready_weapon_action_id is not None
                              and self._ready_weapon_action_outcome is None)
+                    and not ready_preparation_pending
+                    and not delay_pending
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
                     and not grappling_pending
@@ -4356,6 +4581,8 @@ class GeneratedArenaSession:
                     and self._pickup_action_outcome is not None
                     and not (self._ready_weapon_action_id is not None
                              and self._ready_weapon_action_outcome is None)
+                    and not ready_preparation_pending
+                    and not delay_pending
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
                     and not grappling_pending
@@ -4367,6 +4594,8 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             if (self._movement_plan is None and self._ready_weapon_action_id is not None
                     and self._ready_weapon_action_outcome is not None and not melee_pending
+                    and not ready_preparation_pending
+                    and not delay_pending
                     and not melee_pending and not player_defense_pending
                     and not touch_pending
                     and not grappling_pending

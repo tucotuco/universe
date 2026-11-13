@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -563,6 +563,65 @@ def _make_plan(encounter,candidate,rng_owner):
         updated_tags=dict(obj.current.tags)
         updated_tags.pop(NATIVE_DRAW_LOCATION_TAG, None)
         plan.contents('targets',obj.current.tags,updated_tags)
+    from weapon import NATIVE_READY_PREPARATION_TAG, native_ready_preparation
+    ready_preparations=[]
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is not ReadyPreparationEffect:continue
+        source=events.get(effect.source_action_id)
+        actor=objects.get(effect.target_id)
+        obj=objects.get(effect.object_id)
+        if (source is None or source.event_type!='ready object'
+                or source.actor_id!=effect.target_id or source.target_id!=effect.object_id
+                or source.ready_motion!=effect.motion
+                or source.readying_seconds!=effect.readying_seconds
+                or type(actor) is not BeingInstance or type(obj) is not WeaponInstance
+                or effect.object_id not in actor.weapons
+                or effect.object_id not in actor.armed_with(world).values()
+                or native_ready_preparation(obj) is not None):
+            raise PublicationRejected('Ready preparation identity or held-weapon state changed before atomic publication')
+        ready_preparations.append((obj, {
+            'owner_id': actor.id, 'motion': effect.motion,
+            'ready_action_id': effect.source_action_id,
+            'completed_at': candidate.boundary,
+            'readying_seconds': effect.readying_seconds}))
+    for obj, record in ready_preparations:
+        updated_tags=dict(obj.current.tags)
+        updated_tags[NATIVE_READY_PREPARATION_TAG]=record
+        plan.contents('targets',obj.current.tags,updated_tags)
+    ready_consumptions=[]
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is not ReadyConsumptionEffect:continue
+        source=events.get(effect.source_action_id)
+        actor=objects.get(effect.target_id)
+        obj=objects.get(effect.object_id)
+        preparation=None if type(obj) is not WeaponInstance else native_ready_preparation(obj)
+        if (source is None or source.instrument_id!=effect.object_id
+                or source.actor_id!=effect.target_id
+                or type(actor) is not BeingInstance or type(obj) is not WeaponInstance
+                or preparation is None or preparation['owner_id']!=actor.id
+                or preparation['ready_action_id']!=effect.ready_action_id):
+            raise PublicationRejected('Ready consumption no longer matches the used Weapon preparation')
+        ready_consumptions.append(obj)
+    for obj in ready_consumptions:
+        updated_tags=dict(obj.current.tags)
+        updated_tags.pop(NATIVE_READY_PREPARATION_TAG, None)
+        plan.contents('targets',obj.current.tags,updated_tags)
+    delay_effects=[row.effect for row in supported.boundary.effects.values()
+                   if type(row.effect) is DelayDefenseEffect]
+    if len({effect.target_id for effect in delay_effects})!=len(delay_effects):
+        raise PublicationRejected('one Being cannot publish conflicting same-boundary Delay defenses')
+    from strategy import Strategy
+    for effect in delay_effects:
+        source=events.get(effect.source_action_id)
+        actor=objects.get(effect.target_id)
+        if (source is None or source.event_type!='delay' or source.actor_id!=effect.target_id
+                or source.target_id is not None or type(actor) is not BeingInstance):
+            raise PublicationRejected('Delay defense does not belong to an exact native waiting Action')
+        prior=actor.strategy
+        plan.attr('targets',actor,'strategy',Strategy(prior.attack,effect.defense,
+            prior.timing,prior.extra_damage))
     disarm_drops=[row.effect for row in supported.boundary.effects.values()
                   if type(row.effect) is DropObjectEffect]
     if len({effect.target_id for effect in disarm_drops})!=len(disarm_drops):
@@ -946,6 +1005,23 @@ def _committed_consistency(encounter,candidate,plan):
                            for key,other in objects.items() if type(other) is BeingInstance
                            and other is not actor for name in ('possessions','weapons','body_parts','armor'))):
                 raise PublicationRejected('Ready weapon identity/custody post-write consistency failed')
+        elif type(effect) is ReadyPreparationEffect:
+            from weapon import native_ready_preparation
+            preparation=native_ready_preparation(objects[effect.object_id])
+            if (preparation is None or preparation['owner_id']!=effect.target_id
+                    or preparation['motion']!=effect.motion
+                    or preparation['ready_action_id']!=effect.source_action_id
+                    or preparation['completed_at']!=candidate.boundary
+                    or preparation['readying_seconds']!=effect.readying_seconds):
+                raise PublicationRejected('Ready preparation post-write consistency failed')
+        elif type(effect) is ReadyConsumptionEffect:
+            from weapon import native_ready_preparation
+            if native_ready_preparation(objects[effect.object_id]) is not None:
+                raise PublicationRejected('Ready consumption post-write consistency failed')
+        elif type(effect) is DelayDefenseEffect:
+            actor=objects[effect.target_id]
+            if actor.strategy.defense!=effect.defense:
+                raise PublicationRejected('Delay defense post-write consistency failed')
     if candidate.adult_member_candidate is not None:
         operation,group,being,member,slot=plan.adult_realization
         objects=encounter.universe.object_registry.object_instances

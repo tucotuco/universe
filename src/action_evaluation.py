@@ -221,10 +221,11 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
     shield_names = freeze(weapon_dictionary['object_categories']).get('Shields', ())
     participants = tuple(dict.fromkeys(freeze(ed['being_list']) + freeze(ed['non_being_object_list'])))
     actions = {}
-    from activities import ThrowAction, PickUpAction, ReadyWeaponAction
+    from activities import ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
     families = {Action: 'combat', MeleeStrike: 'melee', MeleeDefense: 'defense',
                 RunAction: 'run', SpotAction: 'spot', ThrowAction: 'throw',
-                PickUpAction: 'pickup', ReadyWeaponAction: 'ready_weapon'}
+                PickUpAction: 'pickup', ReadyWeaponAction: 'ready_weapon',
+                ReadyPreparationAction: 'ready_preparation', DelayAction: 'delay'}
     objective_actions = {}
     if _objective:
         from group_observation import ObserveGroupAction
@@ -252,7 +253,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -272,14 +273,18 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             continue
         if any(ad.get(k) is not None for k in ('resolution', 'combat_result', 'result')):
             raise EvaluationIntegrityError('Action already has a successful live result')
-        end = ad['end_time']
+        book = object.__getattribute__(encounter, '__dict__').get('_choice_book')
+        paused = bool(book is not None and book.is_paused(aid))
+        end = ad['end_time'] if book is None else book.effective_end(action)
         if type(end) not in (int, float) or not math.isfinite(end):
             raise EvaluationIntegrityError('invalid Action deadline')
         cancelled = aid in ed['cancelled_action_list']
-        if not cancelled and math.ceil(end) < boundary:
+        if not cancelled and not paused and math.ceil(end) < boundary:
             raise EvaluationIntegrityError('stale pending Action')
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
-        family = ('disarm' if type(action) is Action and ad['event_type']=='disarm' else
+        family = ('ready_preparation' if type(action) is Action and ad['event_type']=='ready object' else
+                  'delay' if type(action) is Action and ad['event_type']=='delay' else
+                  'disarm' if type(action) is Action and ad['event_type']=='disarm' else
                   'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
                   'grappling' if type(action) is Action and ad['event_type'] in ('grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip') else
                   'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
@@ -297,7 +302,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
-        for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id'):
             if key in ad:
                 selected[key] = freeze(ad[key])
@@ -354,6 +359,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             selected['map_height_cells'] = freeze(ad['map_height_cells'])
         if type(action) is ReadyWeaponAction:
             selected['hand'] = freeze(ad['hand'])
+        if type(action) is ReadyPreparationAction:
+            selected['ready_motion'] = freeze(ad['ready_motion'])
+            selected['readying_seconds'] = freeze(ad['readying_seconds'])
         if not cancelled:
             # Reuse Increment 3 ownership and declaration validation, after the
             # exact-type/callback preflight above. No scheduling hook executes.
@@ -391,7 +399,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         actions[aid] = ActionView(aid, family, freeze(ad['actor_id']),
             freeze(ad['target_id']), freeze(ad['instrument_id']), freeze(ad['start_time']),
             end, math.ceil(end), -1 if type(action) is MeleeDefense else 0, order,
-            'cancelled' if cancelled else 'pending', MappingProxyType(selected))
+            'cancelled' if cancelled else ('paused' if paused else 'pending'), MappingProxyType(selected))
     object_classes = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance,
                       StatisticalGroup)
     entities = {}
@@ -497,7 +505,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             freeze(od['physiology_id'])
         elif type(obj) is WeaponInstance:
             category = 'weapon'
-            from weapon import NATIVE_DRAW_LOCATION_TAG, DRAWABLE_WORN_SHEATH
+            from weapon import (NATIVE_DRAW_LOCATION_TAG, DRAWABLE_WORN_SHEATH,
+                                native_ready_preparation)
             tags = cd.get('tags')
             if type(tags) is not dict:
                 raise EvaluationIntegrityError('Weapon tags must be a native dictionary')
@@ -510,7 +519,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 raise EvaluationIntegrityError('native Weapon draw-location record is malformed')
             data.update(attacks=freeze(cd['attacks']), size=freeze(cd['weapon_size']),
                         original_type=freeze(native_data(od['original'], (WeaponDefinition,))['obj_type']),
-                        draw_location=freeze(location))
+                        draw_location=freeze(location),
+                        ready_preparation=freeze(native_ready_preparation(obj)))
         elif type(obj) is ArmorInstance:
             category = 'armor'
             data['defenses'] = freeze(cd['defenses'])
@@ -708,11 +718,38 @@ class PickupEffect:
 
 @dataclass(frozen=True)
 class ReadyWeaponEffect:
-    """Atomically add a carried weapon to the native weapon and hand slots."""
+    """Draw a carried weapon into an explicitly selected native hand."""
     source_action_id: str
     target_id: str  # acting Being
     object_id: str
     hand: str
+
+
+@dataclass(frozen=True)
+class ReadyPreparationEffect:
+    """Persist motion-specific Ready preparation on the native Weapon Object."""
+    source_action_id: str
+    target_id: str
+    object_id: str
+    motion: str
+    readying_seconds: int
+
+
+@dataclass(frozen=True)
+class ReadyConsumptionEffect:
+    """Consume prior Ready preparation when an Action uses that Object."""
+    source_action_id: str
+    target_id: str
+    object_id: str
+    ready_action_id: str
+
+
+@dataclass(frozen=True)
+class DelayDefenseEffect:
+    """Carry the selected defense level into the Being's committed waiting state."""
+    source_action_id: str
+    target_id: str
+    defense: int
 
 
 @dataclass(frozen=True)
@@ -1805,6 +1842,28 @@ def ready_weapon_eligibility(snapshot, action):
     return None
 
 
+def ready_preparation_eligibility(snapshot, action):
+    """Validate a motion-specific Ready Action against the common snapshot."""
+    actor, weapon = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    if actor.category != 'being' or weapon.category != 'weapon':
+        return 'unavailable'
+    if _helpless(actor):
+        return 'unable_to_act'
+    motion = action.data.get('ready_motion')
+    attacks = weapon.data.get('attacks', {})
+    key = {'swing': 'S', 'thrust': 'T'}.get(motion)
+    if key is None or type(attacks) not in (dict, MappingProxyType) or attacks.get(key) is None:
+        return 'unsupported_motion'
+    if (action.target_id not in actor.data.get('weapons', ())
+            or action.target_id not in actor.data.get('held', ())):
+        return 'unavailable'
+    if weapon.data.get('ready_preparation') is not None:
+        return 'already_ready'
+    if type(action.data.get('readying_seconds')) is not int or action.data['readying_seconds'] < 1:
+        return 'unsupported_timing'
+    return None
+
+
 def _activity(snapshot, action, rng):
     actor = snapshot.entity(action.actor_id)
     effects = []
@@ -1893,7 +1952,7 @@ def evaluate_snapshot(snapshot, action_ids=None):
     if type(snapshot) is not EvaluationSnapshot:
         raise TypeError('expected native EvaluationSnapshot')
     ids = tuple(action_ids) if action_ids is not None else tuple(a.id for a in snapshot.actions.values()
-        if a.boundary == snapshot.boundary)
+        if a.boundary == snapshot.boundary and a.lifecycle != 'paused')
     if len(set(ids)) != len(ids):
         raise EvaluationIntegrityError('duplicate evaluation identity')
     selected = [snapshot.actions[key] for key in ids]
@@ -1906,7 +1965,7 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon') for a in selected):
+    if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     pickup_status = {action.id: pickup_eligibility(snapshot, action)
                      for action in selected if action.lifecycle == 'pending'
@@ -1914,6 +1973,9 @@ def evaluate_snapshot(snapshot, action_ids=None):
     ready_status = {action.id: ready_weapon_eligibility(snapshot, action)
                     for action in selected if action.lifecycle == 'pending'
                     and action.family == 'ready_weapon'}
+    preparation_status = {action.id: ready_preparation_eligibility(snapshot, action)
+                    for action in selected if action.lifecycle == 'pending'
+                    and action.family == 'ready_preparation'}
     pickup_by_object = {}
     for action in selected:
         if (action.lifecycle == 'pending' and action.family == 'pickup'
@@ -1925,6 +1987,11 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and ready_status[action.id] is None):
             ready_claims.setdefault((action.actor_id, action.data['hand']), []).append(action.id)
             ready_claims.setdefault(('weapon', action.target_id), []).append(action.id)
+    preparation_claims = {}
+    for action in selected:
+        if (action.lifecycle == 'pending' and action.family == 'ready_preparation'
+                and preparation_status[action.id] is None):
+            preparation_claims.setdefault(action.target_id, []).append(action.id)
     rng = _ProvisionalRandom(snapshot.rng_state)
     proposals = []
     defense_effects = []
@@ -1966,8 +2033,34 @@ def evaluate_snapshot(snapshot, action_ids=None):
                                            action.data['hand'])
                 proposal = ActionProposal(action.id, action.actor_id,
                     tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
+        elif action.family == 'ready_preparation':
+            status = preparation_status[action.id]
+            if status is not None:
+                proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), status)
+            elif len(preparation_claims[action.target_id]) > 1:
+                proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), 'contested')
+            else:
+                effect = ReadyPreparationEffect(action.id, action.actor_id, action.target_id,
+                    action.data['ready_motion'], action.data['readying_seconds'])
+                proposal = ActionProposal(action.id, action.actor_id,
+                    tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
+        elif action.family == 'delay':
+            effect = DelayDefenseEffect(action.id, action.actor_id,
+                                         action.data['strategy'].get('defense', 0))
+            proposal = ActionProposal(action.id, action.actor_id,
+                (action.actor_id,), 'success', (effect,))
         else:
             proposal = _activity(snapshot, action, rng)
+        if (action.lifecycle == 'pending' and action.instrument_id is not None
+                and action.family not in ('ready_preparation', 'ready_weapon', 'delay')):
+            instrument = snapshot.entity(action.instrument_id)
+            preparation = instrument.data.get('ready_preparation')
+            if (instrument.category == 'weapon' and preparation is not None
+                    and preparation.get('owner_id') == action.actor_id):
+                consume = ReadyConsumptionEffect(action.id, action.actor_id,
+                    action.instrument_id, preparation['ready_action_id'])
+                proposal = replace(proposal, target_ids=tuple(sorted(set(proposal.target_ids) | {action.actor_id})),
+                                   effects=proposal.effects + (consume,))
         proposals.append(proposal)
     # Adopted revision 36–37: separately declared Grapple actions whose
     # successful same-boundary results prescribe incompatible states of the

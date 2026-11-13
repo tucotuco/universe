@@ -23,7 +23,7 @@ from universe import Universe
 from action_choice import ChoiceBook, ChoiceView, ChoiceMember, Reservation, _Accepted, declaration
 from scheduling import PreparedSchedule
 from action import Action
-from activities import RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction
+from activities import RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
 from group_observation import ObserveGroupAction, SampledGroupObservation
@@ -62,7 +62,7 @@ def _require(test, reason):
         raise IntervalIntegrityError(reason)
 
 
-_ACTIONS = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, MeleeStrike, MeleeDefense,
+_ACTIONS = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense,
             ObserveGroupAction, AskAboutPastAction)
 _OBJECTS = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance, StatisticalGroup)
 # Pin methods at import, before any user-provided extension is inspected. This
@@ -376,6 +376,25 @@ def _preflight(encounter, boundary):
         _require(data['id'] == key and sum(v is obj for v in registry.values()) == 1, 'aliased Object registry identity')
         _require((type(obj) is BeingInstance) == (key in ed['being_list']), 'invalid participant role')
     book = ed['_choice_book']; native_data(book,(ChoiceBook,))
+    _require(type(book._paused) is dict, 'opaque paused-Action store')
+    for aid,row in book._paused.items():
+        action=wd['event_history'].get(aid)
+        _require(type(aid) is str and type(row) is dict
+            and set(row)=={'original_end','effective_end','paused_at','remaining','total_paused'}
+            and action is not None and aid in book._registered
+            and type(row['original_end']) in (int,float) and math.isfinite(row['original_end'])
+            and row['original_end']==action.end_time
+            and type(row['effective_end']) in (int,float) and math.isfinite(row['effective_end'])
+            and type(row['total_paused']) in (int,float) and math.isfinite(row['total_paused'])
+            and row['total_paused']>=0, 'invalid paused-Action receipt')
+        if row['paused_at'] is not None:
+            _require(type(row['paused_at']) in (int,float) and math.isfinite(row['paused_at'])
+                and type(row['remaining']) in (int,float) and math.isfinite(row['remaining'])
+                and row['remaining']>0 and row['effective_end']>=row['original_end'],
+                'invalid active pause boundary/remaining duration')
+        else:
+            _require(row['remaining'] is None and row['effective_end']>=row['original_end'],
+                'invalid resumed Action deadline')
     _require(book.encounter is encounter and book.lock is wd['_schedule_lock']
         and type(wd['_choice_books']) is list and wd['_choice_books'].count(book)==1, 'choice ownership/index mismatch')
     for other in wd['_choice_books']:
@@ -526,7 +545,7 @@ def _validate_closure(candidate):
     _require(supported.coverage=='complete_supported_due_set' and not supported.ready_for_publication
         and supported.boundary.source_snapshot is snapshot and supported.boundary.coverage=='complete_supported_batch'
         and supported.boundary.observer_reconciliation_complete, 'incomplete supported interval Action coverage')
-    due={aid for aid,a in snapshot.actions.items() if a.boundary==candidate.boundary}
+    due={aid for aid,a in snapshot.actions.items() if a.boundary==candidate.boundary and a.lifecycle!='paused'}
     _require(set(supported.boundary.actions)==due and set(supported.lifecycle)==due, 'missing interval due Action')
     changes=candidate.proposed_authoritative_changes
     _require(set(changes)=={'clock','positions','facings','environment','fatigue_history','targets','objective','recipients',

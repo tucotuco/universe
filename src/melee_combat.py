@@ -127,6 +127,16 @@ class MeleeStrike(Action):
         super().__init__(encounter.universe, encounter.time, None, motion,
                          actor_id, target_id, weapon_id, strategy=strategy,
                          parent_event_id=encounter.id)
+        from weapon import WeaponInstance, native_ready_preparation
+        weapon = encounter.universe.get_object_by_id(weapon_id)
+        preparation = native_ready_preparation(weapon) if type(weapon) is WeaponInstance else None
+        if (preparation is not None and preparation['owner_id'] == actor_id
+                and preparation['motion'] == motion
+                and preparation['completed_at'] <= encounter.time):
+            native_timing = weapon.St() if motion == 'swing' else weapon.Tt()
+            reduced = max(1, native_timing - preparation['readying_seconds']
+                          - self.strategy.timing_adjustment())
+            self.end_time = self.start_time + reduced
 
     def _status(self, encounter):
         from action_calculations import melee_hex_path_status, melee_path_status

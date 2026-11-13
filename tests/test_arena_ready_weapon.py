@@ -1,6 +1,7 @@
 """Native two-second Draw from explicitly authored source and hand state."""
 from pathlib import Path
 import json
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -8,7 +9,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from activities import ReadyWeaponAction
+from activities import DelayAction, ReadyPreparationAction, ReadyWeaponAction
+from activities import SpotAction
 from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
 from arena_hex_map import HexAddress
 from arena_perception import ArenaPerceptionEvidence
@@ -16,7 +18,8 @@ from atomic_publication import PublicationFailure, _WritePlan
 from melee_combat import MeleeStrike
 from weapon import (DRAWABLE_WORN_SHEATH, NATIVE_DRAW_LOCATION_TAG, WeaponInstance,
                     author_worn_sheath_draw_location, native_weapon_draw_location,
-                    re_ready_time_after_strike)
+                    re_ready_time_after_strike, native_ready_preparation,
+                    weapon_readying_time)
 
 GENERATE = {"starting_experience": "10000", "width_cells": "10", "height_cells": "5"}
 DAGGER = [{"source_item_id": "ready-test:dagger", "category": "weapon",
@@ -71,6 +74,139 @@ def draw_scenario():
 
 
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_eligible_action_pause_resume_preserves_remaining_duration_and_process_save(self):
+        session, candidate, player = arena(seed=20261132)
+        opponent=candidate.participants[1].native.being
+        session.choose_run(); session.advance_one_second()
+        spot=SpotAction(candidate.universe,player.id,opponent.id,candidate.encounter.time)
+        candidate.encounter.schedule_action(spot)
+        candidate.encounter.step(2)
+        self.assertEqual(candidate.encounter.time,3)
+        pause=candidate.encounter._choice_book.pause_action(spot.id)
+        self.assertEqual(pause['remaining'],4)
+        candidate.encounter.step(3)
+        self.assertEqual(candidate.encounter.time,6)
+        self.assertIsNone(spot.resolution)
+        paused_bytes=session.save_encounter_bytes()
+        script=("import sys;sys.path.insert(0,'src');"
+            "from arena_browser_session import GeneratedArenaSession;"
+            "s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read());"
+            "c=s.active_candidate;b=c.encounter._choice_book;"
+            "rows=[c.universe.get_event_by_id(a) for a in c.encounter.pending_action_list];"
+            "a=next(x for x in rows if x.event_type=='spot');"
+            "assert b.is_paused(a.id) and b._paused[a.id]['remaining']==4;"
+            "print('restored-paused-action')")
+        fresh=subprocess.run([sys.executable,'-B','-c',script],input=paused_bytes,
+            cwd=ROOT,capture_output=True,check=False,timeout=30)
+        self.assertEqual(fresh.returncode,0,fresh.stderr.decode('utf-8','replace'))
+        self.assertEqual(fresh.stdout.decode().strip(),'restored-paused-action')
+        candidate.encounter._choice_book.resume_action(spot.id)
+        self.assertEqual(candidate.encounter._choice_book.effective_end(spot),10)
+        candidate.encounter.step(3)
+        self.assertIsNone(spot.resolution)
+        candidate.encounter.step(1)
+        self.assertIsNotNone(spot.resolution)
+        self.assertEqual(candidate.encounter.time,10)
+
+    def test_momentum_dependent_strike_cannot_be_paused(self):
+        session,candidate,player=arena(seed=20261133)
+        opponent=candidate.participants[1].native.being
+        weapon_id=candidate.encounter.make_weapon('Dagger','Pause-test Dagger')
+        weapon=candidate.universe.get_object_by_id(weapon_id)
+        player.possessions.append(weapon_id);player.weapons.append(weapon_id)
+        player.current.body_parts['right hand']=weapon_id;weapon.parent_container_id=player.id
+        session.choose_run();session.advance_one_second()
+        strike=MeleeStrike(candidate.encounter,player.id,opponent.id,weapon_id,
+            motion='swing',reach=100)
+        candidate.encounter.schedule_action(strike)
+        candidate.encounter.step(1)
+        with self.assertRaisesRegex(ValueError,'Momentum-dependent'):
+            candidate.encounter._choice_book.pause_action(strike.id)
+
+    def test_generated_draw_ready_delay_and_use_controls(self):
+        session = GeneratedArenaSession(authored_draw_scenario=draw_scenario(),
+            root_seed_factory=lambda: 20261130)
+        session.generate(GENERATE)
+        candidate = session.active_candidate
+        player = candidate.participants[0].native.being
+        weapon = candidate.universe.get_object_by_id(player.possessions[0])
+        handle, _ = select_draw(session, weapon)
+        session.choose_ready_weapon({"handle": handle, "hand": "right hand"})
+        session.advance_one_second()
+        session.advance_one_second()
+        handle, inspected = select_draw(session, weapon)
+        ready_row = next(row for row in inspected["action_catalog"]["entries"]
+                         if row["name"] == "ready object")
+        self.assertEqual(ready_row["status"], "available")
+        self.assertEqual(ready_row["motions"], [
+            {"motion": "swing", "duration_seconds": 1},
+            {"motion": "thrust", "duration_seconds": 1}])
+        session.choose_ready_preparation({"handle": handle, "motion": "swing"})
+        self.assertEqual(session.advance_one_second()["ready_preparation_action"]["outcome"],
+                         "success")
+        ready = native_ready_preparation(weapon)
+        session.choose_delay({"defense": 0})
+        self.assertEqual(session.advance_one_second()["delay_action"]["outcome"], "success")
+        self.assertEqual(native_ready_preparation(weapon), ready)
+        wire = session.save_encounter_bytes()
+        restored = GeneratedArenaSession(root_seed_factory=lambda: 20261130)
+        restored.load_encounter_bytes(wire)
+        loaded_weapon = restored.active_candidate.universe.get_object_by_id(weapon.id)
+        self.assertEqual(native_ready_preparation(loaded_weapon), ready)
+        self.assertEqual(restored.active_candidate.participants[0].native.being.strategy.defense, 0)
+        script = (
+            "import sys; sys.path.insert(0, 'src'); "
+            "from arena_browser_session import GeneratedArenaSession; "
+            "from weapon import WeaponInstance, native_ready_preparation; "
+            "s=GeneratedArenaSession(); s.load_encounter_bytes(sys.stdin.buffer.read()); "
+            "c=s.active_candidate; "
+            "rows=[native_ready_preparation(o) for o in c.universe.object_registry.object_instances.values() "
+            "if type(o) is WeaponInstance and native_ready_preparation(o) is not None]; "
+            "assert len(rows)==1 and rows[0]['motion']=='swing'; "
+            "assert c.participants[0].native.being.strategy.defense==0; print('restored-ready-delay')")
+        fresh = subprocess.run([sys.executable, "-B", "-c", script], input=wire,
+            cwd=ROOT, capture_output=True, check=False, timeout=30)
+        self.assertEqual(fresh.returncode, 0, fresh.stderr.decode("utf-8", "replace"))
+        self.assertEqual(fresh.stdout.decode().strip(), "restored-ready-delay")
+        opponent = candidate.participants[1].native.being
+        strike = MeleeStrike(candidate.encounter, player.id, opponent.id, weapon.id,
+                             motion="swing", reach=100)
+        self.assertEqual(strike.end_time - strike.start_time, 3)
+
+    def test_ready_long_sword_swing_uses_two_seconds_and_persists_native_preparation(self):
+        session, candidate, player = arena(seed=20261131)
+        weapon_id = candidate.encounter.make_weapon("Longsword", "Test Longsword")
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        player.possessions.append(weapon.id)
+        player.weapons.append(weapon.id)
+        weapon.parent_container_id = player.id
+        player.current.body_parts["right hand"] = weapon.id
+        self.assertEqual(weapon_readying_time(weapon, "swing"), 2)
+        session.choose_run()
+        session.advance_one_second()
+        action = ReadyPreparationAction(candidate.encounter, player.id, weapon.id,
+                                        "swing", 1)
+        candidate.encounter.schedule_action(action)
+        candidate.encounter.step(2)
+        preparation = native_ready_preparation(weapon)
+        self.assertEqual(preparation, {
+            "owner_id": player.id, "motion": "swing", "ready_action_id": action.id,
+            "completed_at": 3, "readying_seconds": 2})
+        delay = DelayAction(candidate.encounter, player.id, defense=0, start_time=3)
+        candidate.encounter.schedule_action(delay)
+        candidate.encounter.step(1)
+        self.assertEqual(native_ready_preparation(weapon), preparation)
+        opponent = candidate.participants[1].native.being
+        strike = MeleeStrike(candidate.encounter, player.id, opponent.id, weapon.id,
+                             motion="swing", reach=100)
+        self.assertEqual(strike.end_time - strike.start_time, 4)
+        candidate.encounter.schedule_action(strike)
+        candidate.encounter.step(4)
+        self.assertIsNone(native_ready_preparation(weapon))
+        repeated = MeleeStrike(candidate.encounter, player.id, opponent.id, weapon.id,
+                               motion="swing", reach=100)
+        self.assertEqual(repeated.end_time - repeated.start_time, 6)
+
     def test_opt_in_authored_scenario_draws_as_first_choice_and_regenerates_cleanly(self):
         session = GeneratedArenaSession(root_seed_factory=iter((20261120, 20261121)).__next__,
                                         authored_draw_scenario=draw_scenario())

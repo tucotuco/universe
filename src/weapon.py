@@ -17,6 +17,7 @@ from utils import convert_to_numeric
 
 NATIVE_DRAW_LOCATION_TAG = "universe.native_draw_location"
 DRAWABLE_WORN_SHEATH = "worn_sheath"
+NATIVE_READY_PREPARATION_TAG = "universe.native_ready_preparation"
 
 
 def native_weapon_draw_location(weapon):
@@ -51,6 +52,42 @@ def author_worn_sheath_draw_location(weapon, owner_id):
         raise ValueError("native weapon tags are malformed")
     weapon.current.tags[NATIVE_DRAW_LOCATION_TAG] = {
         "kind": DRAWABLE_WORN_SHEATH, "owner_id": owner_id}
+
+
+def native_ready_preparation(weapon):
+    """Return exact Object preparation evidence, if this Weapon has any."""
+    if type(weapon) is not WeaponInstance:
+        raise TypeError("ready preparation evidence requires an exact WeaponInstance")
+    tags = weapon.current.tags
+    if type(tags) is not dict:
+        raise ValueError("native weapon tags are malformed")
+    record = tags.get(NATIVE_READY_PREPARATION_TAG)
+    if record is None:
+        return None
+    if (type(record) is not dict
+            or set(record) != {"owner_id", "motion", "ready_action_id", "completed_at", "readying_seconds"}
+            or type(record.get("owner_id")) is not str or not record["owner_id"]
+            or record.get("motion") not in ("swing", "thrust")
+            or type(record.get("ready_action_id")) is not str or not record["ready_action_id"]
+            or type(record.get("completed_at")) is not int or record["completed_at"] < 0
+            or type(record.get("readying_seconds")) is not int or record["readying_seconds"] < 1):
+        raise ValueError("native weapon ready-preparation record is malformed")
+    return record
+
+
+def weapon_readying_time(weapon, motion):
+    """Adopted one-third weapon timing for an explicitly selected motion."""
+    if type(weapon) is not WeaponInstance or motion not in ("swing", "thrust"):
+        raise ValueError("weapon Ready requires a native Weapon and selected swing or thrust")
+    if motion not in weapon.get_melee_types():
+        raise ValueError(f"weapon does not support {motion}")
+    timing = weapon.St() if motion == "swing" else weapon.Tt()
+    if type(timing) not in (int, float) or not math.isfinite(timing) or timing <= 0:
+        raise ValueError("weapon motion has no supported positive timing")
+    seconds = math.floor(timing / 3)
+    if seconds < 1:
+        raise ValueError("this weapon motion's one-third Ready time is below the native one-second Action minimum")
+    return seconds
 
 class WeaponDefinition(ObjectDefinition):
     '''

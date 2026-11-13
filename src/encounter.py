@@ -772,12 +772,15 @@ class Encounter(Event):
         preparer = native_preparer(action)
         if _arena_activation_preparation:
             from atomic_publication import publication_owned
-            from activities import RunAction, ReadyWeaponAction
+            from activities import RunAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
             arena_preparation = (publication_owned(self) and self.arena_activation_enabled
                                  and not self.initiated
                                  and ((type(action) is RunAction and action.target_id is None)
                                       or (type(action) is ReadyWeaponAction
-                                          and action.target_id is not None)))
+                                          and action.target_id is not None)
+                                      or (type(action) is ReadyPreparationAction
+                                          and action.target_id is not None)
+                                      or type(action) is DelayAction))
         else:
             arena_preparation = False
         if not self.initiated and not arena_preparation:
@@ -927,7 +930,7 @@ class Encounter(Event):
         Preparation is read-only. Invalid requests leave initiation, ChoiceBook,
         event history, clock, and RNG untouched.
         """
-        from activities import RunAction, ReadyWeaponAction
+        from activities import RunAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
         from action_choice import ChoiceRejected
 
         if not self.arena_activation_enabled:
@@ -940,9 +943,14 @@ class Encounter(Event):
         valid_first_draw = (
             type(action) is ReadyWeaponAction and action.actor_id == actor_id
             and type(action.target_id) is str and bool(action.target_id))
-        if not (valid_first_choice or valid_first_draw):
+        valid_first_ready = (
+            type(action) is ReadyPreparationAction and action.actor_id == actor_id
+            and type(action.target_id) is str and bool(action.target_id))
+        valid_first_delay = (type(action) is DelayAction and action.actor_id == actor_id
+                             and action.target_id is None)
+        if not (valid_first_choice or valid_first_draw or valid_first_ready or valid_first_delay):
             raise ValueError(
-                "first Arena Choice must be this actor's native target-free Run or owned-weapon Draw")
+                "first Arena Choice must be this actor's native Run, Draw, held-weapon Ready, or Delay")
         if self.get_being(actor_id) is None or action.start_time != self.time:
             raise ValueError("Run actor must participate and begin at native Encounter time")
 
@@ -1238,13 +1246,15 @@ class Encounter(Event):
             action = self.universe.get_event_by_id(action_id)
             if not isinstance(action, Action) or action.id != action_id or action.parent_event_id != self.id:
                 raise BoundaryInvariantError(f'Missing/invalid pending Action reference: {action_id}')
-            times = (action.start_time, action.end_time)
+            effective_end = self._choice_book.effective_end(action)
+            paused = self._choice_book.is_paused(action_id)
+            times = (action.start_time, effective_end)
             if (any(isinstance(t, bool) or not isinstance(t, (int, float))
                     or not math.isfinite(t) for t in times)
                     or action.start_time < 0 or action.end_time - action.start_time < 1):
                 raise BoundaryInvariantError(f'Invalid pending Action deadline/duration: {action_id}')
-            boundary = math.ceil(action.end_time)
-            if boundary <= self.last_processed_boundary:
+            boundary = math.ceil(effective_end)
+            if boundary <= self.last_processed_boundary and not paused:
                 raise BoundaryInvariantError(f'Overdue Action for boundary {boundary}: {action_id}')
             if self.get_being(action.actor_id) is None or (action.target_id is not None
                     and self.get_entity(action.target_id) is None):

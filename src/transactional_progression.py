@@ -495,12 +495,29 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or action.end_time - action.start_time != ReadyWeaponAction.DRAW_DURATION_SECONDS
                 or action.hand not in ReadyWeaponAction.HANDS):
             raise TransactionalProgressionError('weapon draw must retain its two-second native hand declaration')
+    from activities import ReadyPreparationAction, DelayAction
+    if type(action) is ReadyPreparationAction:
+        if (type(action.start_time) not in (int, float)
+                or type(action.end_time) not in (int, float)
+                or not math.isfinite(action.start_time) or not math.isfinite(action.end_time)
+                or action.event_type != 'ready object'
+                or type(action.ready_motion) is not str or action.ready_motion not in ('swing', 'thrust')
+                or type(action.readying_seconds) is not int or action.readying_seconds < 1
+                or action.end_time - action.start_time != action.readying_seconds):
+            raise TransactionalProgressionError('weapon Ready must retain its selected motion and one-third timing')
+    if type(action) is DelayAction:
+        if (action.event_type != 'delay' or action.target_id is not None
+                or action.instrument_id is not None
+                or action.end_time-action.start_time != DelayAction.DURATION_SECONDS
+                or type(action.strategy.defense) not in (int,float)
+                or not math.isfinite(action.strategy.defense) or action.strategy.defense < 0):
+            raise TransactionalProgressionError('Delay must retain its one-second wait and selected defense allocation')
     if not _force and mode_of(encounter)!='transactional':return
     from interval_staging import _guard_methods
     _guard_methods()
     import inspect
     from action import Action
-    from activities import RunAction,SpotAction,PickUpAction,ReadyWeaponAction
+    from activities import RunAction,SpotAction,PickUpAction,ReadyWeaponAction,ReadyPreparationAction,DelayAction
     from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
@@ -509,14 +526,14 @@ def validate_action_contract(encounter,action,*,_force=False):
     from observer_proposals import _NATIVE_RESOLVERS,_NATIVE_HOOKS,_capture_belief,frozen_value
     from objective_reality import objective_action_data
     from action_evaluation import UnsupportedEvaluation
-    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
+    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,ReadyPreparationAction,DelayAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
         raise UnsupportedEvaluation('transactional progression requires a reviewed exact native Action family')
     data=object.__getattribute__(action,'__dict__')
     if (inspect.getattr_static(type(action),'resolve') is not _NATIVE_RESOLVERS[type(action)]
             or 'on_completed' in data or inspect.getattr_static(type(action),'on_completed',None) is not _NATIVE_HOOKS.get(type(action))
             or any(callable(value) for key,value in data.items() if key!='generate')):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
-    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip'):
+    if type(action) is Action and data['event_type'] not in ('swing','thrust','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','delay'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
     if type(action) is Action and data['event_type'] == 'touch' and (
             data.get('instrument_id') is not None

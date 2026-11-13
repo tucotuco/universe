@@ -36,10 +36,10 @@ _NATIVE_OBJECT_LAST = ObjectObservationLedger.last_observation
 _NATIVE_SAMPLE = SampledGroupObservation.sample
 _NATIVE_INTERPRET = FieldInterpreter.interpret
 from action import Action
-from activities import RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction
+from activities import RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
-_NATIVE_RESOLVERS = {cls:cls.resolve for cls in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction)}
+_NATIVE_RESOLVERS = {cls:cls.resolve for cls in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,ReadyPreparationAction,DelayAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction)}
 _RECORDS = (FieldObservation, CountReport, FieldInterpretation, BeliefRevision,
     EvidenceReassessment, InquiryProposal, InquiryRecord, HeardAccount, CartesianPosition,
     BeingLocationObservation, LastSeenLocation, ObjectObservation)
@@ -518,9 +518,9 @@ def _validate_effect_rows(rows, snapshot, due, recipients, *, inputs, proposals,
         PostCommitNotificationIntent, AwarenessEffect, PracticeEffect)
     # Core combat effects have already been validated by native reconciliation.
     from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect,
-        DefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
+        DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
     accepted += (DamageEffect, FatalEffect, ProtectionEffect, DefenseEffect,
-                 ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
+                 ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
     for row in rows:
         _check(type(row) is IdentifiedEffect and type(row.identity) is EffectIdentity, 'invalid staged effect')
         key = row.identity
@@ -620,7 +620,7 @@ def build_supported_candidate(context, *, notify=False):
     """
     _check(type(notify) is bool, 'notification option must be a Boolean')
     inputs = validate_complete_context(context); snapshot = context.snapshot
-    due = {key for key, a in snapshot.actions.items() if a.boundary == snapshot.boundary}
+    due = {key for key, a in snapshot.actions.items() if a.boundary == snapshot.boundary and a.lifecycle!='paused'}
     ordered = sorted((snapshot.actions[k] for k in due), key=lambda a:(a.priority,a.order,a.id))
     core = evaluate_snapshot(context.native_snapshot)
     core_proposals = {p.action_id:p for p in core.proposals}

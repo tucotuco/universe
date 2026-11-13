@@ -15,8 +15,8 @@ FIELD_ADAPTERS = {
         "required": 'actor_id end_time event_type instrument_id location name parent_event_id resolution start_time strategy target_id type universe'.split(),
     },
     'action_choice.ChoiceBook': {
-        "allowed": '_choices _closed_drafts _counter _drafts _registered _reservations _states _tokens encounter lock revision'.split(),
-        "required": '_choices _closed_drafts _counter _drafts _registered _reservations _states _tokens encounter lock'.split(),
+        "allowed": '_choices _closed_drafts _counter _drafts _paused _registered _reservations _states _tokens encounter lock revision'.split(),
+        "required": '_choices _closed_drafts _counter _drafts _paused _registered _reservations _states _tokens encounter lock'.split(),
     },
     'action_choice.ChoiceMember': {
         "allowed": 'action key priority_penalty target_action_key'.split(),

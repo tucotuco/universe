@@ -35,8 +35,8 @@ _ARENA_TAGS = frozenset({
     'physical_fatigue.PhysicalFatigueState','spatial.state.CartesianPosition',
     'spatial.state.SpatialState','spatial.geometry.Sphere','spatial.geometry.AxisAlignedBox',
     'arena_perception.ArenaPerceptionEvidence',
-    'arena_perception.ArenaPerceptionLedger','activities.RunAction',
-    'activities.PickUpAction','activities.ReadyWeaponAction','melee_combat.MeleeStrike',
+    'arena_perception.ArenaPerceptionLedger','activities.RunAction','activities.SpotAction',
+    'activities.PickUpAction','activities.ReadyWeaponAction','activities.ReadyPreparationAction','activities.DelayAction','melee_combat.MeleeStrike',
     'melee_combat.MeleeResult','melee_defense.MeleeDefense',
     'atomic_publication.PublishedInterval','atomic_publication.TargetIntervalRecord',
     'encounter_inspection.CommittedBoundaryRecord','encounter_inspection.EntityInspection',
@@ -44,7 +44,7 @@ _ARENA_TAGS = frozenset({
     'action_evaluation.ActionView','action_evaluation.EffectIdentity',
     'action_evaluation.IdentifiedEffect','action_evaluation.DamageEffect',
     'action_evaluation.ProtectionEffect','action_evaluation.PickupEffect',
-    'action_evaluation.ReadyWeaponEffect','action_evaluation.DropObjectEffect','action_evaluation.GrappleStateEffect','action_evaluation.ObjectGripEffect','action_evaluation.PracticeEffect',
+    'action_evaluation.ReadyWeaponEffect','action_evaluation.ReadyPreparationEffect','action_evaluation.ReadyConsumptionEffect','action_evaluation.DelayDefenseEffect','action_evaluation.DropObjectEffect','action_evaluation.GrappleStateEffect','action_evaluation.ObjectGripEffect','action_evaluation.PracticeEffect',
     'observer_proposals.ActionOutcomeEffect','observer_proposals.LifecycleEffect',
     'observer_proposals.ReservationReleaseEffect',
     'observer_proposals.ObserverProjection','frozen_practice.PracticeProjection',
@@ -386,6 +386,10 @@ def restore(envelope):
             elif reference.role == 'accepted_packet':
                 registered = book._registered.get(reference.key)
                 target = None if registered is None else registered[1]
+            elif reference.role == 'encounter':
+                target = encounter if reference.key == encounter.id else None
+            elif reference.role == 'universe':
+                target = world if reference.key == world.id else None
             else:
                 target = None
             _need(target is not None, 'native committed fence reference cannot be rebound')

@@ -169,6 +169,7 @@ def declaration(action, *, _initialization=None):
     names += ('group_fully_visible', 'location_ledger', 'object_ledger')
     names += ('map_width_cells', 'map_height_cells')
     names += ('hand',)
+    names += ('ready_motion', 'readying_seconds')
     names += ('get_instrument', 'damage_potential', '_status', 'on_schedule', 'prepare_schedule')
     strategy = data.get('strategy')
     from strategy import Strategy
@@ -195,6 +196,7 @@ class ChoiceBook:
         self._reservations = ()
         self._registered = {}  # id -> (choice id, prepared packet, declaration)
         self._states = {}      # registered, executing, finished, cancelled
+        self._paused = {}      # action id -> committed remaining-time/pause receipt
         with self.lock:
             encounter.universe._choice_books.append(self)
 
@@ -887,6 +889,71 @@ class ChoiceBook:
     def actor_planned_now(self, actor_id):
         with self.lock:
             return any(p.actor_id == actor_id and p.start_time <= self.encounter.time
+                       and self._paused.get(p.action_id, {}).get('paused_at') is None
                        and object.__getattribute__(m.action, '__dict__').get('event_type') not in ('delay', 'hold')
                        for record in self._choices.values() if record.view.state == 'accepted'
                        for m, p in zip(record.members, record.prepared))
+
+    def effective_end(self, action):
+        with self.lock:
+            row=self._paused.get(action.id)
+            if row is None:return action.end_time
+            if row['paused_at'] is not None:
+                return self.encounter.time + row['remaining']
+            return row['effective_end']
+
+    def is_paused(self, action_id):
+        with self.lock:
+            row=self._paused.get(action_id)
+            return row is not None and row['paused_at'] is not None
+
+    def pause_action(self, action_id):
+        """Pause one eligible running Action at the current committed second."""
+        planning_entry(self.encounter)
+        with self.lock:
+            self.encounter._assert_timeline()
+            action=self.encounter.universe.get_event_by_id(action_id)
+            if (action is None or action_id not in self.encounter.pending_action_list
+                    or self._states.get(action_id)!='executing'
+                    or action.start_time>=self.encounter.time):
+                raise ValueError('Pause requires this Being’s started pending Action after a committed second')
+            event=object.__getattribute__(action,'__dict__').get('event_type')
+            if event in ('swing','thrust','charge','spell','cast','spellcasting'):
+                raise ValueError('Momentum-dependent Actions and spellcasting cannot be paused')
+            if self.is_paused(action_id):
+                raise ValueError('Action is already paused')
+            end=self.effective_end(action)
+            remaining=end-self.encounter.time
+            if remaining<=0:
+                raise ValueError('Action has no remaining duration to pause')
+            prior=self._paused.get(action_id, {})
+            self._paused[action_id]={
+                'original_end': action.end_time,
+                'effective_end': end,
+                'paused_at': self.encounter.time,
+                'remaining': remaining,
+                'total_paused': prior.get('total_paused',0),
+            }
+            self.revision=self.revision+1
+            return self._paused[action_id].copy()
+
+    def resume_action(self, action_id):
+        """Resume the same Action identity with its unspent active duration."""
+        planning_entry(self.encounter)
+        with self.lock:
+            self.encounter._assert_timeline()
+            row=self._paused.get(action_id)
+            if (row is None or row['paused_at'] is None
+                    or action_id not in self.encounter.pending_action_list
+                    or self._states.get(action_id)!='executing'):
+                raise ValueError('Resume requires this Being’s paused pending Action')
+            elapsed=self.encounter.time-row['paused_at']
+            if elapsed<0:
+                raise ValueError('Encounter time precedes the pause boundary')
+            remaining=row['remaining']
+            row['effective_end']=self.encounter.time+remaining
+            row['total_paused']+=elapsed
+            row['paused_at']=None
+            row['remaining']=None
+            self.revision=self.revision+1
+            return row.copy()

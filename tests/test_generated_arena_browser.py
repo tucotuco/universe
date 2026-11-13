@@ -229,6 +229,42 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual([component["priority_penalty"] for component in projected[0]["components"]],
                          [0, 3])
         self.assertNotIn(touch.id, json.dumps(projected))
+        with tempfile.TemporaryDirectory() as directory:
+            accepted_path=Path(directory)/"accepted-program.json"
+            running_path=Path(directory)/"running-mixed-program.json"
+            aborted_path=Path(directory)/"aborted-program.json"
+            accepted_path.write_bytes(self.session.save_encounter_bytes())
+            env=dict(os.environ,PYTHONPATH=f"{ROOT/'src'}:{ROOT/'examples'}")
+            advance_code=("import sys;from arena_browser_session import GeneratedArenaSession;"
+                "s=GeneratedArenaSession();s.load_encounter_bytes(open(sys.argv[1],'rb').read());"
+                "e=s.active_candidate.encounter;b=e._choice_book;"
+                "r=next(r for r in b._choices.values() if len(r.members)==2);"
+                "assert r.view.state=='accepted';s.advance_one_second();"
+                "r=next(r for r in b._choices.values() if len(r.members)==2);"
+                "assert r.view.state=='executing' and len([a for a in r.view.action_ids if a in e.pending_action_list])==1;"
+                "open(sys.argv[2],'wb').write(s.save_encounter_bytes());print('fresh-running-mixed')")
+            first=subprocess.run([sys.executable,'-B','-c',advance_code,str(accepted_path),str(running_path)],
+                cwd=ROOT,env=env,capture_output=True,text=True,check=False,timeout=60)
+            self.assertEqual(first.returncode,0,first.stderr);self.assertEqual(first.stdout.strip(),'fresh-running-mixed')
+            cancel_code=("import sys;from arena_browser_session import GeneratedArenaSession;"
+                "s=GeneratedArenaSession();s.load_encounter_bytes(open(sys.argv[1],'rb').read());"
+                "e=s.active_candidate.encounter;r=next(r for r in e._choice_book._choices.values() if len(r.members)==2);"
+                "assert r.view.state=='executing';s.cancel_multiple_action({});"
+                "open(sys.argv[2],'wb').write(s.save_encounter_bytes());print('fresh-aborted')")
+            second=subprocess.run([sys.executable,'-B','-c',cancel_code,str(running_path),str(aborted_path)],
+                cwd=ROOT,env=env,capture_output=True,text=True,check=False,timeout=60)
+            self.assertEqual(second.returncode,0,second.stderr);self.assertEqual(second.stdout.strip(),'fresh-aborted')
+            verify_code=("import json,sys;from arena_browser_session import GeneratedArenaSession;"
+                "s=GeneratedArenaSession();s.load_encounter_bytes(open(sys.argv[1],'rb').read());"
+                "e=s.active_candidate.encounter;r=next(r for r in e._choice_book._choices.values() if len(r.members)==2);"
+                "print(json.dumps({'pending':sorted(e.pending_action_list),'cancelled':sorted(e.cancelled_action_list),"
+                "'states':[e._choice_book._states[a] for a in r.view.action_ids]}))")
+            final=subprocess.run([sys.executable,'-B','-c',verify_code,str(aborted_path)],
+                cwd=ROOT,env=env,capture_output=True,text=True,check=False,timeout=60)
+            self.assertEqual(final.returncode,0,final.stderr)
+            restored_abort=json.loads(final.stdout)
+            self.assertFalse(set(record.view.action_ids).intersection(restored_abort['pending']))
+            self.assertEqual(restored_abort['states'],['finished','cancelled'])
         for _ in range(3):
             self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
         cycles = [row for row in encounter._choice_book._choices.values()
@@ -2792,6 +2828,69 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(player.possessions, [weapon.id])
         self.assertEqual(weapon.parent_container_id, player.id)
         self.assertNotIn(weapon.id, json.dumps(second))
+
+    def test_generated_ready_delay_http_controls_and_visible_motion_timing(self):
+        from weapon import native_ready_preparation
+        scenario = json.loads((ROOT / "examples/arena_scenarios/ordinary-dagger-draw.json")
+                              .read_text(encoding="utf-8"))
+        self.session = GeneratedArenaSession(authored_draw_scenario=scenario,
+            root_seed_factory=lambda: 20261130)
+        status, state = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 200)
+        weapon = next(obj for obj in self.session.active_candidate.universe.object_registry.object_instances.values()
+                      if getattr(obj, "name", None) == "Drawable Dagger")
+        handle = next(row["handle"] for row in state["entities"] if row["name"] == weapon.name)
+        status, draw = self.request("/api/generated/ready-weapon",
+            {"handle": handle, "hand": "right hand"})
+        self.assertEqual(status, 200)
+        self.request("/api/generated/advance", {"seconds": 1})
+        status, drawn = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        status, inspected = self.request("/api/generated/inspect", {"handle": handle})
+        self.assertEqual(status, 200)
+        ready_row = next(row for row in inspected["action_catalog"]["entries"]
+                         if row["name"] == "ready object")
+        self.assertEqual(ready_row["motions"], [
+            {"motion": "swing", "duration_seconds": 1},
+            {"motion": "thrust", "duration_seconds": 1}])
+        status, ready = self.request("/api/generated/ready-preparation",
+            {"handle": handle, "motion": "swing"})
+        self.assertEqual((status, ready["ready_preparation_action"]["duration_seconds"]),
+                         (200, 1))
+        status, committed = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual((status, committed["ready_preparation_action"]["outcome"]),
+                         (200, "success"))
+        self.assertEqual(native_ready_preparation(weapon)["motion"], "swing")
+        status, waiting = self.request("/api/generated/delay", {"defense": 0})
+        self.assertEqual((status, waiting["delay_action"]["status"]), (200, "executing"))
+        status, waited = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual((status, waited["delay_action"]["outcome"]), (200, "success"))
+        self.assertEqual(native_ready_preparation(weapon)["motion"], "swing")
+        _, page = self.request("/")
+        self.assertIn("/api/generated/ready-preparation", page)
+        self.assertIn("/api/generated/delay", page)
+
+    def test_pause_resume_http_controls_keep_action_identity_and_remaining_time(self):
+        from activities import SpotAction
+        status,_=self.request("/api/generated/generate",{
+            "starting_experience":"1000","width_cells":"5","height_cells":"5",
+            "equipment_mode":"unequipped","opponent_strategy":"none"})
+        self.assertEqual(status,200)
+        self.session.choose_run();self.session.advance_one_second()
+        candidate=self.session.active_candidate;player,target=(r.native.being for r in candidate.participants)
+        spot=SpotAction(candidate.universe,player.id,target.id,candidate.encounter.time)
+        candidate.encounter.schedule_action(spot);candidate.encounter.step(2)
+        status,paused=self.request('/api/generated/pause',{})
+        self.assertEqual((status,paused['paused_action']['name'],paused['paused_action']['seconds_remaining']),
+                         (200,'Spot',4))
+        candidate.encounter.step(2)
+        status,resumed=self.request('/api/generated/resume',{})
+        self.assertEqual((status,resumed['paused_action'],candidate.encounter._choice_book.effective_end(spot)),
+                         (200,None,9))
+        _,page=self.request('/')
+        self.assertIn('/api/generated/pause',page)
+        self.assertIn('/api/generated/resume',page)
 
     def test_opt_in_draw_scenario_http_first_choice_and_forged_stale_refusal(self):
         from arena_authored_draw_scenario import validate_scenario

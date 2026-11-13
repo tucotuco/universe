@@ -46,7 +46,7 @@ def native_preparer(action):
     merely naming a callback prepare_schedule does not make it safe.
     """
     from action import Action
-    from activities import RunAction, SpotAction, PickUpAction, ReadyWeaponAction
+    from activities import RunAction, SpotAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
     from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
@@ -54,7 +54,7 @@ def native_preparer(action):
     from history_conversation import AskAboutPastAction
 
     cls = type(action)
-    native = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, MeleeStrike, MeleeDefense,
+    native = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense,
               ObserveGroupAction, AskAboutPastAction)
     if not issubclass(cls, Action):
         raise UnsupportedScheduleExtension(
