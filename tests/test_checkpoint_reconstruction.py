@@ -30,7 +30,7 @@ from weapon import WeaponDictionary
 
 
 def build_source(*, future=False, arena_activation_enabled=False, initiated=True,
-                 facings=None, postures=None):
+                 facings=None, postures=None, multiple=False):
     library = Library(load_definitions=False)
     library.action_dictionary = ActionDictionary()
     library.armor_dictionary = ArmorDictionary()
@@ -47,6 +47,7 @@ def build_source(*, future=False, arena_activation_enabled=False, initiated=True
     library.skill_dictionary.skills = {
         'run': {'is_ordinary': True, 'is_progressive': True},
         'spot': {'is_ordinary': True, 'is_progressive': True},
+        'multi-action': {'is_ordinary': True, 'is_progressive': True},
     }
     world = Universe('5D2C6 fixture', library)
     observer = world.get_object_by_id(world.make_being('Observer', 'Observer'))
@@ -63,6 +64,8 @@ def build_source(*, future=False, arena_activation_enabled=False, initiated=True
     observer.physical_fatigue = PhysicalFatigueState(.73, .61)
     observer.skill_experience['spot'] = 17
     observer.current.skills.skills['spot'] = 2
+    if multiple:
+        observer.current.skills.skills['multi-action'] = 1
     encounter = Encounter(world, 11, 0, initiated=initiated,
                           arena_activation_enabled=arena_activation_enabled)
     world.add_event(encounter)
@@ -73,10 +76,19 @@ def build_source(*, future=False, arena_activation_enabled=False, initiated=True
     actions = []
     if future:
         from activities import RunAction, SpotAction
-        actions.append(RunAction(world, observer.id, 2.375, 1.25, 0.5, experience=3))
-        actions.append(SpotAction(world, observer.id, target.id, 4.25, duration=6,
-                                  die_roll=14))
-        encounter.schedule_choice(tuple(actions))
+        if multiple:
+            from action_choice import ChoiceMember
+            actions.extend((SpotAction(world, observer.id, target.id, 2.375,
+                                       duration=6, die_roll=14),
+                            SpotAction(world, observer.id, target.id, 2.375,
+                                       duration=6, die_roll=15)))
+            encounter.schedule_choice((ChoiceMember('first', actions[0], priority_penalty=0),
+                                       ChoiceMember('second', actions[1], priority_penalty=3)))
+        else:
+            actions.append(RunAction(world, observer.id, 2.375, 1.25, 0.5, experience=3))
+            actions.append(SpotAction(world, observer.id, target.id, 4.25, duration=6,
+                                      die_roll=14))
+            encounter.schedule_choice(tuple(actions))
     envelope = assemble_native_run_spot_envelope(
         world, encounter, quiescent=True, rng_scope='exclusive_encounter')
     return world, encounter, cursor, envelope, actions
@@ -253,6 +265,21 @@ class TestInitialNativeReconstruction(unittest.TestCase):
                          tuple(action.id for action in source_actions))
         self.assertEqual(tuple(row.start_time for row in result.view.actions),
                          tuple(member[3][3][1] for member in envelope.accepted_choice_descriptors[0][7]))
+
+    def test_future_multiple_action_priorities_survive_fresh_process_reconstruction(self):
+        _, _, _, envelope, source_actions = build_source(future=True, multiple=True)
+        descriptor = envelope.accepted_choice_descriptors[0]
+        self.assertEqual(descriptor[0], 'universe.accepted-action-choice/2')
+        result = reconstruct_initial_run_spot(decode_run_spot_wire(
+            encode_run_spot_envelope(envelope)))
+        native_world, native_encounter, _ = _NATIVE_GRAPHS[result]
+        record = next(iter(native_encounter._choice_book._choices.values()))
+        self.assertEqual(tuple(member.priority_penalty for member in record.members), (0, 3))
+        from checkpoint_choices import describe_accepted_choice
+        self.assertEqual(describe_accepted_choice(native_world, native_encounter,
+                         record.view.id).to_data(), descriptor)
+        self.assertEqual(tuple(member.action.start_time for member in record.members),
+                         tuple(action.start_time for action in source_actions))
         self.assertFalse(hasattr(result.view.actions[0], 'resolve'))
         with self.assertRaisesRegex(ValueError, '(?i)quarantined'):
             record.members[0].action.resolve(native_encounter.difficulty_class)
