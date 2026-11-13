@@ -2,6 +2,15 @@
 
 **Status:** ACTIVE, with the independently implementable general composition/UI work implemented. Conditional Delay/Ready and the weapon re-ready lifecycle remain bounded by missing adopted timing/state semantics listed below. This report is the current status narrative; prior dated U-ARENA-018 reports remain historical evidence.
 
+## Codex execution intervals
+
+| Session | Start (ISO 8601) | End (ISO 8601) | Elapsed (ISO 8601 duration) |
+|---|---|---|---|
+| U-CAP-001 implementation closeout | `2026-11-12T23:48:41-08:00` | `2026-11-13T00:31:37-08:00` | `PT42M56S` |
+| Permanent process amendment | `2026-11-13T00:36:28-08:00` | `2026-11-13T00:39:01-08:00` | `PT2M33S` |
+
+The first interval is carried forward from its actual timestamps in the preceding Codex closeout; this report had not yet persisted them. There was a `PT4M51S` calendar gap between that interval's End and this session's Start. Total active execution time across these sessions: `PT45M29S`. Total calendar span from the first Start to the final End: `PT50M20S`.
+
 ## U-ARENA-018 parent reconciliation
 
 The original U-ARENA-018 acceptance minimum is reconciled and closed as DONE (bounded) in [the parent closeout](U-ARENA-018-closeout.md), commit `51249f5`. The original minimum's authentic generated-Arena Chrome contact/grappling walkthrough and required native Takedown/Reverse/Pin plus Trip-or-Wrest are evidenced in the closed U-ARENA-018D report; this does not close optional Stun, Subdue or complete Disarm variants. U-ACT stable IDs remain open where their broader scopes remain unfinished. The task register preserves one ACTIVE program, U-CAP-001.
@@ -46,4 +55,4 @@ No user decision is needed for the general composer or its native Choice integra
 - Native evaluator regressions: five focused tests for willing Touch, paralysis refusal without RNG, Grapple + Break-hold continuation, frozen priority and fresh-ID repeat/abort passed in 3.304 s.
 - Combined command `PYTHONPATH=src:examples .venv/bin/python -B -m unittest tests.test_action_choices tests.test_generated_arena_browser` passed **118 tests in 87.246 s**. A preceding run had one stale assertion expecting the former `Abort Multiple actions` catalog label; updated the assertion to `Cancel Action program` and reran the full cohort successfully. `git diff --check` also passed. The full repository suite was not run.
 - Idea inbox: `docs/ideas/inbox/` does not exist; no intake mapping or pending note.
-- Starting HEAD for this work: `51249f5` (parent closeout). Implementation commit: `cea1708` (`Add generated Arena Action program composer`). Task/report state commit: `05d4395` (`Record U-CAP-001 composition status`). The report closeout correction is a documentation-only follow-up; its resulting HEAD and clean status are verified in the final repository check and final response. Implementation staged audit passed `git diff --cached --check` and `.venv/bin/python -B tools/check_publication_safety.py --staged` (`3 files; 0 findings`); task/report staged audit passed both checks (`2 files; 0 findings`). No push is authorized or performed.
+- Starting HEAD for this work: `51249f5` (parent closeout). Implementation commit: `cea1708` (`Add generated Arena Action program composer`). Task/report state commit: `05d4395` (`Record U-CAP-001 composition status`). Permanent process amendment commit: `5db30e4` (`Require timestamped Codex execution closeouts`). The final report-only closeout commit and resulting HEAD are recorded in the final response. Implementation staged audit passed `git diff --cached --check` and `.venv/bin/python -B tools/check_publication_safety.py --staged` (`3 files; 0 findings`); task/report staged audit passed both checks (`2 files; 0 findings`). No push is authorized or performed.
