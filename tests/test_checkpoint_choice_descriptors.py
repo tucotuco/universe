@@ -9,11 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_encounter_inspection import InspectionFixture
 from activities import RunAction, SpotAction
-from action_choice import Reservation, declaration
+from action_choice import ChoiceMember, Reservation, declaration
 from checkpoint_choices import (ChoiceDescriptorRejected, DESCRIPTOR_SCHEMA,
     describe_accepted_choice, describe_native_declaration)
 from checkpoint_inventory import capture_checkpoint_candidate
 from location_observation import LocationEvidenceLedger
+from activities import SpotAction
 
 
 class TestPortableChoiceDescriptors(InspectionFixture):
@@ -54,6 +55,21 @@ class TestPortableChoiceDescriptors(InspectionFixture):
         self.assertIsNot(original, counterpart)
         self.assertEqual(describe_native_declaration(original, self.world, self.enc),
                          describe_native_declaration(counterpart, self.world, self.enc))
+
+    def test_multiple_action_priority_is_portable_and_versioned(self):
+        self.enable()
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+        one = SpotAction(self.world, self.a.id, self.b.id, 2, duration=6, die_roll=12)
+        two = SpotAction(self.world, self.a.id, self.c.id, 2, duration=6, die_roll=13)
+        members = (ChoiceMember('first', one, priority_penalty=0),
+                   ChoiceMember('second', two, priority_penalty=3))
+        view = self.enc.schedule_choice(members)
+        data = self.descriptor(view).to_data()
+        self.assertEqual(data[0], 'universe.accepted-action-choice/2')
+        self.assertEqual(tuple(row[5] for row in data[7]), (0, 3))
+        from checkpoint_reconstruction import _preflight_choices
+        _preflight_choices((data,), self.enc.id,
+                           {self.a.id, self.b.id, self.c.id}, self.enc.time)
 
     def test_unknown_callbacks_and_custom_subclasses_refuse(self):
         self.enable()

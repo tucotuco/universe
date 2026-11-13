@@ -55,7 +55,32 @@ class TestActionEvaluation(unittest.TestCase):
         return MeleeStrike(self.enc, self.a.id, self.b.id, weapon or self.w1, motion='thrust', reach=2)
 
     def schedule(self, *actions):
-        self.enc.schedule_choice(actions)
+        by_actor = {}
+        proposed = {action.id: action for action in actions}
+        prepared = {action.id: self.enc.prepare_action(action, _proposed_actions=proposed)
+                    for action in actions}
+        for action in actions:
+            by_actor.setdefault(action.actor_id, []).append(action)
+        members = {str(index): ChoiceMember(str(index), action)
+                   for index, action in enumerate(actions)}
+        penalty_rows = {2: (0, 3), 3: (0, 2, 4), 4: (0, 1, 2, 6)}
+        for actor_id, rows in by_actor.items():
+            overlapping = [action for action in rows if any(
+                other is not action
+                and max(prepared[action.id].start_time, prepared[other.id].start_time)
+                    < min(prepared[action.id].end_time, prepared[other.id].end_time)
+                for other in rows)]
+            if not overlapping:
+                continue
+            actor = self.world.get_object_by_id(actor_id)
+            actor.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+            penalties = penalty_rows.get(len(overlapping))
+            if penalties is None:
+                raise AssertionError('fixture Multiple-action helper supports two through four overlapping components')
+            for action, penalty in zip(overlapping, penalties):
+                key = str(actions.index(action))
+                members[key] = ChoiceMember(key, action, priority_penalty=penalty)
+        self.enc.schedule_choice(tuple(members[str(index)] for index in range(len(actions))))
 
     def snapshot(self, boundary=None):
         if boundary is None:
@@ -1117,6 +1142,13 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.b.hit_points(), 100)
         self.assertEqual(s.entity(armor.id).hp, armor.hit_points())
         self.assertEqual(evaluate_snapshot(s), evaluate_snapshot(s, (two.id, one.id)))
+
+    def test_declared_multiple_action_priority_is_frozen_with_each_component(self):
+        first, second = self.strike(self.w1), self.strike(self.w2)
+        self.schedule(first, second)
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot.actions[first.id].data['multiple_action_priority'], 0)
+        self.assertEqual(snapshot.actions[second.id].data['multiple_action_priority'], 3)
 
     def test_multiple_designated_defenses_all_retained_no_stacking(self):
         attack = self.strike()

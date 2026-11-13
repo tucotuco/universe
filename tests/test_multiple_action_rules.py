@@ -8,7 +8,8 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 
 from multiple_action_rules import (MultipleActionRuleError,
-    validate_priority_penalties, validate_priority_schedule)
+    validate_priority_penalties, validate_priority_schedule,
+    validate_resource_budget)
 
 
 class TestMultipleActionRules(unittest.TestCase):
@@ -44,6 +45,26 @@ class TestMultipleActionRules(unittest.TestCase):
         with self.assertRaises(MultipleActionRuleError):
             validate_priority_schedule(intervals,
                 {'long':0,'short-first':1,'short-second':3})
+
+    def test_shared_defense_and_single_program_ability_reserve_bound_strategy(self):
+        pools={'longsword': 5, 'dagger': 5}
+        priorities={'longsword': 1, 'dagger': 2}
+        strategies={'longsword': (0, 2, 3, 1), 'dagger': (0, 2, 1, 0)}
+        self.assertTrue(validate_resource_budget(pools, priorities, strategies,
+            strength_points=1, dexterity_points=1))
+        with self.assertRaisesRegex(MultipleActionRuleError, 'share a defense'):
+            validate_resource_budget(pools, priorities,
+                {'longsword': (0, 2, 3, 1), 'dagger': (0, 1, 1, 0)},
+                strength_points=1, dexterity_points=1)
+        with self.assertRaisesRegex(MultipleActionRuleError, 'DEX may reduce timing|exceed'):
+            validate_resource_budget(pools, priorities,
+                {'longsword': (4, 2, 4, 2), 'dagger': (0, 2, 1, 0)})
+        with self.assertRaisesRegex(MultipleActionRuleError, 'DEX may reduce timing'):
+            validate_resource_budget({'one': 0}, {'one': 0},
+                                     {'one': (0, 0, 1, 0)})
+        with self.assertRaisesRegex(MultipleActionRuleError, 'STR may fund extra damage'):
+            validate_resource_budget({'one': 0}, {'one': 0},
+                                     {'one': (0, 0, 0, 1)})
 
 
 if __name__=='__main__':

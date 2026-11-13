@@ -11,6 +11,7 @@ from scheduling import PreparedSchedule
 
 
 DESCRIPTOR_SCHEMA = 'universe.accepted-action-choice/1'
+MULTIPLE_ACTION_DESCRIPTOR_SCHEMA = 'universe.accepted-action-choice/2'
 _DECLARATION_FIELDS = (
     'id', 'universe', 'event_type', 'start_time', 'end_time', 'actor_id',
     'target_id', 'instrument_id', 'parent_event_id', 'encounter', 'reach',
@@ -40,6 +41,7 @@ class PortableChoiceMember:
     key: str
     action: PortableActionDeclaration
     target_action_key: str | None
+    priority_penalty: int | None
     prepared: tuple
 
 
@@ -57,11 +59,20 @@ class PortableAcceptedChoice:
 
     def to_data(self):
         """Return a recursively immutable graph of primitive data and tuples."""
-        return (self.schema, self.choice_id, self.version, self.state, self.origin,
+        if any(member.priority_penalty is not None for member in self.members):
+            schema = MULTIPLE_ACTION_DESCRIPTOR_SCHEMA
+            members = tuple((m.key, m.action.adapter, m.action.action_id,
+                             m.action.fields, m.target_action_key,
+                             m.priority_penalty, m.prepared)
+                            for m in self.members)
+        else:
+            schema = self.schema
+            members = tuple((m.key, m.action.adapter, m.action.action_id,
+                             m.action.fields, m.target_action_key, m.prepared)
+                            for m in self.members)
+        return (schema, self.choice_id, self.version, self.state, self.origin,
                 self.action_ids, self.first_start,
-                tuple((m.key, m.action.adapter, m.action.action_id,
-                       m.action.fields, m.target_action_key, m.prepared)
-                      for m in self.members), self.reservations)
+                members, self.reservations)
 
 
 def _require(test, message):
@@ -328,11 +339,15 @@ def _describe_accepted_choice_locked(world, encounter, book, choice_id):
                  'cross-Action dependency keys require a separate native adapter')
         action = member.action
         declaration_data = _action_descriptor(action, world, encounter)
-        _require(type(signature) is tuple and len(signature)==2
-                 and signature[0]==member.key and _primitive_tree(signature[1]),
-                 'accepted live signature is not a closed native signature tree')
-        _require(signature == (member.key, declaration(action)),
-                 'live accepted signature is stale; recapture after native validation')
+        expected_signature = ((member.key, member.priority_penalty, declaration(action))
+                              if member.priority_penalty is not None
+                              else (member.key, declaration(action)))
+        _require(type(signature) is tuple and signature == expected_signature
+                 and all(_primitive_tree(value) for value in signature),
+                 'accepted live signature is stale or is not a closed native signature tree')
+        _require(member.priority_penalty is None or
+                 (type(member.priority_penalty) is int and member.priority_penalty >= 0),
+                 'Multiple-action priority penalty is not a nonnegative integer')
         _require(action.id not in member_ids, 'duplicate Action logical ID in choice')
         member_ids.append(action.id)
         prepared = _prepared_data(packet, action, world, encounter, declaration_data.adapter)
@@ -342,7 +357,8 @@ def _describe_accepted_choice_locked(world, encounter, book, choice_id):
         for object_id in packet.active_object_ids:
             expected_reservations.append((action.id, object_id, packet.start_time,
                                           math.ceil(packet.end_time)))
-        members.append(PortableChoiceMember(member.key, declaration_data, None, prepared))
+        members.append(PortableChoiceMember(member.key, declaration_data, None,
+            member.priority_penalty, prepared))
     other_ids=[]
     for other in book._choices.values():
         if type(other) is not _Accepted or other is record:

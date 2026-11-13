@@ -53,6 +53,11 @@ _ACTIVE_RESTORED_EXECUTION = None
 _AUTOMATIC_HOLD_SCHEDULES = set()
 
 
+def is_automatic_hold_schedule(encounter, action):
+    """Whether this native Hold is the no-cost system maintenance event."""
+    return (id(encounter), id(action)) in _AUTOMATIC_HOLD_SCHEDULES
+
+
 def _is_automatic_hold_schedule(encounter, action):
     return (id(encounter), id(action)) in _AUTOMATIC_HOLD_SCHEDULES
 

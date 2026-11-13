@@ -63,10 +63,72 @@ class TestActionChoices(unittest.TestCase):
                            weapon or self.w1, motion='thrust', reach=2)
 
     def accept(self, actions):
+        keyed = tuple(actions.items()) if type(actions) is dict else tuple(
+            (str(index), action) for index, action in enumerate(actions))
+        by_actor = {}
+        for key, action in keyed:
+            packet = self.enc.prepare_action(action)
+            by_actor.setdefault(action.actor_id, []).append((key, action, packet))
+        members = {key: ChoiceMember(key, action) for key, action in keyed}
+        for actor_id, rows in by_actor.items():
+            overlapping = [(key, action) for key, action, packet in rows if any(
+                other_key != key
+                and max(packet.start_time, other_packet.start_time)
+                    < min(packet.end_time, other_packet.end_time)
+                for other_key, other, other_packet in rows)]
+            if not overlapping:
+                continue
+            actor = self.world.get_object_by_id(actor_id)
+            actor.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+            priorities = {2: (0, 3), 3: (0, 1, 5), 4: (0, 1, 2, 6)}.get(len(overlapping))
+            if priorities is None:
+                raise AssertionError('focused fixture helper supports one through four components')
+            for rank, (key, action) in enumerate(overlapping):
+                # This helper only makes existing scheduling tests declare a
+                # legal component program; focused tests cover all table rows.
+                penalty = priorities[rank]
+                members[key] = ChoiceMember(key, action,
+                                               priority_penalty=penalty)
+        actions = tuple(members[key] for key, _ in keyed)
         draft = self.enc.propose_choice(actions)
         validation = self.enc.validate_choice(draft)
         self.assertTrue(validation.valid, validation.diagnostics)
         return self.enc.accept_valid_choice(validation)
+
+    def multiple_action_members(self, actions, penalties):
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+        return tuple(ChoiceMember(str(index), action, priority_penalty=penalty)
+                     for index, (action, penalty) in enumerate(zip(actions, penalties)))
+
+    def test_overlapping_actions_need_skill_and_exact_priority_declaration(self):
+        one, two = self.strike(self.w1), self.strike(self.w2)
+        draft = self.enc.propose_choice((one, two))
+        validation = self.enc.validate_choice(draft)
+        self.assertFalse(validation.valid)
+        self.assertEqual({diagnostic.code for diagnostic in validation.diagnostics},
+                         {'multiple_action_skill'})
+
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+        bad = self.enc.validate_choice(self.enc.propose_choice(
+            self.multiple_action_members((one, two), (0, 2))))
+        self.assertFalse(bad.valid)
+        self.assertIn('multiple_action_priority', {item.code for item in bad.diagnostics})
+        valid = self.enc.validate_choice(self.enc.propose_choice(
+            self.multiple_action_members((one, two), (0, 3))))
+        self.assertTrue(valid.valid, valid.diagnostics)
+
+    def test_interrupting_a_multiple_action_cancels_only_unfinished_components(self):
+        completed = self.action(start=0, end=1)
+        pending = self.action(start=0, end=2)
+        choice = self.accept((completed, pending))
+        self.enc.step(1)
+        self.assertEqual(self.enc._choice_book._states[completed.id], 'finished')
+        self.enc.cancel_action(pending.id)
+        self.assertEqual(self.enc._choice_book._states[completed.id], 'finished')
+        self.assertEqual(self.enc._choice_book._states[pending.id], 'cancelled')
+        self.assertIn(completed.id, self.enc.finished_action_list)
+        self.assertIn(pending.id, self.enc.cancelled_action_list)
+        self.assertEqual(self.enc.get_choice(choice.id).state, 'finished')
 
     def unchanged(self, operation, exception=None):
         before, rng = self.world.to_json(), random.getstate()
@@ -95,7 +157,10 @@ class TestActionChoices(unittest.TestCase):
         self.assertIsNone(good.parent_event_id)
         self.assertIsNone(self.world.get_event_by_id(good.id))
         replacement = self.action(self.w2, end=2)
-        edited = self.enc.edit_choice(draft, {'good': good, 'corrected': replacement})
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+        edited = self.enc.edit_choice(draft, (
+            ChoiceMember('good', good, priority_penalty=0),
+            ChoiceMember('corrected', replacement, priority_penalty=3)))
         token = self.enc.validate_choice(edited)
         choice = self.enc.accept_valid_choice(token)
         self.assertEqual(choice.state, 'accepted')
@@ -648,7 +713,7 @@ class TestActionChoices(unittest.TestCase):
     def test_active_cancellation_holds_endpoint_until_settlement(self):
         victim = self.action(self.w1, end=4)
         self.enc.schedule_action(victim)
-        trigger = self.action(end=1)
+        trigger = self.action(end=1, actor=self.b, target=self.a)
         def callback(enc):
             enc.cancel_action(victim.id)
             with self.assertRaises(ChoiceRejected):
@@ -737,8 +802,9 @@ class TestActionChoices(unittest.TestCase):
         def fail(record):
             original(record)
             raise RuntimeError('native metadata failure')
+        members = self.multiple_action_members((one, two), (0, 3))
         with patch.object(self.enc._choice_book, '_publish_updates', side_effect=fail):
-            self.unchanged(lambda: self.enc.schedule_choice([one, two]), RuntimeError)
+            self.unchanged(lambda: self.enc.schedule_choice(members), RuntimeError)
         self.assertIsNone(one.parent_event_id)
         self.assertIsNone(two.parent_event_id)
 
@@ -747,8 +813,8 @@ class TestActionChoices(unittest.TestCase):
         other = Encounter(self.world, 10, 2, initiated=True)
         other.add_being(self.a.id)
         other.add_being(self.b.id)
-        early = self.action(start=2, end=3)
-        later = self.action(self.w1, start=4, end=5)
+        early = self.action(start=2, end=3, actor=self.b, target=self.a)
+        later = self.action(self.w1, start=4, end=5, actor=self.b, target=self.a)
         draft = other.propose_choice([early, later])
         choice = other.accept_valid_choice(other.validate_choice(draft))
         other.publish_choice(choice)
@@ -775,7 +841,7 @@ class TestActionChoices(unittest.TestCase):
         self.enc.schedule_action(incoming)
         defenses = [MeleeDefense(self.enc, self.a.id, self.b.id, kind='parry', parry_motion='swing',
                      target_action_id=incoming.id, weapon_id=weapon) for weapon in (self.w1, self.w2)]
-        self.enc.schedule_choice(defenses)
+        self.enc.schedule_choice(self.multiple_action_members(defenses, (0, 3)))
         with patch('melee_defense.roll_dice', side_effect=[20, 1, 20, 1]):
             self.enc.step(4)
         self.assertTrue(all(d.defended_action_ids == (incoming.id,) for d in defenses))
@@ -789,7 +855,7 @@ class TestActionChoices(unittest.TestCase):
             return (Fact(owner.episode_key(0, 'past'), {'description': 'A memory'}, 'test'),)
         inquiries = [AskAboutPastAction(self.world, self.a.id, self.b.id, 0,
             episode_time=0, topic='past', generate=generate, received_accounts=accounts) for _ in range(2)]
-        self.enc.schedule_choice(inquiries)
+        self.enc.schedule_choice(self.multiple_action_members(inquiries, (0, 3)))
         self.enc.step(1)
         self.assertEqual([account.action_id for account in accounts], [a.id for a in inquiries])
         self.assertEqual(len(history.reality.view().all_facts()), 1)

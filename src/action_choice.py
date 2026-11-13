@@ -16,6 +16,7 @@ class ChoiceMember:
     key: str
     action: object
     target_action_key: str | None = None
+    priority_penalty: int | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,43 @@ def _freeze(value):
     if type(value) is dict:
         return tuple(sorted(((_freeze(k), _freeze(v)) for k, v in value.items()), key=repr))
     return ('identity', id(value))
+
+
+def _requires_multiple_action_capacity(action):
+    # Run Actions represent the movement exception in the adopted rule. Other
+    # registered action families consume simultaneous Action capacity.
+    return getattr(action, 'event_type', None) != 'run'
+
+
+def _resource_skill_pool(encounter, action):
+    actor = encounter.get_being(action.actor_id)
+    if actor is None:
+        return 0
+    skills = {str(name).casefold(): value
+              for name, value in actor.current.skills.get_skills().items()}
+    event = getattr(action, 'event_type', '').casefold()
+    if event in ('swing', 'thrust', 'disarm', 'strike object', 'break weapon',
+                 'parry', 'block'):
+        combat = skills.get('armed combat', 0) or 0
+    elif event in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape',
+                   'takedown', 'reverse', 'pin', 'trip', 'wrest', 'grab object'):
+        combat = skills.get('unarmed combat', 0) or 0
+    elif event == 'dodge':
+        combat = skills.get('tumble', 0) or 0
+    else:
+        combat = skills.get(event, 0) or 0
+    weapon_rank = 0
+    instrument_id = getattr(action, 'instrument_id', None)
+    if instrument_id is not None:
+        weapon = encounter.universe.get_object_by_id(instrument_id)
+        original = getattr(weapon, 'original', None)
+        weapon_type = getattr(original, 'obj_type', None)
+        if weapon_type is not None:
+            weapon_rank = actor.get_weapon_skill_level(weapon_type) or 0
+    pool = combat + weapon_rank
+    if type(pool) is not int or pool < 0:
+        raise ValueError('Multiple-action skill ranks must be nonnegative integers')
+    return pool
 
 
 def declaration(action, *, _initialization=None):
@@ -204,7 +242,10 @@ class ChoiceBook:
                     raise ValueError('An Action may occur only once in a complete choice')
                 ids.add(member.action.id)
                 candidates[member.key] = member.action
-                signatures.append((member.key, declaration(member.action)))
+                live_declaration = declaration(member.action)
+                signatures.append((member.key, member.priority_penalty, live_declaration)
+                                  if member.priority_penalty is not None
+                                  else (member.key, live_declaration))
             except (TypeError, ValueError) as exc:
                 errors.append(ChoiceDiagnostic('unsupported' if isinstance(exc, UnsupportedScheduleExtension)
                                                else 'invalid_member',
@@ -257,6 +298,119 @@ class ChoiceBook:
                 if any(packet.action_id == p.action_id for p in record.prepared):
                     errors.append(ChoiceDiagnostic('action_committed', member.key,
                         'This Action already belongs to an accepted or published choice'))
+        by_actor = {}
+        for member, packet in packets:
+            if _requires_multiple_action_capacity(member.action):
+                by_actor.setdefault(packet.actor_id, []).append((member, packet))
+        from multiple_action_rules import (MultipleActionRuleError,
+            validate_priority_schedule, validate_resource_budget)
+        for actor_id, components in by_actor.items():
+            if len(components) < 2:
+                if components and components[0][0].priority_penalty is not None:
+                    errors.append(ChoiceDiagnostic('orphaned_priority', components[0][0].key,
+                        'A priority penalty is valid only within an overlapping Multiple-action program'))
+                continue
+            intervals = {member.key: (packet.start_time, packet.end_time)
+                         for member, packet in components}
+            # Defense is a characteristic of the whole declared program. A
+            # component cannot silently use a different defensive allocation.
+            defenses = {getattr(getattr(member.action, 'strategy', None), 'defense', 0)
+                        for member, _ in components}
+            if len(defenses) > 1:
+                errors.append(ChoiceDiagnostic('multiple_action_shared_defense',
+                    components[0][0].key,
+                    'All components of a Multiple-action program must share one defense level'))
+            overlaps = {member.key: any(
+                other.key != member.key
+                and max(packet.start_time, other_packet.start_time)
+                    < min(packet.end_time, other_packet.end_time)
+                for other, other_packet in components)
+                for member, packet in components}
+            if not any(overlaps.values()):
+                if any(member.priority_penalty is not None for member, _ in components):
+                    errors.append(ChoiceDiagnostic('orphaned_priority', components[0][0].key,
+                        'Priority penalties are used only while Actions overlap'))
+                continue
+            actor = self.encounter.get_being(actor_id)
+            if actor is None or (actor.get_skill_level('multi-action') or 0) <= 0:
+                for member, _ in components:
+                    if overlaps[member.key]:
+                        errors.append(ChoiceDiagnostic('multiple_action_skill', member.key,
+                            'Overlapping Actions by one Being require acquired Multi-action skill'))
+                continue
+            for member, _ in components:
+                if overlaps[member.key] and type(member.priority_penalty) is not int:
+                    errors.append(ChoiceDiagnostic('multiple_action_priority', member.key,
+                        'Every overlapping Action needs one fixed integer Multiple-action priority penalty'))
+                elif not overlaps[member.key] and member.priority_penalty is not None:
+                    errors.append(ChoiceDiagnostic('orphaned_priority', member.key,
+                        'A nonoverlapping Action does not receive a Multiple-action priority penalty'))
+            if all(not overlaps[member.key] or type(member.priority_penalty) is int
+                   for member, _ in components):
+                penalties = {member.key: member.priority_penalty for member, _ in components
+                             if overlaps[member.key]}
+                participating_intervals = {key: intervals[key] for key in penalties}
+                priority_schedule_valid = True
+                try:
+                    validate_priority_schedule(participating_intervals, penalties)
+                except MultipleActionRuleError as exc:
+                    priority_schedule_valid = False
+                    errors.append(ChoiceDiagnostic('multiple_action_priority', components[0][0].key,
+                        str(exc)))
+                if priority_schedule_valid:
+                    try:
+                        strategies = {}
+                        skill_pools = {}
+                        all_priorities = {}
+                        for member, _ in components:
+                            strategy = getattr(member.action, 'strategy', None)
+                            values = tuple(getattr(strategy, name, 0)
+                                           for name in ('attack', 'defense', 'timing', 'extra_damage'))
+                            strategies[member.key] = values
+                            skill_pools[member.key] = _resource_skill_pool(
+                                self.encounter, member.action)
+                            all_priorities[member.key] = member.priority_penalty or 0
+                        actor = self.encounter.get_being(actor_id)
+                        strength = max(0, (actor.STR() - 10) // 2)
+                        dexterity = max(0, (actor.DEX() - 10) // 2)
+                        validate_resource_budget(skill_pools, all_priorities,
+                            strategies, strength_points=strength,
+                            dexterity_points=dexterity)
+                    except (MultipleActionRuleError, TypeError, ValueError) as exc:
+                        errors.append(ChoiceDiagnostic('multiple_action_resources',
+                            components[0][0].key, str(exc)))
+        # Components accepted through separate choices are not a declared
+        # Multiple-action program. Refuse any same-actor interval overlap with
+        # another live choice, even when both choices individually validate.
+        proposed_by_actor = {}
+        for member, packet in packets:
+            if _requires_multiple_action_capacity(member.action):
+                proposed_by_actor.setdefault(packet.actor_id, []).append((member, packet))
+        from transactional_progression import is_automatic_hold_schedule
+        for book in self.encounter.universe._choice_books:
+            for record in book._choices.values():
+                if record.view.id == exclude_choice or record.view.state not in ('accepted', 'executing'):
+                    continue
+                for existing_member, existing_packet in zip(record.members, record.prepared):
+                    if not _requires_multiple_action_capacity(existing_member.action):
+                        continue
+                    if existing_packet.action_id == interrupt:
+                        continue
+                    if is_automatic_hold_schedule(book.encounter, existing_member.action):
+                        continue
+                    for member, packet in proposed_by_actor.get(existing_packet.actor_id, ()):
+                        if is_automatic_hold_schedule(self.encounter, member.action):
+                            continue
+                        if (packet.action_id != existing_packet.action_id
+                                and max(packet.start_time, existing_packet.start_time)
+                                    < min(packet.end_time, existing_packet.end_time)):
+                            errors.append(ChoiceDiagnostic('multiple_action_split', member.key,
+                                'Overlapping Actions by one Being must be declared in the same Multiple-action program',
+                                conflicting_action=existing_packet.action_id,
+                                conflicting_choice=record.view.id,
+                                interval=(packet.start_time, packet.end_time),
+                                conflicting_interval=(existing_packet.start_time,
+                                                      existing_packet.end_time)))
         if interrupt is not None:
             old = self.encounter.universe.get_event_by_id(interrupt)
             if (len(packets) != 1 or interrupt not in self.encounter.pending_action_list
@@ -355,6 +509,24 @@ class ChoiceBook:
             return next((r.view for r in self._choices.values()
                          if action_id in r.view.action_ids), None)
 
+    def abort_multiple_action(self, choice_id, *, reason='aborted'):
+        """Cancel every unresolved member, preserving actions already finished."""
+        planning_entry(self.encounter)
+        with self.lock:
+            record = self._choices.get(choice_id)
+            if (record is None or record.view.state != 'executing'
+                    or len(record.members) < 2
+                    or not any(member.priority_penalty is not None
+                               for member in record.members)):
+                self._reject('not_active_multiple_action',
+                    'Only an executing declared Multiple-action program can be aborted')
+            pending = tuple(aid for aid in record.view.action_ids
+                            if aid in self.encounter.pending_action_list)
+            for action_id in pending:
+                self.encounter._cancel_action(action_id, reason=reason,
+                                              _abort_program=False)
+            return self._choices[choice_id].view
+
     @property
     def reservations(self):
         with self.lock:
@@ -396,7 +568,11 @@ class ChoiceBook:
 
     def _publication_check(self, record):
         for member, packet, signature in zip(record.members, record.prepared, record.signatures):
-            if (member.key, declaration(member.action)) != signature:
+            current_declaration = declaration(member.action)
+            current_signature = ((member.key, member.priority_penalty, current_declaration)
+                                 if member.priority_penalty is not None
+                                 else (member.key, current_declaration))
+            if current_signature != signature:
                 self._reject('edited_action', 'Accepted declarations changed; undo or replace the whole choice')
             self.encounter._validate_prepared_schedule(member.action, packet)
             if packet.start_time == self.encounter.time and self.encounter.active_boundary is None:

@@ -582,8 +582,11 @@ def reconstruct_initial_run_spot(decoded):
             _need(profile['initial_total_experience'] == instance.original.experience,
                   'Arena initial profile XP differs from the reconstructed Being original')
             instance._arena_initial_profile = profile
-        if fields.get('_arena_perception_ledger') != ('absent-for-non-Arena',):
-            ledger_value=fields.get('_arena_perception_ledger')
+        ledger_field = (graph.value(fields['_arena_perception_ledger'])
+                        if '_arena_perception_ledger' in fields else None)
+        if ledger_field not in (None, ('absent-for-non-Arena',),
+                                ('null-arena-perception-ledger', 1)):
+            ledger_value=ledger_field
             _need(type(ledger_value) is tuple and len(ledger_value)==2
                   and ledger_value[0]=='arena-perception-ledger',
                   'Arena observer evidence has an unsupported checkpoint adapter')
@@ -720,7 +723,10 @@ def reconstruct_initial_run_spot(decoded):
         choice_id = descriptor[1]
         reservations.extend(descriptor[8])
         for member in descriptor[7]:
-            _key, family, action_id, declaration_fields, _target_key, _prepared = member
+            if descriptor[0] == 'universe.accepted-action-choice/2':
+                _key, family, action_id, declaration_fields, _target_key, _penalty, _prepared = member
+            else:
+                _key, family, action_id, declaration_fields, _target_key, _prepared = member
             fields = dict(declaration_fields)
             def ref_value(name):
                 value = fields[name]
@@ -797,15 +803,25 @@ def _rebuild_future_choices(graph, choices, world, encounter, native_objects):
     for descriptor in choices:
         _need(type(descriptor) is tuple and len(descriptor) == 9,
               'accepted choice descriptor has an unsupported shape')
-        _need(descriptor[0] == 'universe.accepted-action-choice/1'
+        _need(descriptor[0] in ('universe.accepted-action-choice/1',
+                                'universe.accepted-action-choice/2')
               and descriptor[3] == 'accepted', 'only accepted native choice descriptors are supported')
+        multiple_action_descriptor = descriptor[0] == 'universe.accepted-action-choice/2'
         choice_id, members = descriptor[1], descriptor[7]
         _need(type(choice_id) is str and type(members) is tuple and members,
               'accepted choice identity or members are invalid')
         actions = []
         for member in members:
-            _need(type(member) is tuple and len(member) == 6, 'malformed accepted choice member')
-            key, adapter, action_id, fields, target_key, prepared = member
+            member_width = 7 if multiple_action_descriptor else 6
+            _need(type(member) is tuple and len(member) == member_width,
+                  'malformed accepted choice member')
+            if multiple_action_descriptor:
+                key, adapter, action_id, fields, target_key, priority_penalty, prepared = member
+                _need(type(priority_penalty) is int and priority_penalty >= 0,
+                      'invalid Multiple-action priority penalty')
+            else:
+                key, adapter, action_id, fields, target_key, prepared = member
+                priority_penalty = None
             _need(adapter in ('native.run-action/1', 'native.spot-action/1'),
                   'unsupported accepted Action family')
             values = dict(fields)
@@ -834,7 +850,8 @@ def _rebuild_future_choices(graph, choices, world, encounter, native_objects):
             _need(tuple(pair[0] for pair in effort_data) ==
                   ('attack', 'defense', 'timing', 'extra_damage'), 'unknown Action strategy fields')
             action.strategy = Strategy(*effort)
-            actions.append(ChoiceMember(key, action, target_action_key=target_key))
+            actions.append(ChoiceMember(key, action, target_action_key=target_key,
+                                        priority_penalty=priority_penalty))
             expected_ids.append(action_id)
         book = encounter._choice_book
         # The native API generates the draft id from its monotonic counter. Set
@@ -1222,7 +1239,8 @@ def _preflight_choices(choices, encounter_id, entity_ids, encounter_time):
     action_ids = set()
     for choice in choices:
         _need(type(choice) is tuple and len(choice) == 9 and
-              choice[0] == 'universe.accepted-action-choice/1' and choice[3] == 'accepted',
+              choice[0] in ('universe.accepted-action-choice/1',
+                            'universe.accepted-action-choice/2') and choice[3] == 'accepted',
               'only versioned accepted future choices are supported')
         choice_id = choice[1]
         prefix = encounter_id + '/draft/'
@@ -1232,10 +1250,18 @@ def _preflight_choices(choices, encounter_id, entity_ids, encounter_time):
         _need(ordinal > previous_ordinal, 'accepted choice IDs are duplicate or unordered')
         previous_ordinal = ordinal
         members = choice[7]
+        multiple_action_descriptor = choice[0] == 'universe.accepted-action-choice/2'
         _need(type(members) is tuple and members, 'accepted choice has no complete member set')
         for member in members:
-            _need(type(member) is tuple and len(member) == 6, 'malformed accepted choice member')
-            key, adapter, action_id, fields, target_key, prepared = member
+            expected_width = 7 if multiple_action_descriptor else 6
+            _need(type(member) is tuple and len(member) == expected_width,
+                  'malformed accepted choice member')
+            if multiple_action_descriptor:
+                key, adapter, action_id, fields, target_key, priority_penalty, prepared = member
+                _need(type(priority_penalty) is int and priority_penalty >= 0,
+                      'invalid Multiple-action priority')
+            else:
+                key, adapter, action_id, fields, target_key, prepared = member
             _need(adapter in ('native.run-action/1', 'native.spot-action/1'),
                   'unsupported accepted Action family')
             _need(type(key) is str and key and type(action_id) is str and action_id not in action_ids,

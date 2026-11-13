@@ -75,3 +75,53 @@ def validate_priority_schedule(intervals, penalties):
         if len(active) > 1:
             validate_priority_penalties(tuple(penalties[identity] for identity in active))
     return True
+
+
+def validate_resource_budget(skill_pools, priorities, strategies, *, strength_points=0,
+                             dexterity_points=0):
+    """Check adopted shared-defense and total point-allocation limits.
+
+    ``strategies`` maps component IDs to (attack, defense, timing, extra_damage).
+    Skill points are component-specific; positive STR/DEX points are a single
+    program-wide reserve. This deliberately does not assign an ability point
+    to a particular component or change action-specific eligibility rules.
+    """
+    keys = set(skill_pools)
+    if (not keys or set(priorities) != keys or set(strategies) != keys
+            or any(type(key) is not str or not key for key in keys)):
+        raise MultipleActionRuleError('resource allocation must cover every program component exactly once')
+    if (type(strength_points) is not int or strength_points < 0
+            or type(dexterity_points) is not int or dexterity_points < 0):
+        raise MultipleActionRuleError('STR and DEX allocation reserves must be nonnegative integers')
+    defenses = set()
+    remaining_skill_points = 0
+    allocated_points = 0
+    timing_points = 0
+    extra_damage_points = 0
+    for key in keys:
+        pool, priority = skill_pools[key], priorities[key]
+        values = strategies[key]
+        if type(pool) is not int or pool < 0 or type(priority) is not int or priority < 0:
+            raise MultipleActionRuleError('component skill pools and priorities must be nonnegative integers')
+        if type(values) not in (tuple, list) or len(values) != 4:
+            raise MultipleActionRuleError('component strategy must contain attack, defense, timing, and extra damage')
+        if any(type(value) is not int or value < 0 for value in values):
+            raise MultipleActionRuleError('strategy allocations must be nonnegative integers')
+        attack, defense, timing, damage = values
+        defenses.add(defense)
+        # Priority is an outcome penalty, not an eligibility gate: an Action
+        # with no discretionary points can still proceed at a negative total.
+        remaining_skill_points += max(0, pool - priority - defense)
+        allocated_points += attack + timing + damage
+        timing_points += timing
+        extra_damage_points += damage
+    if len(defenses) != 1:
+        raise MultipleActionRuleError('all components of one Multiple-action program share a defense allocation')
+    ability_points = strength_points + dexterity_points
+    if max(0, timing_points - remaining_skill_points) > dexterity_points:
+        raise MultipleActionRuleError('DEX may reduce timing, but STR points cannot fund timing')
+    if max(0, extra_damage_points - remaining_skill_points) > strength_points:
+        raise MultipleActionRuleError('STR may fund extra damage, but DEX points cannot fund extra damage')
+    if allocated_points > remaining_skill_points + ability_points:
+        raise MultipleActionRuleError('component strategies exceed the available skill and one-time ability points')
+    return True

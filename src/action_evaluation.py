@@ -283,7 +283,19 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                   'grappling' if type(action) is Action and ad['event_type'] in ('grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip') else
                   'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
                   else families[type(action)])
+        multiple_action_priority = None
+        book = object.__getattribute__(encounter, '__dict__').get('_choice_book')
+        if book is not None:
+            for record in book._choices.values():
+                for member in record.members:
+                    if member.action.id == aid:
+                        multiple_action_priority = member.priority_penalty
+                        break
+                if multiple_action_priority is not None:
+                    break
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
+        if multiple_action_priority is not None:
+            selected['multiple_action_priority'] = multiple_action_priority
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id'):
             if key in ad:
@@ -909,8 +921,12 @@ def _defense(snapshot, action, rng):
             else:
                 weapon = snapshot.entity(strike.instrument_id)
                 attack_rank = attacker.data['weapon_skills'].get(weapon.data['original_type'], 0) or 0
-                success = defense_succeeds(rng.roll('1d20'), rank, actor.data['strategy']['defense'],
-                    rng.roll('1d20'), attack_rank, attacker.data['strategy']['attack'])
+                defense_priority = action.data.get('multiple_action_priority', 0) or 0
+                attack_priority = strike.data.get('multiple_action_priority', 0) or 0
+                success = defense_succeeds(rng.roll('1d20'), rank,
+                    actor.data['strategy']['defense'] - defense_priority,
+                    rng.roll('1d20'), attack_rank,
+                    attacker.data['strategy']['attack'] - attack_priority)
             outcome = ('deflected' if kind == 'parry' else 'evaded') if success else 'failed'
             effects = (PracticeEffect(action.id, actor.id, skill, 10),)
     dependency = DefenseEffect(action.id, strike.id, kind, eligible, success)
@@ -949,7 +965,8 @@ def _combat(snapshot, action, rng, dependencies):
                         reach, snapshot.physical_path(actor.id,target.id), layout)
                     if status != 'in_reach': outcome = status
             if outcome is None:
-                attack_total = rng.roll('1d20') + actor.data['strategy']['attack']
+                attack_total = (rng.roll('1d20') + actor.data['strategy']['attack']
+                                - (action.data.get('multiple_action_priority', 0) or 0))
                 defense_total = rng.roll('1d20') + target.data['strategy']['defense']
                 outcome = 'touched' if attack_total > defense_total else 'missed'
         metadata = () if distance is None else (('distance', distance),)
@@ -1020,9 +1037,11 @@ def _combat(snapshot, action, rng, dependencies):
                     and dependency.success)
                 feint_bonus = 2 if action.data.get('feint_source_action_id') is not None else 0
                 pin_bonus = 4 if any(row[2] == target.id for row in pinned_controls) else 0
+                priority_penalty = action.data.get('multiple_action_priority', 0) or 0
                 return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0)
-                    + actor.data['strategy']['attack'] + feint_bonus + pin_bonus,
+                    + actor.data['strategy']['attack'] - priority_penalty
+                    + feint_bonus + pin_bonus,
                     target_defense + parry_bonus, dc - adjustment)
             if action.family == 'melee' and action.data['event_type'] == 'feint':
                 if (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0) <= 1:
@@ -1183,6 +1202,7 @@ def _grapple_roll(rng, being, *, escape=False, strength_only=False, bonus=0):
 def _grappling(snapshot, action, rng):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     event_type = action.data['event_type']
+    priority_penalty = action.data.get('multiple_action_priority', 0) or 0
     effects = []
     if event_type in ('grab object','wrest'):
         holder=snapshot.entity(action.data['holder_id'])
@@ -1233,7 +1253,7 @@ def _grappling(snapshot, action, rng):
             if size_mod is None:
                 return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
             roll=rng.roll('1d20')
-            success=attack_hits(roll,actor.data['strategy']['attack'],
+            success=attack_hits(roll,actor.data['strategy']['attack']-priority_penalty,
                 holder.data['strategy']['defense'],snapshot.difficulty+5+size_mod)
             if not success:
                 return ActionProposal(action.id,actor.id,(target.id,),'failed')
@@ -1245,7 +1265,8 @@ def _grappling(snapshot, action, rng):
                 or existing[3]!=holder.id or existing[4]!=hand or existing[5]!=holder_hand
                 or existing[1]!=grip_id):
             return ActionProposal(action.id,actor.id,(target.id,),'grip_lost')
-        actor_total=sum(rng.roll('1d6') for _ in range(3))+(actor.data['abilities'].get('STR',10)-10)//2
+        actor_total=(sum(rng.roll('1d6') for _ in range(3))
+                     +(actor.data['abilities'].get('STR',10)-10)//2-priority_penalty)
         holder_total=sum(rng.roll('1d6') for _ in range(3))+(holder.data['abilities'].get('STR',10)-10)//2
         if actor_total<=holder_total:
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
@@ -1283,7 +1304,7 @@ def _grappling(snapshot, action, rng):
         allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
         if not allowed:
             return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
-        holder = _grapple_roll(rng,actor,bonus=bonus)
+        holder = _grapple_roll(rng,actor,bonus=bonus-priority_penalty)
         pinned = any(row[2] == target.id and len(row) > 6
                      and row[6] in ('pin_top', 'pin_bottom')
                      for row in snapshot.grapple_controls)
@@ -1300,7 +1321,7 @@ def _grappling(snapshot, action, rng):
         allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
         if not allowed:
             return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
-        if _grapple_roll(rng,actor,bonus=bonus) <= _grapple_roll(rng,target):
+        if _grapple_roll(rng,actor,bonus=bonus-priority_penalty) <= _grapple_roll(rng,target):
             effects.append(GrappleStateEffect(action.id,target.id,actor.id,grip[0],
                 'grip','release',grip[3],None))
             return ActionProposal(action.id,actor.id,(target.id,),'failed',tuple(effects))
@@ -1311,7 +1332,8 @@ def _grappling(snapshot, action, rng):
         grip = next((row for row in snapshot.physical_grips if row[0] == action.data['grip_id']
                      and row[1] == target.id and row[2] == actor.id),None)
         if grip is None: return ActionProposal(action.id,actor.id,(target.id,),'unavailable')
-        if _grapple_roll(rng,actor,strength_only=True) <= _grapple_roll(rng,target,strength_only=True):
+        if (_grapple_roll(rng,actor,strength_only=True,bonus=-priority_penalty)
+                <= _grapple_roll(rng,target,strength_only=True)):
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
         effects.append(GrappleStateEffect(action.id,actor.id,actor.id,grip[0],
             'grip','release',grip[3],None))
@@ -1344,7 +1366,7 @@ def _grappling(snapshot, action, rng):
         allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
         if not allowed:
             return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
-        if _grapple_roll(rng,actor,bonus=bonus) <= _grapple_roll(rng,target):
+        if _grapple_roll(rng,actor,bonus=bonus-priority_penalty) <= _grapple_roll(rng,target):
             return ActionProposal(action.id,actor.id,(target.id,),'failed',tuple(effects))
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
             'control','establish',None,action.boundary+6))
@@ -1363,7 +1385,7 @@ def _grappling(snapshot, action, rng):
             attacker_modifier+=2
         defender_ability=action.data.get('trip_defender_ability')
         defender_modifier=(target.data['abilities'].get(defender_ability,10)-10)//2+4*(order.index(t_size)-order.index(a_size))
-        attacker=sum(rng.roll('1d6') for _ in range(3))+attacker_modifier
+        attacker=sum(rng.roll('1d6') for _ in range(3))+attacker_modifier-priority_penalty
         defender=sum(rng.roll('1d6') for _ in range(3))+defender_modifier
         if attacker<=defender:
             return ActionProposal(action.id,actor.id,(target.id,),'failed',metadata=metadata)
@@ -1402,7 +1424,7 @@ def _grappling(snapshot, action, rng):
         allowed, bonus = _grapple_capacity_and_bonus(snapshot, actor, target)
         if not allowed:
             return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
-        if _grapple_roll(rng,actor,bonus=bonus)<=_grapple_roll(rng,target):
+        if _grapple_roll(rng,actor,bonus=bonus-priority_penalty)<=_grapple_roll(rng,target):
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,control[0],
             'control','transition',None,action.boundary+6,goal))
@@ -1413,7 +1435,7 @@ def _grappling(snapshot, action, rng):
             effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
                 'posture','set',None,None,'lying'))
         return ActionProposal(action.id,actor.id,(target.id,), 'success',tuple(effects))
-    escape = _grapple_roll(rng,actor,escape=True)
+    escape = _grapple_roll(rng,actor,escape=True,bonus=-priority_penalty)
     allowed, bonus = _grapple_capacity_and_bonus(snapshot, target, actor)
     if not allowed:
         return ActionProposal(action.id,actor.id,(target.id,),'capacity_exceeded')
@@ -1443,6 +1465,7 @@ def _grappling(snapshot, action, rng):
 def _object_strike(snapshot, action, rng):
     """Resolve the adopted immobile, nonmagical Object branch transactionally."""
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    priority_penalty = action.data.get('multiple_action_priority', 0) or 0
     weapon = snapshot.entity(action.instrument_id)
     if action.data['event_type'] == 'break weapon':
         defender = target
@@ -1476,7 +1499,7 @@ def _object_strike(snapshot, action, rng):
         if adjustment is None:
             return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=metadata)
         def hits(roll,dc):
-            return attack_hits(roll,skill+actor.data['strategy']['attack']-defender.data['strategy']['attack'],0,dc-adjustment)
+            return attack_hits(roll,skill+actor.data['strategy']['attack']-priority_penalty-defender.data['strategy']['attack'],0,dc-adjustment)
         outcome=hit_outcome(snapshot.difficulty,rng.roll,hits,lambda dc:True,lambda dc:True)
         effects=[]
         if outcome in ('normal','critical'):
@@ -1525,7 +1548,7 @@ def _object_strike(snapshot, action, rng):
         return ActionProposal(action.id, actor.id, (target.id,), 'unable_to_act', metadata=metadata)
     skill = actor.data['weapon_skills'].get(weapon.data['original_type'], 0)
     def hits(roll, dc):
-        return attack_hits(roll, skill + actor.data['strategy']['attack'], 0, dc - adjustment)
+        return attack_hits(roll, skill + actor.data['strategy']['attack'] - priority_penalty, 0, dc - adjustment)
     # An immobile unattended object has no independent save; doubled natural
     # 20 uses the ordinary critical confirmation rule against that same DC.
     outcome = hit_outcome(snapshot.difficulty, rng.roll, hits,
@@ -1563,7 +1586,8 @@ def _disarm(snapshot, action, rng):
     adjustment=actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
     if adjustment is None:
         return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
-    attacker_total=rng.roll('1d20')+skill+actor.data['strategy']['attack']-adjustment
+    priority_penalty=action.data.get('multiple_action_priority',0) or 0
+    attacker_total=rng.roll('1d20')+skill+actor.data['strategy']['attack']-priority_penalty-adjustment
     defender_total=rng.roll('1d20')+defender.data['strategy']['defense']+5
     margin=attacker_total-defender_total
     metadata.extend((('margin',margin),('maximum_landing_hexes',max(0,margin//3))))

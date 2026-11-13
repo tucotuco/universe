@@ -257,7 +257,10 @@ def _validate_future_choice(choice):
     from checkpoint_choices import PortableAcceptedChoice,PortableChoiceMember,PortableActionDeclaration
     _closed(choice,PortableAcceptedChoice)
     data=choice.to_data()
-    if type(data) is not tuple or len(data)!=9 or data[0]!='universe.accepted-action-choice/1' or data[3]!='accepted':
+    if (type(data) is not tuple or len(data)!=9
+            or data[0] not in ('universe.accepted-action-choice/1',
+                               'universe.accepted-action-choice/2')
+            or data[3]!='accepted'):
         raise ReceiptDescriptorRejected('unknown or nonaccepted future choice version/state')
     if type(choice.members) is not tuple or not choice.members:
         raise ReceiptDescriptorRejected('future choice has no portable members')
@@ -265,6 +268,11 @@ def _validate_future_choice(choice):
         _closed(member,PortableChoiceMember);_closed(member.action,PortableActionDeclaration)
         if member.action.adapter not in ('native.run-action/1','native.spot-action/1'):
             raise ReceiptDescriptorRejected('unknown future Action adapter')
+        if data[0] == 'universe.accepted-action-choice/2':
+            if type(member.priority_penalty) is not int or member.priority_penalty < 0:
+                raise ReceiptDescriptorRejected('invalid Multiple-action priority')
+        elif member.priority_penalty is not None:
+            raise ReceiptDescriptorRejected('legacy future choice unexpectedly has Multiple-action priority')
     return data
 
 

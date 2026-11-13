@@ -1059,7 +1059,14 @@ class Encounter(Event):
         with self._choice_book.lock:
             return self._cancel_action(action_id, reason=reason)
 
-    def _cancel_action(self, action_id, *, reason='interrupted'):
+    def abort_multiple_action(self, choice):
+        """Abort an executing Multiple-action program at its decision fence."""
+        planning_entry(self)
+        choice_id = self._choice_id(choice)
+        with self._choice_book.lock:
+            return self._choice_book.abort_multiple_action(choice_id)
+
+    def _cancel_action(self, action_id, *, reason='interrupted', _abort_program=True):
         """Withdraw a pending Action, retaining the Event as evidence of intent.
 
         It has no resolution, completion, damage, or practice award.  Repeated
@@ -1072,6 +1079,13 @@ class Encounter(Event):
         if not isinstance(action, Action):
             raise ValueError('only pending Actions may be canceled')
         self._choice_book.assert_registered(action)
+        if _abort_program:
+            choice_id = self._choice_book.for_action(action_id)
+            record = None if choice_id is None else self._choice_book._choices.get(choice_id.id)
+            if (record is not None and len(record.members) > 1
+                    and any(member.priority_penalty is not None for member in record.members)):
+                self._choice_book.abort_multiple_action(record.view.id, reason=reason)
+                return action
         self.pending_action_list.remove(action_id)
         action.canceled_at = self.time
         action.cancellation_reason = reason

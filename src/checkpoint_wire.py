@@ -261,7 +261,8 @@ def _logical_ref(value, role, participants):
 
 def _validate_choice(choice, universe_id, participants, all_action_ids):
     _need(type(choice) is tuple and len(choice) == 9
-          and choice[0] == 'universe.accepted-action-choice/1',
+          and choice[0] in ('universe.accepted-action-choice/1',
+                            'universe.accepted-action-choice/2'),
           'unknown accepted-choice schema or field layout')
     choice_id, version, state, origin, action_ids, first_start, members, reservations = choice[1:]
     _need(type(choice_id) is str and choice_id and type(version) is int and version > 0
@@ -276,10 +277,17 @@ def _validate_choice(choice, universe_id, participants, all_action_ids):
     _need(reservations == (), 'Run/Spot choice has unsupported active Object reservations')
     member_ids = []
     starts = []
+    multiple_action_descriptor = choice[0] == 'universe.accepted-action-choice/2'
     for member in members:
-        _need(type(member) is tuple and len(member) == 6,
+        member_width = 7 if multiple_action_descriptor else 6
+        _need(type(member) is tuple and len(member) == member_width,
               'malformed accepted-choice member')
-        _key, adapter, action_id, fields, target_key, prepared = member
+        if multiple_action_descriptor:
+            _key, adapter, action_id, fields, target_key, priority_penalty, prepared = member
+            _need(type(priority_penalty) is int and priority_penalty >= 0,
+                  'invalid Multiple-action priority')
+        else:
+            _key, adapter, action_id, fields, target_key, prepared = member
         _need(type(adapter) is str and adapter in
               ('native.run-action/1', 'native.spot-action/1')
               and type(action_id) is str and action_id

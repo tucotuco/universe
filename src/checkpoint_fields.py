@@ -19,8 +19,8 @@ FIELD_ADAPTERS = {
         "required": '_choices _closed_drafts _counter _drafts _registered _reservations _states _tokens encounter lock'.split(),
     },
     'action_choice.ChoiceMember': {
-        "allowed": 'action key target_action_key'.split(),
-        "required": 'action key target_action_key'.split(),
+        "allowed": 'action key priority_penalty target_action_key'.split(),
+        "required": 'action key priority_penalty target_action_key'.split(),
     },
     'action_choice.ChoiceView': {
         "allowed": 'action_ids first_start id state version'.split(),
@@ -570,7 +570,7 @@ RUN_SPOT_FIELD_CLOSURE = {
                           'top_facing', 'front_facing', 'hex_facing', 'spatial_state', 'geometry',
                           'visual_occlusion', 'possessions', 'weapons', 'strategy',
                           'physical_fatigue', 'physiology_id', 'fatigue_level',
-                          'effective_fitness', 'exertion', 'skill_experience',
+                          'effective_fitness', 'exertion', 'size_category', 'skill_experience',
                           'skill_use_history', '_skill_practice_baselines',
                           'personal_history', '_atomic_target_history',
                           '_arena_perception_ledger', '_arena_initial_profile'),
@@ -583,6 +583,7 @@ RUN_SPOT_FIELD_CLOSURE = {
             '_atomic_target_history': ('absent-before-first-commit',
                                        'list-matching-receipts'),
             'physiology_id': ('null', 'registered PhysiologyRegistry ID'),
+            'size_category': ('null', 'registered effective size category'),
             'personal_history': ('null-only-in-this-subset',),
             '_arena_perception_ledger': ('absent-for-non-Arena',
                                          'arena_perception-ledger/1'),

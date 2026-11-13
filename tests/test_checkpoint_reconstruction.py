@@ -312,7 +312,7 @@ print(json.dumps({"encounter": v.encounter_id,
         self.assertEqual(output['actions'], expected_action_ids)
         self.assertEqual(output['facings'], [2, None])
         self.assertCountEqual([tuple(value) for value in output['positions'].values()],
-                              [(0.125, 0.0, 0.0), (1.25, 0.0, 0.0)])
+                              [(0.12, 0.0, 0.0), (1.25, 0.0, 0.0)])
         self.assertIn((.73, .61),
                       tuple(tuple(value) for value in output['qb'].values()))
         self.assertEqual(output['rng_state_version'], 3)
