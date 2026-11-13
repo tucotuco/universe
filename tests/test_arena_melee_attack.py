@@ -492,6 +492,52 @@ class TestArenaMeleeAttack(unittest.TestCase):
             self.assertEqual(restored, {"time": result["time"],
                 "status": "completed", "outcome": "success", "posture": "lying"})
 
+    def test_generated_occupied_route_refusal_restores_unchanged_in_fresh_process(self):
+        view = self.generate(size_categories={"player": "medium", "opponent": "medium"})
+        status, view = self.request("/api/generated/run", {})
+        self.assertEqual(status, 200, view)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        target_cell = candidate.arena_map.layout.cell_at_position(target.get_position())
+        before = {"time": candidate.encounter.time,
+                  "player": player.get_position().as_tuple(),
+                  "target": target.get_position().as_tuple(),
+                  "rng": self.session._rng_cursor.state}
+        status, selected = self.request("/api/generated/destination", {
+            "column": target_cell.column, "row": target_cell.row,
+            "rate": "sprint", "facing_policy": "turn"})
+        self.assertEqual(status, 200, selected)
+        self.assertIsNotNone(selected["movement_plan"])
+        status, refusal = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 409, refusal)
+        self.assertEqual(refusal["movement_refusal"]["category"],
+                         "movement_prerequisite_not_met")
+        self.assertEqual((candidate.encounter.time, player.get_position().as_tuple(),
+                          target.get_position().as_tuple(), self.session._rng_cursor.state),
+                         (before["time"], before["player"], before["target"], before["rng"]))
+        status, stopped = self.request("/api/generated/stop", {})
+        self.assertEqual(status, 200, stopped)
+        self.assertIsNone(stopped["movement_plan"])
+        with tempfile.TemporaryDirectory() as directory:
+            saved = Path(directory) / "occupied-route-refusal.json"
+            saved.write_bytes(self.session.save_encounter_bytes())
+            code = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 29); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); v=s.public_view(); "
+                "print(json.dumps({'time':v['time_seconds'], 'plan':v['movement_plan'], "
+                "'player':s.active_candidate.participants[0].native.being.get_position().as_tuple(), "
+                "'target':s.active_candidate.participants[1].native.being.get_position().as_tuple(), "
+                "'rng':s._rng_cursor.state}))"
+            )
+            env = dict(os.environ, PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}")
+            restored = subprocess.run([sys.executable, "-B", "-c", code, str(saved)],
+                cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+        expected = json.loads(json.dumps({"time": before["time"],
+            "plan": None, "player": before["player"],
+            "target": before["target"], "rng": before["rng"]}))
+        self.assertEqual(json.loads(restored.stdout), expected)
+
     def test_generated_withdrawal_moves_before_scheduled_opponent_strike_reach_check(self):
         view = self.generate(size_categories={"player": "medium", "opponent": "medium"})
         view, target_row, _weapon_id, _distance, _reach = self.move_to_target_neighbor(view)
