@@ -4,7 +4,7 @@
 
 ## 1. Product boundary
 
-Arena v1 is a local-browser interface over the native Universe simulation. A new session starts with no active Encounter and offers **Generate Encounter** or **Load Encounter**. Universe owns authoritative Being/Object state, identity, Action resolution, chronology, observation history, and continuation state after generation. The NPC Generator remains a separately maintained source pending the ownership decision recorded in the [U-ARENA-004A audit](../reports/U-ARENA-004A-report.md).
+Arena v1 is a local-browser interface over the native Universe simulation. A new session starts with no active Encounter and offers **Generate Encounter** or **Load Encounter**. Universe owns authoritative Being/Object state, identity, Action resolution, chronology, observation history, and continuation state after generation. The NPC Generator remains a separately maintained source pending the ownership decision recorded in the [U-ARENA-004A audit](../reports/archive/U-ARENA-004A-report.md).
 
 The browser is an operator/player interface, not a second simulation engine. Native Universe state and supported Encounter operations remain authoritative. A displayed grid, marker, name, movement arrow, or estimate is a presentation over that state and must not create competing simulation state. Arena v1 does not add victory conditions, sophisticated opponent tactics, terrain, global geography, synthetic perception noise, extra Beings, or multiplayer.
 

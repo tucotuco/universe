@@ -34,7 +34,7 @@ The approval flag and new RNG seed are separate explicit host inputs. The resume
 Reproduce the end-to-end stop/restart/browser flow with:
 
 ```sh
-cd /private/tmp/u-arena-003c2.kKyhCE/src
+cd <temporary-directory>/u-arena-003c2.kKyhCE/src
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../tests \
   python3 -m unittest test_arena_local_checkpoint.ArenaOperatorHTTPContinuationTests
 ```
@@ -59,7 +59,7 @@ This deterministic Run consumes no RNG. The result does **not** demonstrate old 
 
 ## Verification
 
-Tests and checks ran on a clean isolated Git export at `/private/tmp/u-arena-003c2.kKyhCE`, based on initial HEAD `40d551fd031515dc7225728d915f45da4291d489`, overlaid with the six scoped implementation/task paths. Sixteen `legacy/src/data/offspring_*_wlist.csv` files were copied read-only into the export as required test fixtures; no legacy program was executed. The current dirty working tree and real index were not used as the test source.
+Tests and checks ran on a clean isolated Git export at `<temporary-directory>/u-arena-003c2.kKyhCE`, based on initial HEAD `40d551fd031515dc7225728d915f45da4291d489`, overlaid with the six scoped implementation/task paths. Sixteen `legacy/src/data/offspring_*_wlist.csv` files were copied read-only into the export as required test fixtures; no legacy program was executed. The current dirty working tree and real index were not used as the test source.
 
 - Final focused C2 and existing Arena browser regressions: **8 passed** (`test_arena_local_checkpoint`, `test_npc_encounter_arena_web`; HTTP loopback enabled).
 - Broader Arena/history/state/checkpoint/Spot/Run focused set: **80 passed** before the final extra comparison/refusal assertions; the final full suite below includes the final assertions.

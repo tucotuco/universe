@@ -6,11 +6,11 @@ Implemented the bounded Reach correction and verified native in-range and out-of
 
 ## Changes
 
-- Added shared `reference_arm_length_inches()` and `effective_melee_reach_meters()` helpers in [`src/melee_combat.py`](../../src/melee_combat.py). They use positive native Being dimensions, the adopted `15/37` personal-arm formula, native inch-valued weapon length, and convert the resulting sum to meters. Collision geometry is not a Reach input.
-- Reused the helper in [`src/ai_duel.py`](../../src/ai_duel.py); the existing legacy replay Reach path remains unchanged.
+- Added shared `reference_arm_length_inches()` and `effective_melee_reach_meters()` helpers in [`src/melee_combat.py`](../../../src/melee_combat.py). They use positive native Being dimensions, the adopted `15/37` personal-arm formula, native inch-valued weapon length, and convert the resulting sum to meters. Collision geometry is not a Reach input.
+- Reused the helper in [`src/ai_duel.py`](../../../src/ai_duel.py); the existing legacy replay Reach path remains unchanged.
 - Updated the terminal and loopback Arena to supply the calculated Reach. Its explicitly authored positive scene is now 0.75 m center-to-center with separate 0.25 m spheres; the geometry is not inferred from the imported body dimensions.
-- Expanded [`tests/test_npc_being_arena.py`](../../tests/test_npc_being_arena.py) and adjusted [`tests/test_npcgen_being_integration.py`](../../tests/test_npcgen_being_integration.py) and [`tests/test_npc_being_arena_web.py`](../../tests/test_npc_being_arena_web.py) for dimensional consistency and impact behavior.
-- Updated [`TASKS.md`](../../TASKS.md) and [`docs/tasks/encounter-engine.md`](../tasks/encounter-engine.md) to mark only this bounded increment complete.
+- Expanded [`tests/test_npc_being_arena.py`](../../../tests/test_npc_being_arena.py) and adjusted [`tests/test_npcgen_being_integration.py`](../../../tests/test_npcgen_being_integration.py) and [`tests/test_npc_being_arena_web.py`](../../../tests/test_npc_being_arena_web.py) for dimensional consistency and impact behavior.
+- Updated [`TASKS.md`](../../../TASKS.md) and [`docs/tasks/encounter-engine.md`](../../tasks/encounter-engine.md) to mark only this bounded increment complete.
 
 ## Demonstrated behavior
 

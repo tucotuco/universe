@@ -26,7 +26,7 @@ The user's established workflow is: inspect the actual checkout and authority; c
 - **Reproduction:** world-only ReproductionGroup generation supports exact parent-set membership, partial resolution, merge aliases, derived bounded kinship, and reproduction-domain checkpoints. One pristine native Being can participate in a separate bounded combined checkpoint. These formats are not general Universe or Encounter save/resume.
 - **Spatial state:** native Cartesian coordinates and geometry are metric at full floating precision; ISEA TriFold is derived. Being measurements use inches and pounds; presentation distances use yards. Local demos do not establish globally coherent geography, terrain, or collision physics.
 
-For exact scope and provenance read [TASKS](../../TASKS.md), the [topic task files](../tasks/), the [Encounter package](../encounters/README.md), the [U-REPO-005 report](../reports/U-REPO-005-report.md), and current examples/tests. Historical reports and designs are evidence, not substitutes for current source or adopted rules.
+For exact scope and provenance read [TASKS](../../TASKS.md), the [topic task files](../tasks/), the [Encounter package](../encounters/README.md), the [U-REPO-005 report](../reports/archive/U-REPO-005-report.md), and current examples/tests. Historical reports and designs are evidence, not substitutes for current source or adopted rules.
 
 ## Controlling rules and boundaries
 

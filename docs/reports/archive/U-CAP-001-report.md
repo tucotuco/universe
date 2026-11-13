@@ -29,7 +29,7 @@ This execution began at HEAD `33ba09f68fc0d11a612b8b1ebc1fb3380f07f14e` on local
 
 | U-CAP-001 criterion | Result | Verified evidence / boundary |
 |---|---|---|
-| Reconcile original U-ARENA-018 minimum and Sections A–D | Met | [Parent closeout](../U-ARENA-018-closeout.md), commit `51249f5`; U-ARENA-018 is DONE (bounded), with Stun/Subdue and optional Disarm variants separate. |
+| Reconcile original U-ARENA-018 minimum and Sections A–D | Met | [Parent closeout](U-ARENA-018-closeout.md), commit `51249f5`; U-ARENA-018 is DONE (bounded), with Stun/Subdue and optional Disarm variants separate. |
 | General ordered composer for every eligible Action in the supported Arena catalog | Met (bounded) | Native Choice remains the single validator/publication path. Generated UI exposes action families with complete native Arena submission contracts, opaque observer handles, timing, resources, priority and reasons. General HTTP composer tests and earlier shipped-browser Touch + Dagger Swing interaction are retained. |
 | Mixed-duration overlap, sequential work, contention, resources, priority, simultaneous effects and RNG safety | Met | `tests.test_action_choices`; generated HTTP overlap/no-skill refusal preserves RNG state; mixed Touch + Thrust test verifies component timing/penalty and simultaneous outcomes. |
 | Interruption, cancellation and repeat-until-abort | Met | Native Choice regressions; generated general program cancellation; Multiple Touch repeated-cycle test restores, executes a fresh-identity cycle and cancels the successor. |

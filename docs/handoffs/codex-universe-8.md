@@ -15,7 +15,7 @@ The working tree intentionally contains user-managed deletions and untracked mat
 1. [`TASKS.md`](../../TASKS.md), all five active [`docs/tasks/`](../tasks/) files, especially `encounter-engine.md`, `generation-and-attention.md`, and `repository-workflow.md`.
 2. [`docs/encounters/README.md`](../encounters/README.md), adopted revision-61 rules and revision-62/63 supplements, the current issue bridge, and relevant source/tests.
 3. [`docs/design/U-PERCEPTION-FOREST-WATCH-DESIGN-v2.md`](../design/U-PERCEPTION-FOREST-WATCH-DESIGN-v2.md) and [`deferred-object-event-perception.md`](../design/deferred-object-event-perception.md), both design/requirements material only.
-4. [`U-REPO-005 report`](../reports/U-REPO-005-report.md) and [`U-REPO-006 report`](../reports/U-REPO-006-report.md) for bounded regression evidence and migration history. U-REPO-007B is a local closeout report, not a published dependency; the publication facts are summarized above.
+4. [`U-REPO-005 report`](../reports/archive/U-REPO-005-report.md) and [`U-REPO-006 report`](../reports/U-REPO-006-report.md) for bounded regression evidence and migration history. U-REPO-007B is a local closeout report, not a published dependency; the publication facts are summarized above.
 
 Current rules: revision 61 baseline; revision 62 changes only adopted physical units/reference-arm/Reach/Throw matters; revision 63 supersedes only authoritative spatial coordinate rounding. The interim accurate-perceptible-property Spot/Listen simplification remains adopted. Quantitative uncertainty, general Object/Event/motion perception, Remain Aware capacity, and reacquisition rules remain unadopted/deferred.
 

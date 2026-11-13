@@ -20,7 +20,7 @@ No native Target history was installed: its six-boundary representation remains 
 
 ## Verification
 
-Tests ran against `/private/tmp/u-arena-003b3-checkout`, a disposable export of starting commit `2c93865f01abea1f1289e06988ad7c8ee3e27d62` with only the six implementation paths above overlaid. The export included the committed authoritative rules and revision-60 files. No source tree outside the export was used.
+Tests ran against `<temporary-directory>/u-arena-003b3-checkout`, a disposable export of starting commit `2c93865f01abea1f1289e06988ad7c8ee3e27d62` with only the six implementation paths above overlaid. The export included the committed authoritative rules and revision-60 files. No source tree outside the export was used.
 
 - Focused Arena/history/state/checkpoint/Run restoration regressions: **81 passed**.
 - Dedicated B3 tests: **9 passed**.

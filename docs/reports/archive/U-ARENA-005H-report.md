@@ -18,7 +18,7 @@ PYTHONPATH=../npc-generator .venv/bin/python examples/generated_arena_browser.py
 ```
 
 The launcher loads only
-[`examples/arena_scenarios/ordinary-dagger-draw.json`](../../examples/arena_scenarios/ordinary-dagger-draw.json).
+[`examples/arena_scenarios/ordinary-dagger-draw.json`](../../../examples/arena_scenarios/ordinary-dagger-draw.json).
 Its strict schema fixes the scenario ID, Dagger type/display name, one empty
 right-hand slot, and `worn_sheath` source. The option is mutually exclusive with
 the ground-loadout profile. There is no generic browser mutation API or client

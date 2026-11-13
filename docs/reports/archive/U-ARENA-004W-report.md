@@ -1,7 +1,7 @@
 # U-ARENA-004W — native ground Pick up
 
 **Status:** Implemented. No push.
-**Rules:** U-ARENA-004W's proposed rules 1, 2, 3, and 5 were expressly adopted by the user's instruction to implement the approved pickup Action under the adopted timing, accessibility, possession, and contention rules. Recorded as the revision-64 Arena-only supplement in [the Encounter decision package](../encounters/encounters-consistency-decisions-r64.md) and linked from its [index](../encounters/README.md). Rule 4 was not separately approved and is not implemented.
+**Rules:** U-ARENA-004W's proposed rules 1, 2, 3, and 5 were expressly adopted by the user's instruction to implement the approved pickup Action under the adopted timing, accessibility, possession, and contention rules. Recorded as the revision-64 Arena-only supplement in [the Encounter decision package](../../encounters/encounters-consistency-decisions-r64.md) and linked from its [index](../../encounters/README.md). Rule 4 was not separately approved and is not implemented.
 
 ## Implementation
 

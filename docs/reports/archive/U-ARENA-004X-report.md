@@ -4,7 +4,7 @@
 
 Implemented the revised Arena perception and pickup assignment. The generated browser now shows the other Being at time zero, and shows every realized ground Object from its native position, whether near or far. This applies equally when the normal generated Arena has no equipment. The browser draws Beings as circles and Objects as triangles, lists their perceptible name/type/current state, and supports clicking a marker or list entry to inspect it.
 
-The user-adopted rule is recorded as Encounter revision 65 in [the decision supplement](../encounters/encounters-consistency-decisions-r65.md), indexed from the [Encounter README](../encounters/README.md), and described in [the Arena perception design note](../design/generated-arena-perception.md). It supersedes the limited ground-Object discovery proposal. Revision 64's separate same-hex pickup access rule remains in force.
+The user-adopted rule is recorded as Encounter revision 65 in [the decision supplement](../../encounters/encounters-consistency-decisions-r65.md), indexed from the [Encounter README](../../encounters/README.md), and described in [the Arena perception design note](../../design/generated-arena-perception.md). It supersedes the limited ground-Object discovery proposal. Revision 64's separate same-hex pickup access rule remains in force.
 
 ## Native evidence and transaction path
 

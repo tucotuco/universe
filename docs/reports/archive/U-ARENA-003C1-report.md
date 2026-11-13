@@ -36,7 +36,7 @@ Process B's fresh RNG cursor is unchanged by this RNG-free Run. This demonstrate
 
 ## Verification
 
-All final checks were performed against the isolated candidate export at `/private/tmp/u-arena-003c1-y6tnAF`; its required legacy CSV inputs were copied read-only for the tests. No legacy code was executed.
+All final checks were performed against the isolated candidate export at `<temporary-directory>/u-arena-003c1-y6tnAF`; its required legacy CSV inputs were copied read-only for the tests. No legacy code was executed.
 
 - Focused final activation tests: **6 passed** (`PYTHONPATH=../tests python3 -m unittest test_arena_state_activation`, from the export's `src/`).
 - Broader Arena/history/state/checkpoint/Run focused set: **149 passed**.

@@ -27,4 +27,4 @@ This is enough to close the stated minimum while retaining wider Action/UI limit
 - The sole ACTIVE program moves to `U-CAP-001` as authorized by that assignment.
 - Remaining work stays under existing IDs: U-ACT-007 Delay, U-ACT-008 Disarm variants, U-ACT-012 broader Grapple, U-ACT-013 general Multiple actions, U-ACT-015 conditional Ready, U-ACT-020 Stun, U-ACT-021 Subdue, U-UI-001, and U-PER-002. No remaining item is silently absorbed into this bounded DONE claim.
 
-Detailed source/test/commit evidence is in [U-ARENA-018D](U-ARENA-018D-report.md), [the original U-ARENA-018 report](U-ARENA-018-report.md), and the current [TASKS register](../../TASKS.md).
+Detailed source/test/commit evidence is in [U-ARENA-018D](U-ARENA-018D-report.md), [the original U-ARENA-018 report](U-ARENA-018-report.md), and the current [TASKS register](../../../TASKS.md).
