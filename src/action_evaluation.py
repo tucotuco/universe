@@ -913,6 +913,22 @@ def _defense(snapshot, action, rng):
         return ActionProposal(action.id, actor.id, (), 'ready')
     attacker = snapshot.entity(action.target_id)
     strike = snapshot.actions[action.data['target_action_id']]
+    if kind == 'yield' and strike.family == 'grappling' and strike.data.get('event_type') == 'bull rush':
+        if (strike.lifecycle != 'pending' or strike.actor_id != attacker.id
+                or strike.target_id != actor.id or strike.nominal_end != action.nominal_end):
+            return ActionProposal(action.id, actor.id, (attacker.id,), 'no_threat')
+        start, attacker_start = (action.data.get('start_position'),
+                                 action.data.get('target_position'))
+        current_distance = snapshot.distance(actor.id, attacker.id)
+        if (start is None or attacker_start is None or current_distance is None
+                or math.dist(actor.position.as_tuple(), attacker.position.as_tuple())
+                   <= math.dist(start.as_tuple(), attacker_start.as_tuple())):
+            dependency = DefenseEffect(action.id, strike.id, kind, False, False)
+            return ActionProposal(action.id, actor.id, (attacker.id,), 'no_space', (),
+                                  (dependency,))
+        dependency = DefenseEffect(action.id, strike.id, kind, True, True)
+        return ActionProposal(action.id, actor.id, (attacker.id,), 'yielded', (),
+                              (dependency,))
     prepared = action.data.get('prepared_defense')
     if prepared is not None:
         if (kind not in ('parry', 'dodge') or prepared['kind'] != kind
@@ -1297,7 +1313,7 @@ def _grapple_roll(rng, being, *, escape=False, strength_only=False, bonus=0):
     return sum(dice) + modifier + bonus
 
 
-def _grappling(snapshot, action, rng):
+def _grappling(snapshot, action, rng, dependencies=()):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     event_type = action.data['event_type']
     priority_penalty = action.data.get('multiple_action_priority', 0) or 0
@@ -1444,6 +1460,9 @@ def _grappling(snapshot, action, rng):
             'posture','set',None,None,'lying'))
         return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
     if event_type == 'bull rush':
+        if any(row.kind == 'yield' and row.eligible and row.success
+               and row.strike_id == action.id for row in dependencies):
+            return ActionProposal(action.id, actor.id, (target.id,), 'yielded')
         from arena_hex_map import layout_from_encounter_map
         layout = layout_from_encounter_map(snapshot.encounter_map)
         if layout is not None and (layout.cell_at_position(actor.position) is None
@@ -2114,7 +2133,8 @@ def evaluate_snapshot(snapshot, action_ids=None):
         elif action.family == 'disarm':
             proposal = _disarm(snapshot,action,rng)
         elif action.family == 'grappling':
-            proposal = _grappling(snapshot,action,rng)
+            proposal = _grappling(snapshot,action,rng,
+                tuple(d for d in defense_effects if d.strike_id == action.id))
         elif action.family == 'pickup':
             status = pickup_status[action.id]
             if status is not None:

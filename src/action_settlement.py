@@ -109,7 +109,7 @@ _OUTCOMES = {
                                     'unsupported_timing', 'already_ready', 'contested', 'success')),
     'delay': frozenset(('success',)),
     'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','not_facing','blocked','uncertain_path',
-        'unavailable','failed','success','success_pending_displacement','tower_shield_restricted','shield_unavailable','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
+        'unavailable','failed','success','success_pending_displacement','yielded','tower_shield_restricted','shield_unavailable','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
 }
 _METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
@@ -369,8 +369,13 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         _require(action.family == 'defense' and effect.strike_id == action.data['target_action_id'], 'invalid designated defense source')
         _require(effect.strike_id in actions, 'missing designated strike')
         strike = actions[effect.strike_id]
-        _require(strike.family == 'melee' and strike.actor_id == action.target_id
-            and strike.target_id == action.actor_id and strike.nominal_end == action.nominal_end,
+        bull_rush_yield = (effect.kind == 'yield' and strike.family == 'grappling'
+            and strike.data.get('event_type') == 'bull rush'
+            and strike.actor_id == action.target_id and strike.target_id == action.actor_id)
+        ordinary_melee_defense = (strike.family == 'melee'
+            and strike.actor_id == action.target_id and strike.target_id == action.actor_id)
+        _require((bull_rush_yield or ordinary_melee_defense)
+            and strike.nominal_end == action.nominal_end,
             'contradictory designated defense relationship')
         _require(effect.kind == action.data['kind'] and effect.kind in ('parry', 'dodge', 'block', 'yield'), 'invalid defense kind')
         _require(type(effect.eligible) is bool and type(effect.success) is bool and (effect.eligible or not effect.success), 'invalid defense eligibility/success')

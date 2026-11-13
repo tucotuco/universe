@@ -838,6 +838,40 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(result.facts.outcome,'success_pending_displacement')
         self.assertEqual((self.a.get_position(),self.b.get_position()),before)
 
+    def test_native_yield_nullifies_same_boundary_bull_rush(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.8,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        defense=MeleeDefense(self.enc,self.b.id,self.a.id,kind='yield',
+                             target_action_id=rush.id)
+        self.enc.schedule_choice((ChoiceMember('rush',rush),ChoiceMember('yield',defense)))
+        self.enc.step(1,velocities={self.b.id:(0,.1,0)})
+        result=self.enc.inspect_committed(1)
+        self.assertEqual(result.action(defense.id).facts.outcome,'yielded')
+        self.assertEqual(result.action(rush.id).facts.outcome,'yielded')
+        self.assertGreater(self.b.get_position().y,0)
+
+    def test_native_yield_does_not_nullify_bull_rush_without_opening_distance(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.8,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        defense=MeleeDefense(self.enc,self.b.id,self.a.id,kind='yield',
+                             target_action_id=rush.id)
+        self.enc.schedule_choice((ChoiceMember('rush',rush),ChoiceMember('yield',defense)))
+        values=iter([6,6,6,1,1,1])
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice.split('d')[1]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll): self.enc.step(1)
+        result=self.enc.inspect_committed(1)
+        self.assertEqual(result.action(defense.id).facts.outcome,'no_space')
+        self.assertEqual(result.action(rush.id).facts.outcome,'success_pending_displacement')
+
     def test_native_bull_rush_tie_fails_without_displacement(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
         self.a.set_hex_facing(0)

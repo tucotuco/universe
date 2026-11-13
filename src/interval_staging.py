@@ -527,7 +527,10 @@ def _stage_start_fence(encounter, boundary, time, phase, positions, pending, eve
             fence=_StagedReadFence(id(encounter),boundary,tuple(pending),events,initialization,registered,states,positions,{})
             snap=capture_snapshot(encounter,boundary,rng_state=rng_state,_objective=True,_stage=fence)
             strike=snap.actions.get(initialization.get(aid,{}).get('target_action_id',action.target_action_id))
-            if strike is not None:data['threat_at_schedule']=((strike.id,snap.melee_status(strike)[0]=='in_reach'),)
+            if strike is not None:
+                threatened = (strike.family == 'melee'
+                    and snap.melee_status(strike)[0] == 'in_reach')
+                data['threat_at_schedule']=((strike.id,threatened),)
             if action.kind=='yield':
                 data['start_position']=positions.get(action.actor_id)
                 data['target_position']=positions.get(action.target_id)

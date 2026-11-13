@@ -175,6 +175,20 @@ class MeleeDefense(Action):
         target_action_id = self.target_action_id if target_action_id is None else target_action_id
         proposed_actions = proposed_actions or {}
         strike = proposed_actions.get(target_action_id) or encounter.universe.get_event_by_id(target_action_id)
+        # Adopted Bull Rush rule: a one-second Yield can nullify a Bull Rush
+        # resolving at the same boundary. Keep this explicit and identity-
+        # linked; it is not a general-purpose defense against grappling Actions.
+        if self.kind == 'yield' and type(strike) is Action and strike.event_type == 'bull rush':
+            if (strike.id not in encounter.pending_action_list and strike.id not in proposed_actions
+                    or strike.actor_id != attacker.id or strike.target_id != actor.id
+                    or strike.end_time != self.start_time + 1):
+                raise ValueError('Yield must designate the incoming Bull Rush completing in one second')
+            from scheduling import native_preparer
+            native_preparer(strike)
+            return PreparedSchedule.from_action(self, end_time=strike.end_time,
+                initialization=(('ready_at', strike.end_time),
+                                ('threat_at_schedule', ()),
+                                ('target_action_id', strike.id)))
         if (not isinstance(strike, MeleeStrike)
                 or (strike.id not in encounter.pending_action_list and strike.id not in proposed_actions)
                 or strike.actor_id != attacker.id or strike.target_id != actor.id):
