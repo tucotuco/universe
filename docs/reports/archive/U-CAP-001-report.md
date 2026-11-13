@@ -9,8 +9,9 @@
 | U-CAP-001 implementation closeout | `2026-11-12T23:48:41-08:00` | `2026-11-13T00:31:37-08:00` | `PT42M56S` |
 | Permanent development-process amendment | `2026-11-13T00:36:28-08:00` | `2026-11-13T00:39:01-08:00` | `PT2M33S` |
 | Revision 69 rules and Draw/Ready/Delay implementation | `2026-11-13T01:39:08-08:00` | `2026-11-13T02:40:29-08:00` | `PT1H1M21S` |
+| U-CAP-001 archival workflow and reference updates | `2026-11-13T08:29:35-08:00` | `2026-11-13T08:35:32-08:00` | `PT5M57S` |
 
-The first two intervals are carried forward from the actual prior closeouts. The third interval lasted `PT1H1M21S`. Total active execution time across these three recorded intervals is `PT1H46M50S`; total calendar time from the first Start to the final End is `PT2H51M48S`.
+The first two intervals are carried forward from the actual prior closeouts. The last two intervals lasted `PT1H1M21S` and `PT5M57S`. Total active execution time across these four recorded intervals is `PT1H52M47S`; total calendar time from the first Start to the final End is `PT8H46M51S`.
 
 ## Rules, implementation and boundaries
 
@@ -71,8 +72,9 @@ The permanent [development-process document](../../process/DEVELOPMENT-PROCESS.m
 
 - Rules supplement commit: `43bf86d727af4b632050de10ab52d145d78bb8da` (`Adopt revision 69 Draw Ready and Delay rules`).
 - Implementation commit: `3b07d78` (`Implement Draw Ready and Delay Actions`). It contains 20 explicitly staged source/test files; `git diff --cached --check` passed and `tools/check_publication_safety.py --staged` reported 20 files, 0 findings.
-- The task-register/report closeout is the final documentation commit; its resulting HEAD is included in the final chat closeout. Its staged audit is repeated after timestamp insertion.
-- The pre-existing unrelated untracked assignment files, saved Arena JSON and `docs/reports/U-REPO-010-report.md` were preserved and not staged. `.venv`, ignored `legacy/`, saved-world data, independent repositories and backups were not modified.
+- The source assignment was first committed at its original path in `17efa06` because it was untracked; `eb5effc0b37c1141937fcf68f5edb60381ee1781` then records both Git-aware moves, the process amendment, and maintained-reference updates. The moves are detected as renames (assignment 93%, report 85%).
+- At the start of this archival execution HEAD was `6924777151bd955907379cca4f2167aaaf630cd1`; the archive/reference commit produced HEAD `eb5effc0b37c1141937fcf68f5edb60381ee1781`. The timestamped report closeout is a following report-only local commit.
+- `git diff --cached --check` passed; `.venv/bin/python -B tools/check_publication_safety.py --staged` reported 7 staged files, 0 findings. Local Markdown links in all five changed documentation files were checked and resolve. The pre-existing unrelated untracked assignment files, saved Arena JSON and `docs/reports/U-REPO-010-report.md` were preserved and not staged. `.venv`, ignored `legacy/`, saved-world data, independent repositories and backups were not modified.
 - No remote push or history rewrite was performed.
 
 ## Remaining limits
