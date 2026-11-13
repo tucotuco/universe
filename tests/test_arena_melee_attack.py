@@ -492,6 +492,50 @@ class TestArenaMeleeAttack(unittest.TestCase):
             self.assertEqual(restored, {"time": result["time"],
                 "status": "completed", "outcome": "success", "posture": "lying"})
 
+    def test_generated_withdrawal_moves_before_scheduled_opponent_strike_reach_check(self):
+        view = self.generate(size_categories={"player": "medium", "opponent": "medium"})
+        view, target_row, _weapon_id, _distance, _reach = self.move_to_target_neighbor(view)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        from hex_facing import nearest_facing
+        target.set_hex_facing(nearest_facing((
+            player.get_position().x - target.get_position().x,
+            player.get_position().y - target.get_position().y,
+            player.get_position().z - target.get_position().z)))
+        from melee_combat import MeleeStrike
+        weapon_id = next(iter(target.armed_with(candidate.universe).values()))
+        strike = MeleeStrike(candidate.encounter, target.id, player.id, weapon_id,
+                             motion="thrust", reach=1.2)
+        candidate.encounter.schedule_action(strike)
+        layout = candidate.arena_map.layout
+        target_position = target.get_position()
+        away = (player.get_position().x - target_position.x,
+                player.get_position().y - target_position.y)
+        destinations = [cell for cell in layout.addresses()
+            if math.dist(layout.center_position(cell).as_tuple(), target_position.as_tuple()) > 3.0
+            and ((layout.center_position(cell).x - target_position.x) * away[0]
+                 + (layout.center_position(cell).y - target_position.y) * away[1]) > 0]
+        self.assertTrue(destinations)
+        destination = max(destinations, key=lambda cell: math.dist(
+            layout.center_position(cell).as_tuple(), player.get_position().as_tuple()))
+        status, view = self.request("/api/generated/destination", {
+            "column": destination.column, "row": destination.row,
+            "rate": "sprint", "facing_policy": "turn"})
+        self.assertEqual(status, 200, view)
+        for _ in range(100):
+            if view["movement_plan"] is None:
+                break
+            status, view = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, view)
+        self.assertIsNone(view["movement_plan"])
+        self.assertGreater(math.dist(player.get_position().as_tuple(),
+                                     target.get_position().as_tuple()), 1.2)
+        while candidate.encounter.time < math.ceil(strike.end_time):
+            status, view = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, view)
+        result = candidate.encounter.inspect_committed(math.ceil(strike.end_time)).action(strike.id)
+        self.assertEqual(result.facts.outcome, "out_of_reach")
+
 
 if __name__ == "__main__":
     unittest.main()
