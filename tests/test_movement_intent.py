@@ -315,6 +315,38 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.session.choose_run()
         return self.candidate.universe.event_history[self.session._player_action_id]
 
+    def resolve_postmovement_withdrawal(self, destination, reach):
+        self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
+        self.opponent.set_position(self.layout.center_position(HexAddress(2, 2)))
+        self.player.set_hit_points(100)
+        self.opponent.set_hit_points(100)
+        weapon_id = self.candidate.universe.make_weapon_for_being(
+            self.opponent.id, "Dagger", "Withdrawal regression Dagger")
+        self.candidate.universe.arm_being(self.opponent.id, weapon_id, "right hand")
+        self.activate_run_observer()
+        from melee_combat import MeleeStrike
+        strike = MeleeStrike(self.encounter, self.opponent.id, self.player.id,
+                             weapon_id, motion="thrust", reach=reach)
+        self.encounter.schedule_action(strike)
+        intent = MovementIntent(self.player.id, self.layout.center_position(destination),
+                                "sprint", "disengage-withdrawal", 1,
+                                facing_policy="turn")
+        self.encounter.step(1, movement_intent=intent, movement_conditions=self.conditions())
+        self.assertEqual(self.player.get_position(),
+                         truncate_position(self.layout.center_position(destination)))
+        remaining = math.ceil(strike.end_time) - self.encounter.time
+        if remaining:
+            self.encounter.step(remaining)
+        return self.encounter.inspect_committed(math.ceil(strike.end_time)).action(strike.id)
+
+    def test_ordinary_withdrawal_movement_leaves_scheduled_strike_out_of_reach(self):
+        result = self.resolve_postmovement_withdrawal(HexAddress(0, 1), reach=1.2)
+        self.assertEqual(result.facts.outcome, "out_of_reach")
+
+    def test_ordinary_withdrawal_movement_can_remain_in_scheduled_strike_reach(self):
+        result = self.resolve_postmovement_withdrawal(HexAddress(1, 3), reach=1.7)
+        self.assertNotEqual(result.facts.outcome, "out_of_reach")
+
     def test_rate_categories_and_run_skill_increment_follow_adopted_units(self):
         conditions = self.conditions()
         self.assertEqual(self.player.get_fatigue_level(), 0)
