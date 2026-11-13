@@ -209,6 +209,127 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(defense.parry_motion, "thrust")
         self.assertEqual(accepted["defense_action"]["duration_seconds"], max(1, weapon.Tt() - 1))
 
+    def test_player_defender_assigns_block_to_observed_attack(self):
+        from dataclasses import replace
+        from melee_combat import MeleeStrike, effective_melee_reach_meters
+
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261113,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        defender = candidate.participants[0].native.being
+        attacker = candidate.participants[1].native.being
+        shield_id = candidate.encounter.make_weapon_for_being(
+            defender.id, "Small shield", "Test defender shield")
+        candidate.encounter.arm_being(defender.id, shield_id, "shield hand")
+        candidate.universe.get_object_by_id(shield_id).parent_container_id = defender.id
+        shield_handle = "test-only-opaque-shield-handle"
+        self.session._view_handles[shield_id] = shield_handle
+        attacker_weapon_id = attacker.current.body_parts["right hand"]
+        attacker_weapon = candidate.universe.get_object_by_id(attacker_weapon_id)
+        attacker.set_position(CartesianPosition(defender.get_position().x + 0.1,
+            defender.get_position().y, defender.get_position().z))
+        attacker.set_hex_facing(nearest_facing((defender.get_position().x - attacker.get_position().x,
+            defender.get_position().y - attacker.get_position().y, 0)))
+        ledger = defender._arena_perception_ledger
+        evidence = replace(ledger._current[attacker.id], position=attacker.get_position())
+        ledger._current[attacker.id] = evidence
+        ledger._history = [evidence if row.entity_id == attacker.id else row
+                           for row in ledger._history]
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        attacker.strategy.attack = 0
+        strike = MeleeStrike(candidate.encounter, attacker.id, defender.id, attacker_weapon_id,
+            motion="thrust", reach=effective_melee_reach_meters(attacker.current,
+                                                                 attacker_weapon.current))
+        candidate.encounter.schedule_action(strike)
+        self.assertEqual(strike._status(candidate.encounter)[0], "in_reach")
+        for _ in range(2):
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(strike._status(candidate.encounter)[0], "in_reach")
+        attacker_handle = self.session._view_handles[attacker.id]
+        self.assertEqual(self.request("/api/generated/inspect", {"handle": attacker_handle})[0], 200)
+        selected = self.request("/api/generated/inspect", {"handle": attacker_handle})[1]
+        block_row = next(row for row in selected["action_catalog"]["entries"]
+                         if row["name"] == "Block")
+        self.assertEqual(block_row["status"], "available", block_row["reason"])
+        self.assertIn(shield_handle, json.dumps(block_row))
+        status, accepted = self.request("/api/generated/block", {
+            "handle": attacker_handle, "shield_handle": shield_handle})
+        self.assertEqual(status, 200, accepted)
+        defense = self.session._latest_melee_defense(candidate, defender)
+        self.assertEqual(defense.kind, "block")
+        self.assertEqual(defense.target_action_id, strike.id)
+        while candidate.encounter.time < math.ceil(strike.end_time):
+            self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(defense.resolution.outcome, "blocked")
+        self.assertIsNotNone(strike.resolution)
+
+    def test_player_defender_assigns_yield_to_observed_attack(self):
+        from dataclasses import replace
+        from melee_combat import MeleeStrike, effective_melee_reach_meters
+        from strategy import Strategy
+
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261114,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        defender = candidate.participants[0].native.being
+        attacker = candidate.participants[1].native.being
+        attacker_weapon_id = attacker.current.body_parts["right hand"]
+        attacker_weapon = candidate.universe.get_object_by_id(attacker_weapon_id)
+        attacker.set_position(CartesianPosition(defender.get_position().x + 0.1,
+            defender.get_position().y, defender.get_position().z))
+        attacker.set_hex_facing(nearest_facing((defender.get_position().x - attacker.get_position().x,
+            defender.get_position().y - attacker.get_position().y, 0)))
+        ledger = defender._arena_perception_ledger
+        evidence = replace(ledger._current[attacker.id], position=attacker.get_position())
+        ledger._current[attacker.id] = evidence
+        ledger._history = [evidence if row.entity_id == attacker.id else row
+                           for row in ledger._history]
+        layout = candidate.arena_map.layout
+        start_cell = layout.cell_at_position(defender.get_position())
+        destinations = [layout.center_position(address, z=defender.get_position().z)
+                        for address in layout.addresses() if address != start_cell]
+        current_distance = math.dist(defender.get_position().as_tuple(),
+                                     attacker.get_position().as_tuple())
+        destination = min((point for point in destinations
+                           if math.dist(point.as_tuple(), attacker.get_position().as_tuple())
+                           > current_distance),
+                          key=lambda point: math.dist(point.as_tuple(),
+                                                      defender.get_position().as_tuple()))
+        destination_cell = layout.cell_at_position(destination)
+        status, movement = self.request("/api/generated/destination", {
+            "column": destination_cell.column, "row": destination_cell.row,
+            "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200, movement)
+        attacker.strategy.attack = 0
+        strike = MeleeStrike(candidate.encounter, attacker.id, defender.id, attacker_weapon_id,
+            motion="thrust", reach=effective_melee_reach_meters(attacker.current,
+                attacker_weapon.current), strategy=Strategy(timing=3))
+        candidate.encounter.schedule_action(strike)
+        self.assertEqual(strike.end_time, 2)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(strike._status(candidate.encounter)[0], "in_reach")
+        attacker_handle = self.session._view_handles[attacker.id]
+        status, accepted = self.request("/api/generated/yield", {"handle": attacker_handle})
+        self.assertEqual(status, 200, accepted)
+        defense = self.session._latest_melee_defense(candidate, defender)
+        self.assertEqual(defense.kind, "yield")
+        self.assertEqual(defense.target_action_id, strike.id)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(defense.resolution.outcome, "yielded")
+        self.assertIsNotNone(strike.resolution)
+
     def test_player_defender_assigns_retained_dodge_to_observed_attack(self):
         from action_evaluation import _ProvisionalRandom, RandomDraw
         from melee_combat import MeleeStrike, effective_melee_reach_meters
@@ -355,7 +476,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "equipment_mode": "unequipped", "opponent_strategy": "none"})
         self.assertEqual(status, 200)
         self.assertEqual(self.request("/api/generated/run", {})[0], 200)
-        status, _ = self.request("/api/generated/advance", {"seconds": 1})
+        status, activated = self.request("/api/generated/advance", {"seconds": 1})
         self.assertEqual(status, 200)
         target_id = self.session.active_candidate.participants[1].native.being.id
         target = next(row for row in activated["entities"]
