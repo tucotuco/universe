@@ -2,7 +2,7 @@
 
 ## Archive update — 2026-11-13
 
-A one-time authorized historical sweep moved all 14 assignment Markdown files and 95 engineering-report Markdown files that were directly under the active directories into their archive directories. U-CAP-001 was already archived. The original names are preserved and maintained Markdown links now resolve to the archive. Current status and priorities remain in [`TASKS.md`](../../TASKS.md): U-ARENA-018 and U-CAP-001 are DONE (bounded), no implementation program is active, and U-CAP-002 remains an unassigned candidate. The historical status statements below describe the 2026-11-11 snapshot. The active assignment and report directories are for new unfinished assignments and reports awaiting review; future archival follows the permanent process.
+A one-time authorized historical sweep moved all 14 assignment Markdown files and 95 engineering-report Markdown files that were directly under the active directories into their archive directories. U-CAP-001 was already archived. The original names are preserved and maintained Markdown links now resolve to the archive. Current status and priorities remain in [`TASKS.md`](../../TASKS.md): U-ARENA-018, U-CAP-001, and U-CAP-002 are DONE (bounded); [U-CAP-002's accepted assignment](../assignments/archive/U-CAP-002.md) and [consumed report](../reports/archive/U-CAP-002-report.md) are archived; U-CAP-003 is ACTIVE. The historical status statements below describe earlier snapshots. The active assignment and report directories are for new unfinished assignments and reports awaiting review; future archival follows the permanent process.
 
 ## Orientation
 
