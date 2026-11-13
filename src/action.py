@@ -60,7 +60,9 @@ class Action(Event):
         self.instrument_id = instrument_id
         self.strategy = strategy or Strategy()
         self.resolution = None  # Set only after successful structured resolution.
-        base_duration = 4 if self.event_type == "overrun" else 1 if self.event_type == "bull rush" else 0
+        base_duration = (3 if self.event_type == "end-run" else
+                         4 if self.event_type == "overrun" else
+                         1 if self.event_type == "bull rush" else 0)
         self.end_time = self.calculate_end_time(base_duration, self.strategy.timing_adjustment())
         instrument = self.get_instrument()
         if instrument is not None:
@@ -96,6 +98,54 @@ class Action(Event):
         Encounter invokes only reviewed native implementations. The Encounter
         argument is read-only during preparation, never an extension sandbox.
         """
+        if self.event_type == 'end-run':
+            from encounter import Encounter
+            from being import BeingInstance
+            from spatial.state import CartesianPosition
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('End Run requires the native transactional Encounter pathway')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            data = object.__getattribute__(self, '__dict__')
+            destination = data.get('end_run_exit_position')
+            conditions = data.get('end_run_movement_conditions')
+            rate = data.get('end_run_rate')
+            if (type(actor) is not BeingInstance or type(target) is not BeingInstance
+                    or actor is target or self.actor_id not in encounter.being_list
+                    or self.target_id not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id, self.target_id)):
+                raise ValueError('End Run requires two distinct aware participating Beings')
+            if (actor.is_helpless() or actor.get_position() is None
+                    or target.get_position() is None):
+                raise ValueError('End Run requires positioned able participants')
+            if type(destination) is not CartesianPosition:
+                raise ValueError('End Run requires an explicitly selected native exit position')
+            if (type(conditions) is not tuple or len(conditions) != 4
+                    or type(conditions[0]) not in (float, int)
+                    or type(conditions[1]) not in (float, int)
+                    or conditions[2] not in ('forward', 'backward', 'sideways', 'non_forward')
+                    or conditions[3] is not False):
+                raise ValueError('End Run requires explicit ordinary movement-rate conditions')
+            if type(rate) is not str or rate not in ('sprint','run','jog','hustle','walk'):
+                raise ValueError('End Run requires an adopted ordinary movement rate')
+            from arena_hex_map import layout_from_encounter_map
+            layout = layout_from_encounter_map(encounter.map)
+            if layout is None:
+                raise ValueError('End Run requires a modeled Arena hex map')
+            origin_cell = layout.cell_at_position(actor.get_position())
+            target_cell = layout.cell_at_position(target.get_position())
+            exit_cell = layout.cell_at_position(destination)
+            if (origin_cell is None or target_cell is None or exit_cell is None
+                    or target_cell == origin_cell or exit_cell == origin_cell
+                    or exit_cell == target_cell):
+                raise ValueError('End Run exit must be a distinct modeled hex beyond the occupant')
+            duration = max(1, 3 - self.strategy.timing_adjustment())
+            if self.end_time - self.start_time != duration:
+                raise ValueError('End Run preparation must use its adopted three-second timing')
+            return PreparedSchedule.from_action(self, initialization=(
+                ('end_run_origin_position', actor.get_position()),
+                ('end_run_target_position', target.get_position()),
+                ('end_run_origin_cell', (origin_cell.column, origin_cell.row)),
+                ('end_run_target_cell', (target_cell.column, target_cell.row))))
         if self.event_type == 'bull rush':
             from encounter import Encounter
             from arena_hex_map import layout_from_encounter_map

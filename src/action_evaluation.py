@@ -167,7 +167,7 @@ class EvaluationSnapshot:
 
 
 def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _stage=None,
-                     _restore_context=None):
+                     _restore_context=None, _decision_preflight=False):
     """Freeze the current state at an explicit, non-dispatching evaluation fence.
 
     Caller must first advance physical state to this boundary without resolving
@@ -198,6 +198,13 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(_stage) is not _StagedReadFence or _stage.encounter_identity != id(encounter) or _stage.boundary != boundary:
             raise EvaluationIntegrityError('invalid private interval read fence')
         ed = dict(ed, time=boundary, pending_action_list=_stage.pending_ids)
+    elif _decision_preflight:
+        if (type(_decision_preflight) is not bool or not _decision_preflight
+                or ed['active_boundary'] is not None
+                or ed['time'] != ed['last_processed_boundary']
+                or boundary != ed['last_processed_boundary'] + 1):
+            raise EvaluationIntegrityError('invalid next-boundary decision preflight')
+        ed = dict(ed, time=boundary)
     if (type(boundary) is not int or boundary < 1 or ed['time'] != boundary
             or ed['_dispatching'] or ed.get('boundary_fault') is not None
             or ed['last_processed_boundary'] >= boundary):
@@ -254,7 +261,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','bull rush','overrun', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','bull rush','overrun','end-run', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -290,7 +297,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if not cancelled and not paused and math.ceil(end) < boundary:
             raise EvaluationIntegrityError('stale pending Action')
         strategy = freeze(native_data(ad['strategy'], (Strategy,)))
-        family = ('ready_preparation' if type(action) is Action and ad['event_type']=='ready object' else
+        family = ('end_run' if type(action) is Action and ad['event_type']=='end-run' else
+                  'ready_preparation' if type(action) is Action and ad['event_type']=='ready object' else
                   'delay' if type(action) is Action and ad['event_type']=='delay' else
                   'disarm' if type(action) is Action and ad['event_type']=='disarm' else
                   'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
@@ -311,9 +319,11 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge','end_run_exit_position','end_run_movement_conditions','end_run_occupant_willing','end_run_rate','end_run_origin_position','end_run_target_position','end_run_origin_cell','end_run_target_cell','end_run_phase_result'):
             if key in ad:
-                selected[key] = freeze(ad[key])
+                selected[key] = (position(ad[key]) if key in (
+                    'end_run_exit_position','end_run_origin_position',
+                    'end_run_target_position') else freeze(ad[key]))
         if type(action) is Action and ad['event_type'] == 'grab':
             from physical_contact import successful_touch
             selected['contact_verified'] = successful_touch(encounter,ad.get('touch_action_id'),
@@ -2017,6 +2027,67 @@ def ready_preparation_eligibility(snapshot, action):
     return None
 
 
+def resolve_end_run_contest(snapshot, action, rng):
+    """Resolve the adopted End Run contest from one movement-phase snapshot."""
+    actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    data = action.data
+    if actor.position is None or target.position is None:
+        return ActionProposal(action.id, actor.id, (target.id,), 'unplaced')
+    if data.get('end_run_occupant_willing') is True:
+        return ActionProposal(action.id, actor.id, (target.id,), 'success')
+    actor_dex, target_dex = (actor.data['abilities'].get('DEX'),
+                             target.data['abilities'].get('DEX'))
+    if type(actor_dex) is not int or type(target_dex) is not int:
+        return ActionProposal(action.id, actor.id, (target.id,), 'dexterity_unknown')
+    target_facing = target.data.get('hex_facing')
+    if type(target_facing) is not int:
+        return ActionProposal(action.id, actor.id, (target.id,), 'facing_unknown')
+    from hex_facing import vector_is_behind
+    behind = vector_is_behind(target_facing,
+        (actor.position.x-target.position.x,
+         actor.position.y-target.position.y,
+         actor.position.z-target.position.z))
+    immobilized = (target.data.get('states', {}).get('immobilized') is True
+                   or any(len(row) > 6 and row[2] == target.id
+                          and row[6] in ('pin_top', 'pin_bottom')
+                          for row in snapshot.grapple_controls))
+    if behind or immobilized:
+        roll = sum(rng.roll('1d6') for _ in range(3))
+        outcome = 'success' if roll <= actor_dex else 'failed'
+        return ActionProposal(action.id, actor.id, (target.id,), outcome,
+            metadata=(('rolls', (roll,)), ('initiator_total', roll),
+                      ('occupant_total', actor_dex),
+                      ('reason', 'behind_or_immobilized')))
+    sizes = ('diminutive','tiny','small','medium','large','huge','gargantuan','colossal')
+    actor_size, target_size = (actor.data.get('size_category'),
+                               target.data.get('size_category'))
+    if actor_size not in sizes or target_size not in sizes:
+        return ActionProposal(action.id, actor.id, (target.id,), 'size_unknown')
+    size_bonus = 2 * max(0, sizes.index(target_size)-sizes.index(actor_size))
+    penalty = data.get('multiple_action_priority', 0) or 0
+    if type(penalty) is not int or penalty < 0:
+        raise EvaluationIntegrityError('End Run Multiple-action priority penalty is invalid')
+    actor_rolls = tuple(rng.roll('1d6') for _ in range(3))
+    target_rolls = tuple(rng.roll('1d6') for _ in range(3))
+    actor_total = sum(actor_rolls) + (actor_dex-10)//2 + size_bonus - penalty
+    target_total = sum(target_rolls) + (target_dex-10)//2
+    outcome = 'success' if actor_total > target_total else 'failed'
+    return ActionProposal(action.id, actor.id, (target.id,), outcome,
+        metadata=(('rolls', actor_rolls+target_rolls),
+                  ('initiator_total', actor_total), ('occupant_total', target_total),
+                  ('reason', 'opposed_dexterity')))
+
+
+def _end_run(snapshot, action, rng):
+    result = action.data.get('end_run_phase_result')
+    if (type(result) is not tuple or len(result) != 2
+            or type(result[0]) is not str or type(result[1]) is not tuple):
+        raise EvaluationIntegrityError('End Run requires an authoritative movement-phase result')
+    outcome, metadata = result
+    return ActionProposal(action.id, action.actor_id, (action.target_id,), outcome,
+                          metadata=metadata)
+
+
 def _activity(snapshot, action, rng):
     actor = snapshot.entity(action.actor_id)
     effects = []
@@ -2118,7 +2189,7 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay') for a in selected):
+    if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     pickup_status = {action.id: pickup_eligibility(snapshot, action)
                      for action in selected if action.lifecycle == 'pending'
@@ -2198,6 +2269,8 @@ def evaluate_snapshot(snapshot, action_ids=None):
                     action.data['ready_motion'], action.data['readying_seconds'])
                 proposal = ActionProposal(action.id, action.actor_id,
                     tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
+        elif action.family == 'end_run':
+            proposal = _end_run(snapshot, action, rng)
         elif action.family == 'delay':
             effect = DelayDefenseEffect(action.id, action.actor_id,
                                          action.data['strategy'].get('defense', 0))

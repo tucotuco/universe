@@ -170,6 +170,8 @@ def declaration(action, *, _initialization=None):
     names += ('map_width_cells', 'map_height_cells')
     names += ('hand',)
     names += ('ready_motion', 'readying_seconds')
+    names += ('end_run_exit_position','end_run_movement_conditions',
+              'end_run_occupant_willing','end_run_rate')
     names += ('get_instrument', 'damage_potential', '_status', 'on_schedule', 'prepare_schedule')
     strategy = data.get('strategy')
     from strategy import Strategy

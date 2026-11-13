@@ -1123,13 +1123,13 @@ class GeneratedArenaSession:
         actions = [event_by_id.get(action_id) for action_id in accepted]
         actions = [action for action in actions if type(action) is Action
                    and action.actor_id == player.id and action.event_type in
-                   ("grab", "grab object", "wrest", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "bull rush", "overrun")]
+                   ("grab", "grab object", "wrest", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "bull rush", "overrun", "end-run")]
         action = max(actions, key=lambda row: (row.start_time, row.end_time, row.id), default=None)
         if action is None:
             return None
         label = {"grab":"Grab", "grab object":"Grab held Object", "wrest":"Wrest", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                  "grapple":"Grapple", "grapple escape":"Grapple Escape",
-                 "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip", "bull rush":"Bull Rush", "overrun":"Overrun"}[action.event_type]
+                 "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip", "bull rush":"Bull Rush", "overrun":"Overrun", "end-run":"End Run"}[action.event_type]
         if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
             return {"name":label,"status":"executing","outcome":None,
                     "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time)),
@@ -2069,7 +2069,7 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _grappling_preflight(self, candidate, player, entity_id, evidence,
-                             event_type, hand=None, position=None,
+                             event_type, hand=None, position=None, exit_cell=None,
                              allow_composition=False):
         """Prepare one supported physical-contact Action from player evidence."""
         from physical_contact import active_contact_state, successful_touch
@@ -2083,9 +2083,54 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("Activate the native Encounter before physical-contact Actions.")
         if not _has_native_transactional_action_contract(Action):
             raise ArenaBrowserRequestError("The native transactional Action contract is unavailable.")
+        if event_type == "end-run":
+            from activities import end_run_action
+            from arena_hex_map import HexAddress
+            layout = candidate.arena_map.layout
+            if (type(exit_cell) is not tuple or len(exit_cell) != 2
+                    or any(type(value) is not int or value < 0 for value in exit_cell)):
+                raise ArenaBrowserRequestError("Choose a represented exit hex beyond the selected Being.")
+            try:
+                destination = layout.center_position(HexAddress(*exit_cell))
+            except (TypeError, ValueError) as exc:
+                raise ArenaBrowserRequestError("End Run exit hex is outside the Arena map.") from exc
+            if encounter._choice_book.actor_planned_now(player.id):
+                raise ArenaBrowserRequestError("The player already has an accepted Action resolving.")
+            premise = candidate.world_premise
+            action = end_run_action(encounter, player.id, target.id, destination,
+                terrain_multiplier=premise.terrain_multiplier,
+                hampered_multiplier=premise.hampered_multiplier,
+                direction="forward", rate="run", occupant_willing=False)
+            try:
+                prepared = encounter.prepare_action(action)
+                from movement_intent import (MovementIntent, MovementRateConditions,
+                    prepare_movement_intent, validate_end_run_path, _movement_hexes)
+                from action_evaluation import capture_snapshot
+                snapshot = capture_snapshot(encounter,
+                    encounter.last_processed_boundary+1,_decision_preflight=True)
+                row = prepare_movement_intent(encounter,
+                    MovementIntent(player.id,destination,"run",action.id,
+                        encounter.last_processed_boundary+1,"turn",None),
+                    MovementRateConditions(premise.terrain_multiplier,
+                        premise.hampered_multiplier,None,"forward",False),
+                    pre_action_snapshot=snapshot)
+                if row.arrival_time_seconds is None or row.arrival_time_seconds > 1:
+                    raise ArenaBrowserRequestError("Selected exit is farther than one second of the chosen ordinary movement rate.")
+                target_cell = candidate.arena_map.layout.cell_at_position(target.get_position())
+                route_cells = _movement_hexes(row.start_position,destination,
+                                               candidate.arena_map.layout)
+                if target_cell not in route_cells:
+                    raise ArenaBrowserRequestError("Selected route does not pass through the occupied Being hex.")
+                validate_end_run_path(player.id,target.id,row.start_position,
+                    destination,snapshot)
+            except ArenaBrowserRequestError:
+                raise
+            except (ValueError,TypeError,KeyError) as exc:
+                raise ArenaBrowserRequestError(str(exc)) from exc
+            return action,prepared
         grips, controls = active_contact_state(encounter)
         action_data = {}
-        duration = 4 if event_type == "overrun" else 1
+        duration = 3 if event_type == "end-run" else 4 if event_type == "overrun" else 1
         if event_type in ("overrun", "bull rush"):
             # Native preparation validates positions, sizes, timing and facing
             # without the browser choosing contest outcomes.
@@ -2232,12 +2277,17 @@ class GeneratedArenaSession:
         return action,prepared
 
     def choose_grappling(self, payload):
-        if (type(payload) is not dict or set(payload) - {"handle", "action", "hand", "position"}
+        if (type(payload) is not dict or set(payload) - {"handle", "action", "hand", "position", "exit_cell"}
                 or not {"handle", "action"}.issubset(payload)
                 or type(payload.get("handle")) is not str
-                or payload.get("action") not in ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "bull rush", "overrun")
+                or payload.get("action") not in ("grab", "grab object", "wrest", "hold", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin", "trip", "bull rush", "overrun", "end-run")
                 or ("position" in payload and payload["position"] not in ("kneeling","prone","pin_top","pin_bottom","STR","DEX"))
-                or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))):
+                or ("hand" in payload and payload["hand"] not in ("left hand", "right hand"))
+                or ("exit_cell" in payload and (type(payload["exit_cell"]) is not dict
+                    or set(payload["exit_cell"]) != {"column","row"}
+                    or any(type(payload["exit_cell"][key]) is not int or payload["exit_cell"][key] < 0
+                           for key in ("column","row"))))
+                or (payload.get("action") == "end-run") != ("exit_cell" in payload)):
             raise ArenaBrowserRequestError("Physical-contact Action request is malformed.")
         with self._lock:
             if self._active is None:
@@ -2256,7 +2306,9 @@ class GeneratedArenaSession:
                     payload['action'],payload.get('hand'))
             else:
                 action, prepared = self._grappling_preflight(
-                    candidate, player, entity_id, evidence, payload["action"], payload.get("hand"), payload.get("position"))
+                    candidate, player, entity_id, evidence, payload["action"], payload.get("hand"), payload.get("position"),
+                    None if "exit_cell" not in payload else
+                        (payload["exit_cell"]["column"],payload["exit_cell"]["row"]))
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -2273,7 +2325,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("Contact cancellation accepts an empty request.")
         contact_types = {"touch", "grab", "grab object", "wrest", "break hold",
                          "release grip", "grapple", "grapple escape", "takedown",
-                         "reverse", "pin", "trip", "bull rush", "overrun"}
+                         "reverse", "pin", "trip", "bull rush", "overrun", "end-run"}
         with self._lock:
             if self._active is None:
                 raise ArenaBrowserRequestError("Generate an Encounter before cancelling an Action.")
@@ -3228,15 +3280,15 @@ class GeneratedArenaSession:
                     (f" ({duration:g} s)" if duration is not None else ""),"reason":reason,
                     "target":target_view,"duration_seconds":duration})
                 continue
-            elif name.casefold() in ("grab being", "hold being", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip", "bull rush", "overrun"):
+            elif name.casefold() in ("grab being", "hold being", "break hold", "release grip", "grapple", "grapple escape", "takedown", "reverse", "pin from above", "pin from below", "trip", "bull rush", "overrun", "end-run"):
                 event_type = {"grab being":"grab", "hold being":"hold",
                               "break hold":"break hold", "release grip":"release grip", "grapple":"grapple",
                               "grapple escape":"grapple escape", "takedown":"takedown",
-                              "reverse":"reverse", "pin from above":"pin", "pin from below":"pin", "trip":"trip", "bull rush":"bull rush", "overrun":"overrun"}[name.casefold()]
+                              "reverse":"reverse", "pin from above":"pin", "pin from below":"pin", "trip":"trip", "bull rush":"bull rush", "overrun":"overrun", "end-run":"end-run"}[name.casefold()]
                 display = {"grab":"Grab", "hold":"Hold", "break hold":"Break hold", "release grip":"Release grip",
                            "grapple":"Grapple", "grapple escape":"Grapple Escape",
-                           "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip","bull rush":"Bull Rush","overrun":"Overrun"}[event_type]
-                duration = 6 if event_type in ("grapple", "grapple escape","takedown","reverse","pin") else 4 if event_type=="overrun" else 2 if event_type=="trip" else 1
+                           "takedown":"Takedown","reverse":"Reverse","pin":"Pin","trip":"Trip","bull rush":"Bull Rush","overrun":"Overrun","end-run":"End Run"}[event_type]
+                duration = 6 if event_type in ("grapple", "grapple escape","takedown","reverse","pin") else 4 if event_type=="overrun" else 3 if event_type=="end-run" else 2 if event_type=="trip" else 1
                 if event_type == "hold":
                     display = "Automatic Hold check"
                     duration = None
@@ -3245,6 +3297,7 @@ class GeneratedArenaSession:
                     "present_state":selected["present_state"]})
                 status, reason = "unavailable", "Select a currently perceived opposing Being."
                 hands = []
+                exit_cells = []
                 if selected is not None and selected.get("category") == "being":
                     try:
                         if event_type == "grab":
@@ -3275,6 +3328,19 @@ class GeneratedArenaSession:
                             _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type,position="STR")
                         elif event_type in ("overrun", "bull rush"):
                             _, prepared = self._grappling_preflight(candidate,player,entity_id,evidence,event_type)
+                        elif event_type == "end-run":
+                            from arena_hex_map import HexAddress
+                            for address in candidate.arena_map.layout.addresses():
+                                try:
+                                    _, prepared = self._grappling_preflight(candidate,player,
+                                        entity_id,evidence,event_type,
+                                        exit_cell=(address.column,address.row))
+                                    exit_cells.append({"column":address.column,"row":address.row,
+                                        "duration_seconds":prepared.end_time-prepared.start_time})
+                                except ArenaBrowserRequestError:
+                                    continue
+                            if not exit_cells:
+                                raise ArenaBrowserRequestError("No currently clear exit hex is reachable through this Being at the selected ordinary movement rate.")
                         elif event_type in ("takedown","pin"):
                             default_position = ("prone" if event_type == "takedown" else
                                 "pin_top" if name.casefold() == "pin from above" else "pin_bottom")
@@ -3297,6 +3363,7 @@ class GeneratedArenaSession:
                             "trip":"Two-second Strength versus defender-chosen Strength/Dexterity contest after this player's successful Touch; size category is required.",
                             "bull rush":"One-second native Strength contest within one yard and ahead, including +2 for an explicitly represented side with more than two named legs; success records pending displacement without inventing a distance.",
                             "overrun":"Four-second native Strength + Dexterity contest against a standing Being within one yard and ahead, including +2 for an explicitly represented side with more than two named legs; success leaves the target prone without invented displacement.",
+                            "end-run":"Three-second preparation, then a one-second ordinary-rate passage through this occupied hex. The movement-phase contest uses native Dexterity, explicit size facts and Multiple-action priority; changing occupancy or an unknown route refuses safely.",
                         }[event_type]
                     except ArenaBrowserRequestError as exc:
                         reason = str(exc)
@@ -3304,7 +3371,7 @@ class GeneratedArenaSession:
                     "target_type":"being","required_skill":source_row["required_skill"],
                     "is_melee":source_row["is_melee"],"status":status,
                     "display_name":(f"{display} ({duration:g} s)" if duration is not None else display),"reason":reason,
-                    "target":target_view,"hands":hands,"duration_seconds":duration,
+                    "target":target_view,"hands":hands,"exit_cells":exit_cells,"duration_seconds":duration,
                     "event_type":event_type})
                 continue
             elif name.casefold() in ("grab object","wrest"):

@@ -505,6 +505,69 @@ class TestArenaMeleeAttack(unittest.TestCase):
         self.assertIn(dagger_id, player.possessions)
         self.assertEqual(target.get_hit_points(), candidate.participants[1].native.being.get_hit_points())
 
+    def test_generated_end_run_passage_and_fresh_process_continuation(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 9)
+        view = self.generate(size_categories={"player": "medium", "opponent": "medium"},
+                             opponent_strategy="none")
+        view, target_row, _weapon_id, _distance, _reach = self.move_to_target_neighbor(view)
+        status, inspected = self.request("/api/generated/inspect", {"handle": target_row["handle"]})
+        self.assertEqual(status, 200, inspected)
+        entry = next(row for row in inspected["action_catalog"]["entries"]
+                     if row.get("event_type") == "end-run")
+        self.assertEqual(entry["status"], "available", entry["reason"])
+        self.assertTrue(entry["exit_cells"])
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("End Run exit hex", page)
+        self.assertIn("submitGrappling(action.event_type,action.target.handle,null,null,cell)", page)
+        destination = entry["exit_cells"][0]
+        status, accepted = self.request("/api/generated/grappling", {
+            "handle": target_row["handle"], "action": "end-run",
+            "exit_cell": {"column": destination["column"], "row": destination["row"]}})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["grappling_action"]["status"], "executing")
+        self.assertEqual(accepted["grappling_action"]["seconds_remaining"], 3)
+        with tempfile.TemporaryDirectory() as directory:
+            pending_path = Path(directory) / "end-run-pending.json"
+            committed_path = Path(directory) / "end-run-committed.json"
+            pending_path.write_bytes(self.session.save_encounter_bytes())
+            env = dict(os.environ, PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}")
+            code = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 13); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "assert s.public_view()['grappling_action']['status']=='executing'; "
+                "[s.advance_one_second() for _ in range(3)]; v=s.public_view(); "
+                "player=s.active_candidate.participants[0].native.being; "
+                "target=s.active_candidate.participants[1].native.being; "
+                "print(json.dumps({'time':v['time_seconds'],'status':v['grappling_action']['status'],"
+                "'outcome':v['grappling_action']['outcome'],'player':player.get_position().as_tuple(),"
+                "'target':target.get_position().as_tuple()})); "
+                "open(sys.argv[2],'wb').write(s.save_encounter_bytes())"
+            )
+            resolved = subprocess.run([sys.executable, "-B", "-c", code,
+                str(pending_path), str(committed_path)], cwd=ROOT, env=env,
+                check=True, capture_output=True, text=True)
+            result = json.loads(resolved.stdout)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["outcome"], "success")
+            origin = self.session.active_candidate.participants[0].native.being.get_position()
+            self.assertNotEqual(result["player"], origin.as_tuple())
+            verify = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 17); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); v=s.public_view(); "
+                "print(json.dumps({'time':v['time_seconds'],'status':v['grappling_action']['status'],"
+                "'outcome':v['grappling_action']['outcome'],"
+                "'player':s.active_candidate.participants[0].native.being.get_position().as_tuple()}))"
+            )
+            restored = subprocess.run([sys.executable, "-B", "-c", verify,
+                str(committed_path)], cwd=ROOT, env=env, check=True,
+                capture_output=True, text=True)
+            self.assertEqual(json.loads(restored.stdout), {
+                "time": result["time"], "status": "completed",
+                "outcome": "success", "player": result["player"]})
+
     def test_generated_overrun_refuses_when_required_size_facts_are_absent(self):
         view = self.generate()
         self.assertEqual(self.request("/api/generated/run", {})[0], 200)

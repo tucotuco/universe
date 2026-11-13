@@ -838,13 +838,23 @@ class Encounter(Event):
         registered = self.universe.get_event_by_id(action.id)
         if registered is not None and registered is not action:
             raise ValueError("an Event with this id already exists")
-        allowed = {'start_position', '_encounter', 'ready_at', 'threat_at_schedule', 'target_action_id'}
+        allowed = {'start_position', '_encounter', 'ready_at', 'threat_at_schedule', 'target_action_id',
+                   'end_run_origin_position','end_run_target_position',
+                   'end_run_origin_cell','end_run_target_cell'}
         names = [name for name, _ in prepared.initialization]
         if len(names) != len(set(names)) or any(name not in allowed for name in names):
             raise ValueError("unsupported prepared initialization fields")
         for name, value in prepared.initialization:
             if name == '_encounter' and value is not self:
                 raise ValueError("prepared binding must refer to this Encounter")
+            if name in ('end_run_origin_position','end_run_target_position'):
+                from spatial.state import CartesianPosition
+                if type(value) is not CartesianPosition:
+                    raise ValueError('prepared End Run position must be native Cartesian data')
+            if name in ('end_run_origin_cell','end_run_target_cell') and (
+                    type(value) is not tuple or len(value) != 2
+                    or any(type(part) is not int or part < 0 for part in value)):
+                raise ValueError('prepared End Run hex address must be a native cell tuple')
             readiness_start = (0 if getattr(action, 'prepared_defense_action_id', None) is not None
                                else prepared.start_time)
             if name == 'ready_at' and (isinstance(value, bool)

@@ -160,12 +160,14 @@ def _movement_hexes(start, end, layout):
     return frozenset(touched)
 
 
-def _validate_arena_routes(routes, snapshot, *, terminal_object_cells=None):
+def _validate_arena_routes(routes, snapshot, *, terminal_object_cells=None,
+                           passage_targets=None):
     from arena_hex_map import layout_from_encounter_map
     layout = layout_from_encounter_map(snapshot.encounter_map)
     if layout is None:
         return
     terminal_object_cells = {} if terminal_object_cells is None else dict(terminal_object_cells)
+    passage_targets = {} if passage_targets is None else dict(passage_targets)
     moving = set(routes)
     occupied_routes = {}
     trajectories = {}
@@ -195,7 +197,15 @@ def _validate_arena_routes(routes, snapshot, *, terminal_object_cells=None):
         for cell in route - {origin}:
             occupants = stationary.get(cell, ())
             if occupants:
-                raise MovementIntentRefusal("occupied_path", "movement passes through a known occupied Being hex")
+                passage_target = passage_targets.get(actor_id)
+                target = (snapshot.entity(passage_target)
+                          if passage_target is not None else None)
+                target_cell = (None if target is None or target.position is None
+                               else layout.cell_at_position(target.position))
+                if not (passage_target is not None and cell == target_cell
+                        and len(occupants) == 1
+                        and occupants[0][0] == passage_target):
+                    raise MovementIntentRefusal("occupied_path", "movement passes through a known occupied Being hex")
             for object_id in ground_objects.get(cell, ()):
                 obstacle = snapshot.entity(object_id)
                 if obstacle.geometry is None:
@@ -253,6 +263,16 @@ def validate_arena_movement_paths(prepared, snapshot):
                for entity in snapshot.entities.values()):
             terminal_object_cells[row.intent.actor_id] = cell
     _validate_arena_routes(routes, snapshot, terminal_object_cells=terminal_object_cells)
+
+
+def validate_end_run_path(actor_id, target_id, start, end, snapshot):
+    """Validate a single adopted passage through its named occupied hex."""
+    if (type(actor_id) is not str or type(target_id) is not str
+            or actor_id == target_id
+            or type(start) is not CartesianPosition or type(end) is not CartesianPosition):
+        raise MovementIntentRefusal('invalid_end_run_path', 'End Run requires native Being identities and positions')
+    _validate_arena_routes({actor_id: (start, end)}, snapshot,
+                           passage_targets={actor_id: target_id})
 
 
 def validate_arena_velocity_paths(velocities, snapshot, duration):

@@ -81,7 +81,7 @@ class BoundaryCandidate:
 
 
 _EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
-_FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
+_FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
@@ -108,6 +108,7 @@ _OUTCOMES = {
     'ready_preparation': frozenset(('unavailable', 'unable_to_act', 'unsupported_motion',
                                     'unsupported_timing', 'already_ready', 'contested', 'success')),
     'delay': frozenset(('success',)),
+    'end_run': frozenset(('success','failed','unplaced','dexterity_unknown','facing_unknown','size_unknown','target_moved','mover_displaced','unknown_path','occupied_exit','insufficient_movement','movement_unavailable','contested')),
     'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','not_facing','blocked','uncertain_path',
         'unavailable','failed','success','success_pending_displacement','yielded','tower_shield_restricted','shield_unavailable','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
 }
@@ -119,6 +120,7 @@ _METADATA = {'combat': ('distance',), 'melee': ('distance','relative_charge_spee
              'history_request': ('account_id', 'objective_key', 'newly_constructed'),
              'pickup': (), 'ready_weapon': (), 'ready_preparation': (), 'delay': (), 'grappling': ('contact_kind',)}
 _METADATA['throw'] = ('release_speed_yd_s', 'impact_time')
+_METADATA['end_run'] = ('rolls','initiator_total','occupant_total','reason','exit_distance_m')
 
 
 def _require(condition, reason):
@@ -234,7 +236,9 @@ def _copy_actions(snapshot):
         _identity(view.lifecycle)
         _require(view.lifecycle in ('pending', 'paused', 'cancelled'), 'unsupported Action lifecycle')
         _require(view.lifecycle in ('cancelled','paused') or view.boundary >= snapshot.boundary, 'stale pending Action')
-        data = {_identity(k): (position(v) if k in ('start_position', 'target_position') else freeze(v)) for k, v in _mapping(view.data).items()}
+        data = {_identity(k): (position(v) if k in ('start_position','target_position',
+            'end_run_exit_position','end_run_origin_position','end_run_target_position')
+            else freeze(v)) for k, v in _mapping(view.data).items()}
         actions[key] = replace(view, data=MappingProxyType(data))
     _require(len({a.order for a in actions.values()}) == len(actions), 'ambiguous scheduling order')
     return actions

@@ -733,6 +733,124 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             MappingProxyType(facing_updates), MappingProxyType(boundary_motion))
         context=capture_observer_context(encounter,next_boundary,rng_state=before_rng,
             _stage=fence,_restore_context=_restore_context)
+        end_run_rng = None
+        end_run_trace = ()
+        due_end_runs = tuple(sorted((view for view in context.snapshot.actions.values()
+            if view.family == 'end_run' and view.lifecycle == 'pending'
+            and view.boundary == next_boundary), key=lambda view:(view.priority,view.order,view.id)))
+        if due_end_runs:
+            from action_evaluation import _ProvisionalRandom, resolve_end_run_contest
+            from movement_intent import (MovementIntent, MovementRateConditions,
+                MovementIntentRefusal, prepare_movement_intent, validate_end_run_path,
+                _movement_hexes)
+            from arena_hex_map import layout_from_encounter_map
+            layout = layout_from_encounter_map(context.snapshot.encounter_map)
+            end_run_rng = _ProvisionalRandom(before_rng)
+            prepared = {}
+            results = {}
+            for view in due_end_runs:
+                data = view.data
+                actor = context.snapshot.entity(view.actor_id)
+                target = context.snapshot.entity(view.target_id)
+                origin = data.get('end_run_origin_position')
+                target_origin = data.get('end_run_target_position')
+                exit_position = data.get('end_run_exit_position')
+                if (layout is None or actor.position is None or target.position is None
+                        or origin != actor.position):
+                    results[view.id] = ('mover_displaced', ())
+                    continue
+                if target_origin != target.position:
+                    results[view.id] = ('target_moved', ())
+                    continue
+                conditions_data = data.get('end_run_movement_conditions')
+                if (type(conditions_data) is not tuple or len(conditions_data) != 4
+                        or type(exit_position) is not CartesianPosition):
+                    results[view.id] = ('movement_unavailable', ())
+                    continue
+                target_cell = layout.cell_at_position(target.position)
+                exit_cell = layout.cell_at_position(exit_position)
+                origin_cell = layout.cell_at_position(actor.position)
+                recorded_target_cell = data.get('end_run_target_cell')
+                if (target_cell is None or origin_cell is None or exit_cell is None
+                        or target_cell == origin_cell or exit_cell in (origin_cell,target_cell)
+                        or recorded_target_cell != (target_cell.column,target_cell.row)):
+                    results[view.id] = ('unknown_path', ())
+                    continue
+                try:
+                    conditions = MovementRateConditions(
+                        conditions_data[0], conditions_data[1], None,
+                        conditions_data[2], conditions_data[3])
+                    intent = MovementIntent(view.actor_id, exit_position,
+                        data.get('end_run_rate'), view.id, next_boundary,
+                        'turn', None)
+                    row = prepare_movement_intent(encounter,intent,conditions,
+                        duration=1.0,pre_action_snapshot=context.snapshot)
+                    if (row.arrival_time_seconds is None
+                            or row.arrival_time_seconds > 1.0):
+                        results[view.id] = ('insufficient_movement', ())
+                        continue
+                    route_cells = _movement_hexes(row.start_position,exit_position,layout)
+                    if target_cell not in route_cells:
+                        results[view.id] = ('unknown_path', ())
+                        continue
+                    validate_end_run_path(view.actor_id,view.target_id,
+                        row.start_position,exit_position,context.snapshot)
+                    prepared[view.id] = row
+                except MovementIntentRefusal as exc:
+                    code = ('occupied_exit' if exc.code in ('occupied_path','conflicting_routes')
+                            else 'unknown_path' if exc.code in ('unknown_path','blocked_path','uncertain_path')
+                            else 'movement_unavailable')
+                    results[view.id] = (code, (('reason',exc.code),))
+            # Ambiguous simultaneous claims are refused as a group. No order or
+            # identity-based winner is introduced for a shared passage.
+            conflicted = set()
+            for index,left in enumerate(due_end_runs):
+                if left.id not in prepared: continue
+                lrow = prepared[left.id]
+                lstart = lrow.start_position
+                lcells = _movement_hexes(lstart,lrow.intent.destination,layout)
+                ltarget = context.snapshot.entity(left.target_id).position
+                ltarget_cell = layout.cell_at_position(ltarget)
+                for right in due_end_runs[index+1:]:
+                    if right.id not in prepared: continue
+                    rrow = prepared[right.id]
+                    rcells = _movement_hexes(rrow.start_position,rrow.intent.destination,layout)
+                    rtarget = context.snapshot.entity(right.target_id).position
+                    rtarget_cell = layout.cell_at_position(rtarget)
+                    if (left.target_id == right.target_id
+                            or ((lcells-{layout.cell_at_position(lstart),ltarget_cell})
+                                & (rcells-{layout.cell_at_position(rrow.start_position),rtarget_cell}))):
+                        conflicted.update((left.id,right.id))
+            for action_id in conflicted:
+                results[action_id] = ('contested', ())
+            end_run_outputs = {}
+            for view in due_end_runs:
+                if view.id not in results:
+                    end_run_rng.action_id = view.id
+                    proposal = resolve_end_run_contest(context.snapshot,view,end_run_rng)
+                    metadata = proposal.metadata
+                    results[view.id] = (proposal.outcome, metadata)
+                outcome, metadata = results[view.id]
+                end_run_outputs[view.id] = (outcome,metadata)
+                initialization.setdefault(view.id,{})['end_run_phase_result'] = (outcome,metadata)
+                if outcome == 'success' and view.id in prepared:
+                    row=prepared[view.id]
+                    positions[view.actor_id]=truncate_position(row.intent.destination)
+                    if row.facing_update is not None:
+                        facing_updates[view.actor_id]=row.facing_update
+                    movement.append(MovementSegment(next_boundary-1,next_boundary,
+                        MappingProxyType({view.actor_id:row.velocity_meters_per_second}),
+                        MappingProxyType({view.actor_id:row.start_position}),
+                        MappingProxyType({view.actor_id:positions[view.actor_id]})))
+            end_run_trace=tuple(end_run_rng.trace)
+            fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),
+                MappingProxyType(events),MappingProxyType(initialization),
+                MappingProxyType(registered),MappingProxyType(states),
+                MappingProxyType(positions),MappingProxyType(facing_updates),
+                MappingProxyType(boundary_motion))
+            context=capture_observer_context(encounter,next_boundary,
+                rng_state=end_run_rng.rng.getstate(),_stage=fence,
+                _restore_context=_restore_context)
         if adult_member_candidate is not None:
             _require(adult_member_candidate.member_id not in context.snapshot.entities,
                 'new adult must be absent from the common interval snapshot')
@@ -838,7 +956,7 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                 for f in fences for aid in f.registered_action_ids),
             MappingProxyType(states),MappingProxyType(choice_states),reservations,revision)
         provisional=ProvisionalRNG(role,owner_identity,before_rng,supported.boundary.provisional_rng_state,
-            supported.boundary.trace,supported.observer_trace,supported.objective.draws)
+            end_run_trace+supported.boundary.trace,supported.observer_trace,supported.objective.draws)
         history=freeze(ed['fatigue_frame_history'])+(freeze({'start':checkpoint.start,'time':next_boundary,
             'views':context.snapshot.fatigue}),)
         changes=MappingProxyType({'clock':freeze({'time':next_boundary,'coordinator_time':next_boundary,

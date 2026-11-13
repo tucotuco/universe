@@ -364,6 +364,134 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.session.choose_run()
         return self.candidate.universe.event_history[self.session._player_action_id]
 
+    def declare_end_run(self, *, willing=False, exit_cell=HexAddress(3, 2), rate='run'):
+        from activities import end_run_action
+        self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
+        self.opponent.set_position(self.layout.center_position(HexAddress(2, 2)))
+        self.player.set_hex_facing(0)
+        self.opponent.set_hex_facing(6)
+        self.player.size_category = 'medium'
+        self.opponent.size_category = 'medium'
+        self.player.set_ability('DEX',10)
+        self.opponent.set_ability('DEX',10)
+        self.activate_run_observer()
+        action = end_run_action(self.encounter,self.player.id,self.opponent.id,
+            self.layout.center_position(exit_cell),terrain_multiplier=1.0,
+            hampered_multiplier=1.0,direction='forward',rate=rate,
+            occupant_willing=willing)
+        self.encounter.schedule_action(action)
+        return action
+
+    def test_end_run_is_prepared_for_three_seconds_then_moves_through_willing_occupant(self):
+        action = self.declare_end_run(willing=True)
+        origin = self.player.get_position()
+        initial_rng = self.rng.state
+        self.assertEqual(action.end_time-action.start_time,3)
+        self.encounter.step(1)
+        self.assertEqual(self.player.get_position(),origin)
+        self.encounter.step(1)
+        self.assertEqual(self.player.get_position(),origin)
+        self.assertEqual(self.encounter.time,2)
+        self.encounter.step(1)
+        self.assertEqual(self.encounter.time,3)
+        self.assertEqual(self.player.get_position(),
+                         truncate_position(self.layout.center_position(HexAddress(3,2))))
+        receipt=self.encounter.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'success')
+        self.assertEqual(self.rng.state,initial_rng)
+
+    def test_end_run_refuses_target_that_changes_hex_during_preparation(self):
+        action = self.declare_end_run(willing=False)
+        origin = self.player.get_position()
+        self.encounter.step(1)
+        self.encounter.step(1)
+        self.opponent.set_position(self.layout.center_position(HexAddress(2,3)))
+        rng_before = self.rng.state
+        self.encounter.step(1)
+        self.assertEqual(self.player.get_position(),origin)
+        self.assertEqual(self.rng.state,rng_before)
+        self.assertEqual(self.encounter.inspect_committed(3).action(action.id).facts.outcome,
+                         'target_moved')
+
+    def test_end_run_tie_fails_without_moving_initiator(self):
+        action = self.declare_end_run(willing=False)
+        origin = self.player.get_position()
+        self.rng.state = random.Random(1).getstate()
+        for _ in range(3): self.encounter.step(1)
+        receipt = self.encounter.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'failed')
+        self.assertEqual(self.player.get_position(),origin)
+
+    def test_end_run_size_modifier_can_turn_same_tie_into_success(self):
+        action = self.declare_end_run(willing=False)
+        origin = self.player.get_position()
+        self.player.size_category = 'small'
+        self.opponent.size_category = 'medium'
+        self.rng.state = random.Random(1).getstate()
+        for _ in range(3): self.encounter.step(1)
+        receipt = self.encounter.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'success')
+        self.assertNotEqual(self.player.get_position(),origin)
+
+    def test_end_run_behind_occupant_uses_dexterity_check(self):
+        action = self.declare_end_run(willing=False)
+        self.opponent.set_hex_facing(0)
+        self.rng.state = random.Random(1).getstate()
+        for _ in range(3): self.encounter.step(1)
+        receipt = self.encounter.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome, 'success')
+        self.assertEqual(dict(receipt.facts.metadata)['reason'], 'behind_or_immobilized')
+
+    def test_end_run_is_interrupted_by_explicit_action_cancellation(self):
+        action = self.declare_end_run(willing=True)
+        origin = self.player.get_position()
+        self.encounter.step(1)
+        self.encounter.cancel_action(action.id, reason='test_interruption')
+        for _ in range(2): self.encounter.step(1)
+        self.assertEqual(self.player.get_position(), origin)
+        self.assertIn(action.id, self.encounter.cancelled_action_list)
+
+    def test_simultaneous_end_runs_contending_for_one_occupant_are_refused_together(self):
+        from activities import end_run_action
+        third_id = self.candidate.universe.make_being('Human', 'Second End Run challenger')
+        third = self.candidate.universe.get_object_by_id(third_id)
+        third.current.race = 'human'
+        self.encounter.add_being(third_id)
+        first, target = self.player, self.opponent
+        first.set_position(self.layout.center_position(HexAddress(1, 1)))
+        target.set_position(self.layout.center_position(HexAddress(2, 2)))
+        third.set_position(self.layout.center_position(HexAddress(1, 2)))
+        for being in (first, target, third):
+            being.set_hit_points(100)
+            being.set_hex_facing(6 if being is target else 0)
+            being.size_category = 'medium'
+            being.set_ability('DEX', 10)
+            being.set_posture('standing')
+        self.encounter.mark_aware(third.id, target.id)
+        self.encounter.mark_aware(self.player.id, target.id)
+        self.activate_run_observer()
+        # This native three-Being contention fixture exercises the transactional
+        # core outside the generated Arena's intentionally two-observer shell.
+        self.encounter.arena_activation_enabled = False
+        a = end_run_action(self.encounter, first.id, target.id,
+            self.layout.center_position(HexAddress(3, 2)), terrain_multiplier=1.0,
+            hampered_multiplier=1.0, direction='forward', rate='run', occupant_willing=False)
+        b = end_run_action(self.encounter, third.id, target.id,
+            self.layout.center_position(HexAddress(3, 1)), terrain_multiplier=1.0,
+            hampered_multiplier=1.0, direction='forward', rate='run', occupant_willing=False)
+        a.start_time = b.start_time = 1
+        a.end_time = b.end_time = 4
+        self.encounter.schedule_action(a)
+        self.encounter.schedule_action(b)
+        positions = tuple(row.get_position() for row in (first, target, third))
+        rng_before = self.rng.state
+        for _ in range(4): self.encounter.step(1)
+        receipts = self.encounter.inspect_committed(4)
+        self.assertEqual(receipts.action(a.id).facts.outcome, 'contested')
+        self.assertEqual(receipts.action(b.id).facts.outcome, 'contested')
+        self.assertEqual(tuple(row.get_position() for row in (first, target, third)), positions)
+        self.assertEqual(self.rng.state, rng_before)
+
     def resolve_postmovement_withdrawal(self, destination, reach):
         self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
         self.opponent.set_position(self.layout.center_position(HexAddress(2, 2)))

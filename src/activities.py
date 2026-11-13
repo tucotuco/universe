@@ -207,6 +207,53 @@ class DelayAction(Action):
         raise RuntimeError('DelayAction resolves only through native transactional publication')
 
 
+def end_run_action(encounter, actor_id, target_id, exit_position, *,
+                   terrain_multiplier, hampered_multiplier, direction,
+                   occupant_willing=False, rate='run', start_time=None,
+                   strategy=None, id=None):
+    """Create the adopted three-second End Run declaration.
+
+    The exit and ordinary movement premises are explicit declaration data.
+    ``occupant_willing`` is a target-authored scenario decision, never inferred
+    from NPC posture, strategy, or hidden attributes.
+    """
+    from spatial.state import CartesianPosition
+    from encounter import Encounter
+    from strategy import Strategy
+    if type(encounter) is not Encounter:
+        raise ValueError('End Run requires a native Encounter')
+    if type(exit_position) is not CartesianPosition:
+        raise ValueError('End Run requires a native Cartesian exit position')
+    if type(occupant_willing) is not bool:
+        raise ValueError('End Run occupant willingness must be an explicit target decision')
+    if type(rate) is not str or rate not in ('sprint','run','jog','hustle','walk'):
+        raise ValueError('End Run requires an adopted ordinary movement rate')
+    if (type(terrain_multiplier) not in (int, float)
+            or type(hampered_multiplier) not in (int, float)
+            or not math.isfinite(terrain_multiplier)
+            or not math.isfinite(hampered_multiplier)
+            or not 0 <= terrain_multiplier <= 1
+            or not 0 <= hampered_multiplier <= 1
+            or direction not in ('forward', 'backward', 'sideways', 'non_forward')):
+        raise ValueError('End Run requires explicit supported movement-rate premises')
+    start = encounter.time if start_time is None else start_time
+    if type(start) not in (int, float) or not math.isfinite(start) or start < 0 or not float(start).is_integer():
+        raise ValueError('End Run must begin at a committed integer boundary')
+    allocation = strategy if strategy is not None else Strategy()
+    if type(allocation) is not Strategy:
+        raise ValueError('End Run requires a native Strategy')
+    duration = max(1, 3 - allocation.timing_adjustment())
+    action = Action(encounter.universe, start, start + duration, 'end-run',
+                    actor_id, target_id, instrument_id=None,
+                    strategy=allocation, parent_event_id=encounter.id, id=id)
+    action.end_run_exit_position = exit_position
+    action.end_run_movement_conditions = (
+        float(terrain_multiplier), float(hampered_multiplier), direction, False)
+    action.end_run_occupant_willing = occupant_willing
+    action.end_run_rate = rate
+    return action
+
+
 class ReadyWeaponAction(Action):
     """Candidate ordinary weapon draw; resolution follows the native boundary."""
 
