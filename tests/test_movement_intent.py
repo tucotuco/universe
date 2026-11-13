@@ -63,6 +63,20 @@ class TestNativeMovementIntent(unittest.TestCase):
         self.assertEqual((self.encounter.time, self.player.get_position(), self.rng.state,
                           random.getstate(), tuple(self.encounter.pending_action_list)), before)
 
+    def test_direct_native_velocity_cannot_bypass_occupied_hex_clearance(self):
+        self.activate_run_observer()
+        self.player.set_position(self.layout.center_position(HexAddress(1, 2)))
+        origin = self.player.get_position()
+        occupied = self.layout.center_position(HexAddress(2, 2))
+        destination = self.layout.center_position(HexAddress(3, 2))
+        self.opponent.set_position(occupied)
+        velocity = tuple((b-a) for a, b in zip(origin.as_tuple(), destination.as_tuple()))
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, velocities={self.player.id: velocity})
+        self.assertEqual(refused.exception.code, "occupied_path")
+        self.assertEqual(self.encounter.time, 0)
+        self.assertEqual(self.player.get_position(), origin)
+
     def test_movement_refuses_unmodeled_route_outside_arena_footprint(self):
         self.activate_run_observer()
         start = self.player.get_position()
@@ -74,6 +88,26 @@ class TestNativeMovementIntent(unittest.TestCase):
                     terrain_multiplier=1.0, hampered_multiplier=1.0,
                     direction="forward", concurrent_demanding_action=False))
         self.assertEqual(refused.exception.code, "unknown_path")
+        self.assertEqual(self.encounter.time, 0)
+
+    def test_movement_refuses_ground_object_cell_without_clearance_geometry(self):
+        self.activate_run_observer()
+        origin, obstruction, destination = (HexAddress(1, 2), HexAddress(2, 2),
+                                            HexAddress(3, 2))
+        self.player.set_position(self.layout.center_position(origin))
+        self.opponent.set_position(self.layout.center_position(HexAddress(4, 4)))
+        object_id = self.candidate.universe.make_object("Rock", "unmodeled route rock")
+        rock = self.candidate.universe.get_object_by_id(object_id)
+        rock.set_position(self.layout.center_position(obstruction))
+        self.encounter.add_object(object_id)
+        intent = MovementIntent(self.player.id, self.layout.center_position(destination),
+                                "sprint", "unknown-object-route", 1)
+        with self.assertRaises(MovementIntentRefusal) as refused:
+            self.encounter.step(1, movement_intent=intent,
+                movement_conditions=MovementRateConditions(
+                    terrain_multiplier=1.0, hampered_multiplier=1.0,
+                    direction="forward", concurrent_demanding_action=False))
+        self.assertEqual(refused.exception.code, "uncertain_path")
         self.assertEqual(self.encounter.time, 0)
 
     def test_simultaneous_movers_cannot_claim_one_destination_hex(self):

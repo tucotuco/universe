@@ -160,30 +160,18 @@ def _movement_hexes(start, end, layout):
     return frozenset(touched)
 
 
-def validate_arena_movement_paths(prepared, snapshot):
-    """Fail closed on reference-point routes through known occupied Arena cells.
-
-    Hexes are a one-yard-across-flats occupancy/presentation reference only;
-    no Being footprint or body clearance is inferred. The same starting cell
-    may contain a contact/grip already represented by the Encounter.
-    """
+def _validate_arena_routes(routes, snapshot):
     from arena_hex_map import layout_from_encounter_map
     layout = layout_from_encounter_map(snapshot.encounter_map)
     if layout is None:
         return
-    moving = {row.intent.actor_id: row for row in prepared}
-    routes = {}
-    for actor_id, row in moving.items():
-        end = (row.intent.destination
-               if row.arrival_time_seconds is not None
-               and row.arrival_time_seconds <= 1.0 else CartesianPosition(
-                   row.start_position.x + row.velocity_meters_per_second[0],
-                   row.start_position.y + row.velocity_meters_per_second[1],
-                   row.start_position.z + row.velocity_meters_per_second[2]))
-        start_cell = layout.cell_at_position(row.start_position)
+    moving = set(routes)
+    occupied_routes = {}
+    for actor_id, (start, end) in routes.items():
+        start_cell = layout.cell_at_position(start)
         if start_cell is None or layout.cell_at_position(end) is None:
             raise MovementIntentRefusal("unknown_path", "movement endpoint is outside modeled Arena cells")
-        routes[actor_id] = (start_cell, _movement_hexes(row.start_position, end, layout))
+        occupied_routes[actor_id] = (start_cell, _movement_hexes(start, end, layout))
 
     stationary = {}
     ground_objects = {}
@@ -200,14 +188,14 @@ def validate_arena_movement_paths(prepared, snapshot):
             stationary.setdefault(cell, []).append((entity_id, entity))
         elif entity.data.get("parent_container_id") is None:
             ground_objects.setdefault(cell, []).append(entity_id)
-    for actor_id, (origin, route) in routes.items():
+    for actor_id, (origin, route) in occupied_routes.items():
         for cell in route - {origin}:
             occupants = stationary.get(cell, ())
             if occupants:
                 raise MovementIntentRefusal("occupied_path", "movement passes through a known occupied Being hex")
             if ground_objects.get(cell):
                 raise MovementIntentRefusal("uncertain_path", "movement crosses a ground Object cell without supported clearance geometry")
-        for other_id, (other_origin, other_route) in routes.items():
+        for other_id, (other_origin, other_route) in occupied_routes.items():
             if actor_id == other_id:
                 continue
             if other_origin != origin and other_origin in route:
@@ -215,6 +203,42 @@ def validate_arena_movement_paths(prepared, snapshot):
             shared = (route - {origin}) & (other_route - {other_origin})
             if shared:
                 raise MovementIntentRefusal("conflicting_routes", "simultaneous routes claim the same Arena hex")
+
+
+def validate_arena_movement_paths(prepared, snapshot):
+    """Check one-second intent routes against known Arena occupancy.
+
+    Hexes are a one-yard-across-flats occupancy/presentation reference only;
+    no Being footprint or body clearance is inferred. The same starting cell
+    may contain a contact/grip already represented by the Encounter.
+    """
+    routes = {}
+    for row in prepared:
+        end = (row.intent.destination
+               if row.arrival_time_seconds is not None
+               and row.arrival_time_seconds <= 1.0 else CartesianPosition(
+                   row.start_position.x + row.velocity_meters_per_second[0],
+                   row.start_position.y + row.velocity_meters_per_second[1],
+                   row.start_position.z + row.velocity_meters_per_second[2]))
+        routes[row.intent.actor_id] = (row.start_position, end)
+    _validate_arena_routes(routes, snapshot)
+
+
+def validate_arena_velocity_paths(velocities, snapshot, duration):
+    """Apply the same occupancy contract to direct native Being velocities."""
+    routes = {}
+    for actor_id, vector in velocities.items():
+        entity = snapshot.entity(actor_id)
+        if entity.category != "being":
+            continue
+        if entity.position is None:
+            raise MovementIntentRefusal("unplaced_actor", "moving Being lacks a native reference position")
+        start = entity.position
+        end = CartesianPosition(start.x + vector[0]*duration,
+                                start.y + vector[1]*duration,
+                                start.z + vector[2]*duration)
+        routes[actor_id] = (start, end)
+    _validate_arena_routes(routes, snapshot)
 
 
 def _finite_factor(value, name):

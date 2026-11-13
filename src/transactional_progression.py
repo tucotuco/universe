@@ -827,6 +827,8 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                                                      for intent,_ in prepared_rows)
                     else:
                         motion=dict(_motion(positions,velocities,encounter.local_frame,velocity_frame,end-start))
+                        from movement_intent import validate_arena_velocity_paths
+                        validate_arena_velocity_paths(motion, context.snapshot, end-start)
                 # The same scope covers validation, staging and publication.
                 if mode_of(encounter)!='transactional':raise TransactionalProgressionError('mode changed')
                 _ROUTED_OWNERSHIP[id(encounter)]=ownership
