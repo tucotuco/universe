@@ -110,7 +110,7 @@ Two narrow rule decisions remain isolated: (1) simultaneous Wrest attempts on on
 
 ### Continuation verification and commit evidence (12 November 2026)
 
-Observed HEAD after implementation, generated-defender coverage and task/report update: `38ed86b755ce12d7f91a2d943db4ed04d6c7590c`. The implementation/test commits are `7a8ac58fdfd8eb1e4caca905e3ee3d3f2fd1a31e` and `cf933d09bf75849f0e35351b226d7e38de9b6569`; the TASKS/report evidence commit is `38ed86b755ce12d7f91a2d943db4ed04d6c7590c`. The report-only evidence correction is the next local commit and does not alter implementation or task state.
+Observed HEAD after implementation, generated-defender coverage and task/report update: `38ed86b755ce12d7f91a2d943db4ed04d6c7590c`. The implementation/test commits are `7a8ac58fdfd8eb1e4caca905e3ee3d3f2fd1a31e` and `cf933d09bf75849f0e35351b226d7e38de9b6569`; the TASKS/report evidence commit is `38ed86b755ce12d7f91a2d943db4ed04d6c7590c`. A separate report-only correction followed that recorded HEAD without changing implementation or task state.
 
 All commands below used `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest`; the listed modules/classes are the unittest arguments.
 
