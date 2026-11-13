@@ -158,6 +158,64 @@ class TestArenaMeleeAttack(unittest.TestCase):
         self.assertIn('action.name===\'Charge\'', page)
         self.assertIn("submitMeleeStrike(action.target.handle,action.motion,true)", page)
 
+    def test_generated_arena_runs_in_and_resolves_a_legal_charge(self):
+        import json
+        empty_profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 12,
+            ground_loadout_profile=empty_profile)
+        status, view = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "30", "height_cells": "30",
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200, view)
+        status, view = self.request("/api/generated/run", {})
+        self.assertEqual(status, 200, view)
+        status, view = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200, view)
+        candidate = self.session.active_candidate
+        player, target = (part.native.being for part in candidate.participants)
+        target_cell = candidate.arena_map.layout.cell_at_position(target.get_position())
+        # A brief legal walk puts the generated sprint run-in at a position
+        # and heading where its four-second culmination lands in Dagger reach.
+        # These are user-selected Arena destinations, not native position or
+        # velocity edits.
+        status, view = self.request("/api/generated/destination", {
+            "column": 4, "row": 27, "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200, view)
+        status, view = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200, view)
+        approach = next(cell for cell in candidate.arena_map.layout.neighbors(target_cell)
+                        if (cell.column, cell.row) == (25, 13))
+        self.assertTrue(candidate.arena_map.layout.contains(approach))
+        target_row = next(row for row in view["entities"]
+                          if row["category"] == "being" and row["name"] != view["player"]["name"])
+        status, inspected = self.request("/api/generated/inspect", {
+            "handle": target_row["handle"]})
+        self.assertEqual(status, 200, inspected)
+        charge = next(row for row in inspected["action_catalog"]["entries"]
+                      if row["name"] == "Charge")
+        self.assertEqual(charge["status"], "available", charge["reason"])
+        status, accepted = self.request("/api/generated/melee-strike", {
+            "handle": target_row["handle"], "motion": "thrust", "charge": True})
+        self.assertEqual(status, 200, accepted)
+        action = self.session._player_melee_action(candidate, player)
+        self.assertTrue(action.charge)
+        status, view = self.request("/api/generated/destination", {
+            "column": approach.column, "row": approach.row,
+            "rate": "sprint", "facing_policy": "turn"})
+        self.assertEqual(status, 200, view)
+        for _ in range(4):
+            status, result = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, result)
+        self.assertEqual(result["melee_action"]["status"], "completed")
+        self.assertEqual(result["melee_action"]["outcome"], "normal")
+        self.assertLessEqual(result["melee_action"]["impact_distance_meters"],
+                             effective_melee_reach_meters(player.current,
+                                 candidate.universe.get_object_by_id(action.instrument_id).current))
+        facts = candidate.encounter.inspect_committed(6).action(action.id).facts
+        relative_speed = dict(facts.metadata)["relative_charge_speed_yd_s"]
+        self.assertGreaterEqual(relative_speed, 4.0)
+        self.assertGreaterEqual(relative_speed, 4.5)
+
     def test_native_strike_browser_route_and_pending_completed_save_load(self):
         accepted, target, action, weapon_id, distance, reach = self.schedule_thrust()
         self.assertEqual(accepted["melee_action"]["status"], "executing")

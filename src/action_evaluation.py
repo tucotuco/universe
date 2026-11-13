@@ -1087,6 +1087,7 @@ def _combat(snapshot, action, rng, dependencies):
                 outcome = 'insufficient_charge_speed'
             else:
                 relative_speed_yd_s = math.dist(actor_velocity, target_velocity) / 0.9144
+                meta.append(('relative_charge_speed_yd_s', relative_speed_yd_s))
                 if relative_speed_yd_s < 4.0:
                     outcome = 'insufficient_charge_speed'
                 else:

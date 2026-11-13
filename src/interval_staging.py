@@ -725,9 +725,12 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
         from measured_values import truncate_position
         positions={key:None if value is None else truncate_position(value)
                    for key,value in positions.items()}
+        boundary_motion = {key: vector for key, vector in motion.items()
+                           if key not in movement_stop_times
+                           or movement_stop_times[key] >= next_boundary}
         fence=_StagedReadFence(id(encounter),next_boundary,tuple(pending),MappingProxyType(events),
             MappingProxyType(initialization),MappingProxyType(registered),MappingProxyType(states),MappingProxyType(positions),
-            MappingProxyType(facing_updates), MappingProxyType(dict(motion)))
+            MappingProxyType(facing_updates), MappingProxyType(boundary_motion))
         context=capture_observer_context(encounter,next_boundary,rng_state=before_rng,
             _stage=fence,_restore_context=_restore_context)
         if adult_member_candidate is not None:

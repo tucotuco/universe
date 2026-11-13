@@ -79,6 +79,25 @@ class TestIntervalStaging(unittest.TestCase):
         self.assertEqual((candidate.movement[0].start,candidate.movement[0].end),(.25,1))
         with self.assertRaises(IntervalIntegrityError):enc.prepare_interval_candidate(0)
 
+    def test_motion_snapshot_excludes_actor_that_arrives_before_boundary(self):
+        from spatial.state import CartesianPosition
+        candidate=self.build(velocities={self.a.id:(2,0,0)},
+            movement_stop_times={self.a.id:.5},
+            movement_targets={self.a.id:CartesianPosition(2,0,0)})
+        self.assertEqual(candidate.pre_action_snapshot.entity(self.a.id).position,
+                         CartesianPosition(2,0,0))
+        self.assertNotIn(self.a.id,candidate.pre_action_snapshot.motion_velocities_m_s)
+
+    def test_motion_snapshot_retains_actor_velocity_at_arrival_boundary(self):
+        from spatial.state import CartesianPosition
+        candidate=self.build(velocities={self.a.id:(2,0,0)},
+            movement_stop_times={self.a.id:1},
+            movement_targets={self.a.id:CartesianPosition(3,0,0)})
+        self.assertEqual(candidate.pre_action_snapshot.entity(self.a.id).position,
+                         CartesianPosition(3,0,0))
+        self.assertEqual(candidate.pre_action_snapshot.motion_velocities_m_s[self.a.id],
+                         (2.0,0.0,0.0))
+
     def test_acceptance_at_zero_is_staged_without_registering_live(self):
         action=RunAction(self.world,self.a.id,0,1,2,experience=5)
         view=self.accept((action,));candidate=self.build(velocities={self.a.id:(3,0,0)})

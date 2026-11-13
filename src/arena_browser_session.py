@@ -4754,6 +4754,11 @@ class GeneratedArenaSession:
                     or getattr(action, "event_type", None) == "hold"):
                 continue
             if type(action) is MeleeStrike:
+                # Charge's attack is the culmination of its movement; treating
+                # that same Action as an additional demanding task halves the
+                # very run-in speed the adopted Charge test requires.
+                if action.charge:
+                    continue
                 demanding = True
             elif type(action) is RunAction:
                 continue

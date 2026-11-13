@@ -111,7 +111,7 @@ _OUTCOMES = {
     'grappling': frozenset(('touched_required','touch_required','size_category_unknown','size_limit','wrong_position','out_of_reach','not_facing','blocked','uncertain_path',
         'unavailable','failed','success','success_pending_displacement','yielded','tower_shield_restricted','shield_unavailable','grip_lost','no_control','not_held','holder_unavailable','hand_unavailable','contested','custody_conflict','capacity_exceeded')),
 }
-_METADATA = {'combat': ('distance',), 'melee': ('distance',), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
+_METADATA = {'combat': ('distance',), 'melee': ('distance','relative_charge_speed_yd_s'), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
                       'racial_action_bonus', 'effective_dc', 'observation_id',
                       'objective_key', 'evidence_kind', 'visible_count'),
@@ -343,6 +343,9 @@ def _copy_proposal(proposal, actions, entities):
                  'physical-contact Actions have only their typed native state effect')
     names = tuple(pair[0] for pair in metadata)
     _require(len(set(names)) == len(names) and set(names).issubset(_METADATA[action.family]), 'unsupported metadata (no Target HP on Actions)')
+    for key, value in metadata:
+        if key == 'relative_charge_speed_yd_s':
+            _number(value, nonnegative=True)
     effects = tuple(_effect(e) for e in _tuple(proposal.effects))
     defenses = tuple(_effect(d) for d in _tuple(proposal.defenses))
     _require(all(type(d) is DefenseEffect for d in defenses), 'non-defense dependency')
