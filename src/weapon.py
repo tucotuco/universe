@@ -65,12 +65,14 @@ def native_ready_preparation(weapon):
     if record is None:
         return None
     if (type(record) is not dict
-            or set(record) != {"owner_id", "motion", "ready_action_id", "completed_at", "readying_seconds"}
+            or set(record) not in ({"owner_id", "motion", "ready_action_id", "completed_at", "readying_seconds"},
+                                   {"owner_id", "motion", "ready_action_id", "completed_at", "readying_seconds", "pole_set"})
             or type(record.get("owner_id")) is not str or not record["owner_id"]
             or record.get("motion") not in ("swing", "thrust")
             or type(record.get("ready_action_id")) is not str or not record["ready_action_id"]
             or type(record.get("completed_at")) is not int or record["completed_at"] < 0
-            or type(record.get("readying_seconds")) is not int or record["readying_seconds"] < 1):
+            or type(record.get("readying_seconds")) is not int or record["readying_seconds"] < 1
+            or ("pole_set" in record and type(record["pole_set"]) is not bool)):
         raise ValueError("native weapon ready-preparation record is malformed")
     return record
 

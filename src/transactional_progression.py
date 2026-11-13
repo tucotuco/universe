@@ -501,9 +501,10 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or type(action.end_time) not in (int, float)
                 or not math.isfinite(action.start_time) or not math.isfinite(action.end_time)
                 or action.event_type != 'ready object'
-                or type(action.ready_motion) is not str or action.ready_motion not in ('swing', 'thrust')
+                or type(action.ready_motion) is not str or action.ready_motion not in ('swing', 'thrust', 'set pole')
                 or type(action.readying_seconds) is not int or action.readying_seconds < 1
-                or action.end_time - action.start_time != action.readying_seconds):
+                or action.end_time - action.start_time != action.readying_seconds
+                or (action.ready_motion == 'set pole' and action.readying_seconds != max(1,4-action.strategy.timing_adjustment()))):
             raise TransactionalProgressionError('weapon Ready must retain its selected motion and one-third timing')
     if type(action) is DelayAction:
         if (action.event_type != 'delay' or action.target_id is not None

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src"), str(ROOT / "examples")]
 
 from arena_browser_session import GeneratedArenaSession
+from action import Action
 from action_calculations import melee_hex_path_status
 from arena_hex_map import ArenaHexLayout, HexAddress
 from arena_web import make_handler
@@ -165,7 +166,8 @@ class TestArenaMeleeAttack(unittest.TestCase):
             ground_loadout_profile=empty_profile)
         status, view = self.request("/api/generated/generate", {
             "starting_experience": "10000", "width_cells": "30", "height_cells": "30",
-            "equipment_mode": "equipped", "opponent_strategy": "none"})
+            "equipment_mode": "equipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})
         self.assertEqual(status, 200, view)
         status, view = self.request("/api/generated/run", {})
         self.assertEqual(status, 200, view)
@@ -215,6 +217,108 @@ class TestArenaMeleeAttack(unittest.TestCase):
         relative_speed = dict(facts.metadata)["relative_charge_speed_yd_s"]
         self.assertGreaterEqual(relative_speed, 4.0)
         self.assertGreaterEqual(relative_speed, 4.5)
+
+    def test_generated_charge_overrun_continuation_restores_position_effect_in_fresh_processes(self):
+        import json
+        empty_profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 12,
+            ground_loadout_profile=empty_profile)
+        status, view = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "30", "height_cells": "30",
+            "equipment_mode": "equipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})
+        self.assertEqual(status, 200, view)
+        self.request("/api/generated/run", {})
+        status, view = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200, view)
+        candidate = self.session.active_candidate
+        player, target = (part.native.being for part in candidate.participants)
+        target_cell = candidate.arena_map.layout.cell_at_position(target.get_position())
+        self.request("/api/generated/destination", {
+            "column": 4, "row": 27, "rate": "walk", "facing_policy": "turn"})
+        status, view = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200, view)
+        approach = next(cell for cell in candidate.arena_map.layout.neighbors(target_cell)
+                        if (cell.column, cell.row) == (25, 13))
+        target_row = next(row for row in view["entities"]
+                          if row["category"] == "being" and row["name"] != view["player"]["name"])
+        status, accepted = self.request("/api/generated/melee-strike", {
+            "handle": target_row["handle"], "motion": "thrust", "charge": True})
+        self.assertEqual(status, 200, accepted)
+        action = self.session._player_melee_action(candidate, player)
+        self.assertTrue(action.charge)
+        self.request("/api/generated/destination", {
+            "column": approach.column, "row": approach.row,
+            "rate": "sprint", "facing_policy": "turn"})
+        for _ in range(4):
+            status, result = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, result)
+        self.assertEqual(result["melee_action"]["outcome"], "normal")
+        status, stopped = self.request("/api/generated/stop", {})
+        self.assertEqual(status, 200, stopped)
+        from action_evaluation import capture_snapshot, _charge_overrun_destination
+        probe = Action(candidate.universe, candidate.encounter.time,
+            candidate.encounter.time + 4, "overrun", player.id, target.id, None)
+        probe.charge_continuation_source_id = action.id
+        probe_snapshot = capture_snapshot(candidate.encounter,
+            candidate.encounter.last_processed_boundary + 1, _decision_preflight=True)
+        self.assertIsNotNone(_charge_overrun_destination(probe_snapshot, probe),
+            (player.get_position(), target.get_position(),
+             player.__dict__.get("hex_facing"), probe_snapshot.moving_ids))
+        status, inspected = self.request("/api/generated/inspect", {
+            "handle": target_row["handle"]})
+        self.assertEqual(status, 200, inspected)
+        overrun = next(row for row in inspected["action_catalog"]["entries"]
+                       if row.get("event_type") == "overrun")
+        self.assertEqual(overrun["status"], "available", overrun["reason"])
+        self.assertEqual(overrun["duration_seconds"], 6)
+        start_cell = candidate.arena_map.layout.cell_at_position(target.get_position())
+        before_position = target.get_position()
+        status, accepted = self.request("/api/generated/grappling", {
+            "handle": target_row["handle"], "action": "overrun"})
+        self.assertEqual(status, 200, accepted)
+        overrun_choice = next(choice
+            for choice in candidate.encounter._choice_book._choices.values()
+            for member in choice.members
+            if member.action.event_type == "overrun"
+            and member.action.actor_id == player.id
+            and member.action.target_id == target.id)
+        self.assertEqual(overrun_choice.prepared[0].end_time-
+                         overrun_choice.prepared[0].start_time, 6)
+        self.assertEqual(accepted["grappling_action"]["seconds_remaining"], 6)
+        with tempfile.TemporaryDirectory() as directory:
+            pending_path = Path(directory) / "charge-overrun-pending.json"
+            completed_path = Path(directory) / "charge-overrun-completed.json"
+            pending_path.write_bytes(self.session.save_encounter_bytes())
+            code = (
+                "import json,sys; from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda: 19); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "from action_evaluation import _ProvisionalRandom; "
+                "values=iter((6,6,6,1,1,1)); "
+                "_ProvisionalRandom.roll=lambda self,dice: next(values); "
+                "[s.advance_one_second() for _ in range(6)]; "
+                "c=s.active_candidate; t=c.participants[1].native.being; v=s.public_view(); "
+                "print(json.dumps({'time':v['time_seconds'],'status':v['grappling_action']['status'], "
+                "'outcome':v['grappling_action']['outcome'],'posture':t.get_posture(), "
+                "'position':t.get_position().as_tuple()})); "
+                "open(sys.argv[2],'wb').write(s.save_encounter_bytes())"
+            )
+            env = dict(os.environ, PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}")
+            completed = subprocess.run([sys.executable, "-B", "-c", code,
+                str(pending_path), str(completed_path)], cwd=ROOT, env=env,
+                check=True, capture_output=True, text=True)
+            restored_result = json.loads(completed.stdout)
+            self.assertEqual((restored_result["status"], restored_result["outcome"],
+                              restored_result["posture"]), ("completed", "success", "lying"))
+            self.assertNotEqual(candidate.arena_map.layout.cell_at_position(before_position),
+                                candidate.arena_map.layout.cell_at_position(
+                                    type(before_position)(*restored_result["position"])))
+            final_restore = GeneratedArenaSession()
+            final_view = final_restore.load_encounter_bytes(completed_path.read_bytes())
+            self.assertEqual(final_view["grappling_action"]["outcome"], "success")
+            self.assertEqual(final_restore.active_candidate.participants[1].native.being.get_posture(),
+                             "lying")
 
     def test_native_strike_browser_route_and_pending_completed_save_load(self):
         accepted, target, action, weapon_id, distance, reach = self.schedule_thrust()

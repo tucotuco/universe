@@ -120,26 +120,40 @@ class PickUpAction(Action):
 
 
 class ReadyPreparationAction(Action):
-    """Prepare a held Weapon for one explicitly selected attack motion."""
+    """Prepare a held Weapon for an attack motion or the adopted pole set."""
 
-    def __init__(self, encounter, actor_id, weapon_id, motion, start_time=None, *, id=None):
+    def __init__(self, encounter, actor_id, weapon_id, motion, start_time=None, *, strategy=None, id=None):
         from weapon import WeaponInstance, weapon_readying_time
-        if type(motion) is not str or motion not in ('swing', 'thrust'):
-            raise ValueError('weapon Ready requires an explicitly selected swing or thrust motion')
+        if type(motion) is not str or motion not in ('swing', 'thrust', 'set pole'):
+            raise ValueError('weapon Ready requires swing, thrust, or the adopted set-pole preparation')
         weapon = encounter.universe.get_object_by_id(weapon_id)
         if type(weapon) is not WeaponInstance:
             raise ValueError('weapon Ready requires an exact native WeaponInstance')
-        seconds = weapon_readying_time(weapon, motion)
+        pole_set = motion == 'set pole'
+        if pole_set:
+            dictionary = encounter.universe.library.weapon_dictionary
+            groups = dictionary.object_categories
+            pole_names = set(groups.get('Spears', ())) | set(groups.get('Lances', ()))
+            if weapon.current.obj_type not in pole_names or 'thrust' not in weapon.get_melee_types():
+                raise ValueError('set pole requires an adopted spear- or lance-group weapon with a thrust')
+            from strategy import Strategy
+            selected_strategy = strategy or Strategy()
+            seconds = max(1, 4 - selected_strategy.timing_adjustment())
+            ready_motion = 'set pole'
+        else:
+            seconds = weapon_readying_time(weapon, motion)
+            ready_motion = motion
         start = encounter.time if start_time is None else start_time
         if (type(start) not in (int, float) or not math.isfinite(start)
                 or start < 0 or not float(start).is_integer()):
             raise ValueError('Ready must begin at an integer Encounter second')
         super().__init__(encounter.universe, start, start + seconds, 'ready object',
                          actor_id, weapon_id, instrument_id=None,
-                         parent_event_id=encounter.id, id=id)
+                         strategy=strategy, parent_event_id=encounter.id, id=id)
         self.encounter = encounter
-        self.ready_motion = motion
+        self.ready_motion = ready_motion
         self.readying_seconds = seconds
+        self.pole_set = pole_set
         self.end_time = start + seconds
 
     def prepare_schedule(self, encounter):
@@ -161,6 +175,11 @@ class ReadyPreparationAction(Action):
             raise ValueError('weapon already has completed Ready preparation')
         if self.start_time < encounter.time:
             raise ValueError('Ready cannot begin before current Encounter time')
+        if self.pole_set:
+            expected = max(1, 4 - self.strategy.timing_adjustment())
+            if (self.ready_motion != 'set pole' or self.readying_seconds != expected
+                    or self.end_time - self.start_time != expected):
+                raise ValueError('set pole requires its adopted four-second base preparation with normal timing adjustment')
         return PreparedSchedule.from_action(self)
 
     def resolve(self, difficulty_class):

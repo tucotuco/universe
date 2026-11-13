@@ -964,6 +964,10 @@ class GeneratedArenaSession:
                 reasons.append(f"{motion}: {exc}")
                 continue
             options.append({"motion": motion, "duration_seconds": seconds})
+        categories = candidate.universe.library.weapon_dictionary.object_categories
+        pole_names = set(categories.get('Spears', ())) | set(categories.get('Lances', ()))
+        if weapon.current.obj_type in pole_names and 'thrust' in weapon.get_melee_types():
+            options.append({"motion": "set pole", "duration_seconds": 4})
         if not options:
             return (), ("No supported weapon motion can be readied as a positive-duration native Action. "
                         + "; ".join(reasons))
@@ -1111,13 +1115,15 @@ class GeneratedArenaSession:
                     | set(candidate.encounter.finished_action_list)
                     | set(candidate.encounter.cancelled_action_list))
         active_choices = set()
+        prepared_ends = {}
         for choice in candidate.encounter._choice_book._choices.values():
             if choice.view.state not in ("accepted", "executing", "finished"):
                 continue
-            for member in choice.members:
+            for member, packet in zip(choice.members, choice.prepared):
                 if type(member.action) is Action:
                     event_by_id[member.action.id] = member.action
                     accepted.add(member.action.id)
+                    prepared_ends[member.action.id] = packet.end_time
                     if choice.view.state in ("accepted", "executing"):
                         active_choices.add(member.action.id)
         actions = [event_by_id.get(action_id) for action_id in accepted]
@@ -1131,9 +1137,10 @@ class GeneratedArenaSession:
                  "grapple":"Grapple", "grapple escape":"Grapple Escape",
                  "takedown":"Takedown", "reverse":"Reverse", "pin":"Pin", "trip":"Trip", "bull rush":"Bull Rush", "overrun":"Overrun", "end-run":"End Run"}[action.event_type]
         if action.id in candidate.encounter.pending_action_list or action.id in active_choices:
+            action_end = prepared_ends.get(action.id, action.end_time)
             return {"name":label,"status":"executing","outcome":None,
-                    "seconds_remaining":max(0,math.ceil(action.end_time-candidate.encounter.time)),
-                    "end_time":action.end_time}
+                    "seconds_remaining":max(0,math.ceil(action_end-candidate.encounter.time)),
+                    "end_time":action_end}
         if action.id in candidate.encounter.cancelled_action_list:
             return {"name":label,"status":"cancelled","outcome":None,
                     "seconds_remaining":0,"end_time":action.end_time}
@@ -1929,7 +1936,7 @@ class GeneratedArenaSession:
                     hand = component.get("hand")
                     action = ReadyWeaponAction(encounter, player.id, entity_id,
                         hand, encounter.time)
-                elif kind == "ready-preparation" and motion in ("swing", "thrust"):
+                elif kind == "ready-preparation" and motion in ("swing", "thrust", "set pole"):
                     from activities import ReadyPreparationAction
                     options, reason = self._ready_preparation_options_unlocked(
                         candidate, player, entity_id, evidence)
@@ -2134,7 +2141,27 @@ class GeneratedArenaSession:
         if event_type in ("overrun", "bull rush"):
             # Native preparation validates positions, sizes, timing and facing
             # without the browser choosing contest outcomes.
-            pass
+            if event_type in ("bull rush", "overrun"):
+                from melee_combat import MeleeStrike
+                from action_evaluation import ActionProposal
+                source = None
+                for action_id in reversed(encounter.finished_action_list):
+                    prior = candidate.universe.get_event_by_id(action_id)
+                    if (prior is None or prior.actor_id != player.id
+                            or prior.target_id != target.id or prior.end_time != encounter.time
+                            or type(prior.resolution) is not ActionProposal):
+                        continue
+                    if (type(prior) is MeleeStrike and prior.charge
+                            and prior.resolution.outcome in ("normal", "critical")):
+                        source = prior
+                        break
+                    if (event_type == "overrun" and type(prior) is Action
+                            and prior.event_type == "bull rush"
+                            and prior.resolution.outcome in ("success", "success_pending_displacement")):
+                        source = prior
+                        break
+                if source is not None:
+                    action_data["charge_continuation_source_id"] = source.id
         elif event_type == "grab":
             touch = self._player_touch_action(candidate, player)
             if (touch is None or touch.target_id != target.id
@@ -3365,6 +3392,10 @@ class GeneratedArenaSession:
                             "overrun":"Four-second native Strength + Dexterity contest against a standing Being within one yard and ahead, including +2 for an explicitly represented side with more than two named legs; success leaves the target prone without invented displacement.",
                             "end-run":"Three-second preparation, then a one-second ordinary-rate passage through this occupied hex. The movement-phase contest uses native Dexterity, explicit size facts and Multiple-action priority; changing occupancy or an unknown route refuses safely.",
                         }[event_type]
+                        if event_type == "overrun" and duration > 4:
+                            reason = ("Six-second continuation after a successful Charge or Bull Rush, with the adopted +1 contest bonus. "
+                                "A Charge continuation lands the prone target one hex in the charging direction; a Bull Rush continuation "
+                                "leaves it prone in its current hex because no force-to-motion distance is adopted.")
                     except ArenaBrowserRequestError as exc:
                         reason = str(exc)
                 catalog_rows.append({"name":name,"group":"Physical contact",

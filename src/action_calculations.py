@@ -55,7 +55,7 @@ def defense_succeeds(defense_roll, defense_rank, defense_strategy,
     return defense_roll + defense_rank + defense_strategy >= attack_roll + attack_rank + attack_strategy
 
 
-def damage_path(outcome, potential, extra, roll, shield, armor, body):
+def damage_path(outcome, potential, extra, roll, shield, armor, body, *, damage_dice=1):
     """Distribute native ordinary/critical/self-hit damage through supplied sinks.
 
     Sinks may publish legacy effects or collect immutable proposals. Critical
@@ -64,7 +64,9 @@ def damage_path(outcome, potential, extra, roll, shield, armor, body):
     """
     if outcome not in ('normal', 'critical', 'hit self'):
         return
-    ordinary = roll(f'1d{potential}')
+    if type(damage_dice) is not int or damage_dice < 1:
+        raise ValueError('damage_dice must be a positive integer')
+    ordinary = sum(roll(f'1d{potential}') for _ in range(damage_dice))
     critical = roll(f'1d{potential}') if outcome == 'critical' else 0
     body(armor(shield(ordinary + extra)), critical)
 

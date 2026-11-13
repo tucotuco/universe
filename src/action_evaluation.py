@@ -27,6 +27,13 @@ class EvaluationIntegrityError(ValueError):
     """Contradictory/corrupt native data, distinct from a gameplay outcome."""
 
 
+def _timing_adjustment(strategy):
+    value = strategy.get('timing', 0)
+    if type(value) not in (int, float) or value < 0 or not math.isfinite(value):
+        raise EvaluationIntegrityError('invalid native timing strategy')
+    return math.floor((-1 + math.sqrt(1 + 8 * value)) / 2)
+
+
 def freeze(value):
     """Detach data without deepcopy/reduce/serialization extension callbacks."""
     if value is None or type(value) in (str, bool, int):
@@ -118,6 +125,7 @@ class EvaluationSnapshot:
     object_grips: tuple = ()
     moving_ids: tuple = ()
     motion_velocities_m_s: object = field(default_factory=lambda: MappingProxyType({}))
+    pole_weapon_names: frozenset = frozenset()
 
     def entity(self, identity):
         try:
@@ -142,13 +150,10 @@ class EvaluationSnapshot:
         distance = self.distance(first, second)
         if distance is None or distance == 0:
             return None
-        from arena_hex_map import layout_from_encounter_map
-        arena_hex_context = layout_from_encounter_map(self.encounter_map) is not None
         return trace_physical_path(self.entity(first).position, self.entity(second).position,
             ((key, entity) for key in self.participant_ids
              for entity in (self.entity(key),)
-             if (not arena_hex_context
-                 or entity.data.get('parent_container_id') is None)),
+             if entity.data.get('parent_container_id') is None),
             exclude_ids=(first, second))
 
     def melee_status(self, action):
@@ -319,11 +324,15 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
         for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
-                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge','end_run_exit_position','end_run_movement_conditions','end_run_occupant_willing','end_run_rate','end_run_origin_position','end_run_target_position','end_run_origin_cell','end_run_target_cell','end_run_phase_result'):
+                    'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge','charge_continuation_source_id','bull_rush_target_willing','end_run_exit_position','end_run_movement_conditions','end_run_occupant_willing','end_run_rate','end_run_origin_position','end_run_target_position','end_run_origin_cell','end_run_target_cell','end_run_phase_result'):
             if key in ad:
                 selected[key] = (position(ad[key]) if key in (
                     'end_run_exit_position','end_run_origin_position',
                     'end_run_target_position') else freeze(ad[key]))
+        if ('bull_rush_target_willing' in selected
+                and (ad['event_type'] != 'bull rush'
+                     or type(selected['bull_rush_target_willing']) is not bool)):
+            raise EvaluationIntegrityError('Bull Rush willingness must be an explicit native boolean scenario fact')
         if type(action) is Action and ad['event_type'] == 'grab':
             from physical_contact import successful_touch
             selected['contact_verified'] = successful_touch(encounter,ad.get('touch_action_id'),
@@ -366,6 +375,32 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(action) is RunAction:
             selected['start_position'] = position(ad['start_position'])
             selected['started'] = ad.get('_activity_started', False)
+        if type(action) is Action and ad.get('event_type') in ('bull rush','overrun'):
+            source_id = ad.get('charge_continuation_source_id')
+            if source_id is not None:
+                from melee_combat import MeleeStrike
+                source = wd['event_history'].get(source_id)
+                source_data = native_data(source, (MeleeStrike, Action)) if type(source) in (MeleeStrike, Action) else None
+                resolution = None if source_data is None else source_data.get('resolution')
+                common = (source_data is not None
+                    and source_data.get('actor_id') == ad.get('actor_id')
+                    and source_data.get('target_id') == ad.get('target_id')
+                    and source_data.get('end_time') == ad.get('start_time')
+                    and type(resolution) is ActionProposal)
+                if (type(source) is MeleeStrike and common
+                        and source_data.get('charge') is True
+                        and resolution.outcome in ('normal','critical')):
+                    selected['charge_continuation'] = True
+                elif (ad.get('event_type') == 'overrun' and type(source) is Action
+                        and common and source_data.get('event_type') == 'bull rush'
+                        and resolution.outcome in ('success','success_pending_displacement')):
+                    selected['bull_rush_continuation'] = True
+                elif (ad.get('event_type') == 'bull rush' and type(source) is Action
+                        and common and source_data.get('event_type') == 'bull rush'
+                        and resolution.outcome == 'success_pending_displacement'):
+                    selected['bull_rush_continuation'] = True
+                else:
+                    raise EvaluationIntegrityError('continuation lacks its immediately successful Charge or Bull Rush receipt')
         if type(action) is MeleeDefense and action.kind == 'yield':
             selected['start_position'] = position(ad.get('start_position'))
             selected['target_position'] = position(ad.get('target_position'))
@@ -643,7 +678,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         grapple_controls=controls, object_grips=object_grips,
         moving_ids=tuple(sorted(moving_ids)),
         motion_velocities_m_s=MappingProxyType({} if _stage is None else
-            {key: freeze(value) for key,value in _stage.motion_velocities_m_s.items()}))
+            {key: freeze(value) for key,value in _stage.motion_velocities_m_s.items()}),
+        pole_weapon_names=frozenset(
+            tuple(weapon_dictionary['object_categories'].get('Spears', ()))
+            + tuple(weapon_dictionary['object_categories'].get('Lances', ()))))
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -753,6 +791,7 @@ class ReadyPreparationEffect:
     object_id: str
     motion: str
     readying_seconds: int
+    pole_set: bool = False
 
 
 @dataclass(frozen=True)
@@ -793,6 +832,14 @@ class GrappleStateEffect:
     hand: str | None
     next_check: int | None
     position: str | None = None
+
+
+@dataclass(frozen=True)
+class PositionEffect:
+    """Receipt-backed exact position change from an adopted maneuver result."""
+    source_action_id: str
+    target_id: str
+    position: tuple
 
 
 @dataclass(frozen=True)
@@ -1025,7 +1072,8 @@ def _defense(snapshot, action, rng):
     return ActionProposal(action.id, actor.id, (attacker.id,), outcome, effects, (dependency,))
 
 
-def _combat(snapshot, action, rng, dependencies):
+def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
+            pole_charge_speed=None, charge_intercepted=False):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     weapon = snapshot.entity(action.instrument_id) if action.instrument_id else None
     effects = []
@@ -1090,7 +1138,9 @@ def _combat(snapshot, action, rng, dependencies):
     if action.family == 'melee':
         status, distance = snapshot.melee_status(action)
         meta.append(('distance', distance))
-        if action.data.get('charge') is True:
+        if pole_set_charge and pole_charge_speed is not None:
+            meta.append(('relative_charge_speed_yd_s', pole_charge_speed))
+        if action.data.get('charge') is True and not charge_intercepted:
             actor_velocity = snapshot.motion_velocities_m_s.get(actor.id)
             target_velocity = snapshot.motion_velocities_m_s.get(target.id, (0.0, 0.0, 0.0))
             if actor_velocity is None:
@@ -1168,7 +1218,9 @@ def _combat(snapshot, action, rng, dependencies):
                 return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0)
                     + actor.data['strategy']['attack'] - priority_penalty
-                    + feint_bonus + pin_bonus + (2 if action.data.get('charge') is True else 0),
+                    + feint_bonus + pin_bonus
+                    + (2 if action.data.get('charge') is True and not charge_intercepted else 0)
+                    + (2 if pole_set_charge else 0),
                     target_defense + parry_bonus, dc - adjustment)
             if action.family == 'melee' and action.data['event_type'] == 'feint':
                 if (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0) <= 1:
@@ -1243,9 +1295,15 @@ def _combat(snapshot, action, rng, dependencies):
                 effects.append(DamageEffect(action.id, recipient.id, ordinary, 'body'))
                 if outcome == 'critical':
                     effects.append(DamageEffect(action.id, recipient.id, critical, 'critical_bypass'))
+            if pole_charge_speed is not None:
+                pole_extra_damage = math.floor((pole_charge_speed - 4.0) / 2.0)
+            else:
+                pole_extra_damage = 0
             damage_path(outcome, potential,
-                action.data['strategy']['extra_damage'] + charge_extra_damage,
-                rng.roll, shield, armor, body)
+                action.data['strategy']['extra_damage']
+                + (0 if charge_intercepted else charge_extra_damage) + pole_extra_damage,
+                rng.roll, shield, armor, body,
+                damage_dice=2 if pole_set_charge else 1)
             if coup_de_grace:
                 damage_dealt = sum(effect.amount for effect in effects
                     if type(effect) is DamageEffect and effect.target_id == target.id
@@ -1349,6 +1407,56 @@ def _represented_extra_legs(being):
     count = sum(1 for name in parts
                 if type(name) is str and name.casefold().strip().endswith(' leg'))
     return 2 if count > 2 else 0
+
+
+def _charge_overrun_destination(snapshot, action):
+    """Resolve only an unambiguous, open one-hex adopted Charge-Overrun landing."""
+    from arena_hex_map import HexAddress, layout_from_encounter_map
+    from hex_facing import facing_vector
+    layout = layout_from_encounter_map(snapshot.encounter_map)
+    actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
+    if (layout is None or actor.position is None or target.position is None
+            or target.id in snapshot.moving_ids):
+        return None
+    source = layout.cell_at_position(target.position)
+    facing = actor.data.get('hex_facing')
+    if source is None or type(facing) is not int:
+        return None
+    fx, fy = facing_vector(facing)
+    center = layout.center_position(source, z=target.position.z)
+    candidates = []
+    for address in layout.neighbors(source):
+        if not layout.contains(address):
+            continue
+        position = layout.center_position(address, z=target.position.z)
+        dx, dy = position.x-center.x, position.y-center.y
+        candidates.append((dx*fx+dy*fy, address, position))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (-row[0], row[1].column, row[1].row))
+    if (len(candidates) > 1
+            and math.isclose(candidates[0][0], candidates[1][0], rel_tol=0, abs_tol=1e-10)):
+        return None
+    if candidates[0][0] <= 0:
+        return None
+    _, destination_cell, destination = candidates[0]
+    for identity in snapshot.participant_ids:
+        if identity in (actor.id, target.id):
+            continue
+        entity = snapshot.entity(identity)
+        if entity.position is not None and layout.cell_at_position(entity.position) == destination_cell:
+            return None
+    from spatial.visibility import trace_physical_path
+    path = trace_physical_path(target.position, destination,
+        ((identity, snapshot.entity(identity)) for identity in snapshot.participant_ids
+         if identity != target.id and snapshot.entity(identity).position is not None
+         and snapshot.entity(identity).geometry is not None
+         and snapshot.entity(identity).data.get('parent_container_id') is None),
+        exclude_ids=(target.id,))
+    if path.intersections or path.unmodeled_entity_ids:
+        return None
+    from measured_values import truncate_position
+    return truncate_position(destination).as_tuple()
 
 
 def _grappling(snapshot, action, rng, dependencies=()):
@@ -1489,12 +1597,20 @@ def _grappling(snapshot, action, rng, dependencies=()):
         actor_total=(sum(rng.roll('1d6') for _ in range(3))
                      +(actor_size-10)//2+(actor_dex-10)//2
                      +max(0,size_modifier)+shield_bonus
-                     +_represented_extra_legs(actor)-priority_penalty)
+                     +_represented_extra_legs(actor)-priority_penalty
+                     +(1 if (action.data.get('charge_continuation') is True
+                             or action.data.get('bull_rush_continuation') is True) else 0))
         target_total=(sum(rng.roll('1d6') for _ in range(3))
                       +(target_size-10)//2+(target_dex-10)//2
                       +max(0,-size_modifier)+_represented_extra_legs(target))
         if actor_total<=target_total:
             return ActionProposal(action.id,actor.id,(target.id,),'failed')
+        if action.data.get('charge_continuation') is True:
+            destination = _charge_overrun_destination(snapshot, action)
+            if destination is None:
+                return ActionProposal(action.id,actor.id,(target.id,),
+                    'success_pending_displacement')
+            effects.append(PositionEffect(action.id,target.id,destination))
         effects.append(GrappleStateEffect(action.id,target.id,actor.id,action.id,
             'posture','set',None,None,'lying'))
         return ActionProposal(action.id,actor.id,(target.id,),'success',tuple(effects))
@@ -1524,6 +1640,9 @@ def _grappling(snapshot, action, rng, dependencies=()):
                and 'tower' in snapshot.entity(shield_id).data['original_type'].casefold()
                for shield_id in actor.data.get('shields', ())):
             return ActionProposal(action.id,actor.id,(target.id,),'tower_shield_restricted')
+        if action.data.get('bull_rush_target_willing') is True:
+            return ActionProposal(action.id,actor.id,(target.id,),
+                                  'success_pending_displacement')
         shield_bonus=0
         if action.instrument_id is not None:
             if action.instrument_id not in actor.data.get('shields', ()):
@@ -1537,7 +1656,9 @@ def _grappling(snapshot, action, rng, dependencies=()):
         actor_total=(sum(rng.roll('1d6') for _ in range(3))
                      +(actor.data['abilities'].get('STR',10)-10)//2
                      +4*max(0,difference)+shield_bonus
-                     +_represented_extra_legs(actor)-priority_penalty)
+                     +_represented_extra_legs(actor)-priority_penalty
+                     +(2 if action.data.get('charge_continuation') is True else
+                       1 if action.data.get('bull_rush_continuation') is True else 0))
         target_total=(sum(rng.roll('1d6') for _ in range(3))
                       +(target.data['abilities'].get('STR',10)-10)//2
                       +4*max(0,-difference)+_represented_extra_legs(target))
@@ -2012,7 +2133,8 @@ def ready_preparation_eligibility(snapshot, action):
         return 'unavailable'
     if _helpless(actor):
         return 'unable_to_act'
-    motion = action.data.get('ready_motion')
+    pole_set = action.data.get('ready_motion') == 'set pole'
+    motion = 'thrust' if pole_set else action.data.get('ready_motion')
     attacks = weapon.data.get('attacks', {})
     key = {'swing': 'S', 'thrust': 'T'}.get(motion)
     if key is None or type(attacks) not in (dict, MappingProxyType) or attacks.get(key) is None:
@@ -2020,6 +2142,10 @@ def ready_preparation_eligibility(snapshot, action):
     if (action.target_id not in actor.data.get('weapons', ())
             or action.target_id not in actor.data.get('held', ())):
         return 'unavailable'
+    expected_seconds = max(1, 4 - _timing_adjustment(action.data.get('strategy', {})))
+    if pole_set and (weapon.data.get('original_type') not in snapshot.pole_weapon_names
+                     or key != 'T' or action.data.get('readying_seconds') != expected_seconds):
+        return 'unsupported_pole_set'
     if weapon.data.get('ready_preparation') is not None:
         return 'already_ready'
     if type(action.data.get('readying_seconds')) is not int or action.data['readying_seconds'] < 1:
@@ -2216,10 +2342,52 @@ def evaluate_snapshot(snapshot, action_ids=None):
         if (action.lifecycle == 'pending' and action.family == 'ready_preparation'
                 and preparation_status[action.id] is None):
             preparation_claims.setdefault(action.target_id, []).append(action.id)
+    # Revision-14 coupled pole interception. Both attacks use this same
+    # frozen snapshot; evaluate a declared prepared-pole attack immediately
+    # before its matching charge so the charge's classification is known
+    # without publishing either attack's effects first.
+    pole_pairs = {}
+    pole_charge_pairs = {}
+    for charge in selected:
+        if (charge.family != 'melee' or charge.lifecycle != 'pending'
+                or charge.data.get('charge') is not True):
+            continue
+        velocity = snapshot.motion_velocities_m_s.get(charge.actor_id)
+        target_velocity = snapshot.motion_velocities_m_s.get(charge.target_id, (0.0, 0.0, 0.0))
+        if velocity is None:
+            continue
+        speed = math.dist(velocity, target_velocity) / 0.9144
+        if speed < 4.0:
+            continue
+        for pole in selected:
+            if (pole.family != 'melee' or pole.lifecycle != 'pending'
+                    or pole.data.get('charge') is True or pole.data.get('event_type') != 'thrust'
+                    or pole.actor_id != charge.target_id or pole.target_id != charge.actor_id
+                    or pole.instrument_id is None):
+                continue
+            preparation = snapshot.entity(pole.instrument_id).data.get('ready_preparation')
+            if (preparation is None or preparation.get('pole_set') is not True
+                    or preparation.get('owner_id') != pole.actor_id
+                    or preparation.get('motion') != 'thrust'
+                    or preparation.get('completed_at', snapshot.boundary) > pole.start):
+                continue
+            pole_pairs[pole.id] = (charge.id, speed)
+            pole_charge_pairs.setdefault(charge.id, []).append(pole.id)
     rng = _ProvisionalRandom(snapshot.rng_state)
     proposals = []
     defense_effects = []
-    for action in sorted(selected, key=lambda a: (a.priority, a.order)):
+    ordered = sorted(selected, key=lambda a: (a.priority, a.order))
+    # The adopted coupled interaction is declared as one adjudication. Give
+    # the set-pole attack the first deterministic draw allocation within its
+    # pair even if its declaration followed the charge.
+    for pole_id, (charge_id, _speed) in pole_pairs.items():
+        pole = next(row for row in ordered if row.id == pole_id)
+        charge = next(row for row in ordered if row.id == charge_id)
+        if ordered.index(pole) > ordered.index(charge):
+            ordered.remove(pole)
+            ordered.insert(ordered.index(charge), pole)
+    successful_pole_interceptions = set()
+    for action in ordered:
         rng.action_id = action.id
         if action.lifecycle == 'cancelled':
             proposal = ActionProposal(action.id, action.actor_id,
@@ -2228,7 +2396,17 @@ def evaluate_snapshot(snapshot, action_ids=None):
             proposal = _defense(snapshot, action, rng)
             defense_effects.extend(proposal.defenses)
         elif action.family in ('combat', 'melee'):
-            proposal = _combat(snapshot, action, rng, tuple(d for d in defense_effects if d.strike_id == action.id))
+            pole_pair = pole_pairs.get(action.id)
+            intercepted = (action.id in pole_charge_pairs
+                and any(pole_id in successful_pole_interceptions
+                        for pole_id in pole_charge_pairs[action.id]))
+            proposal = _combat(snapshot, action, rng,
+                tuple(d for d in defense_effects if d.strike_id == action.id),
+                pole_set_charge=pole_pair is not None,
+                pole_charge_speed=None if pole_pair is None else pole_pair[1],
+                charge_intercepted=intercepted)
+            if pole_pair is not None and proposal.outcome in ('normal', 'critical'):
+                successful_pole_interceptions.add(action.id)
         elif action.family == 'object_strike':
             proposal = _object_strike(snapshot, action, rng)
         elif action.family == 'disarm':
@@ -2266,7 +2444,9 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 proposal = ActionProposal(action.id, action.actor_id, (action.target_id,), 'contested')
             else:
                 effect = ReadyPreparationEffect(action.id, action.actor_id, action.target_id,
-                    action.data['ready_motion'], action.data['readying_seconds'])
+                    ('thrust' if action.data['ready_motion'] == 'set pole'
+                     else action.data['ready_motion']), action.data['readying_seconds'],
+                    action.data['ready_motion'] == 'set pole')
                 proposal = ActionProposal(action.id, action.actor_id,
                     tuple(sorted((action.target_id, action.actor_id), key=str)), 'success', (effect,))
         elif action.family == 'end_run':

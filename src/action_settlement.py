@@ -11,7 +11,7 @@ from types import MappingProxyType
 from spatial.state import CartesianPosition
 
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
-    EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, GrappleStateEffect,
+    EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, GrappleStateEffect, PositionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, EffectIdentity, IdentifiedEffect,
     RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, ObjectGripEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
@@ -80,7 +80,7 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect)
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect)
 _FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
@@ -105,7 +105,7 @@ _OUTCOMES = {
                          'unsupported_contents', 'contested', 'success')),
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
-    'ready_preparation': frozenset(('unavailable', 'unable_to_act', 'unsupported_motion',
+    'ready_preparation': frozenset(('unavailable', 'unable_to_act', 'unsupported_motion', 'unsupported_pole_set',
                                     'unsupported_timing', 'already_ready', 'contested', 'success')),
     'delay': frozenset(('success',)),
     'end_run': frozenset(('success','failed','unplaced','dexterity_unknown','facing_unknown','size_unknown','target_moved','mover_displaced','unknown_path','occupied_exit','insufficient_movement','movement_unavailable','contested')),
@@ -165,7 +165,7 @@ def _effect(effect):
     if type(effect) in (ReadyPreparationEffect, ReadyConsumptionEffect):
         _identity(values['object_id'])
     if type(effect) is ReadyPreparationEffect:
-        _require(values['motion'] in ('swing', 'thrust')
+        _require(values['motion'] in ('swing', 'thrust') and type(values['pole_set']) is bool
                  and type(values['readying_seconds']) is int and values['readying_seconds'] >= 1,
                  'unsupported native Ready preparation descriptor')
     if type(effect) is ReadyConsumptionEffect:
@@ -182,6 +182,11 @@ def _effect(effect):
         _identity(values['owner_id'])
         _require(type(values['position']) is tuple and len(values['position'])==3,
                  'invalid native disarm landing position')
+        for value in values['position']:_number(value)
+    if type(effect) is PositionEffect:
+        _identity(values['target_id'])
+        _require(type(values['position']) is tuple and len(values['position']) == 3,
+                 'invalid native position effect')
         for value in values['position']:_number(value)
     if type(effect) is GrappleStateEffect:
         _identity(values['actor_id']); _identity(values['state_id'])
@@ -322,7 +327,7 @@ def _copy_proposal(proposal, actions, entities):
                      and ((values['margin']>0) if proposal.outcome=='disarmed' else values['margin']<=0),
                      'Disarm outcome contradicts opposed attack-roll margin')
     if action.family == 'grappling':
-        state_effects = [e for e in proposal.effects if type(e) in (GrappleStateEffect,ObjectGripEffect)]
+        state_effects = [e for e in proposal.effects if type(e) in (GrappleStateEffect,PositionEffect,ObjectGripEffect)]
         event = action.data.get('event_type')
         if event == 'trip' and action.lifecycle == 'pending':
             values = dict(metadata)
@@ -334,6 +339,8 @@ def _copy_proposal(proposal, actions, entities):
                 _require('contact_kind' not in values,
                          'Trip receipt claims unsupported contact provenance')
         expected_effects = (2 if event == 'grapple' and proposal.outcome == 'success'
+            else 2 if event == 'overrun' and action.data.get('charge_continuation') is True
+                      and proposal.outcome == 'success'
             else 1 if ((event in ('hold','grapple escape') and proposal.outcome in ('success','failed'))
                        or (event in ('grab','break hold','release grip','grab object','wrest') and proposal.outcome == 'success')
                        or (event == 'grapple' and proposal.outcome == 'failed')
@@ -344,7 +351,7 @@ def _copy_proposal(proposal, actions, entities):
         _require(len(state_effects) == expected_effects,
                  'physical-contact state effect must match the successful native Action')
         _require(len(proposal.effects) == len(state_effects) and not proposal.defenses,
-                 'physical-contact Actions have only their typed native state effect')
+                 'physical-contact Actions have only typed native state effects')
     names = tuple(pair[0] for pair in metadata)
     _require(len(set(names)) == len(names) and set(names).issubset(_METADATA[action.family]), 'unsupported metadata (no Target HP on Actions)')
     for key, value in metadata:
@@ -423,6 +430,15 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
                  and effect.state_id == (action.id if expected == 'establish' else action.data.get('object_grip_id')),
                  'Object Grip receipt does not match the declared successful transition')
         return effect.target_id, ('object_grip', action.id, effect.target_id, effect.operation)
+    if type(effect) is PositionEffect:
+        from action_evaluation import _charge_overrun_destination
+        _require(action.family == 'grappling' and action.data.get('event_type') == 'overrun'
+                 and action.data.get('charge_continuation') is True
+                 and proposal.outcome == 'success' and effect.target_id == action.target_id
+                 and recipient.category == 'being'
+                 and effect.position == _charge_overrun_destination(snapshot, action),
+                 'Charge-Overrun position effect differs from the adopted one-hex landing')
+        return effect.target_id, ('charge_overrun_position', action.id, effect.target_id)
     if type(effect) is GrappleStateEffect:
         event_type = action.data.get('event_type')
         is_damage_release = (action.family == 'melee'
@@ -583,8 +599,10 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         _identity(effect.object_id)
         _require(action.family == 'ready_preparation' and proposal.outcome == 'success'
                  and effect.target_id == action.actor_id and effect.object_id == action.target_id
-                 and effect.motion == action.data.get('ready_motion')
+                 and effect.motion == ('thrust' if action.data.get('ready_motion') == 'set pole'
+                                       else action.data.get('ready_motion'))
                  and effect.readying_seconds == action.data.get('readying_seconds')
+                 and effect.pole_set == (action.data.get('ready_motion') == 'set pole')
                  and recipient.category == 'being'
                  and entities[effect.object_id].category == 'weapon',
                  'Ready preparation effect does not match its declared actor, Weapon, and motion')
@@ -748,6 +766,12 @@ def _validate_complete_outcome(proposal, action, entities):
     object_grips=[e for e in effects if type(e) is ObjectGripEffect]
     _require(len(object_grips)==int(action.family=='grappling' and action.data.get('event_type') in ('grab object','wrest') and proposal.outcome=='success'),
              'missing/extra native Object Grip receipt')
+    positions=[e for e in effects if type(e) is PositionEffect]
+    _require(len(positions)==int(action.family=='grappling'
+        and action.data.get('event_type')=='overrun'
+        and action.data.get('charge_continuation') is True
+        and proposal.outcome=='success'),
+        'missing/extra adopted Charge-Overrun position receipt')
     releases = [e for e in effects if type(e) is ProjectileReleaseEffect]
     _require(len(releases) == int(action.family == 'throw' and proposal.outcome == 'released'),
              'missing/extra projectile release contribution')

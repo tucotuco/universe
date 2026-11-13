@@ -63,7 +63,7 @@ def activate(session):
 
 def select_draw(session, weapon):
     entity = next(row for row in session.public_view()["entities"]
-                  if row["name"] == weapon.name and row["type"] == "Dagger")
+                  if row["name"] == weapon.name and row["type"] == weapon.current.obj_type)
     inspected = session.inspect_entity({"handle": entity["handle"]})
     return entity["handle"], inspected
 
@@ -74,6 +74,44 @@ def draw_scenario():
 
 
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_generated_arena_offers_and_persists_adopted_set_pole_control(self):
+        session, candidate, player = arena(seed=20261144)
+        activate(session)
+        weapon_id = candidate.encounter.make_weapon_for_being(
+            player.id, "Spear", "Arena set-pole spear")
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        hand = next(slot for slot, held in player.current.body_parts.items()
+                    if slot in ("left hand", "right hand") and held is None)
+        player.possessions.append(weapon_id)
+        player.weapons.append(weapon_id)
+        player.current.body_parts[hand] = weapon_id
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, weapon.id, "object", weapon.name,
+            "Spear", None, "carried", candidate.encounter.time, 0.0)
+        ledger._current[weapon.id] = evidence
+        ledger._history.append(evidence)
+        handle, inspected = select_draw(session, weapon)
+        ready_row = next(row for row in inspected["action_catalog"]["entries"]
+                         if row["name"] == "ready object")
+        self.assertIn({"motion": "set pole", "duration_seconds": 4}, ready_row["motions"])
+        session.choose_ready_preparation({"handle": handle, "motion": "set pole"})
+        for _ in range(4):
+            session.advance_one_second()
+        preparation = native_ready_preparation(weapon)
+        self.assertTrue(preparation["pole_set"])
+        saved = session.save_encounter_bytes()
+        script = ("import sys;sys.path.insert(0,'src');"
+            "from arena_browser_session import GeneratedArenaSession;"
+            "from weapon import native_ready_preparation;"
+            "s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read());"
+            "c=s.active_candidate;b=next(x for x in c.universe.object_registry.object_instances.values() "
+            "if getattr(x,'name',None)=='Arena set-pole spear');"
+            "assert native_ready_preparation(b)['pole_set'] is True;print('restored-pole-set')")
+        restored = subprocess.run([sys.executable, "-B", "-c", script], input=saved,
+            cwd=ROOT, capture_output=True, check=False, timeout=30)
+        self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
+        self.assertEqual(restored.stdout.decode().strip(), "restored-pole-set")
+
     def test_eligible_action_pause_resume_preserves_remaining_duration_and_process_save(self):
         session, candidate, player = arena(seed=20261132)
         opponent=candidate.participants[1].native.being

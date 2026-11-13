@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, ObjectGripEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -453,6 +453,17 @@ def _make_plan(encounter,candidate,rng_owner):
             plan.attr('movement',objects[key].spatial_state,'position',pos)
     for row in supported.boundary.effects.values():
         effect=row.effect
+        if type(effect) is PositionEffect:
+            source=events.get(effect.source_action_id)
+            target=objects.get(effect.target_id)
+            if (source is None or source.event_type!='overrun'
+                    or source.actor_id not in encounter.being_list
+                    or effect.target_id not in encounter.being_list
+                    or type(target) is not BeingInstance or target.spatial_state is None):
+                raise PublicationRejected('Charge-Overrun position target or source changed before publication')
+            plan.attr('movement',target.spatial_state,'position',
+                CartesianPosition(*effect.position),chain=True)
+            continue
         if type(effect) is GrappleStateEffect and effect.kind == 'posture':
             being=objects.get(effect.target_id)
             if type(being) is not BeingInstance or effect.operation != 'set' or effect.position not in ('lying','kneeling'):
@@ -573,18 +584,22 @@ def _make_plan(encounter,candidate,rng_owner):
         obj=objects.get(effect.object_id)
         if (source is None or source.event_type!='ready object'
                 or source.actor_id!=effect.target_id or source.target_id!=effect.object_id
-                or source.ready_motion!=effect.motion
+                or ('thrust' if source.ready_motion=='set pole' else source.ready_motion)!=effect.motion
                 or source.readying_seconds!=effect.readying_seconds
+                or effect.pole_set!=(source.ready_motion=='set pole')
                 or type(actor) is not BeingInstance or type(obj) is not WeaponInstance
                 or effect.object_id not in actor.weapons
                 or effect.object_id not in actor.armed_with(world).values()
                 or native_ready_preparation(obj) is not None):
             raise PublicationRejected('Ready preparation identity or held-weapon state changed before atomic publication')
-        ready_preparations.append((obj, {
+        record = {
             'owner_id': actor.id, 'motion': effect.motion,
             'ready_action_id': effect.source_action_id,
             'completed_at': candidate.boundary,
-            'readying_seconds': effect.readying_seconds}))
+            'readying_seconds': effect.readying_seconds}
+        if effect.pole_set:
+            record['pole_set'] = True
+        ready_preparations.append((obj, record))
     for obj, record in ready_preparations:
         updated_tags=dict(obj.current.tags)
         updated_tags[NATIVE_READY_PREPARATION_TAG]=record
@@ -1012,8 +1027,14 @@ def _committed_consistency(encounter,candidate,plan):
                     or preparation['motion']!=effect.motion
                     or preparation['ready_action_id']!=effect.source_action_id
                     or preparation['completed_at']!=candidate.boundary
-                    or preparation['readying_seconds']!=effect.readying_seconds):
+                    or preparation['readying_seconds']!=effect.readying_seconds
+                    or preparation.get('pole_set', False)!=effect.pole_set):
                 raise PublicationRejected('Ready preparation post-write consistency failed')
+        elif type(effect) is PositionEffect:
+            target=objects.get(effect.target_id)
+            if (type(target) is not BeingInstance or target.get_position() is None
+                    or target.get_position().as_tuple()!=effect.position):
+                raise PublicationRejected('Charge-Overrun position post-write consistency failed')
         elif type(effect) is ReadyConsumptionEffect:
             from weapon import native_ready_preparation
             if native_ready_preparation(objects[effect.object_id]) is not None:

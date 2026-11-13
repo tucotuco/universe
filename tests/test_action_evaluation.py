@@ -14,7 +14,7 @@ from action_choice import ChoiceMember
 from action_evaluation import (capture_snapshot, evaluate_snapshot, UnsupportedEvaluation,
     EvaluationIntegrityError, DamageEffect, FatalEffect, PracticeEffect, AwarenessEffect,
     ProtectionEffect, ActionProposal, _ProvisionalRandom, RandomDraw, future_reality_request)
-from activities import RunAction, SpotAction
+from activities import RunAction, SpotAction, ReadyPreparationAction
 from encounter import Encounter
 from action_settlement import reconcile_boundary
 from library import Library
@@ -859,6 +859,22 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(result.facts.outcome,'success_pending_displacement')
         self.assertEqual((self.a.get_position(),self.b.get_position()),before)
 
+    def test_explicitly_willing_bull_rush_skips_contest_draws_and_keeps_displacement_bounded(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        rush.bull_rush_target_willing=True
+        before=(self.a.get_position(),self.b.get_position())
+        self.enc.schedule_action(rush)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=AssertionError(
+                'an explicitly willing target must not enter the resistance contest')):
+            self.enc.step(1)
+        result=self.enc.inspect_committed(1).action(rush.id)
+        self.assertEqual(result.facts.outcome,'success_pending_displacement')
+        self.assertEqual((self.a.get_position(),self.b.get_position()),before)
+
     def test_native_yield_nullifies_same_boundary_bull_rush(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.8,0,0))
         self.a.set_hex_facing(0)
@@ -923,6 +939,159 @@ class TestActionEvaluation(unittest.TestCase):
         result=self.enc.inspect_committed(2).action(charge.id)
         self.assertEqual(result.facts.outcome,'normal')
         self.assertEqual(self.b.get_hit_points(),98)
+
+    def test_set_pole_intercepts_charge_and_converts_chargers_scheduled_attack(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(7.5,0,0))
+        self.a.set_hex_facing(0)
+        self.a.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Dagger',0)
+        self.b.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Spear',100)
+        self.b.strategy=Strategy(defense=10)
+        spear_id=self.world.make_weapon_for_being(self.b.id,'Spear','Set pole spear')
+        self.enc.add_object(spear_id)
+        self.b.possessions.append(spear_id); self.b.weapons.append(spear_id)
+        self.b.current.body_parts['left hand']=spear_id
+        self.world.get_object_by_id(spear_id).parent_container_id=self.b.id
+        self.enc.enable_transactional_progression(quiescent=True)
+        adjusted=ReadyPreparationAction(self.enc,self.b.id,spear_id,'set pole',
+                                        strategy=Strategy(timing=3))
+        self.assertEqual(adjusted.end_time-adjusted.start_time,2)
+        ready=ReadyPreparationAction(self.enc,self.b.id,spear_id,'set pole')
+        self.assertEqual(ready.end_time-ready.start_time,4)
+        self.enc.schedule_action(ready)
+        self.enc.step(4)
+        from weapon import native_ready_preparation
+        spear=self.world.get_object_by_id(spear_id)
+        self.assertTrue(native_ready_preparation(spear)['pole_set'])
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',
+                           reach=2,strategy=Strategy(timing=3),charge=True)
+        self.enc.schedule_action(charge)
+        self.enc.step(1,velocities={self.a.id:(4.0,0,0)})
+        pole=MeleeStrike(self.enc,self.b.id,self.a.id,spear_id,motion='thrust',reach=10)
+        self.assertEqual(pole.end_time,6)
+        self.enc.schedule_action(pole)
+        def fixed_roll(dice):
+            return 10 if dice == '1d20' else 1
+        with patch.object(_ProvisionalRandom,'roll',side_effect=fixed_roll):
+            self.enc.step(1,velocities={self.a.id:(4.0,0,0)})
+        pole_result=self.enc.inspect_committed(6).action(pole.id)
+        charge_result=self.enc.inspect_committed(6).action(charge.id)
+        self.assertEqual(pole_result.facts.outcome,'normal')
+        self.assertNotIn('relative_charge_speed_yd_s',dict(charge_result.facts.metadata),
+                         (dict(pole_result.facts.metadata),dict(charge_result.facts.metadata)))
+        self.assertEqual(charge_result.facts.outcome,'miss')
+        self.assertEqual(self.a.get_hit_points(),98)
+
+    def test_successful_charge_bull_rush_continuation_adds_adopted_contest_bonus(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(8.5,0,0))
+        self.a.size_category=self.b.size_category='medium'
+        self.a.set_hex_facing(0)
+        self.a.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Dagger',100)
+        self.enc.enable_transactional_progression(quiescent=True)
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',reach=2,
+                           strategy=Strategy(timing=3),charge=True)
+        self.enc.schedule_action(charge)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=lambda dice: 10 if dice=='1d20' else 1):
+            self.enc.step(2,velocities={self.a.id:(4.0,0,0)})
+        charge_result=self.enc.inspect_committed(2).action(charge.id)
+        self.assertEqual(charge_result.facts.outcome,'normal')
+        rush=Action(self.world,2,3,'bull rush',self.a.id,self.b.id,None)
+        rush.charge_continuation_source_id=charge.id
+        self.enc.schedule_action(rush)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=(4,4,4,4,4,4)):
+            self.enc.step(1)
+        result=self.enc.inspect_committed(3).action(rush.id)
+        self.assertEqual(result.facts.outcome,'success_pending_displacement')
+
+    def test_successful_bull_rush_overrun_gets_bonus_and_two_seconds_without_inventing_displacement(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.set_ability('strength',10);self.b.set_ability('strength',10)
+        self.a.set_ability('dexterity',10);self.b.set_ability('dexterity',10)
+        self.a.set_posture('standing');self.b.set_posture('standing')
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        rush=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        self.enc.schedule_action(rush)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=(6,6,6,1,1,1)):
+            self.enc.step(1)
+        self.assertEqual(self.enc.inspect_committed(1).action(rush.id).facts.outcome,
+                         'success_pending_displacement')
+        overrun=Action(self.world,1,5,'overrun',self.a.id,self.b.id,None)
+        overrun.charge_continuation_source_id=rush.id
+        prepared=self.enc.prepare_action(overrun)
+        self.assertEqual(prepared.end_time,7)
+        self.enc.schedule_action(overrun)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=(2,2,2,2,2,2)):
+            self.enc.step(6)
+        self.assertEqual(self.enc.inspect_committed(7).action(overrun.id).facts.outcome,'success')
+        self.assertEqual(self.b.get_posture(),'lying')
+        self.assertEqual(self.b.get_position(),CartesianPosition(.2,0,0))
+
+    def test_successful_bull_rush_can_continue_next_second_with_adopted_one_point_bonus(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.set_hex_facing(0)
+        self.a.set_ability('strength',10);self.b.set_ability('strength',10)
+        self.a.set_posture('standing');self.b.set_posture('standing')
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        first=Action(self.world,0,1,'bull rush',self.a.id,self.b.id,None)
+        self.enc.schedule_action(first)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=(6,6,6,1,1,1)):
+            self.enc.step(1)
+        self.assertEqual(self.enc.inspect_committed(1).action(first.id).facts.outcome,
+                         'success_pending_displacement')
+        continued=Action(self.world,1,2,'bull rush',self.a.id,self.b.id,None)
+        continued.charge_continuation_source_id=first.id
+        self.assertEqual(self.enc.prepare_action(continued).end_time,2)
+        self.enc.schedule_action(continued)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=(2,2,2,2,2,2)):
+            self.enc.step(1)
+        self.assertEqual(self.enc.inspect_committed(2).action(continued.id).facts.outcome,
+                         'success_pending_displacement')
+        self.assertEqual(self.b.get_position(),CartesianPosition(.2,0,0))
+
+    def test_charge_overrun_uses_adopted_time_bonus_and_open_one_hex_landing(self):
+        from arena_hex_map import ArenaHexLayout, HexAddress, encounter_map_descriptor
+        layout=ArenaHexLayout.rectangle(20,10)
+        self.enc.map=encounter_map_descriptor(layout)
+        origin=layout.center_position(HexAddress(1,4))
+        from hex_facing import facing_vector
+        dx,dy=facing_vector(1)
+        self.a.set_position(origin)
+        self.b.set_position(CartesianPosition(origin.x+8.4*dx,origin.y+8.4*dy,origin.z))
+        self.a.set_hex_facing(1)
+        self.a.set_ability('strength',10);self.b.set_ability('strength',10)
+        self.a.set_ability('dexterity',10);self.b.set_ability('dexterity',10)
+        self.a.set_posture('standing');self.b.set_posture('standing')
+        self.a.set_weapon_skill_level(self.world.get_weapon_dictionary(),'Dagger',100)
+        self.a.size_category=self.b.size_category='medium'
+        self.enc.enable_transactional_progression(quiescent=True)
+        charge=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',reach=2,
+                           strategy=Strategy(timing=3),charge=True)
+        self.enc.schedule_action(charge)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=lambda dice: 10 if dice=='1d20' else 1):
+            self.enc.step(2,velocities={self.a.id:(3.8*dx,3.8*dy,0)})
+        self.assertEqual(self.enc.inspect_committed(2).action(charge.id).facts.outcome,'normal')
+        start_cell=layout.cell_at_position(self.b.get_position())
+        neighbors=[address for address in layout.neighbors(start_cell) if layout.contains(address)]
+        self.assertTrue(neighbors)
+        expected=layout.center_position(max(neighbors,
+            key=lambda address: (layout.center_yards(address)[0]*dx
+                                 +layout.center_yards(address)[1]*dy)),
+            z=self.b.get_position().z)
+        from measured_values import truncate_position
+        expected=truncate_position(expected)
+        overrun=Action(self.world,2,6,'overrun',self.a.id,self.b.id,None)
+        overrun.charge_continuation_source_id=charge.id
+        self.assertEqual(self.enc.prepare_action(overrun).end_time,8)
+        self.enc.schedule_action(overrun)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=(6,6,6,6,6,6)):
+            self.enc.step(6)
+        result=self.enc.inspect_committed(8).action(overrun.id)
+        self.assertEqual(result.facts.outcome,'success')
+        for actual, wanted in zip(self.b.get_position().as_tuple(),expected.as_tuple()):
+            self.assertAlmostEqual(actual,wanted,places=7)
+        self.assertEqual(self.b.__dict__.get('_posture'),'lying')
 
     def test_charge_adds_adopted_two_point_hit_bonus(self):
         self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(8.8,0,0))

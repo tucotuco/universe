@@ -564,14 +564,11 @@ class Encounter(Event):
         start, end = source.get_position(), target.get_position()
         if start is None or end is None or start == end:
             return None
-        from arena_hex_map import layout_from_encounter_map
-        arena_hex_context = layout_from_encounter_map(self.map) is not None
         candidates = ((entity_id, entity)
                       for entity_id in self.entity_ids()
                       for entity in (self.get_entity(entity_id),)
                       if entity is not None
-                      and (not arena_hex_context
-                           or getattr(entity, "parent_container_id", None) is None))
+                      and getattr(entity, "parent_container_id", None) is None)
         return trace_physical_path(start, end, candidates,
                                    exclude_ids=(source_entity_id, target_entity_id))
 
@@ -793,6 +790,26 @@ class Encounter(Event):
                                 target_action_id=_target_action_id)
         else:
             prepared = preparer(action, self)
+        if (type(action) is Action and action.event_type == 'overrun'
+                and action.__dict__.get('charge_continuation_source_id') is not None):
+            source = self.universe.get_event_by_id(
+                action.__dict__['charge_continuation_source_id'])
+            from melee_combat import MeleeStrike
+            from action_evaluation import ActionProposal
+            common = (source is not None and source.actor_id == action.actor_id
+                and source.target_id == action.target_id
+                and source.end_time == action.start_time
+                and type(source.resolution) is ActionProposal)
+            charged = (type(source) is MeleeStrike and source.charge
+                and source.resolution.outcome in ('normal', 'critical'))
+            rushed = (type(source) is Action and source.event_type == 'bull rush'
+                and source.resolution.outcome in ('success', 'success_pending_displacement'))
+            if not (common and (charged or rushed)):
+                raise ValueError('Overrun continuation requires the immediately successful Charge or Bull Rush')
+            prepared = PreparedSchedule(prepared.action_id, prepared.start_time,
+                prepared.end_time + 2, prepared.actor_id, prepared.target_id,
+                prepared.instrument_id, prepared.parent_event_id,
+                prepared.active_object_ids, prepared.initialization)
         self._validate_prepared_schedule(action, prepared)
         return prepared
 

@@ -19,6 +19,8 @@ _DECLARATION_FIELDS = (
     'max_distance', 'spotting_conditions', 'declared_roll', 'episode_time', 'topic', 'generate',
     'substituted_claim', 'received_accounts', 'seed', 'random_key', 'observer',
     'interpreter', 'ledger', 'experience_policy', 'focus_category',
+    'charge_continuation_source_id',
+    'bull_rush_target_willing',
     'get_instrument', 'damage_potential', '_status', 'on_schedule',
     'prepare_schedule',
 )
