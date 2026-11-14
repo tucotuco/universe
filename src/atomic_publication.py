@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -47,6 +47,7 @@ _PUBLISHING = False
 _FAULTS = {}
 _EMERGENCIES = {}  # No automatic reset: shared RNG/recipient authority may be tainted.
 _COMMITTED_RECEIPTS = {}  # Process-local successful issuance; never a replay format.
+_DISARM_LANDING_RECEIPTS = {}
 _ARENA_RESTORED_RECEIPT_AUTHORITY = object()
 _COUNTER = itertools.count(1)
 _MODULE_GETSTATE, _MODULE_SETSTATE = random.getstate, random.setstate
@@ -173,6 +174,137 @@ def publication_owned(encounter):
     """Whether the current thread owns the explicit native publication lease."""
     return (_ACTIVE is not None and _ACTIVE.encounter is encounter
             and _ACTIVE.thread == threading.get_ident())
+
+
+def disarm_landing_options(encounter, weapon_id):
+    """Return clear, represented cells within the persisted rolled limit."""
+    from weapon import WeaponInstance, native_pending_disarm_landing
+    from arena_hex_map import layout_from_encounter_map, HexAddress
+    if type(weapon_id) is not str:raise PublicationRejected('native Weapon identity required')
+    obj=encounter.universe.get_object_by_id(weapon_id)
+    if type(obj) is not WeaponInstance:
+        raise PublicationRejected('Disarm landing Weapon is unavailable')
+    pending=native_pending_disarm_landing(obj)
+    if pending is None:
+        raise PublicationRejected('Weapon has no pending post-roll Disarm landing')
+    layout=layout_from_encounter_map(encounter.map)
+    origin=HexAddress(*pending['origin_cell'])
+    if layout is None or not layout.contains(origin):
+        raise PublicationRejected('pending Disarm has no authored Arena map')
+    occupied=set()
+    for identity in encounter.being_list:
+        being=encounter.get_being(identity)
+        if being is not None and being.get_position() is not None:
+            cell=layout.cell_at_position(being.get_position())
+            if cell is not None:occupied.add(cell)
+    for other in encounter.universe.object_registry.object_instances.values():
+        if other is obj or getattr(other,'parent_container_id',None) is not None:
+            continue
+        position=other.get_position() if hasattr(other,'get_position') else None
+        if position is not None:
+            cell=layout.cell_at_position(position)
+            if cell is not None:occupied.add(cell)
+    return tuple(HexAddress(column,row) for column in range(layout.width_columns)
+        for row in range(layout.height_rows)
+        if (cell:=HexAddress(column,row)) and layout.contains(cell) and cell not in occupied
+        and layout.distance(origin,cell)<=pending['max_landing_hexes'])
+
+
+def choose_disarm_landing(encounter, weapon_id, column, row):
+    """Commit the observed post-roll landing choice without advancing time."""
+    from weapon import (WeaponInstance, native_pending_disarm_landing,
+        NATIVE_PENDING_DISARM_LANDING_TAG, NATIVE_READY_PREPARATION_TAG)
+    from arena_hex_map import layout_from_encounter_map, HexAddress
+    from encounter_inspection import DisarmLandingReceipt, inspect_encounter, fingerprint
+    if type(weapon_id) is not str or type(column) is not int or type(row) is not int:
+        raise PublicationRejected('Disarm landing requires a native Weapon and integer hex address')
+    inspected=inspect_encounter(encounter)
+    obj=encounter.universe.get_object_by_id(weapon_id)
+    if type(obj) is not WeaponInstance:
+        raise PublicationRejected('Disarm landing Weapon is unavailable')
+    pending=native_pending_disarm_landing(obj)
+    if pending is None:
+        raise PublicationRejected('Weapon has no pending post-roll Disarm landing')
+    action=encounter.universe.get_event_by_id(pending['source_action_id'])
+    action_receipt=inspected.action(pending['source_action_id'])
+    if (action is None or action_receipt.facts.outcome!='landing_choice_pending'
+            or action.actor_id!=pending['actor_id'] or action.target_id!=pending['owner_id']
+            or action.disarm_weapon_id!=weapon_id):
+        raise PublicationRejected('pending landing no longer matches its committed Disarm Action')
+    layout=layout_from_encounter_map(encounter.map)
+    address=HexAddress(column,row)
+    origin=HexAddress(*pending['origin_cell'])
+    if address not in disarm_landing_options(encounter,weapon_id):
+        raise PublicationRejected('selected Disarm landing is occupied or outside its rolled distance')
+    owner=encounter.get_being(pending['owner_id']); actor=encounter.get_being(pending['actor_id'])
+    slots=[] if owner is None else [key for key,value in owner.current.body_parts.items() if value==weapon_id]
+    if (owner is None or actor is None or len(slots)!=1 or owner.weapons.count(weapon_id)!=1
+            or obj.parent_container_id not in (None,owner.id) or obj.spatial_state is not None):
+        raise PublicationRejected('pending Disarm custody changed before the landing choice')
+    from measured_values import truncate_position
+    position=truncate_position(layout.center_position(address,0.0))
+    receipt=DisarmLandingReceipt(action.id,weapon_id,owner.id,actor.id,
+        encounter.last_processed_boundary,pending['origin_cell'],(column,row),pending['margin'],
+        pending['max_landing_hexes'],position.as_tuple())
+    from spatial.state import SpatialState
+    from being import BeingInstance
+    with publication_boundary(encounter,quiescent=True):
+        plan=_WritePlan()
+        body_parts=dict(owner.current.body_parts);body_parts[slots[0]]=None
+        weapons=list(owner.weapons);weapons.remove(weapon_id)
+        possessions=list(owner.possessions)
+        if weapon_id in possessions:possessions.remove(weapon_id)
+        tags=dict(obj.current.tags);tags.pop(NATIVE_PENDING_DISARM_LANDING_TAG,None)
+        tags.pop(NATIVE_READY_PREPARATION_TAG,None)
+        plan.contents('targets',owner.current.body_parts,body_parts)
+        plan.contents('targets',owner.weapons,weapons)
+        plan.contents('targets',owner.possessions,possessions)
+        plan.contents('targets',obj.current.tags,tags)
+        plan.attr('targets',obj,'parent_container_id',None)
+        plan.attr('targets',obj,'spatial_state',SpatialState(position))
+        # The post-roll choice is an observable no-time event.  Refresh each
+        # observer-owned record of this already-visible Object in the same
+        # atomic publication as its custody and position change.
+        from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger
+        for observer_id in encounter.being_list:
+            observer=encounter.get_being(observer_id)
+            if observer is None:continue
+            ledger=object.__getattribute__(observer,'__dict__').get('_arena_perception_ledger')
+            if ledger is None:continue
+            if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id!=observer_id:
+                raise PublicationRejected('Disarm landing observer ledger is missing or misowned')
+            prior=ledger._current.get(weapon_id)
+            if prior is None:continue
+            updated=ArenaPerceptionEvidence(observer_id,weapon_id,prior.category,
+                prior.name,prior.type_key,position,'ground',encounter.last_processed_boundary,
+                float(encounter.time),owner_id=None,equipment_status=None)
+            current=dict(ledger._current);current[weapon_id]=updated
+            history=list(ledger._history)
+            indexes=[index for index,row in enumerate(history) if row.entity_id==weapon_id]
+            if indexes and history[indexes[-1]].boundary==encounter.last_processed_boundary:
+                history[indexes[-1]]=updated
+            else:
+                from checkpoint_arena_perception import MAX_HISTORY_ROWS
+                if len(history)>=MAX_HISTORY_ROWS:
+                    raise PublicationRejected('Disarm landing would exceed the bounded perception history')
+                history.append(updated)
+            plan.contents('observers',ledger._current,current)
+            plan.contents('observers',ledger._history,history)
+        plan.append('mark_committed',encounter,'_disarm_landing_receipts',receipt)
+        plan.validate_aliases()
+        try:
+            for phase in PHASES:plan.apply_phase(phase)
+            plan.verify()
+        except BaseException:
+            errors=plan.rollback()
+            if errors:
+                raise PublicationEmergency('Disarm landing rollback failed')
+            raise
+    key=id(receipt)
+    _DISARM_LANDING_RECEIPTS[key]=(weakref.ref(receipt,
+        lambda ref,key=key:_DISARM_LANDING_RECEIPTS.pop(key,None)),
+        weakref.ref(encounter),fingerprint(receipt))
+    return receipt
 
 
 @contextmanager
@@ -670,6 +802,37 @@ def _make_plan(encounter,candidate,rng_owner):
         plan.attr('targets',actor,'strategy',Strategy(prior.attack,effect.defense,
             prior.timing,prior.extra_damage))
     from action import Action
+    pending_disarms=[row.effect for row in supported.boundary.effects.values()
+                     if type(row.effect) is DisarmLandingPendingEffect]
+    if len({effect.target_id for effect in pending_disarms})!=len(pending_disarms):
+        raise PublicationRejected('simultaneous Disarm claims the same native weapon')
+    from arena_hex_map import layout_from_encounter_map
+    from weapon import NATIVE_PENDING_DISARM_LANDING_TAG
+    for effect in pending_disarms:
+        source=events.get(effect.source_action_id)
+        owner=objects.get(effect.owner_id);actor=objects.get(effect.actor_id)
+        obj=objects.get(effect.target_id)
+        layout=layout_from_encounter_map(encounter.map)
+        origin=None if layout is None else layout.cell_at_position(CartesianPosition(*effect.origin_position))
+        if (type(source) is not Action or source.event_type!='disarm'
+                or source.actor_id!=effect.actor_id or source.target_id!=effect.owner_id
+                or source.disarm_weapon_id!=effect.target_id
+                or type(owner) is not BeingInstance or type(actor) is not BeingInstance
+                or type(obj) is not WeaponInstance or origin is None
+                or origin not in tuple(layout.addresses())
+                or obj.parent_container_id not in (None,owner.id) or obj.spatial_state is not None
+                or effect.target_id not in owner.weapons
+                or effect.target_id not in tuple(owner.current.body_parts.values())):
+            raise PublicationRejected('pending Disarm landing no longer matches the native Weapon or Arena hex')
+        tags=dict(obj.current.tags)
+        if NATIVE_PENDING_DISARM_LANDING_TAG in tags:
+            raise PublicationRejected('Weapon already has an unresolved Disarm landing')
+        tags[NATIVE_PENDING_DISARM_LANDING_TAG]={
+            'actor_id':effect.actor_id,'margin':effect.margin,
+            'max_landing_hexes':effect.maximum_landing_hexes,
+            'origin_cell':(origin.column,origin.row),'owner_id':effect.owner_id,
+            'source_action_id':effect.source_action_id}
+        plan.contents('targets',obj.current.tags,tags)
     disarm_drops=[row.effect for row in supported.boundary.effects.values()
                   if type(row.effect) is DropObjectEffect]
     if len({effect.target_id for effect in disarm_drops})!=len(disarm_drops):
@@ -1488,6 +1651,50 @@ def _unregister_arena_restored_receipts(encounter, authority):
         row = _COMMITTED_RECEIPTS.get(id(receipt))
         if row is not None and row[0]() is receipt and row[1]() is encounter:
             _COMMITTED_RECEIPTS.pop(id(receipt), None)
+
+
+def _register_arena_restored_disarm_landings(encounter, authority):
+    if authority is not _ARENA_RESTORED_RECEIPT_AUTHORITY:
+        raise PublicationRejected('Disarm landing import is restoration-owner controlled')
+    from encounter_inspection import DisarmLandingReceipt, fingerprint
+    from arena_hex_map import layout_from_encounter_map, HexAddress
+    from weapon import native_pending_disarm_landing
+    rows=encounter.__dict__.get('_disarm_landing_receipts')
+    if type(rows) is not list:raise PublicationRejected('native Disarm landing history is malformed')
+    prepared=[]
+    for receipt in rows:
+        if type(receipt) is not DisarmLandingReceipt:
+            raise PublicationRejected('native Disarm landing receipt type is unsupported')
+        source=encounter.universe.get_event_by_id(receipt.source_action_id)
+        obj=encounter.universe.get_object_by_id(receipt.target_id)
+        layout=layout_from_encounter_map(encounter.map)
+        origin=HexAddress(*receipt.origin_cell);landing=HexAddress(*receipt.landing_cell)
+        if (source is None or getattr(source.resolution,'outcome',None)!='landing_choice_pending'
+                or source.actor_id!=receipt.actor_id or source.target_id!=receipt.owner_id
+                or source.disarm_weapon_id!=receipt.target_id or type(obj) is not WeaponInstance
+                or native_pending_disarm_landing(obj) is not None or layout is None
+                or not layout.contains(origin) or not layout.contains(landing)
+                or receipt.margin<=0 or receipt.maximum_landing_hexes!=receipt.margin//3
+                or layout.distance(origin,landing)>receipt.maximum_landing_hexes
+                or __import__('measured_values').truncate_position(layout.center_position(landing,0.0)).as_tuple()!=receipt.position
+                or obj.parent_container_id is not None or obj.get_position()!=CartesianPosition(*receipt.position)
+                or receipt.boundary>encounter.last_processed_boundary):
+            raise PublicationRejected('native Disarm landing receipt contradicts its Action, map or Object')
+        prepared.append((id(receipt),receipt,fingerprint(receipt)))
+    if len({key for key,_,_ in prepared})!=len(prepared):
+        raise PublicationRejected('duplicate native Disarm landing receipt identity')
+    for key,receipt,digest in prepared:
+        _DISARM_LANDING_RECEIPTS[key]=(weakref.ref(receipt,
+            lambda ref,key=key:_DISARM_LANDING_RECEIPTS.pop(key,None)),weakref.ref(encounter),digest)
+
+
+def _unregister_arena_restored_disarm_landings(encounter, authority):
+    if authority is not _ARENA_RESTORED_RECEIPT_AUTHORITY:
+        raise PublicationRejected('Disarm landing rollback is restoration-owner controlled')
+    for receipt in encounter.__dict__.get('_disarm_landing_receipts',()):
+        row=_DISARM_LANDING_RECEIPTS.get(id(receipt))
+        if row is not None and row[0]() is receipt and row[1]() is encounter:
+            _DISARM_LANDING_RECEIPTS.pop(id(receipt),None)
 
 
 def recover_interval_publication(encounter,recovery_token,*,ownership=None,rng_state=None,rng_owner=None):

@@ -659,7 +659,10 @@ class TestNativeObjectWrest(unittest.TestCase):
         # Disarm commits at second 2 while Wrest is accepted to start there and
         # resolve at 3. All Beings have explicit test Geometry and valid facing.
         step_with([20,1])
-        self.assertEqual(disarm.resolution.outcome,'disarmed')
+        self.assertEqual(disarm.resolution.outcome,'landing_choice_pending')
+        from atomic_publication import disarm_landing_options,choose_disarm_landing
+        cell=disarm_landing_options(encounter,world_weapon)[0]
+        choose_disarm_landing(encounter,world_weapon,cell.column,cell.row)
         self.assertIn(wrest.id,encounter.pending_action_list)
         with patch.object(_ProvisionalRandom,'roll',side_effect=AssertionError(
                 'stale Wrest must be rejected before drawing RNG')):
@@ -668,7 +671,7 @@ class TestNativeObjectWrest(unittest.TestCase):
         self.assertEqual(active_object_grip_state(encounter),())
         dropped=world.get_object_by_id(world_weapon)
         self.assertIsNone(dropped.parent_container_id)
-        self.assertEqual(dropped.get_position(),holder.get_position())
+        self.assertEqual(dropped.get_position(),encounter.inspect_committed().target(world_weapon).position)
         self.assertNotIn(world_weapon,holder.current.body_parts.values())
         self.assertNotIn(world_weapon,actor.current.body_parts.values())
 

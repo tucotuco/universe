@@ -87,8 +87,8 @@ _CATALOG = {
     'action_choice':'ChoiceBook ChoiceView ChoiceMember _Accepted Reservation',
     'scheduling':'PreparedSchedule', 'action_settlement':'TargetCandidate',
     'atomic_publication':'PublishedInterval TargetIntervalRecord ObjectiveCommitProvenance',
-    'encounter_inspection':'CommittedBoundaryRecord EntityInspection',
-    'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect DelayDefenseEffect ProjectileReleaseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect GrappleStateEffect PositionEffect ObjectGripEffect StunEffect SubdualEffect',
+    'encounter_inspection':'CommittedBoundaryRecord EntityInspection DisarmLandingReceipt',
+    'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect DelayDefenseEffect ProjectileReleaseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect DisarmLandingPendingEffect GrappleStateEffect PositionEffect ObjectGripEffect StunEffect SubdualEffect',
     'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectiveUse',
     'interval_staging':'AuthorityReference StartFence RegistrationIntent QueueProjection',
 }

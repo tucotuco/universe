@@ -55,6 +55,17 @@ class TestActionEvaluation(unittest.TestCase):
         self.enc.mark_aware(self.b.id, self.a.id)
         self.world.add_event(self.enc)
 
+    def _place_disarm_hexes(self):
+        from arena_hex_map import ArenaHexLayout, HexAddress, encounter_map_descriptor
+        from hex_facing import nearest_facing
+        layout=ArenaHexLayout.rectangle(10,10)
+        self.enc.map=encounter_map_descriptor(layout)
+        first=layout.center_position(HexAddress(5,5))
+        second=layout.center_position(HexAddress(6,5))
+        self.a.set_position(first);self.b.set_position(second)
+        self.a.set_hex_facing(nearest_facing((second.x-first.x,second.y-first.y,0.0)))
+        return layout
+
     def strike(self, weapon=None):
         return MeleeStrike(self.enc, self.a.id, self.b.id, weapon or self.w1, motion='thrust', reach=2)
 
@@ -602,7 +613,7 @@ class TestActionEvaluation(unittest.TestCase):
     def test_native_touch_grab_hold_break_grapple_and_escape_use_separate_receipt_state(self):
         from physical_contact import active_contact_state
         self.a.set_position(CartesianPosition(0,0,0))
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         self.a.current.body_parts['left hand'] = None
         self.a.current.body_parts['right hand'] = None
         self.a.current.skills.skills['improved grapple'] = 3
@@ -1923,9 +1934,9 @@ class TestActionEvaluation(unittest.TestCase):
         # proposals publish even though their combined durability loss destroys it.
         self.assertEqual(target.hit_points(),-1)
 
-    def test_native_disarm_releases_same_weapon_into_defender_hex_atomically(self):
+    def test_native_disarm_persists_post_roll_landing_then_releases_same_weapon_atomically(self):
         self.a.current.skills.weapon_skills['Dagger']=2
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         self.enc.enable_transactional_progression(quiescent=True)
         weapon=self.world.get_object_by_id(self.w1)
         action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
@@ -1941,16 +1952,46 @@ class TestActionEvaluation(unittest.TestCase):
                 int(dice[2:].split('+')[0]),value));return value
         with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(action.end_time)
         receipt=self.enc.inspect_committed(action.end_time).action(action.id)
-        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertEqual(receipt.facts.outcome,'landing_choice_pending')
+        from weapon import NATIVE_PENDING_DISARM_LANDING_TAG
+        self.assertIn(NATIVE_PENDING_DISARM_LANDING_TAG,self.world.get_object_by_id(self.w3).current.tags)
+        from atomic_publication import disarm_landing_options,choose_disarm_landing
+        cell=disarm_landing_options(self.enc,self.w3)[0]
+        choose_disarm_landing(self.enc,self.w3,cell.column,cell.row)
         self.assertEqual(self.b.current.body_parts['right hand'],None)
         self.assertNotIn(self.w3,self.b.weapons)
         dropped=self.world.get_object_by_id(self.w3)
         self.assertIsNone(dropped.parent_container_id)
-        self.assertEqual(dropped.get_position(),self.b.get_position())
+        self.assertEqual(dropped.get_position(),self.enc.inspect_committed().target(self.w3).position)
+
+    def test_successful_sub_three_margin_has_no_clear_legal_landing(self):
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self._place_disarm_hexes()
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon=self.world.get_object_by_id(self.w1)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
+        action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
+        from melee_combat import effective_melee_reach_meters
+        action.reach=effective_melee_reach_meters(self.a.current,weapon.current)
+        action.end_time=weapon.Tt();self.enc.schedule_action(action)
+        rolls=iter((14,10))
+        def roll(ctx,dice):
+            value=next(rolls);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(action.end_time)
+        receipt=self.enc.inspect_committed(action.end_time).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'landing_choice_pending')
+        self.assertEqual(dict(receipt.facts.metadata)['margin'],1)
+        from atomic_publication import disarm_landing_options
+        self.assertEqual(disarm_landing_options(self.enc,self.w3),())
+        from transactional_progression import TransactionalProgressionError
+        with self.assertRaisesRegex(TransactionalProgressionError,'landing is selected'):
+            self.enc.step(1)
+        self.assertEqual(self.enc.time,action.end_time)
 
     def test_disarm_applies_adopted_ranseur_bonus(self):
         from melee_combat import effective_melee_reach_meters
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         attacker=self.world.get_object_by_id(self.w1)
         ranseur=self.world.library.get_weapon_definition('Ranseur')
         attacker.original=ranseur
@@ -1967,12 +2008,12 @@ class TestActionEvaluation(unittest.TestCase):
                 int(dice[2:].split('+')[0]),value));return value
         with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(action.end_time)
         receipt=self.enc.inspect_committed(action.end_time).action(action.id)
-        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertEqual(receipt.facts.outcome,'landing_choice_pending')
         self.assertGreaterEqual(dict(receipt.facts.metadata)['margin'],3)
 
     def test_gauntlet_cannot_be_disarmed_without_random_draw(self):
         from melee_combat import effective_melee_reach_meters
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         gauntlet=self.world.library.get_weapon_definition('Gauntlet')
         target=self.world.get_object_by_id(self.w3)
         target.original=gauntlet;target.current=gauntlet.copy()
@@ -2011,7 +2052,7 @@ class TestActionEvaluation(unittest.TestCase):
     def test_native_unarmed_disarm_uses_arm_profile_and_opposed_attack_roll(self):
         self.a.current.skills.skills['unarmed combat']=1
         self.a.current.body_parts['left hand']=None
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         self.enc.enable_transactional_progression(quiescent=True)
         action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,None)
         action.disarm_weapon_id=self.w3
@@ -2028,17 +2069,20 @@ class TestActionEvaluation(unittest.TestCase):
             return value
         with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(3)
         receipt=self.enc.inspect_committed(3).action(action.id)
-        self.assertEqual(receipt.facts.outcome,'disarmed')
-        self.assertIsNone(self.b.current.body_parts['right hand'])
+        self.assertEqual(receipt.facts.outcome,'landing_choice_pending')
         dropped=self.world.get_object_by_id(self.w3)
+        from atomic_publication import disarm_landing_options,choose_disarm_landing
+        cell=disarm_landing_options(self.enc,self.w3)[0]
+        choose_disarm_landing(self.enc,self.w3,cell.column,cell.row)
+        self.assertIsNone(self.b.current.body_parts['right hand'])
         self.assertIsNone(dropped.parent_container_id)
-        self.assertEqual(dropped.get_position(),self.b.get_position())
+        self.assertEqual(dropped.get_position(),self.enc.inspect_committed().target(self.w3).position)
 
     def test_native_unarmed_disarm_takes_same_weapon_only_at_five_point_margin(self):
         from action_evaluation import DisarmTakeEffect
         self.a.current.skills.skills['unarmed combat']=1
         self.a.current.body_parts['left hand']=None
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         self.enc.enable_transactional_progression(quiescent=True)
         action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,None)
         action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
@@ -2074,7 +2118,7 @@ class TestActionEvaluation(unittest.TestCase):
     def test_native_unarmed_disarm_hand_choice_drops_on_margin_below_five(self):
         self.a.current.skills.skills['unarmed combat']=1
         self.a.current.body_parts['left hand']=None
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         self.enc.enable_transactional_progression(quiescent=True)
         action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,None)
         action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
@@ -2090,16 +2134,18 @@ class TestActionEvaluation(unittest.TestCase):
             return value
         with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(3)
         receipt=self.enc.inspect_committed(3).action(action.id)
-        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertEqual(receipt.facts.outcome,'landing_choice_pending')
         self.assertEqual(dict(receipt.facts.metadata)['margin'],4)
         weapon=self.world.get_object_by_id(self.w3)
+        from atomic_publication import disarm_landing_options,choose_disarm_landing
+        cell=disarm_landing_options(self.enc,self.w3)[0]
+        choose_disarm_landing(self.enc,self.w3,cell.column,cell.row)
         self.assertIsNone(weapon.parent_container_id)
         self.assertIsNotNone(weapon.get_position())
 
     def test_disarm_custody_loss_blocks_accepted_later_attack_with_that_weapon(self):
         self.a.current.skills.weapon_skills['Dagger']=2
-        self.a.set_position(CartesianPosition(0,0,0))
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         self.enc.enable_transactional_progression(quiescent=True)
         defender_weapon=self.world.get_object_by_id(self.w3)
         from melee_combat import effective_melee_reach_meters
@@ -2115,8 +2161,12 @@ class TestActionEvaluation(unittest.TestCase):
             value=next(iterator)
             ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
             return value
-        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(8)
-        self.assertEqual(disarm.resolution.outcome,'disarmed')
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(disarm.end_time)
+        self.assertEqual(disarm.resolution.outcome,'landing_choice_pending')
+        from atomic_publication import disarm_landing_options,choose_disarm_landing
+        cell=disarm_landing_options(self.enc,self.w3)[0]
+        choose_disarm_landing(self.enc,self.w3,cell.column,cell.row)
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(8-self.enc.time)
         self.assertEqual(attack.resolution.outcome,'weapon_unavailable')
         self.assertEqual(defender_weapon.id,self.w3)
         self.assertIsNone(self.b.current.body_parts['right hand'])
@@ -2127,7 +2177,7 @@ class TestActionEvaluation(unittest.TestCase):
         from action_evaluation import ActionView,_disarm
         self.a.current.skills.skills['unarmed combat']=1
         self.a.current.body_parts['left hand']=None
-        self.b.set_position(CartesianPosition(.2,0,0))
+        self._place_disarm_hexes()
         original=self.strike();self.schedule(original)
         snapshot=self.snapshot()
         data=dict(snapshot.actions[original.id].data)
@@ -2144,7 +2194,7 @@ class TestActionEvaluation(unittest.TestCase):
             values=iter((10,10))
             def roll(self,_dice):return next(self.values)
         result=_disarm(snapshot,action,ScriptedRolls())
-        self.assertEqual(result.outcome,'disarmed')
+        self.assertEqual(result.outcome,'landing_choice_pending')
         self.assertEqual(dict(result.metadata)['margin'],1)
 
     def test_native_break_weapon_uses_pending_attack_motion_and_disables_it_next_boundary(self):
@@ -2413,6 +2463,27 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(self.enc.choice_state, choices_before)
         self.assertEqual(dict(self.world.event_history), history_before)
         self.assertEqual(random.getstate(), rng_before)
+
+    def test_selected_different_action_forfeits_successful_feint(self):
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon=self.world.get_object_by_id(self.w1)
+        from melee_combat import effective_melee_reach_meters
+        feint=Action(self.world,0,1,'feint',self.a.id,self.b.id,self.w1)
+        feint.feint_motion='thrust'
+        feint.reach=effective_melee_reach_meters(self.a.current,weapon.current)
+        feint.end_time=math.ceil(weapon.Tt()/2)
+        self.enc.schedule_action(feint)
+        with patch.object(_ProvisionalRandom,'roll',return_value=20):
+            self.enc.step(feint.end_time)
+        self.assertEqual(feint.resolution.outcome,'success')
+        chosen=self.strike()
+        self.enc.schedule_action(chosen)
+        retry=self.strike()
+        retry.feint_source_action_id=feint.id
+        with self.assertRaisesRegex(ValueError,'forfeited or consumed'):
+            retry.prepare_schedule(self.enc)
 
     def test_native_coup_de_grace_automatically_criticals_and_makes_fortitude_save(self):
         from states import StatesList

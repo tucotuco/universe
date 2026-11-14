@@ -67,12 +67,14 @@ _SUPPORTED_TAGS = frozenset({
     'action_evaluation.PracticeEffect', 'observer_proposals.LifecycleEffect',
     'action_evaluation.DropObjectEffect',
     'action_evaluation.DisarmTakeEffect',
+    'action_evaluation.DisarmLandingPendingEffect',
     'action_evaluation.GrappleStateEffect',
     'action_evaluation.PositionEffect',
     'action_evaluation.ObjectGripEffect',
     'observer_proposals.ActionOutcomeEffect',
     'action_settlement.TargetCandidate',
     'encounter_inspection.CommittedBoundaryRecord',
+    'encounter_inspection.DisarmLandingReceipt',
     'encounter_inspection.EntityInspection',
     'interval_staging.QueueProjection',
     'arena_perception.ArenaPerceptionEvidence',
@@ -219,11 +221,12 @@ class _Graph:
         from strategy import Strategy
         from skill import Skills
         from observer_proposals import ObserverProjection
+        from encounter_inspection import DisarmLandingReceipt
         from frozen_practice import (PracticeProjection, CandidatePracticeUse,
                                      CandidateSkillTransition)
         from experience import SkillUse, BatchSkillUse
         from action_evaluation import (IdentifiedEffect, EffectIdentity,
-                                       AwarenessEffect, PracticeEffect, DropObjectEffect, DisarmTakeEffect,
+                                       AwarenessEffect, PracticeEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect,
                                        GrappleStateEffect, PositionEffect, ObjectGripEffect)
         from observer_proposals import LifecycleEffect, ActionOutcomeEffect
         from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger
@@ -309,12 +312,14 @@ class _Graph:
         elif tag == 'action_evaluation.IdentifiedEffect': obj = IdentifiedEffect(**values)
         elif tag == 'action_evaluation.DropObjectEffect': obj = DropObjectEffect(**values)
         elif tag == 'action_evaluation.DisarmTakeEffect': obj = DisarmTakeEffect(**values)
+        elif tag == 'action_evaluation.DisarmLandingPendingEffect': obj = DisarmLandingPendingEffect(**values)
         elif tag == 'action_evaluation.GrappleStateEffect': obj = GrappleStateEffect(**values)
         elif tag == 'action_evaluation.PositionEffect': obj = PositionEffect(**values)
         elif tag == 'action_evaluation.ObjectGripEffect': obj = ObjectGripEffect(**values)
         elif tag == 'action_evaluation.EffectIdentity': obj = EffectIdentity(**values)
         elif tag == 'action_evaluation.AwarenessEffect': obj = AwarenessEffect(**values)
         elif tag == 'action_evaluation.PracticeEffect': obj = PracticeEffect(**values)
+        elif tag == 'encounter_inspection.DisarmLandingReceipt': obj = DisarmLandingReceipt(**values)
         elif tag == 'observer_proposals.LifecycleEffect': obj = LifecycleEffect(**values)
         elif tag == 'observer_proposals.ActionOutcomeEffect': obj = ActionOutcomeEffect(**values)
         elif tag == 'action_settlement.TargetCandidate':

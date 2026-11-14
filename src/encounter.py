@@ -183,6 +183,7 @@ class Encounter(Event):
         self._dispatching = False
         self._boundary_context = None
         self._choice_book = ChoiceBook(self)
+        self._disarm_landing_receipts = []
         if being_list is None:
             self.being_list = [] # A list of ids of Beings involved in the Encounter
         else:
@@ -942,15 +943,23 @@ class Encounter(Event):
         Current starts publish and begin before returning (after settlement if
         called during a boundary). Future starts reserve now and publish later.
         """
+        self._assert_no_pending_disarm_landing()
         planning_entry(self)
         validate_action_contract(self, action)
         return self._choice_book.schedule_single(action, interrupt_action_id)
 
     def schedule_choice(self, actions):
         """Immediate/future complete-set convenience adapter to the same book."""
+        self._assert_no_pending_disarm_landing()
         planning_entry(self)
         validate_choice_actions(self, actions)
         return self._choice_book.schedule_complete(actions)
+
+    def _assert_no_pending_disarm_landing(self):
+        from weapon import WeaponInstance, native_pending_disarm_landing
+        if any(type(obj) is WeaponInstance and native_pending_disarm_landing(obj) is not None
+               for obj in self.universe.object_registry.object_instances.values()):
+            raise RuntimeError('Resolve the pending Disarm landing before scheduling another Action')
 
     def activate_arena_for_player_action(self, actor_id, action, *, rng_owner):
         """Atomically accept the first Run or owned-weapon Draw Choice.

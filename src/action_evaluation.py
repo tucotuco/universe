@@ -931,6 +931,18 @@ class DisarmTakeEffect:
 
 
 @dataclass(frozen=True)
+class DisarmLandingPendingEffect:
+    """Persist a successful Disarm until its post-roll landing is selected."""
+    source_action_id: str
+    target_id: str
+    owner_id: str
+    actor_id: str
+    margin: int
+    maximum_landing_hexes: int
+    origin_position: tuple
+
+
+@dataclass(frozen=True)
 class GrappleStateEffect:
     """A Target-owned, receipt-backed physical grip or Grapple-control transition."""
     source_action_id: str
@@ -2364,9 +2376,14 @@ def _disarm(snapshot, action, rng):
         effect=DisarmTakeEffect(action.id,target_weapon.id,defender.id,actor.id,take_hand)
         return ActionProposal(action.id,actor.id,tuple(sorted((defender.id,target_weapon.id))),
             'disarmed_taken',(effect,),metadata=tuple(metadata))
-    effect=DropObjectEffect(action.id,target_weapon.id,defender.id,defender.position.as_tuple())
+    from arena_hex_map import layout_from_encounter_map
+    layout=layout_from_encounter_map(snapshot.encounter_map)
+    if layout is None or layout.cell_at_position(defender.position) is None:
+        return ActionProposal(action.id,actor.id,(defender.id,),'unplaced',metadata=tuple(metadata[:-1]))
+    effect=DisarmLandingPendingEffect(action.id,target_weapon.id,defender.id,actor.id,
+        margin,max(0,margin//3),defender.position.as_tuple())
     return ActionProposal(action.id,actor.id,tuple(sorted((defender.id,target_weapon.id))),
-        'disarmed',(effect,),metadata=tuple(metadata))
+        'landing_choice_pending',(effect,),metadata=tuple(metadata))
 
 
 def pickup_eligibility(snapshot, action):

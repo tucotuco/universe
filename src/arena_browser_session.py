@@ -776,6 +776,22 @@ class GeneratedArenaSession:
             if (obj is not None and obj.parent_container_id in (None, player.native.being.id)
                     and object_id not in self._view_handles):
                 self._view_handles[object_id] = secrets.token_urlsafe(18)
+        disarm_landing_choice = None
+        from weapon import WeaponInstance, native_pending_disarm_landing
+        from atomic_publication import disarm_landing_options
+        for object_id,obj in candidate.universe.object_registry.object_instances.items():
+            if type(obj) is not WeaponInstance:continue
+            pending=native_pending_disarm_landing(obj)
+            if pending is None or pending['actor_id']!=player.native.being.id:continue
+            evidence=next((row for row in ledger.current if row.entity_id==object_id),None)
+            handle=self._view_handles.get(object_id)
+            if evidence is None or handle is None or evidence.category!='object':continue
+            options=disarm_landing_options(candidate.encounter,object_id)
+            disarm_landing_choice={"handle":handle,"weapon_name":self._display_names.get(object_id,evidence.name),
+                "maximum_landing_hexes":pending['max_landing_hexes'],
+                "cells":[{"column":row.column,"row":row.row} for row in options]}
+            break
+        movement_available = movement_available and disarm_landing_choice is None
         selected = next((row for row in perceived
                          if row["handle"] == self._selected_entity_handle), None)
         selected_being = (self._observer_being_sheet_unlocked(candidate, selected)
@@ -848,6 +864,7 @@ class GeneratedArenaSession:
             "coup_de_grace_action": coup_de_grace_action,
             "object_strike_action": object_strike_action,
             "disarm_action": disarm_action,
+            "disarm_landing_choice": disarm_landing_choice,
             "opponent_melee_action": opponent_melee_action,
             "defense_action": defense_action,
             "opponent_defense_action": opponent_defense_action,
@@ -864,7 +881,7 @@ class GeneratedArenaSession:
             "action_catalog": action_catalog,
             "action_programs": action_programs,
             "run_available": self._player_action_id is None and not candidate.encounter.initiated,
-            "advance_available": ((self._player_action_id is not None
+            "advance_available": (disarm_landing_choice is None and ((self._player_action_id is not None
                                     and self._player_action_outcome is None)
                                    or (self._pickup_action_id is not None
                                        and self._pickup_action_outcome is None)
@@ -888,7 +905,7 @@ class GeneratedArenaSession:
                                    or (opponent_defense_action is not None
                                        and opponent_defense_action["status"] in ("accepted", "preparing", "committed"))
                                    or opponent_can_act
-                                   or movement_plan is not None),
+                                   or movement_plan is not None)),
             "movement_available": movement_available,
             "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
             "movement_plan": movement_plan,
@@ -2750,6 +2767,30 @@ class GeneratedArenaSession:
             except Exception as exc:raise ArenaBrowserRequestError('Native Disarm Choice refused; Arena state is unchanged.') from exc
             self._selected_entity_handle=handle
             self._trace.native_advance(None,None,f'action=disarm mode={"unarmed" if unarmed else "armed"} motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
+            return self._view_unlocked()
+
+    def choose_disarm_landing(self,payload):
+        if (type(payload) is not dict or set(payload)!={'handle','column','row'}
+                or type(payload.get('handle')) is not str
+                or type(payload.get('column')) is not int or type(payload.get('row')) is not int):
+            raise ArenaBrowserRequestError('Choose a clear represented hex for the pending Disarm landing.')
+        with self._lock:
+            if self._active is None:raise ArenaBrowserRequestError('Generate an Encounter first.')
+            candidate=self._active;player=candidate.participants[0].native.being
+            entity_id=next((key for key,value in self._view_handles.items() if value==payload['handle']),None)
+            from arena_perception import ArenaPerceptionLedger
+            ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
+            evidence=None if type(ledger) is not ArenaPerceptionLedger else next(
+                (row for row in ledger.current if row.entity_id==entity_id),None)
+            if evidence is None or evidence.category!='object' or evidence.present_state!='carried':
+                raise ArenaBrowserRequestError('Disarm landing requires your current observed Weapon handle.')
+            try:
+                from atomic_publication import choose_disarm_landing
+                choose_disarm_landing(candidate.encounter,entity_id,payload['column'],payload['row'])
+            except Exception as exc:
+                raise ArenaBrowserRequestError('Native Disarm landing choice refused; Arena state is unchanged.') from exc
+            self._trace.native_advance(None,None,
+                f'action=disarm_landing cell=({payload["column"]},{payload["row"]})')
             return self._view_unlocked()
 
     def _break_weapon_preflight(self,candidate,player,entity_id,evidence):

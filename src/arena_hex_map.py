@@ -158,6 +158,16 @@ class ArenaHexLayout:
             result.append(HexAddress(nq, nr + nq // 2))
         return tuple(result)
 
+    @staticmethod
+    def distance(first: HexAddress, second: HexAddress) -> int:
+        """Shortest regular-hex distance between two offset-column cells."""
+        if type(first) is not HexAddress or type(second) is not HexAddress:
+            raise TypeError("native HexAddress values required")
+        aq, ar = first.column, first.row - first.column // 2
+        bq, br = second.column, second.row - second.column // 2
+        dq, dr = aq - bq, ar - br
+        return max(abs(dq), abs(dr), abs(dq + dr))
+
     def column_row_ranges(self) -> tuple[tuple[int, tuple[tuple[int, int], ...]], ...]:
         """Compact finite footprint by column as inclusive row ranges."""
         by_column: dict[int, list[int]] = {}

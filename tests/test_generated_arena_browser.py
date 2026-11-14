@@ -1644,6 +1644,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def test_disarm_http_pending_save_load_commits_exact_weapon_to_ground(self):
         page=self.request("/")[1]
         self.assertIn("function submitDisarm(handle,motion,unarmed=false,hand=null)",page)
+        self.assertIn("function submitDisarmLanding(handle,column,row)",page)
         profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text())
         self.session=GeneratedArenaSession(root_seed_factory=lambda:20261108,
             ground_loadout_profile=profile)
@@ -1692,6 +1693,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                 "exec('def roll(ctx,dice):\\n value=next(it);ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split(\"+\")[0]),value));return value');"
                 "cm=patch.object(_ProvisionalRandom,'roll',roll);cm.start();"
                 "exec('while v[\"disarm_action\"][\"status\"]==\"executing\":\\n v=s.advance_one_second()');cm.stop();"
+                "w=v['disarm_landing_choice'];c=w['cells'][0];v=s.choose_disarm_landing({'handle':w['handle'],'column':c['column'],'row':c['row']});"
                 "o=s.active_candidate.universe.get_object_by_id(sys.argv[2]);"
                 "print(json.dumps({'action':v['disarm_action'],'owner':o.parent_container_id,"
                 "'position':None if o.get_position() is None else o.get_position().as_tuple(),"
@@ -1699,7 +1701,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             child=subprocess.run([sys.executable,'-c',continuation,str(saved),target_weapon.id],
                 cwd=ROOT,check=True,capture_output=True,text=True)
         foreign=json.loads(child.stdout)
-        self.assertEqual(foreign['action']['outcome'],'disarmed')
+        self.assertEqual(foreign['action']['outcome'],'landing_choice_pending')
         self.assertIsNone(foreign['owner'])
         self.assertEqual(foreign['position'],foreign['inspection'])
         restored=GeneratedArenaSession(root_seed_factory=lambda:3)
@@ -1714,8 +1716,36 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             while view['disarm_action']['status']=='executing':
                 view=restored.advance_one_second()
         self.assertEqual(view['disarm_action']['status'],'completed')
-        self.assertEqual(view['disarm_action']['outcome'],'disarmed')
+        self.assertEqual(view['disarm_action']['outcome'],'landing_choice_pending')
         self.assertGreaterEqual(view['disarm_action']['maximum_landing_hexes'],0)
+        self.assertTrue(view['disarm_landing_choice']['cells'])
+        cell=view['disarm_landing_choice']['cells'][0]
+        weapon_handle=view['disarm_landing_choice']['handle']
+        self.session=restored
+        status,view=self.request("/api/generated/disarm-landing",{
+            'handle':weapon_handle,
+            'column':cell['column'],'row':cell['row']})
+        self.assertEqual(status,200,view)
+        observed=next(row for row in view['entities']
+                      if row['handle']==weapon_handle)
+        self.assertEqual(observed['present_state'],'ground')
+        self.assertEqual(observed['cell'],cell)
+        weapon=restored.active_candidate.universe.get_object_by_id(target_weapon.id)
+        self.assertIsNone(weapon.parent_container_id)
+        self.assertEqual(weapon.get_position(),restored.active_candidate.encounter.inspect_committed().target(weapon.id).position)
+        resolved_wire=restored.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            saved=Path(directory)/'resolved-disarm.arena';saved.write_bytes(resolved_wire)
+            code=("import json,sys;import tests.test_generated_arena_browser;"
+                "from arena_browser_session import GeneratedArenaSession;"
+                "s=GeneratedArenaSession(root_seed_factory=lambda:4);s.load_encounter_bytes(open(sys.argv[1],'rb').read());"
+                "o=s.active_candidate.universe.get_object_by_id(sys.argv[2]);"
+                "print(json.dumps({'position':o.get_position().as_tuple(),'inspection':"
+                "s.active_candidate.encounter.inspect_committed().target(o.id).position.as_tuple()}))")
+            child=subprocess.run([sys.executable,'-c',code,str(saved),target_weapon.id],
+                cwd=ROOT,check=True,capture_output=True,text=True)
+        resolved=json.loads(child.stdout)
+        self.assertEqual(resolved['position'],resolved['inspection'])
 
     def test_generated_arena_exposes_and_accepts_unarmed_disarm(self):
         status,page=self.request("/")

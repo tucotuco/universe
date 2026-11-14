@@ -20,6 +20,28 @@ DRAWABLE_WORN_SHEATH = "worn_sheath"
 NATIVE_READY_PREPARATION_TAG = "universe.native_ready_preparation"
 NATIVE_SHIELD_ATTACHMENT_TAG = "universe.native_shield_attachment"
 NATIVE_LOCKED_GAUNTLET_WEAPON_TAG = "universe.native_locked_gauntlet_weapon_attachment"
+NATIVE_PENDING_DISARM_LANDING_TAG = "universe.native_pending_disarm_landing"
+
+
+def native_pending_disarm_landing(weapon):
+    """Read the persisted post-roll landing request attached to one Weapon."""
+    if type(weapon) is not WeaponInstance:
+        raise TypeError("pending Disarm landing requires an exact native WeaponInstance")
+    tags=weapon.current.tags
+    if type(tags) is not dict:raise ValueError("native Weapon tags are malformed")
+    record=tags.get(NATIVE_PENDING_DISARM_LANDING_TAG)
+    if record is None:return None
+    keys={"actor_id","margin","max_landing_hexes","origin_cell","owner_id","source_action_id"}
+    if (type(record) is not dict or set(record)!=keys
+            or any(type(record.get(key)) is not str or not record[key]
+                   for key in ("actor_id","owner_id","source_action_id"))
+            or type(record.get("margin")) is not int or record["margin"]<=0
+            or type(record.get("max_landing_hexes")) is not int
+            or record["max_landing_hexes"]!=record["margin"]//3
+            or type(record.get("origin_cell")) is not tuple or len(record["origin_cell"])!=2
+            or any(type(value) is not int for value in record["origin_cell"])):
+        raise ValueError("native pending Disarm landing record is malformed")
+    return record
 
 
 def native_locked_gauntlet_weapon_attachment(weapon):

@@ -312,7 +312,23 @@ def validate_saved_equipment_row(row, being, source_record_bytes, universe, enco
                         or any(being.current.body_parts.get(hand) != obj.id for hand in placement["hands"])):
                     raise ValueError("saved Arena-ready held unit disagrees with native hand state")
             else:
-                from action_evaluation import ObjectGripEffect
+                from action_evaluation import ObjectGripEffect, DisarmTakeEffect
+                inspection=encounter.inspect_committed()
+                landing=next((receipt for receipt in inspection.disarm_landings
+                    if receipt.target_id==obj.id and receipt.owner_id==being.id),None)
+                if (landing is not None and obj.parent_container_id is None
+                        and obj.get_position() is not None
+                        and obj.get_position().as_tuple()==landing.position):
+                    continue
+                take=next((effect.effect for action_receipt in inspection.actions.values()
+                    for effect in action_receipt.effects
+                    if type(effect.effect) is DisarmTakeEffect
+                    and effect.effect.target_id==obj.id and effect.effect.owner_id==being.id),None)
+                if (take is not None and obj.parent_container_id==take.actor_id
+                        and obj.id in universe.get_object_by_id(take.actor_id).possessions
+                        and obj.id in universe.get_object_by_id(take.actor_id).weapons
+                        and universe.get_object_by_id(take.actor_id).current.body_parts.get(take.hand)==obj.id):
+                    continue
                 history=object.__getattribute__(obj,'__dict__').get('_atomic_target_history',[])
                 transfers=[]
                 for record in history:

@@ -157,6 +157,7 @@ class EncounterInspection:
     schedule: object
     schema: str = 'native-committed-inspection-v1'
     audience: str = 'omniscient inspection; not observer-filtered policy or replay'
+    disarm_landings: tuple = ()
 
     def action(self, action_id):
         _require(type(action_id) is str and action_id in self.actions, 'unknown/uncommitted/foreign Action')
@@ -171,12 +172,26 @@ class EncounterInspection:
         return self.histories[target_id]
 
 
+@dataclass(frozen=True)
+class DisarmLandingReceipt:
+    source_action_id: str
+    target_id: str
+    owner_id: str
+    actor_id: str
+    boundary: int
+    origin_cell: tuple
+    landing_cell: tuple
+    margin: int
+    maximum_landing_hexes: int
+    position: tuple
+
+
 # Exact approved frozen native data classes. Opaque dataclasses, subclasses,
 # callbacks and objects with extra attributes never pass this closed copier.
 _ALLOWED = None
 
 
-def _expected_body_parts(meta, target_id, initial):
+def _expected_body_parts(meta, target_id, initial, disarm_landings=()):
     expected = dict(initial)
     for row in meta.effects.values():
         effect = row.effect
@@ -194,6 +209,10 @@ def _expected_body_parts(meta, target_id, initial):
             if effect.actor_id==target_id:expected[effect.actor_hand]=effect.target_id
             if effect.holder_id==target_id and expected.get(effect.holder_hand)==effect.target_id:
                 expected[effect.holder_hand]=None
+    for landing in disarm_landings:
+        if landing.owner_id==target_id:
+            for slot,value in tuple(expected.items()):
+                if value==landing.target_id:expected[slot]=None
     return expected
 
 
@@ -212,7 +231,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect DisarmLandingPendingEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',
@@ -229,7 +248,7 @@ def detached(value):
             'action_choice': 'Reservation',
             'throwing': 'ProjectileFlight ProjectileBoundaryState',
             'spatial.state': 'CartesianPosition',
-            'encounter_inspection': 'CommittedBoundaryRecord EntityInspection ActionInspection TargetInspection BoundaryInspection ObjectiveFactInspection ObjectiveInspection EncounterInspection',
+            'encounter_inspection': 'CommittedBoundaryRecord EntityInspection ActionInspection TargetInspection BoundaryInspection ObjectiveFactInspection ObjectiveInspection EncounterInspection DisarmLandingReceipt',
         }
         allowed = set()
         for name, names in catalog.items():
@@ -317,7 +336,7 @@ def _idle(encounter):
              'faulted/incomplete interval cannot be inspected as final')
 
 
-def _validate_live_latest(encounter, targets, meta, objectives, recipients, action_ids):
+def _validate_live_latest(encounter, targets, meta, objectives, recipients, action_ids, disarm_landings=()):
     """Reject unfenced drift; never substitute current state for historical data."""
     objects = encounter.universe.object_registry.object_instances
     from observer_proposals import (BeliefProjection, AccountsProjection,
@@ -326,7 +345,7 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
     from field_observation import BeliefLedger
     from realization import RealityLedger, CommittedFact, FactKey
     from statistical_group import StatisticalGroup
-    from being import BeingDefinition
+    from being import BeingDefinition, BeingInstance
     from object import ObjectDefinition
     from armor import ArmorDefinition
     from weapon import WeaponDefinition
@@ -345,12 +364,15 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                       if type(row.effect) is DropObjectEffect and row.effect.target_id==key),None)
         repositioned=next((row.effect for row in meta.effects.values()
                       if type(row.effect) is PositionEffect and row.effect.target_id==key),None)
-        expected_position=(None if picked_up else
+        landing=next((row for row in reversed(disarm_landings)
+                      if row.target_id==key and row.boundary==meta.end),None)
+        expected_position=(CartesianPosition(*landing.position) if landing is not None else None if picked_up else
                            CartesianPosition(*dropped.position) if dropped is not None else
                            CartesianPosition(*repositioned.position) if repositioned is not None else
                            meta.projectile_states[key].position if key in meta.projectile_states
                            else meta.entities[key].position)
-        _require(detached(None if obj.spatial_state is None else obj.spatial_state.position) == expected_position, 'unreceipted position change')
+        _require(detached(None if obj.spatial_state is None else obj.spatial_state.position) == expected_position,
+                 'unreceipted position change')
         for row in meta.effects.values():
             if type(row.effect) is PickupEffect and row.effect.object_id == key:
                 actor=objects.get(row.effect.target_id)
@@ -373,6 +395,17 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                     and actor.current.body_parts.get(row.effect.hand)==key
                     and obj.parent_container_id==actor.id and obj.spatial_state is None,
                     'unreceipted native Disarm take custody transfer')
+        if landing is not None:
+            owner=objects.get(landing.owner_id);actor=objects.get(landing.actor_id)
+            source=encounter.universe.get_event_by_id(landing.source_action_id)
+            _require(type(owner) is BeingInstance and type(actor) is BeingInstance
+                and source is not None and source.event_type=='disarm'
+                and source.actor_id==actor.id and source.target_id==owner.id
+                and key not in owner.weapons and key not in owner.possessions
+                and key not in tuple(owner.current.body_parts.values())
+                and obj.parent_container_id is None
+                and obj.get_position()==CartesianPosition(*landing.position),
+                'unreceipted post-roll Disarm landing custody transition')
             batches = _transfer_batches(meta, key)
             for boundary, transfers in batches.items():
                 from being import BeingInstance
@@ -424,7 +457,7 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
             _require(detached(states['states']) == _expected_condition_states(
                 properties, target, meta.end)
                 and detached(abilities['abilities']) == properties['abilities']
-                and detached(current['body_parts']) == _expected_body_parts(meta, key, properties['body_parts'])
+                and detached(current['body_parts']) == _expected_body_parts(meta, key, properties['body_parts'], disarm_landings)
                 and detached(current['armor_id']) == properties['armor_id']
                 and detached(current['experience']) == properties['experience'], 'unreceipted participant state change')
         practice = target.practice_state
@@ -544,7 +577,8 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
     from universe import Universe
     import atomic_publication as publication
     from interval_staging import _guard_methods, _OBJECTS, _ACTIONS
-    from action_evaluation import ActionProposal
+    from action_evaluation import ActionProposal, DisarmLandingPendingEffect
+    from encounter_inspection import DisarmLandingReceipt
     from observer_proposals import (LifecycleEffect, LocationObservationEffect,
                                     LocationEvidenceProjection, ObjectObservationEffect,
                                     ObjectEvidenceProjection)
@@ -605,10 +639,35 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
             copied=detached(row)
             _require(fingerprint(copied) == issued[2], 'committed receipt altered')
             copies.append(copied)
+        landing_rows=encounter.__dict__.get('_disarm_landing_receipts',())
+        _require(type(landing_rows) is list, 'unreviewed Disarm landing receipts')
+        from arena_hex_map import layout_from_encounter_map, HexAddress
+        issued_landings=[]
+        for landing in landing_rows:
+            _require(type(landing) is DisarmLandingReceipt,
+                     'unreviewed Disarm landing receipt')
+            issued=publication._DISARM_LANDING_RECEIPTS.get(id(landing))
+            _require(issued is not None and issued[0]() is landing and issued[1]() is encounter
+                and issued[2]==fingerprint(landing), 'forged or altered Disarm landing receipt')
+            issued_landings.append(detached(landing))
+        layout_for_landings=layout_from_encounter_map(encounter.map)
+        for landing in issued_landings:
+            address=HexAddress(*landing.landing_cell)
+            origin_receipt=next((row for row in copies if row.boundary==landing.boundary),None)
+            _require(layout_for_landings is not None and layout_for_landings.contains(address)
+                and origin_receipt is not None, 'Disarm landing receipt has no committed map boundary')
+            for entity_id,entity in origin_receipt.inspection.entities.items():
+                if entity_id==landing.target_id or entity.position is None:
+                    continue
+                occupies=(entity.category=='being'
+                    or entity.pre_action.get('parent_container_id') is None)
+                _require(not (occupies and layout_for_landings.cell_at_position(entity.position)==address),
+                         'Disarm landing receipt names an occupied hex')
         authorized_spatial_transition_ids={
             row.effect.object_id if type(row.effect) is PickupEffect else row.effect.target_id
             for copied in copies for row in copied.inspection.effects.values()
             if type(row.effect) in (PickupEffect, DropObjectEffect)}
+        authorized_spatial_transition_ids.update(row.target_id for row in issued_landings)
         if boundary is not None:
             _require(type(boundary) is int, 'integer committed boundary required')
         if receipt is not None:
@@ -621,6 +680,37 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
         _require(history[-1].boundary == encounter.last_processed_boundary == encounter.time,
                  'incomplete committed cursor')
         objects = world.object_registry.object_instances
+        from being import BeingInstance
+        from weapon import WeaponInstance, native_pending_disarm_landing
+        from arena_hex_map import layout_from_encounter_map, HexAddress
+        layout=layout_from_encounter_map(encounter.map)
+        for weapon in objects.values():
+            if type(weapon) is not WeaponInstance:continue
+            pending=native_pending_disarm_landing(weapon)
+            if pending is None:continue
+            source=wd['event_history'].get(pending['source_action_id'])
+            source_data={} if source is None else native_data(source,_ACTIONS)
+            proposal=source_data.get('resolution')
+            matching=[effect for row in copies for effect in row.inspection.effects.values()
+                      if type(effect.effect) is DisarmLandingPendingEffect
+                      and effect.effect.source_action_id==pending['source_action_id']]
+            owner=objects.get(pending['owner_id'])
+            origin=None if layout is None else layout.cell_at_position(
+                CartesianPosition(*matching[0].effect.origin_position) if matching else CartesianPosition(0,0,0))
+            _require(type(source) in _ACTIONS and type(proposal) is ActionProposal
+                and proposal.outcome=='landing_choice_pending' and len(matching)==1
+                and matching[0].effect.target_id==weapon.id
+                and source_data.get('actor_id')==pending['actor_id']
+                and source_data.get('target_id')==pending['owner_id']
+                and source_data.get('disarm_weapon_id')==weapon.id
+                and type(owner) is BeingInstance and weapon.id in owner.weapons
+                and weapon.id in tuple(owner.current.body_parts.values())
+                and origin is not None and layout.contains(origin)
+                and (origin.column,origin.row)==pending['origin_cell']
+                and pending['margin']==dict(proposal.metadata).get('margin')
+                and pending['max_landing_hexes']==dict(proposal.metadata).get('maximum_landing_hexes')
+                and pending['source_action_id'] not in {row.source_action_id for row in issued_landings},
+                'pending Disarm landing is not authorized by its committed opposed contest')
         actions = {}; effects = {}; histories = {}; timeline = []
         latest_targets = {}; objectives = {}; recipients = {}; selected_objectives = {}; selected_recipients = {}
         selected_use = []; selected_meta = None
@@ -750,7 +840,10 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                             components[component] = components.get(component, 0) + row.effect.amount
                     entity = meta.entities[key]
                     projectile_state=meta.projectile_states.get(key)
-                    position=projectile_state.position if projectile_state is not None else entity.position
+                    landed=next((row for row in reversed(issued_landings)
+                                 if row.target_id==key and row.boundary==record.boundary),None)
+                    position=(CartesianPosition(*landed.position) if landed is not None else
+                              projectile_state.position if projectile_state is not None else entity.position)
                     view = TargetInspection(record.boundary, state, position, entity,
                         freeze(by_action), state.starting_hp - min(state.starting_hp, -10) if state.fatal_effect_ids else 0,
                         _practice_history(state.practice_state), projectile_state)
@@ -797,8 +890,10 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                          and row.encounter_id == encounter.id]
             expected=[row.boundary for row in copies if key in row.inspection.target_anchors]
             _require([row.boundary for row in own_records] == expected, 'unreceipted Target history entry')
-        _validate_live_latest(encounter, latest_targets, copies[-1].inspection, objectives, recipients, all_action_ids)
+        _validate_live_latest(encounter, latest_targets, copies[-1].inspection, objectives, recipients, all_action_ids,
+                              tuple(row for row in issued_landings if row.boundary==copies[-1].boundary))
         return detached(EncounterInspection(encounter.id, boundary, history[-1].boundary, actions,
             {key: rows[-1] for key, rows in histories.items()}, {key: tuple(rows) for key, rows in histories.items()},
             tuple(timeline), effects, _objective_views(selected_objectives,selected_use), tuple(selected_use), selected_recipients,
-            selected_meta.participants,selected_meta.schedule))
+            selected_meta.participants,selected_meta.schedule,
+            disarm_landings=tuple(row for row in issued_landings if row.boundary<=boundary)))

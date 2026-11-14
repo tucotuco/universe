@@ -738,6 +738,11 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
     from encounter import EncounterStep
     assert_not_quarantined(encounter, 'Encounter progression')
     if mode_of(encounter)!='transactional':raise TransactionalProgressionError('explicit transactional selection required')
+    from weapon import WeaponInstance, native_pending_disarm_landing
+    for obj in encounter.universe.object_registry.object_instances.values():
+        if type(obj) is WeaponInstance and native_pending_disarm_landing(obj) is not None:
+            raise TransactionalProgressionError(
+                'Encounter progression is paused until the post-roll Disarm landing is selected')
     if movement_intent is not None and movement_intents is not None:
         raise TransactionalProgressionError('singular and plural MovementIntent inputs cannot be combined')
     if movement_intents is not None:

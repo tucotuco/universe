@@ -11,7 +11,7 @@ from types import MappingProxyType
 from spatial.state import CartesianPosition
 
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
-    EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect,
+    EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, EffectIdentity, IdentifiedEffect,
     RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, ObjectGripEffect, StunEffect, SubdualEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
@@ -80,7 +80,7 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect)
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect)
 _FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'stunned', 'stunned_critical', 'stun_failed', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
@@ -94,7 +94,7 @@ _OUTCOMES = {
     'object_strike': frozenset(('normal', 'critical', 'broken', 'miss', 'spectacular miss', 'drop weapon',
         'weapon_unavailable', 'unable_to_act', 'unsupported_object', 'attended_object',
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path','no_prior_second_attack')),
-    'disarm': frozenset(('disarmed','disarmed_taken','failure','unable_to_act','weapon_unavailable','not_disarmable','unplaced',
+    'disarm': frozenset(('disarmed','disarmed_taken','landing_choice_pending','failure','unable_to_act','weapon_unavailable','not_disarmable','unplaced',
         'out_of_reach','not_facing','blocked','uncertain_path')),
     'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
@@ -187,6 +187,14 @@ def _effect(effect):
         _identity(values['owner_id']); _identity(values['actor_id'])
         _require(values['hand'] in ('left hand','right hand'),
                  'invalid native Disarm take hand')
+    if type(effect) is DisarmLandingPendingEffect:
+        _identity(values['owner_id']);_identity(values['actor_id'])
+        _require(type(values['margin']) is int and values['margin']>0
+                 and type(values['maximum_landing_hexes']) is int
+                 and values['maximum_landing_hexes']==values['margin']//3
+                 and type(values['origin_position']) is tuple and len(values['origin_position'])==3,
+                 'invalid native post-roll Disarm landing request')
+        for value in values['origin_position']:_number(value)
     if type(effect) is PositionEffect:
         _identity(values['target_id'])
         _require(type(values['position']) is tuple and len(values['position']) == 3,
@@ -344,19 +352,20 @@ def _copy_proposal(proposal, actions, entities):
             _require(not proposal.effects and not proposal.defenses,
                      'ineligible Coup de grace has no effects')
     if action.family == 'disarm':
-        _require(proposal.outcome in ('disarmed','disarmed_taken','failure','unable_to_act','weapon_unavailable','not_disarmable',
+        _require(proposal.outcome in ('disarmed','disarmed_taken','landing_choice_pending','failure','unable_to_act','weapon_unavailable','not_disarmable',
             'unplaced','out_of_reach','not_facing','blocked','uncertain_path'),
             'unsupported Disarm outcome')
         drops=[e for e in proposal.effects if type(e) is DropObjectEffect]
         takes=[e for e in proposal.effects if type(e) is DisarmTakeEffect]
-        _require(len(drops)==int(proposal.outcome=='disarmed')
+        pending=[e for e in proposal.effects if type(e) is DisarmLandingPendingEffect]
+        _require(len(drops)==0 and len(pending)==int(proposal.outcome=='landing_choice_pending')
                  and len(takes)==int(proposal.outcome=='disarmed_taken'),
                  'Disarm custody effect does not match its opposed roll')
-        if proposal.outcome in ('disarmed','failure'):
+        if proposal.outcome in ('landing_choice_pending','disarmed_taken','failure'):
             values=dict(metadata)
             _require(type(values.get('margin')) is int
                      and values.get('maximum_landing_hexes')==max(0,values['margin']//3)
-                     and ((values['margin']>0) if proposal.outcome in ('disarmed','disarmed_taken') else values['margin']<=0)
+                     and ((values['margin']>0) if proposal.outcome in ('landing_choice_pending','disarmed_taken') else values['margin']<=0)
                      and (proposal.outcome!='disarmed_taken' or values['margin']>=5),
                      'Disarm outcome contradicts opposed attack-roll margin')
     if action.family == 'grappling':
@@ -630,6 +639,19 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             and effect.position==entities[effect.owner_id].position.as_tuple(),
             'Disarm release differs from the frozen target weapon or legal defender hex')
         return effect.target_id,('disarm_drop',action.id,effect.target_id,effect.owner_id)
+    if type(effect) is DisarmLandingPendingEffect:
+        _identity(effect.owner_id); _identity(effect.actor_id)
+        _require(action.family=='disarm' and proposal.outcome=='landing_choice_pending'
+            and effect.owner_id==action.target_id and effect.actor_id==action.actor_id
+            and effect.target_id==action.data.get('disarm_weapon_id')
+            and effect.margin==dict(proposal.metadata).get('margin')
+            and effect.maximum_landing_hexes==dict(proposal.metadata).get('maximum_landing_hexes')
+            and recipient.category=='weapon' and entities[effect.owner_id].category=='being'
+            and effect.target_id in entities[effect.owner_id].data.get('held',())
+            and entities[effect.owner_id].position is not None
+            and effect.origin_position==entities[effect.owner_id].position.as_tuple(),
+            'pending Disarm landing differs from the frozen native weapon or holder')
+        return effect.target_id,('disarm_landing_pending',action.id,effect.target_id,effect.actor_id)
     if type(effect) is DisarmTakeEffect:
         _identity(effect.owner_id); _identity(effect.actor_id)
         _require(action.family=='disarm' and proposal.outcome=='disarmed_taken'
@@ -898,6 +920,9 @@ def _validate_complete_outcome(proposal, action, entities):
     takes=[e for e in effects if type(e) is DisarmTakeEffect]
     _require(len(takes)==int(action.family=='disarm' and proposal.outcome=='disarmed_taken'),
              'missing/extra native Disarm take custody transfer')
+    pending=[e for e in effects if type(e) is DisarmLandingPendingEffect]
+    _require(len(pending)==int(action.family=='disarm' and proposal.outcome=='landing_choice_pending'),
+             'missing/extra native Disarm landing request')
     object_grips=[e for e in effects if type(e) is ObjectGripEffect]
     _require(len(object_grips)==int(action.family=='grappling' and action.data.get('event_type') in ('grab object','wrest') and proposal.outcome=='success'),
              'missing/extra native Object Grip receipt')
@@ -948,10 +973,10 @@ def _validate_complete_outcome(proposal, action, entities):
         _require(len(object_impacts) >= expected and len(object_impacts) <= expected+1
                  and len(effects) == len(object_impacts),
                  'Object strike damage does not match its native outcome')
-    if action.family=='disarm' and proposal.outcome=='disarmed':
+    if action.family=='disarm' and proposal.outcome=='landing_choice_pending':
         _require(dict(proposal.metadata).get('margin',0)>0
-                 and drops[0].target_id==action.data.get('disarm_weapon_id'),
-                 'Disarm does not release its specifically declared weapon')
+                 and pending[0].target_id==action.data.get('disarm_weapon_id'),
+                 'Disarm landing request does not reference its specifically declared weapon')
     if action.family in ('combat', 'melee') and proposal.outcome in ('normal', 'critical', 'stunned', 'stunned_critical', 'stun_failed', 'hit self'):
         _require(sum(e.component == 'body' for e in damage) == 1, 'missing body contribution')
         _require(sum(e.component == 'critical_bypass' for e in damage) == int(proposal.outcome in ('critical','stunned_critical')), 'missing/extra critical bypass')

@@ -41,10 +41,12 @@ _ARENA_TAGS = frozenset({
     'melee_combat.MeleeResult','melee_defense.MeleeDefense',
     'atomic_publication.PublishedInterval','atomic_publication.TargetIntervalRecord',
     'encounter_inspection.CommittedBoundaryRecord','encounter_inspection.EntityInspection',
+    'encounter_inspection.DisarmLandingReceipt',
     'action_settlement.TargetCandidate','action_evaluation.ActionProposal',
     'action_evaluation.ActionView','action_evaluation.EffectIdentity',
     'action_evaluation.IdentifiedEffect','action_evaluation.DamageEffect',
     'action_evaluation.ProtectionEffect','action_evaluation.PickupEffect',
+    'action_evaluation.DisarmLandingPendingEffect',
     'action_evaluation.StunEffect','action_evaluation.SubdualEffect',
     'action_evaluation.ReadyWeaponEffect','action_evaluation.ReadyPreparationEffect','action_evaluation.ReadyConsumptionEffect','action_evaluation.DelayDefenseEffect','action_evaluation.DropObjectEffect','action_evaluation.DisarmTakeEffect','action_evaluation.GrappleStateEffect','action_evaluation.PositionEffect','action_evaluation.ObjectGripEffect','action_evaluation.PracticeEffect',
     'observer_proposals.ActionOutcomeEffect','observer_proposals.LifecycleEffect',
@@ -431,8 +433,10 @@ def restore(envelope):
     rng_owner = RNGCursor(_decode_rng(rng_data[2]))
     # Re-issue exact receipts only under this restoration owner, and require
     # the complete native inspection gate before exposing the graph.
-    from atomic_publication import _register_arena_restored_receipts
+    from atomic_publication import (_register_arena_restored_receipts,
+                                    _register_arena_restored_disarm_landings)
     _register_arena_restored_receipts(encounter, _ARENA_RESTORE_AUTHORITY)
+    _register_arena_restored_disarm_landings(encounter, _ARENA_RESTORE_AUTHORITY)
     pristine = (not encounter.initiated and encounter.time == encounter.start_time
         and not history and not encounter.pending_action_list
         and not encounter.finished_action_list and not encounter.cancelled_action_list
@@ -445,8 +449,10 @@ def restore(envelope):
             inspect_encounter(encounter)
     except Exception:
         _unbind_restored_arena_progression(encounter, _ARENA_RESTORE_AUTHORITY)
-        from atomic_publication import _unregister_arena_restored_receipts
+        from atomic_publication import (_unregister_arena_restored_receipts,
+                                        _unregister_arena_restored_disarm_landings)
         _unregister_arena_restored_receipts(encounter, _ARENA_RESTORE_AUTHORITY)
+        _unregister_arena_restored_disarm_landings(encounter, _ARENA_RESTORE_AUTHORITY)
         raise
     return world, encounter, rng_owner
 
