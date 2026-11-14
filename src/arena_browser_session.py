@@ -2063,6 +2063,14 @@ class GeneratedArenaSession:
                         candidate, player, entity_id, evidence,
                         component["projectile_handle"],
                         coup_de_grace=component.get("coup_de_grace", False))
+                elif kind == "deflect":
+                    raise ArenaBrowserRequestError(
+                        "Deflect is unavailable: this observer has no committed evidence of awareness "
+                        "throughout the missile's entire trajectory, and the redirected Missing destination is unresolved.")
+                elif kind == "shoot":
+                    raise ArenaBrowserRequestError(
+                        "Shoot is unavailable: adopted bow data do not define arrow velocity/flight time "
+                        "or a native ammunition release profile.")
                 elif kind == "ready-weapon":
                     from activities import ReadyWeaponAction
                     if evidence is None or evidence.category not in ("object", "weapon"):

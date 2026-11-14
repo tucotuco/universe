@@ -240,6 +240,23 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             if row["name"].casefold().startswith("shoot"))
         self.assertIn("throughout its complete trajectory", deflect_row["reason"])
         self.assertIn("no arrow", shoot_row["reason"])
+        time_before_deflect = encounter.time
+        rng_before_deflect = self.session._rng_cursor.state
+        pending_before_deflect = tuple(encounter.pending_action_list)
+        status, refusal = self.request("/api/generated/action-program", {"components": [{
+            "kind": "deflect", "handle": target_row["handle"]}]})
+        self.assertEqual(status, 409)
+        self.assertIn("no committed evidence of awareness", refusal["error"])
+        self.assertEqual(encounter.time, time_before_deflect)
+        self.assertEqual(tuple(encounter.pending_action_list), pending_before_deflect)
+        self.assertEqual(self.session._rng_cursor.state, rng_before_deflect)
+        status, refusal = self.request("/api/generated/action-program", {"components": [{
+            "kind": "shoot", "handle": target_row["handle"]}]})
+        self.assertEqual(status, 409)
+        self.assertIn("do not define arrow velocity/flight time", refusal["error"])
+        self.assertEqual(encounter.time, time_before_deflect)
+        self.assertEqual(tuple(encounter.pending_action_list), pending_before_deflect)
+        self.assertEqual(self.session._rng_cursor.state, rng_before_deflect)
         dagger_option = next(row for row in throw_row["projectiles"]
             if row["handle"] == weapon_row["handle"])
         self.assertTrue(dagger_option["coup_de_grace"])

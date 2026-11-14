@@ -67,7 +67,8 @@ class TestArenaPersistence(unittest.TestCase):
         # generated world graph.
         source = GeneratedArenaSession(root_seed_factory=lambda: 5051)
         source.generate({"starting_experience": "10000",
-                         "width_cells": "10", "height_cells": "5"})
+                         "width_cells": "10", "height_cells": "5",
+                         "opponent_strategy": "none"})
         candidate = source.active_candidate
         being = candidate.participants[0].native.being
         target = candidate.participants[1].native.being
@@ -142,7 +143,7 @@ print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple()
             continued_candidate.encounter.step(1)
             encounter.step(1)
             self.assertIn(projectile.__dict__["_projectile_flight"].impact_outcome,
-                          ("hit", "miss", "fatal", "target_moved"))
+                          ("hit", "miss", "fatal"))
             self.assertEqual(continued_candidate.encounter.time, encounter.time)
             self.assertEqual(continued_projectile.get_position(), projectile.get_position())
             self.assertEqual(continued_projectile.__dict__["_projectile_flight"],
