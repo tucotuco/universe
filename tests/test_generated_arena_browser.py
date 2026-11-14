@@ -3715,6 +3715,188 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(intent.status, "not_accepted")
         self.assertEqual(encounter.aware_beings(player.native.being.id), [hidden.native.being.id])
 
+    def test_generated_stun_program_survives_fresh_load_and_interrupts_later_action(self):
+        from dataclasses import replace
+        from action_evaluation import RandomDraw, _ProvisionalRandom
+        from melee_combat import MeleeStrike
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261119,
+            ground_loadout_profile=json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        page = self.request("/")[1]
+        self.assertIn('kind==="stun"&&a.motions?.length', page)
+        self.assertIn('kind==="subdue"&&a.weapon_options?.length', page)
+        self.assertEqual(self.request("/api/generated/generate", {
+            "starting_experience": "1000", "width_cells": "5", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})[0], 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        player.set_position(CartesianPosition(1.0, 1.0, 0))
+        target.set_position(CartesianPosition(1.1, 1.0, 0))
+        player.set_hex_facing(nearest_facing((target.get_position().x-player.get_position().x,
+            target.get_position().y-player.get_position().y,0)))
+        target.set_hex_facing(nearest_facing((player.get_position().x-target.get_position().x,
+            player.get_position().y-target.get_position().y,0)))
+        player.set_skill_level(candidate.universe.get_skill_dictionary(), "unarmed combat", 5)
+        player.set_skill_level(candidate.universe.get_skill_dictionary(), "stun", 1)
+        player.current.tags["universe.stun_categories"] = {"humanoid": 2}
+        target.current.tags["universe.stun_category"] = "humanoid"
+        weapon_id = candidate.universe.make_weapon_for_being(target.id, "Dagger", "Scenario Dagger")
+        candidate.universe.arm_being(target.id, weapon_id, "right hand")
+        target.set_weapon_skill_level(candidate.universe.get_skill_dictionary(), "Dagger", 3)
+        encounter.mark_aware(player.id, target.id)
+        encounter.mark_aware(target.id, player.id)
+        evidence = replace(player._arena_perception_ledger._current[target.id],
+                           position=target.get_position())
+        player._arena_perception_ledger._current[target.id] = evidence
+        player._arena_perception_ledger._history = [evidence if row.entity_id == target.id else row
+            for row in player._arena_perception_ledger._history]
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        incoming = MeleeStrike(encounter, target.id, player.id, weapon_id,
+                               motion="swing", reach=2)
+        encounter.schedule_action(incoming)
+        target_handle = self.session._view_handles[target.id]
+        inspected = self.request("/api/generated/inspect", {"handle": target_handle})
+        self.assertEqual(inspected[0], 200)
+        stun_row = next(row for row in inspected[1]["action_catalog"]["entries"]
+                        if row["name"] == "Stun")
+        self.assertEqual(stun_row["status"], "available", stun_row["reason"])
+        status, accepted = self.request("/api/generated/action-program", {"components": [{
+            "kind": "stun", "handle": target_handle, "body_region": "Arm",
+            "motion": "thrust"}]})
+        self.assertEqual(status, 200, accepted)
+        stun_action_id = next(member.action.id
+            for record in encounter._choice_book._choices.values()
+            for member in record.members if member.action.event_type == "stun")
+        pending = self.session.save_encounter_bytes()
+        restored = GeneratedArenaSession(root_seed_factory=lambda: 99)
+        loaded = restored.load_encounter_bytes(pending)
+        restored_encounter = restored.active_candidate.encounter
+        stun_record = next(record for record in restored_encounter._choice_book._choices.values()
+            if any(member.action.id == stun_action_id for member in record.members))
+        self.assertEqual(stun_record.view.state, "accepted")
+        self.assertTrue(any(component["name"] == "Stun"
+                            for program in loaded["action_programs"]
+                            for component in program["components"]))
+        stun_action = next(member.action for member in stun_record.members
+                           if member.action.id == stun_action_id)
+        values = iter((19, 1, 1, 1))
+        def roll(context, dice):
+            value = next(values)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", roll):
+            for _ in range(5):
+                loaded = restored.advance_one_second()
+                if incoming.id in restored.active_candidate.encounter.cancelled_action_list:
+                    break
+        restored_encounter = restored.active_candidate.encounter
+        restored_world = restored.active_candidate.universe
+        result_target = restored_world.get_object_by_id(target.id)
+        self.assertEqual(stun_action.resolution.outcome, "stunned")
+        self.assertIn(incoming.id, restored_encounter.cancelled_action_list)
+        self.assertGreater(result_target.current.states.states["stunned_until"],
+                           restored_encounter.time)
+        committed = restored.save_encounter_bytes()
+        second_process = GeneratedArenaSession(root_seed_factory=lambda: 100)
+        second_process.load_encounter_bytes(committed)
+        self.assertEqual(second_process.active_candidate.encounter.id, encounter.id)
+
+    def test_generated_subdue_http_fresh_load_and_independent_condition(self):
+        from dataclasses import replace
+        from action_evaluation import RandomDraw, SubdualEffect, DamageEffect, _ProvisionalRandom
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261120,
+            ground_loadout_profile=json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        self.assertEqual(self.request("/api/generated/generate", {
+            "starting_experience": "1000", "width_cells": "5", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "size_categories": {"player": "medium", "opponent": "medium"}})[0], 200)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        player.set_position(CartesianPosition(1.0, 1.0, 0))
+        target.set_position(CartesianPosition(1.1, 1.0, 0))
+        player.set_hex_facing(nearest_facing((target.get_position().x-player.get_position().x,
+            target.get_position().y-player.get_position().y,0)))
+        target.set_hex_facing(nearest_facing((player.get_position().x-target.get_position().x,
+            player.get_position().y-target.get_position().y,0)))
+        target.current.hit_points = 1
+        encounter.difficulty_class = 1
+        player.set_weapon_skill_level(candidate.universe.get_skill_dictionary(), "Club", 3)
+        club_id = candidate.universe.make_weapon_for_being(player.id, "Club", "Scenario Club")
+        candidate.universe.arm_being(player.id, club_id, "right hand")
+        encounter.mark_aware(player.id, target.id)
+        encounter.mark_aware(target.id, player.id)
+        evidence = replace(player._arena_perception_ledger._current[target.id],
+                           position=target.get_position())
+        player._arena_perception_ledger._current[target.id] = evidence
+        player._arena_perception_ledger._history = [evidence if row.entity_id == target.id else row
+            for row in player._arena_perception_ledger._history]
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.session.public_view()
+        target_handle = self.session._view_handles[target.id]
+        weapon_handle = self.session._view_handles[club_id]
+        inspected = self.request("/api/generated/inspect", {"handle": target_handle})
+        self.assertEqual(inspected[0], 200)
+        subdue_row = next(row for row in inspected[1]["action_catalog"]["entries"]
+                          if row["name"] == "Subdue")
+        self.assertEqual(subdue_row["status"], "available", subdue_row["reason"])
+        status, accepted = self.request("/api/generated/action-program", {"components": [{
+            "kind": "subdue", "handle": target_handle, "weapon_handle": weapon_handle,
+            "motion": "swing"}]})
+        self.assertEqual(status, 200, accepted)
+        action_id = next(member.action.id
+            for record in encounter._choice_book._choices.values()
+            for member in record.members if member.action.event_type == "subdue")
+        pending = self.session.save_encounter_bytes()
+        restored = GeneratedArenaSession(root_seed_factory=lambda: 101)
+        restored.load_encounter_bytes(pending)
+        restored_encounter = restored.active_candidate.encounter
+        record = next(record for record in restored_encounter._choice_book._choices.values()
+            if any(member.action.id == action_id for member in record.members))
+        self.assertEqual(record.view.state, "accepted")
+        subdue = next(member.action for member in record.members if member.action.id == action_id)
+        values = iter((10, 1))
+        def roll(context, dice):
+            value = next(values) if dice == "1d20" or dice.startswith("1d") else 1
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split("+")[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, "roll", roll):
+            for _ in range(8):
+                view = restored.advance_one_second()
+                if subdue.id in restored_encounter.finished_action_list:
+                    break
+        restored_world = restored.active_candidate.universe
+        restored_target = restored_world.get_object_by_id(target.id)
+        self.assertEqual(subdue.resolution.outcome, "normal")
+        burden = next(effect.amount for effect in subdue.resolution.effects
+                      if type(effect) is SubdualEffect)
+        hp_damage = sum(effect.amount for effect in subdue.resolution.effects
+            if type(effect) is DamageEffect and effect.component in ("body", "critical_bypass"))
+        self.assertEqual(burden, 1)
+        self.assertEqual(hp_damage, 0)
+        self.assertEqual(restored_target.current.hit_points, 1)
+        self.assertTrue(restored_target.current.states.states["subdual_unconscious"])
+        restored_encounter.inspect_committed()
+        saved_condition = restored.save_encounter_bytes()
+        another = GeneratedArenaSession(root_seed_factory=lambda: 102)
+        another.load_encounter_bytes(saved_condition)
+        again = another.active_candidate.universe.get_object_by_id(target.id)
+        self.assertEqual(again.current.hit_points, 1)
+        self.assertEqual(again.current.states.states["subdual_damage"], 1)
+        self.assertTrue(again.current.states.states["subdual_unconscious"])
+        self.assertTrue(again.is_helpless())
+        from action_evaluation import subdual_recovery_state
+        recovery_anchor = again.current.states.states["subdual_recovery_anchor"]
+        self.assertEqual(subdual_recovery_state(1, recovery_anchor,
+                         recovery_anchor+3599), (1, recovery_anchor))
+        self.assertEqual(subdual_recovery_state(1, recovery_anchor,
+                         recovery_anchor+3600), (0, recovery_anchor+3600))
+
     def test_passive_refresh_refuses_later_unmodeled_geometry_without_partial_publication(self):
         from spatial.geometry import Sphere
         self.session.generate({"starting_experience": "10000", "width_cells": "10", "height_cells": "5"})

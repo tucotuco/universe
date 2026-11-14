@@ -526,7 +526,6 @@ class GeneratedArenaSession:
         now = candidate.encounter.time
         for record in candidate.encounter._choice_book._choices.values():
             if (record.view.state not in ("accepted", "executing")
-                    or len(record.members) < 2
                     or not any(member.action.actor_id == player.id for member in record.members)):
                 continue
             components = []
@@ -1977,6 +1976,7 @@ class GeneratedArenaSession:
         allowed = {"kind", "handle", "action", "motion", "hand", "position", "unarmed",
                    "shield_handle",
                    "weapon_handle",
+                   "body_region",
                    "projectile_handle",
                    "coup_de_grace",
                    "start_offset_seconds", "priority_penalty", "strategy"}
@@ -2028,7 +2028,21 @@ class GeneratedArenaSession:
                     (row for row in ledger.current if row.entity_id == entity_id), None)
                 kind = component["kind"]
                 motion = component.get("motion")
-                if kind == "touch":
+                if kind == "stun" or kind == "subdue":
+                    from activities import declare_stun, declare_subdue
+                    if evidence is None or evidence.category != "being" or evidence.present_state != "present":
+                        raise ArenaBrowserRequestError("Stun/Subdue requires a currently perceived present Being target.")
+                    if kind == "stun":
+                        action = declare_stun(candidate.universe, encounter, player.id,
+                            entity_id, region=component.get("body_region"),
+                            motion=motion, strategy=Strategy(**component.get("strategy", {})))
+                    else:
+                        weapon_id = next((key for key,value in self._view_handles.items()
+                                          if value == component.get("weapon_handle")), None)
+                        action = declare_subdue(candidate.universe, encounter, player.id,
+                            entity_id, weapon_id, motion=motion,
+                            strategy=Strategy(**component.get("strategy", {})))
+                elif kind == "touch":
                     action, _ = self._touch_preflight(candidate, player, entity_id,
                         evidence, allow_composition=True)
                 elif kind == "melee" and motion in ("swing", "thrust"):
@@ -3721,6 +3735,58 @@ class GeneratedArenaSession:
                 "status": "not_implemented", "reason": reason,
             })
 
+        target_view = (None if selected is None or entity_id is None
+            or evidence is None or evidence.category != "being" else {
+                "handle": handle, "name": selected["name"], "type": selected["type"],
+                "present_state": selected["present_state"]})
+        stun_options = []
+        stun_reason = "Select a currently perceived Being and acquire extraordinary Stun skill."
+        if target_view is not None and (player.get_skill_level("stun") or 0) >= 1:
+            from activities import declare_stun
+            for region,motion in (("Arm","thrust"),("Arm","swing"),("Leg","swing")):
+                try:
+                    action = declare_stun(candidate.universe,candidate.encounter,player.id,
+                        entity_id,region=region,motion=motion)
+                    prepared = candidate.encounter.prepare_action(action)
+                    stun_options.append({"body_region":region,"motion":motion,
+                        "duration_seconds":prepared.end_time-prepared.start_time})
+                except (ArenaBrowserRequestError,TypeError,ValueError,RuntimeError) as exc:
+                    stun_reason = str(exc)
+        catalog_rows.append({"name":"Stun","group":"Being targets","target_type":"being",
+            "required_skill":"stun","is_melee":True,
+            "status":"available" if stun_options else "unavailable",
+            "display_name":"Stun","reason":("Declared unarmed Stun; an eligible threat triggers Fortitude DC 20, duration uses represented Stun ranks, and only later-second Actions are interrupted." if stun_options else stun_reason),
+            "target":target_view,"motions":stun_options})
+
+        subdue_options = []
+        subdue_reason = "Select a present Being and hold a represented bludgeon weapon."
+        if target_view is not None:
+            from activities import declare_subdue
+            from weapon import WeaponInstance
+            for weapon_id in sorted(player.armed_with(candidate.universe).values()):
+                weapon = candidate.universe.get_object_by_id(weapon_id)
+                weapon_handle = self._view_handles.get(weapon_id)
+                if type(weapon) is not WeaponInstance or weapon_handle is None:
+                    continue
+                for motion in ("swing","thrust"):
+                    profile=weapon.current.attacks.get("S" if motion=="swing" else "T",{})
+                    if profile.get("p") != "B":
+                        continue
+                    try:
+                        action=declare_subdue(candidate.universe,candidate.encounter,
+                            player.id,entity_id,weapon_id,motion=motion)
+                        prepared=candidate.encounter.prepare_action(action)
+                        subdue_options.append({"weapon_handle":weapon_handle,
+                            "weapon_name":weapon.name or weapon.current.obj_type,
+                            "motion":motion,"duration_seconds":prepared.end_time-prepared.start_time})
+                    except (ArenaBrowserRequestError,TypeError,ValueError,RuntimeError) as exc:
+                        subdue_reason=str(exc)
+        catalog_rows.append({"name":"Subdue","group":"Being targets","target_type":"being",
+            "required_skill":"none","is_melee":True,
+            "status":"available" if subdue_options else "unavailable",
+            "display_name":"Subdue","reason":("Declared melee bludgeon Subdue; records separate subdual and ordinary damage, with one-point-per-hour recovery." if subdue_options else subdue_reason),
+            "target":target_view,"weapon_options":subdue_options})
+
         if (entity_id is not None and evidence is not None
                 and evidence.category == "being"
                 and evidence.present_state == "present"):
@@ -4160,9 +4226,28 @@ class GeneratedArenaSession:
                     or not math.isfinite(body_weight_pounds) or body_weight_pounds <= 0):
                 raise ArenaBrowserRequestError("native player measurements or condition cannot be projected safely")
             states = current.get_states()
-            if type(states) is not dict or any(type(key) is not str or type(value) is not bool
-                                               for key, value in states.items()):
+            managed = {'stunned_until','subdual_damage','subdual_recovery_anchor',
+                       'subdual_unconscious','subdual_damage_current'}
+            if type(states) is not dict or any(type(key) is not str or
+                    (type(value) is not bool and key not in managed)
+                    for key, value in states.items()):
                 raise ArenaBrowserRequestError("native player condition states cannot be projected safely")
+            visible_states = {key:value for key,value in states.items() if type(value) is bool}
+            stun_until = states.get('stunned_until')
+            from action_evaluation import stun_active_at
+            stun_remaining = (max(0, math.ceil(stun_until-candidate.encounter.time))
+                if type(stun_until) in (int,float) else 0)
+            subdual = states.get('subdual_damage',0)
+            recovery_anchor = states.get('subdual_recovery_anchor')
+            if type(subdual) is int and type(recovery_anchor) in (int,float):
+                from action_evaluation import subdual_recovery_state
+                subdual, _ = subdual_recovery_state(subdual, recovery_anchor,
+                    candidate.encounter.time)
+            if type(subdual) is not int or subdual < 0:
+                raise ArenaBrowserRequestError("native subdual burden cannot be projected safely")
+            visible_states['stunned'] = stun_active_at(stun_until,
+                candidate.encounter.time)
+            visible_states['subdual_unconscious'] = subdual >= hit_points if subdual else False
             fatigue = being.get_physical_fatigue()
             if (not all(type(value) in (int, float) and math.isfinite(value)
                         and 0 <= value <= 1 for value in (fatigue.q, fatigue.b))
@@ -4226,7 +4311,9 @@ class GeneratedArenaSession:
                     "physical_fatigue_reserves": {"q": fatigue.q, "b": fatigue.b,
                                                   "profile_status": "resolved" if being.physiology_id else "unresolved"},
                     "posture": being.posture,
-                    "conditions": self._condition_labels(states),
+                    "conditions": self._condition_labels(visible_states),
+                    "stun_remaining_seconds": stun_remaining,
+                    "subdual_damage": subdual,
                 },
                 "anatomy": anatomy,
                 "movement": movement,
@@ -4244,7 +4331,7 @@ class GeneratedArenaSession:
         }
         active = []
         for name, value in sorted(states.items()):
-            if value:
+            if type(value) is bool and value:
                 label = labels.get(name.casefold(), name.replace("_", " ").strip().capitalize())
                 active.append(label)
         return active
@@ -5010,6 +5097,13 @@ class GeneratedArenaSession:
             player_defense_pending = (self._melee_defense_pending(candidate, player_defense)
                 or (player_defense_view is not None and player_defense_view["status"]
                     in ("accepted", "preparing", "committed")))
+            action_program_pending = any(
+                record.view.state in ("accepted", "executing")
+                and any(member.action.actor_id == player.id
+                        and type(member.action.end_time) in (int, float)
+                        and member.action.end_time > before_time
+                        for member in record.members)
+                for record in candidate.encounter._choice_book._choices.values())
             opponent = candidate.participants[1].native.being
             opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
             opponent_decision = self._opponent_decision(candidate)
@@ -5025,6 +5119,7 @@ class GeneratedArenaSession:
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
+                    and not action_program_pending
                     and not player_defense_pending
                     and not opponent_melee_pending and not opponent_can_act
                     and self._movement_plan is None):
@@ -5045,6 +5140,7 @@ class GeneratedArenaSession:
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
+                    and not action_program_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 self._trace_advance_state(candidate, trace_request_id, trace_client_sequence,
                                           before_time, before_position, before_cell, None,
@@ -5063,6 +5159,7 @@ class GeneratedArenaSession:
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
+                    and not action_program_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Pick up Choice has already resolved")
             if (self._movement_plan is None and self._ready_weapon_action_id is not None
@@ -5076,6 +5173,7 @@ class GeneratedArenaSession:
                     and not feint_pending
                     and not coup_pending and not object_strike_pending
                     and not disarm_pending
+                    and not action_program_pending
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
