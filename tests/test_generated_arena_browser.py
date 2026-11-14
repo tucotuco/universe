@@ -109,6 +109,12 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(action.instrument_id, projectile_id)
         self.assertNotIn(target.id, json.dumps(result))
         self.assertNotIn(projectile_id, json.dumps(result))
+        encounter.step(4)
+        flight = universe.get_object_by_id(projectile_id).__dict__["_projectile_flight"]
+        self.assertEqual(action.resolution.outcome, "released")
+        self.assertEqual(flight.target_id, target.id)
+        self.assertAlmostEqual(flight.landing_position.x, target.get_position().x)
+        self.assertAlmostEqual(flight.landing_position.y, target.get_position().y)
 
 
     def test_general_action_program_http_accepts_sequential_and_validated_overlap(self):

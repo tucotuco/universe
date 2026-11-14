@@ -43,6 +43,21 @@ def placement_signature(candidate):
 
 
 class TestArenaGroundObjects(unittest.TestCase):
+    def test_explicit_generic_object_profile_creates_pickup_eligible_rock(self):
+        profile = json.loads((ROOT / "tests/fixtures/arena/ranged_throw_object.json").read_text())
+        session = GeneratedArenaSession(root_seed_factory=lambda: 5051,
+                                        ground_loadout_profile=profile)
+        session.generate(GENERATE)
+        candidate = session.active_candidate
+        self.assertEqual(len(candidate.ground_objects), 1)
+        placement = candidate.ground_objects[0]
+        self.assertEqual((placement.category, placement.native_type_key), ("object", "Rock"))
+        obj = candidate.universe.get_object_by_id(placement.native_object_id)
+        self.assertIs(type(obj), ObjectInstance)
+        self.assertIsNone(obj.parent_container_id)
+        self.assertIsNone(obj.geometry)
+        self.assertEqual(obj.current.weight, 1.0)
+
     def test_generator_profile_builds_unique_unpossessed_native_weapon_armor_and_shields(self):
         before_global_rng = random.getstate()
         session = GeneratedArenaSession(root_seed_factory=lambda: 404004,
@@ -213,7 +228,26 @@ class TestArenaGroundObjects(unittest.TestCase):
         hidden_armor_class = hidden.get_armor_class()
         start = being.get_position()
         layout = candidate.arena_map.layout
-        target_address = max(layout.addresses(), key=lambda address: math.dist(
+        # Pick a genuinely traversable distant cell. The previous fixture
+        # selected the farthest cell unconditionally and could route through
+        # the generated opponent, failing for unrelated geometry evidence.
+        from movement_intent import _movement_hexes
+        origin = layout.cell_at_position(start)
+        occupied = {layout.cell_at_position(part.native.being.get_position())
+                    for part in candidate.participants
+                    if part.native.being.id != being.id}
+        occupied.update(layout.cell_at_position(item.position)
+                        for item in candidate.ground_objects)
+        valid = []
+        for address in layout.addresses():
+            destination = layout.center_position(address, z=start.z)
+            try:
+                route = _movement_hexes(start, destination, layout) - {origin}
+            except Exception:
+                continue
+            if not route.intersection(occupied):
+                valid.append(address)
+        target_address = max(valid, key=lambda address: math.dist(
             start.as_tuple(), layout.center_position(address, z=start.z).as_tuple()))
         target = layout.center_position(target_address, z=start.z)
         object_positions = {item.native_object_id: item.position for item in candidate.ground_objects}

@@ -13,7 +13,7 @@ import random
 
 from armor import ArmorDefinition, ArmorInstance
 from arena_hex_map import ArenaHexLayout, HexAddress
-from object import ObjectInstance
+from object import ObjectDefinition, ObjectInstance
 from spatial.state import CartesianPosition
 from weapon import WeaponDefinition, WeaponInstance
 
@@ -21,7 +21,7 @@ from weapon import WeaponDefinition, WeaponInstance
 MAX_GROUND_OBJECTS = 3000
 MAX_GROUND_EXPANSION_CELLS = 3000
 MAX_GROUND_LAYOUT_AREA = 1_000_000
-_CATEGORIES = frozenset(("weapon", "armor", "shield"))
+_CATEGORIES = frozenset(("weapon", "armor", "shield", "object"))
 
 
 class ArenaGroundObjectRefusal(ValueError):
@@ -65,7 +65,7 @@ def _validated_specs(universe, item_descriptions):
                 maximum=MAX_GROUND_OBJECTS)
     library = universe.library
     if (library is None or library.weapon_dictionary is None
-            or library.armor_dictionary is None):
+            or library.armor_dictionary is None or library.object_dictionary is None):
         _refuse("native_item_dictionary_unavailable",
                 "native weapon, shield, and armor dictionaries are required")
 
@@ -102,6 +102,11 @@ def _validated_specs(universe, item_descriptions):
             definition = library.armor_dictionary.get_object_definition(key)
             if not isinstance(definition, ArmorDefinition):
                 _refuse("unknown_native_armor", "exact armor key is absent from the native dictionary",
+                        index=index, native_type_key=key)
+        elif category == "object":
+            definition = library.object_dictionary.get_object_definition(key)
+            if not isinstance(definition, ObjectDefinition):
+                _refuse("unknown_native_object", "exact generic Object key is absent from the native dictionary",
                         index=index, native_type_key=key)
         else:
             definition = library.weapon_dictionary.get_object_definition(key)
@@ -209,7 +214,8 @@ def realize_arena_ground_objects(universe, item_descriptions, initial_layout,
         display_name = key
         try:
             instance = (ArmorInstance(definition, display_name) if category == "armor"
-                        else WeaponInstance(definition, display_name))
+                        else (ObjectInstance(definition, display_name) if category == "object"
+                              else WeaponInstance(definition, display_name)))
         except Exception as exc:
             _refuse("native_item_construction_failed",
                     "native constructor refused a prevalidated ground item",

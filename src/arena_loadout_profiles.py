@@ -57,6 +57,10 @@ def _catalog(library):
         if (definition.is_magical is False and type(definition.weight) in (int, float)
                 and definition.weight > 0):
             native[key] = "armor"
+    for key, definition in library.object_dictionary.objects.items():
+        if (type(definition.weight) in (int, float) and definition.weight > 0
+                and definition.is_magical is False):
+            native[key] = "object"
     return native
 
 
@@ -87,7 +91,7 @@ def validate_profile(profile, library=None):
             raise ArenaLoadoutProfileError("explicit_items profile requires at least one item")
         for index, item in enumerate(result["items"]):
             if (type(item) is not dict or set(item) != _ITEM_FIELDS
-                    or item.get("category") not in ("weapon", "armor", "shield")
+                    or item.get("category") not in ("weapon", "armor", "shield", "object")
                     or type(item.get("native_type_key")) is not str or not item["native_type_key"]):
                 raise ArenaLoadoutProfileError(f"items[{index}] has invalid typed item fields")
     else:

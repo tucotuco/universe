@@ -1,0 +1,10 @@
+{
+  "format": "universe-arena-ground-loadout-profile",
+  "schema_version": 1,
+  "profile_id": "ranged-throw-object",
+  "title": "One generic Rock",
+  "mode": "explicit_items",
+  "items": [
+    {"category": "object", "native_type_key": "Rock"}
+  ]
+}
