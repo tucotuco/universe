@@ -1,8 +1,8 @@
 # U-CAP-004 — Complete playable targeted ranged combat
 
 **Repository:** active `~/Projects/universe` checkout only
-**Install at:** `docs/assignments/U-CAP-004.md`
-**Report at:** `docs/reports/U-CAP-004-report.md`
+**Archived at:** `docs/assignments/archive/U-CAP-004.md`
+**Consumed report:** `docs/reports/archive/U-CAP-004-report.md`
 **Codex invocation:** `Execute docs/assignments/U-CAP-004.md.`
 **Authorization:** ordinary in-scope source, tests, documentation, focused automated/browser verification, small audited local commits, and the expressly accepted U-CAP-003 archival operation below. **No remote push, history rewrite, destructive cleanup, modifying unrelated staged/untracked paths, user saves, ignored `legacy/`, `.venv`, backup directories, `npc-generator`, or `universe-geology`.**
 
@@ -59,8 +59,8 @@ ChatGPT has reviewed and **accepted `U-CAP-003` as DONE (bounded)**. Its enginee
 ## Reporting, task state, archive and safety contract
 
 1. Keep **U-CAP-004 ACTIVE** across local commits and partial progress. Declare **DONE (bounded)** only if the mandatory playable targeted ranged slice works, applicable native semantics and strict fresh-process state pass, and every independently supported A–D obligation has an acceptance result. If non-negotiable adopted rules/data genuinely prevent even one supported targeted flight/impact vertical slice, present the precise deciding fact after all independent work, with the program still ACTIVE. The project-wide `TASKS.md` is the sole current state/ideas register; retain accurate separate U-ACT-006/017/022/029 and any broader open projectile variants.
-2. Detailed `docs/reports/U-CAP-004-report.md`: acceptance matrix (implemented, supported-boundary, genuine blocker), exact native/generated/browser reproduction, evidence tiers, time/attack/flight/release/impact identity, tests/commands/elapsed, possible pre-existing regressions, source/policy guardrails, staged audits, specific commits and full Git status. Include measured **Start/End** ISO 8601 offset-aware date-times and calculated **Elapsed** ISO 8601 durations for every captured execution interval; no fabricated missing values. Codex chat response ≤6 lines and includes those times.
+2. Detailed [consumed report](../../reports/archive/U-CAP-004-report.md): acceptance matrix (implemented, supported-boundary, genuine blocker), exact native/generated/browser reproduction, evidence tiers, time/attack/flight/release/impact identity, tests/commands/elapsed, possible pre-existing regressions, source/policy guardrails, staged audits, specific commits and full Git status. Include measured **Start/End** ISO 8601 offset-aware date-times and calculated **Elapsed** ISO 8601 durations for every captured execution interval; no fabricated missing values. Codex chat response ≤6 lines and includes those times.
 3. Use independently green small local commits at coherent boundaries, do not stop after each one. Review exact files staged, run `git diff --cached --check` and `.venv/bin/python -B tools/check_publication_safety.py --staged` before commits; preserve unrelated pre-staging and local-only resources. Prefer `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest ...`. Do not push, force, reset, `git clean`, or modify protected paths.
-4. After **ChatGPT** explicitly accepts the report, Codex will archive `docs/assignments/U-CAP-004.md` and `docs/reports/U-CAP-004-report.md` and repair maintained references. Until then **leave them active**, even if Codex reports DONE. U-CAP-003 archive permission is given in this assignment; no new approval is required for that archival operation.
+4. **ChatGPT accepted U-CAP-004 as DONE (bounded) and consumed its report.** The assignment and report were archived with Git-aware moves when U-CAP-005 began; maintained references point to their archive paths.
 
 **Exact Codex prompt:** `Execute docs/assignments/U-CAP-004.md. First archive accepted U-CAP-003; then deliver the end-to-end targeted ranged-combat outcome under adopted rules, native Choice, observer privacy and strict fresh-process Save/Load. Continue through independent work; no push.`

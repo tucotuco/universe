@@ -1,6 +1,6 @@
 # U-CAP-004 — Targeted ranged combat
 
-**Status: DONE (bounded), awaiting ChatGPT report review.** The original U-CAP-004 acceptance criteria A–D are met for the adopted and represented domains. The report remains active until reviewed and accepted; the assignment remains in the active directory until its completion is confirmed.
+**Status: DONE (bounded), accepted and consumed by ChatGPT.** The original U-CAP-004 acceptance criteria A–D are met for the adopted and represented domains. This assignment and report were archived at the start of U-CAP-005.
 
 ## Execution interval
 
@@ -57,3 +57,9 @@ Other separately completed focused checks: target movement-away/generated hit/ge
 - Fixture and native shield/armor regression plus task-state reconciliation: `3226db030dba4dd1b3fe714c22126cd7d5cdb89a` (`Verify ranged combat fixtures and status`).
 - First audited report closeout commit: `e7fea0d36badf25d3cbed3c3077e2d93423830bc` (`Close out bounded targeted ranged combat`). Final verification immediately before this report-only audit commit recorded HEAD `e7fea0d36badf25d3cbed3c3077e2d93423830bc` and only the unrelated U-CAP-002 archival deletions plus U-THROW-001 patch archive rename staged. `git diff --cached --check` passed; staged publication-safety audit passed with 0 findings. This report-only update records the measured end time and verification snapshot.
 - The unrelated staged U-CAP-002 archival deletions and U-THROW-001 patch archive rename remain outside all U-CAP-004 commits. No push has been performed.
+
+## Archival execution interval
+
+- Start time: 2026-11-13T21:07:54-08:00 (U-CAP-005 execution began and archival work started)
+- End time: 2026-11-13T21:10:54-08:00 (captured immediately before the Git-aware archival commit)
+- Elapsed time: PT3M
