@@ -70,6 +70,7 @@ class TestArenaPersistence(unittest.TestCase):
                          "width_cells": "10", "height_cells": "5"})
         candidate = source.active_candidate
         being = candidate.participants[0].native.being
+        target = candidate.participants[1].native.being
         encounter = candidate.encounter
         universe = candidate.universe
         self.assertEqual(being.current.abilities.STR(), 10)
@@ -83,6 +84,7 @@ class TestArenaPersistence(unittest.TestCase):
         encounter.step(1)
         throw = ThrowAction(universe, being.id, object_id, encounter.time,
             heavy_load_reference_lb=80, elevation_degrees=80,
+            target_id=target.id,
             id="arena-test/throw")
         encounter.schedule_action(throw)
         encounter.step(1)
@@ -101,13 +103,13 @@ s=GeneratedArenaSession();s.load_encounter_bytes(pathlib.Path(sys.argv[1]).read_
 c=s.active_candidate;e=c.encounter;o=c.universe.get_object_by_id(sys.argv[3])
 assert any(type(c.universe.event_history[action_id]) is ThrowAction
            for action_id in e.pending_action_list)
-e.step(4)
+e.step(3)
 f=o.__dict__['_projectile_flight'];h=o.__dict__['_atomic_projectile_history']
-assert f.status=='in_flight' and h[-1].boundary==6
+assert f.status=='in_flight' and h[-1].boundary==5
 pathlib.Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
 print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple(),
  'flight':(f.release_time,f.impact_time,f.release_position.as_tuple(),
-           f.landing_position.as_tuple(),f.velocity_m_s,f.status),
+           f.landing_position.as_tuple(),f.velocity_m_s,f.status,f.target_id),
  'history':[(r.boundary,r.position.as_tuple(),r.status) for r in h],
  'rng':s._rng_cursor.state},separators=(',',':')))
 """
@@ -118,7 +120,7 @@ print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple()
             self.assertEqual(completed.returncode, 0, completed.stderr)
             restored = json.loads(completed.stdout)
 
-            encounter.step(4)
+            encounter.step(3)
             flight = projectile.__dict__["_projectile_flight"]
             history = projectile.__dict__["_atomic_projectile_history"]
             self.assertEqual(restored["time"], encounter.time)
@@ -126,7 +128,8 @@ print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple()
             self.assertEqual(tuple(restored["position"]), projectile.get_position().as_tuple())
             self.assertEqual(restored["flight"], [flight.release_time, flight.impact_time,
                 list(flight.release_position.as_tuple()), list(flight.landing_position.as_tuple()),
-                list(flight.velocity_m_s), flight.status])
+                list(flight.velocity_m_s), flight.status, flight.target_id])
+            self.assertEqual(flight.target_id, target.id)
             self.assertEqual(restored["history"], [[row.boundary,
                 list(row.position.as_tuple()), row.status] for row in history])
             self.assertEqual(self._tuplify(restored["rng"]), source._rng_cursor.state)

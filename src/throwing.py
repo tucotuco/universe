@@ -167,10 +167,13 @@ class ProjectileFlight:
     source_effect_identity: tuple = ()
     status: str = 'in_flight'
     landing_recorded_at: float | None = None
+    target_id: str | None = None
 
     def __post_init__(self):
         if not self.source_action_id or self.status not in ('in_flight', 'landed'):
             raise ValueError('invalid native projectile flight identity/status')
+        if self.target_id is not None and type(self.target_id) is not str:
+            raise ValueError('projectile target must be a native Being identity')
         if (type(self.source_effect_identity) is not tuple or len(self.source_effect_identity) != 5
                 or self.source_effect_identity[2] != self.source_action_id):
             raise ValueError('projectile must retain its native release effect identity')
@@ -254,3 +257,40 @@ def project_drag_free_trajectory(*, release_velocity_yd_s, release_position,
         horizontal_range_m=horizontal_range_m,
         horizontal_range_yd=horizontal_range_m / 0.9144,
     )
+
+
+def aim_drag_free_trajectory_at_point(*, release_velocity_yd_s,
+                                     release_position, target_position):
+    """Return the lower ballistic arc to an explicitly represented point.
+
+    This solves only the adopted drag-free point-mass equation. It does not
+    establish a body silhouette, collision volume, line of sight, or hit.
+    """
+    if type(target_position) is not CartesianPosition:
+        raise ValueError('target_position must be an explicit native CartesianPosition in meters')
+    velocity = _finite_number(release_velocity_yd_s, 'release velocity', positive=True) * 0.9144
+    dx = target_position.x - release_position.x
+    dy = target_position.y - release_position.y
+    dz = target_position.z - release_position.z
+    horizontal_range = math.hypot(dx, dy)
+    if horizontal_range <= 0:
+        raise ValueError('target point must have a positive horizontal separation')
+    gravity = 10.0
+    discriminant = velocity**4 - gravity * (gravity * horizontal_range**2 + 2 * dz * velocity**2)
+    if discriminant < 0:
+        raise ValueError('target point is outside the supported ballistic reach at this launch speed')
+    roots = ((velocity**2 - math.sqrt(discriminant)) / (gravity * horizontal_range),
+             (velocity**2 + math.sqrt(discriminant)) / (gravity * horizontal_range))
+    valid_roots = tuple(root for root in roots if root >= 0)
+    if not valid_roots:
+        raise ValueError('target point requires a downward initial launch angle')
+    tangent = min(valid_roots)
+    elevation = math.degrees(math.atan(tangent))
+    azimuth = math.degrees(math.atan2(dy, dx))
+    projection = project_drag_free_trajectory(
+        release_velocity_yd_s=release_velocity_yd_s,
+        release_position=release_position,
+        landing_elevation_m=target_position.z,
+        elevation_degrees=elevation,
+        azimuth_degrees=azimuth)
+    return elevation, azimuth, projection

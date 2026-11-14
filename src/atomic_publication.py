@@ -400,6 +400,7 @@ def _make_plan(encounter,candidate,rng_owner):
     plan=_WritePlan();world=encounter.universe;book=encounter._choice_book
     objects=world.object_registry.object_instances;changes=candidate.proposed_authoritative_changes
     supported=candidate.supported_candidate;queues=changes['queues'];snapshot=candidate.pre_action_snapshot
+    released_projectile_spatial_states={}
     if candidate.adult_member_candidate is not None:
         from group_member_realization import (
             _construct_detached_adult, validate_adult_member_candidate,
@@ -494,7 +495,7 @@ def _make_plan(encounter,candidate,rng_owner):
         obj=objects.get(effect.target_id);source=events.get(effect.source_action_id)
         if (obj is None or type(obj) is not ObjectInstance or source is None
                 or object.__getattribute__(obj,'__dict__').get('_projectile_flight') is not None
-                or obj.spatial_state is None):
+                or (obj.spatial_state is not None and obj.get_position() is None)):
             raise PublicationRejected('projectile release target is unavailable or already in flight')
         actor=objects.get(source.actor_id)
         if actor is None or effect.target_id not in actor.possessions:
@@ -504,12 +505,19 @@ def _make_plan(encounter,candidate,rng_owner):
                   row.identity.channel,row.identity.slot)
         release_position=CartesianPosition(*effect.release_position)
         landing_position=CartesianPosition(*effect.landing_position)
+        from spatial.state import SpatialState
+        release_spatial_state=(obj.spatial_state if obj.spatial_state is not None
+            else SpatialState(release_position))
+        released_projectile_spatial_states[obj.id]=release_spatial_state
         flight=ProjectileFlight(effect.source_action_id,effect.release_time,effect.impact_time,
             release_position,landing_position,effect.velocity_m_s,
-            effect.landing_elevation_m,identity)
+            effect.landing_elevation_m,identity,target_id=effect.intended_target_id)
         state=ProjectileBoundaryState(effect.source_action_id,candidate.boundary,
             release_position,'in_flight',effect.impact_time,identity)
-        plan.attr('targets',obj.spatial_state,'position',release_position,chain=True)
+        if obj.spatial_state is None:
+            plan.attr('targets',obj,'spatial_state',release_spatial_state)
+        else:
+            plan.attr('targets',obj.spatial_state,'position',release_position,chain=True)
         plan.attr('targets',obj,'_projectile_flight',flight)
         plan.append('targets',obj,'_atomic_projectile_history',state)
     pickup_additions={}
@@ -755,7 +763,9 @@ def _make_plan(encounter,candidate,rng_owner):
         record=TargetIntervalRecord(encounter.id,candidate.boundary,target)
         storage=plan.append('targets',obj,'_atomic_target_history',record)
         expected_spatial_state=(id(None) if key in picked_up_ids else
-            id(dropped_spatial_states[key]) if key in dropped_spatial_states else id(obj.spatial_state))
+            id(dropped_spatial_states[key]) if key in dropped_spatial_states else
+            id(released_projectile_spatial_states[key]) if key in released_projectile_spatial_states else
+            id(obj.spatial_state))
         target_anchors[key]=(id(obj),id(obj.current),expected_spatial_state,id(storage),id(record),fingerprint(record))
         practice=target.practice_state
         if practice is not None:

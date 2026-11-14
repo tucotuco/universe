@@ -18,7 +18,7 @@ from pathlib import Path
 
 from action import Action
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
-from activities import RunAction, ReadyWeaponAction
+from activities import RunAction, ReadyWeaponAction, ThrowAction
 from melee_combat import MeleeStrike, effective_melee_reach_meters
 from atomic_publication import RNGCursor
 from arena_hex_map import HexAddress
@@ -727,7 +727,8 @@ class GeneratedArenaSession:
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
             for action_type in (Action, RunAction, SpotAction, PickUpAction, ReadyWeaponAction,
-                                ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense)
+                                ReadyPreparationAction, DelayAction, ThrowAction,
+                                MeleeStrike, MeleeDefense)
         }
         perceived = []
         for evidence in ledger.current:
@@ -750,6 +751,15 @@ class GeneratedArenaSession:
                 "pickup_available": pickup_available,
                 "pickup_unavailable_reason": pickup_unavailable_reason,
             })
+        # The player may address directly held inventory through the same
+        # opaque session handle contract as perceived entities. This is
+        # player-owned inventory evidence, never a handle to another Being's
+        # private Object graph.
+        for object_id in tuple(player.native.being.possessions):
+            obj = candidate.universe.get_object_by_id(object_id)
+            if (obj is not None and obj.parent_container_id in (None, player.native.being.id)
+                    and object_id not in self._view_handles):
+                self._view_handles[object_id] = secrets.token_urlsafe(18)
         selected = next((row for row in perceived
                          if row["handle"] == self._selected_entity_handle), None)
         selected_being = (self._observer_being_sheet_unlocked(candidate, selected)
@@ -1926,6 +1936,7 @@ class GeneratedArenaSession:
         allowed = {"kind", "handle", "action", "motion", "hand", "position", "unarmed",
                    "shield_handle",
                    "weapon_handle",
+                   "projectile_handle",
                    "start_offset_seconds", "priority_penalty", "strategy"}
         normalized = []
         for component in payload["components"]:
@@ -2002,6 +2013,10 @@ class GeneratedArenaSession:
                     action = PickUpAction(encounter, player.id, entity_id,
                         encounter.time, map_width_cells=candidate.arena_map.width_cells,
                         map_height_cells=candidate.arena_map.height_cells)
+                elif kind == "throw" and type(component.get("projectile_handle")) is str:
+                    action, _prepared, _projectile_id = self._throw_preflight(
+                        candidate, player, entity_id, evidence,
+                        component["projectile_handle"])
                 elif kind == "ready-weapon":
                     from activities import ReadyWeaponAction
                     if evidence is None or evidence.category not in ("object", "weapon"):
@@ -3584,6 +3599,36 @@ class GeneratedArenaSession:
                         "present_state": selected["present_state"]}),
                     "motions": list(options)})
                 continue
+            elif name.casefold() == "throw":
+                target_view = (None if selected is None or selected.get("category") != "being"
+                    else {"handle": handle, "name": selected["name"],
+                          "type": selected["type"],
+                          "present_state": selected["present_state"]})
+                projectiles, reason = self._throw_projectile_options(candidate, player)
+                status = "unavailable"
+                duration = None
+                if target_view is None:
+                    reason = "Select a currently perceived opposing Being."
+                elif not projectiles:
+                    reason = "No supported held Object has an observer-authorized inventory handle."
+                elif supported_actions.get(ThrowAction, False):
+                    try:
+                        _action, prepared, _object_id = self._throw_preflight(
+                            candidate, player, entity_id, evidence,
+                            projectiles[0]["handle"])
+                        status = "available"
+                        duration = prepared.end_time - prepared.start_time
+                        reason = ("Four-second native Throw aimed at the selected Being's represented point; "
+                                  "actual hit/miss resolution is still being integrated.")
+                    except ArenaBrowserRequestError as exc:
+                        reason = str(exc)
+                catalog_rows.append({"name": name, "group": "Being targets",
+                    "target_type": "being", "required_skill": source_row["required_skill"],
+                    "is_melee": False, "status": status,
+                    "display_name": f"Throw ({duration:g} s)" if duration is not None else "Throw",
+                    "reason": reason, "target": target_view,
+                    "projectiles": list(projectiles), "duration_seconds": duration})
+                continue
             elif name.casefold() == "delay":
                 available = supported_actions.get(DelayAction, False)
                 catalog_rows.append({"name": name, "group": "Arena Actions",
@@ -3871,6 +3916,62 @@ class GeneratedArenaSession:
         return {"catalog_source": "native Action catalog",
                 "entries": catalog_rows + arena_rows,
                 "program_resources": resources}
+
+    def _throw_projectile_options(self, candidate, player):
+        """Return only direct player possessions with observer-owned opaque handles."""
+        from object import ObjectInstance
+        from being import BeingInstance
+        rows = []
+        for object_id in tuple(player.possessions):
+            obj = candidate.universe.get_object_by_id(object_id)
+            handle = self._view_handles.get(object_id)
+            if (type(obj) is not ObjectInstance or isinstance(obj, BeingInstance)
+                    or handle is None or obj.parent_container_id not in (None, player.id)
+                    or obj.get_position() is not None):
+                continue
+            weight = obj.current.weight
+            if type(weight) in (int, float) and math.isfinite(weight) and 0 < weight <= 3.3:
+                rows.append({"handle": handle, "name": obj.name or obj.current.obj_type,
+                    "type": obj.current.obj_type, "weight_pounds": float(weight)})
+        return tuple(rows), ("Select an eligible held Object with a native weight and a currently authorized handle."
+            if not rows else "")
+
+    def _throw_preflight(self, candidate, player, target_id, evidence,
+                         projectile_handle):
+        from object import ObjectInstance
+        from being import BeingInstance
+        from movement_intent import _HEAVY_LOAD_UPPER_LB
+        if (type(target_id) is not str or target_id == player.id
+                or evidence is None or evidence.entity_id != target_id
+                or evidence.category != "being" or evidence.present_state != "present"
+                or target_id not in candidate.encounter.being_list):
+            raise ArenaBrowserRequestError("Targeted Throw needs a currently perceived opposing Being.")
+        projectile_id = next((key for key, value in self._view_handles.items()
+                              if value == projectile_handle), None)
+        obj = (None if projectile_id is None else
+               candidate.universe.get_object_by_id(projectile_id))
+        if (type(obj) is not ObjectInstance or isinstance(obj, BeingInstance)
+                or projectile_id not in player.possessions
+                or obj.parent_container_id not in (None, player.id)
+                or obj.get_position() is not None
+                or type(obj.current.weight) not in (int, float)
+                or not math.isfinite(obj.current.weight)
+                or not 0 < obj.current.weight <= 3.3):
+            raise ArenaBrowserRequestError("Throw requires an authorized handle for an eligible Object in the player's custody.")
+        if player.current.abilities.STR() != 10:
+            raise ArenaBrowserRequestError("The current native Throw bracket supports Strength 10 only.")
+        reference = _HEAVY_LOAD_UPPER_LB.get(10)
+        if type(reference) not in (int, float) or not math.isfinite(reference) or reference <= 0:
+            raise ArenaBrowserRequestError("The adopted Strength 10 heavy-load reference is unavailable.")
+        action = ThrowAction(candidate.universe, player.id, projectile_id,
+            candidate.encounter.time, heavy_load_reference_lb=reference,
+            elevation_degrees=45.0, target_id=target_id,
+            landing_elevation_m=0.0)
+        try:
+            prepared = action.prepare_schedule(candidate.encounter)
+        except (TypeError, ValueError) as exc:
+            raise ArenaBrowserRequestError(str(exc)) from exc
+        return action, prepared, projectile_id
 
     def _player_character_sheet_unlocked(self, candidate, participant, position, cell,
                                          movement_plan):

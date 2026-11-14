@@ -8,10 +8,33 @@ from throwing import (
     maximum_throw_velocity_yd_s,
     reference_arm_inches,
     release_velocity_yd_s,
+    aim_drag_free_trajectory_at_point,
 )
+from spatial.state import CartesianPosition
 
 
 class ThrowingReferenceMathTests(unittest.TestCase):
+    def test_lower_arc_reaches_explicit_target_point_without_inventing_geometry(self):
+        origin = CartesianPosition(0.0, 0.0, 1.8288)
+        target = CartesianPosition(6.0, 8.0, 0.0)
+        angle, azimuth, trajectory = aim_drag_free_trajectory_at_point(
+            release_velocity_yd_s=12.0, release_position=origin,
+            target_position=target)
+        self.assertGreaterEqual(angle, 0)
+        self.assertAlmostEqual(azimuth, math.degrees(math.atan2(8, 6)))
+        self.assertAlmostEqual(trajectory.landing_position.x, target.x)
+        self.assertAlmostEqual(trajectory.landing_position.y, target.y)
+        self.assertEqual(trajectory.landing_position.z, target.z)
+
+    def test_aim_refuses_unreachable_or_unrepresented_target_points(self):
+        origin = CartesianPosition(0.0, 0.0, 1.8288)
+        with self.assertRaisesRegex(ValueError, 'outside the supported ballistic reach'):
+            aim_drag_free_trajectory_at_point(release_velocity_yd_s=1,
+                release_position=origin, target_position=CartesianPosition(100, 0, 0))
+        with self.assertRaisesRegex(ValueError, 'explicit native CartesianPosition'):
+            aim_drag_free_trajectory_at_point(release_velocity_yd_s=12,
+                release_position=origin, target_position=None)
+
     def test_reference_categories_and_medium_denominator(self):
         expected = {
             'Diminutive': 3.5, 'Tiny': 7, 'Small': 14, 'Medium': 28,

@@ -575,7 +575,9 @@ def validate_action_contract(encounter,action,*,_force=False):
         if any(type(data.get(key)) is not str or not data[key] for key in expected):
             raise TransactionalProgressionError('native physical-contact Action lacks its exact source identity or hand')
     if type(action) is ThrowAction:
-        if (data.get('event_type') != 'throw' or data.get('target_id') is not None
+        if (data.get('event_type') != 'throw'
+                or (data.get('target_id') is not None
+                    and (type(data.get('target_id')) is not str or not data['target_id']))
                 or type(data.get('instrument_id')) is not str
                 or data.get('end_time') - data.get('start_time') != 4
                 or any(type(data.get(key)) not in (int,float) or not math.isfinite(data[key])

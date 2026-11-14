@@ -788,6 +788,7 @@ class ProjectileReleaseEffect:
     impact_time: float
     landing_position: tuple
     landing_elevation_m: float
+    intended_target_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2288,9 +2289,10 @@ def _activity(snapshot, action, rng):
             if displacement:
                 effects.append(PracticeEffect(action.id, actor.id, 'run', action.data['practice_experience']))
     elif action.family == 'throw':
-        from throwing import release_velocity_yd_s, project_drag_free_trajectory
+        from throwing import (release_velocity_yd_s, project_drag_free_trajectory,
+                              aim_drag_free_trajectory_at_point)
         projectile = snapshot.entity(action.instrument_id)
-        if actor.position is None or projectile.position is None:
+        if actor.position is None:
             outcome = 'unplaced'
         elif action.instrument_id not in actor.data.get('possessions', ()):
             outcome = 'unavailable'
@@ -2308,14 +2310,24 @@ def _activity(snapshot, action, rng):
                 size_category=actor.data.get('size_category'))
             release = CartesianPosition(actor.position.x, actor.position.y,
                 actor.position.z + height * 0.0254)
-            trajectory = project_drag_free_trajectory(release_velocity_yd_s=speed,
-                release_position=release, landing_elevation_m=action.data['landing_elevation_m'],
-                elevation_degrees=action.data['elevation_degrees'],
-                azimuth_degrees=action.data['azimuth_degrees'])
+            intended_target_id = action.target_id
+            if intended_target_id is None:
+                trajectory = project_drag_free_trajectory(release_velocity_yd_s=speed,
+                    release_position=release, landing_elevation_m=action.data['landing_elevation_m'],
+                    elevation_degrees=action.data['elevation_degrees'],
+                    azimuth_degrees=action.data['azimuth_degrees'])
+            else:
+                target = snapshot.entity(intended_target_id)
+                if target.category != 'being' or target.position is None:
+                    return ActionProposal(action.id, actor.id, (intended_target_id,), 'unplaced')
+                _angle, _azimuth, trajectory = aim_drag_free_trajectory_at_point(
+                    release_velocity_yd_s=speed, release_position=release,
+                    target_position=target.position)
             effects.append(ProjectileReleaseEffect(action.id, projectile.id,
                 snapshot.boundary, release.as_tuple(), trajectory.velocity_m_s,
                 snapshot.boundary + trajectory.flight_time_s,
-                trajectory.landing_position.as_tuple(), action.data['landing_elevation_m']))
+                trajectory.landing_position.as_tuple(),
+                trajectory.landing_position.z, intended_target_id))
             outcome = 'released'
             metadata.extend((('release_speed_yd_s', speed),
                              ('impact_time', snapshot.boundary + trajectory.flight_time_s)))

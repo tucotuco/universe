@@ -23,7 +23,7 @@ class ThrowAction(Action):
 
     def __init__(self, universe, actor_id, instrument_id, start_time, *,
                  heavy_load_reference_lb, elevation_degrees, azimuth_degrees=0.0,
-                 landing_elevation_m=0.0, id=None):
+                 landing_elevation_m=0.0, target_id=None, id=None):
         values = (start_time, heavy_load_reference_lb, elevation_degrees,
                   azimuth_degrees, landing_elevation_m)
         if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
@@ -32,8 +32,10 @@ class ThrowAction(Action):
             raise ValueError('invalid Throw load reference or elevation')
         if type(actor_id) is not str or type(instrument_id) is not str:
             raise ValueError('Throw requires native actor and Object identities')
+        if target_id is not None and (type(target_id) is not str or not target_id):
+            raise ValueError('Throw target must be a native Being identity')
         super().__init__(universe, start_time, start_time + 4, 'throw', actor_id,
-                         target_id=None, instrument_id=instrument_id, id=id)
+                         target_id=target_id, instrument_id=instrument_id, id=id)
         self.end_time = start_time + 4
         self.heavy_load_reference_lb = float(heavy_load_reference_lb)
         self.elevation_degrees = float(elevation_degrees)
@@ -49,6 +51,12 @@ class ThrowAction(Action):
         obj = encounter.universe.get_object_by_id(self.instrument_id)
         if actor is None or obj is None or type(obj) is not ObjectInstance:
             raise ValueError('Throw requires a participating Being and registered ObjectInstance')
+        if self.target_id is not None:
+            from being import BeingInstance
+            target = encounter.universe.get_object_by_id(self.target_id)
+            if (self.target_id not in encounter.being_list or type(target) is not BeingInstance
+                    or target.get_position() is None or target is actor):
+                raise ValueError('Targeted Throw requires a positioned participating Being')
         if self.instrument_id not in actor.possessions:
             raise ValueError('Throw Object must be available in actor possessions')
         from being import BeingInstance
@@ -64,8 +72,8 @@ class ThrowAction(Action):
         strength = actor.current.abilities.STR()
         if strength != 10 or weight > 3.3:
             raise ValueError('native Throw supports only the authored Strength 10 four-second weight bracket')
-        if actor.get_position() is None or obj.get_position() is None:
-            raise ValueError('Thrower and Object require authored spatial positions')
+        if actor.get_position() is None:
+            raise ValueError('Thrower requires an authored spatial position')
         return PreparedSchedule.from_action(self)
 
     def resolve(self, difficulty_class):

@@ -13,6 +13,7 @@ import atomic_publication
 from action import Action
 from activities import ThrowAction
 from atomic_publication import PublicationFailure
+from being import BeingInstance
 from encounter import Encounter
 from interval_staging import StaleInterval, validate_interval_candidate
 from native_throw_arena import (build_native_scene, build_projection,
@@ -22,6 +23,29 @@ from throwing import ProjectileFlight, ProjectileBoundaryState
 
 
 class NativeThrowTests(unittest.TestCase):
+    def test_targeted_throw_aims_at_explicit_being_point_without_body_geometry(self):
+        world, enc, actor, projectile, _rng, original = build_native_scene()
+        book = object.__getattribute__(enc, '__dict__')['_choice_book']
+        book.undo(book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition('Human')
+        target = BeingInstance(definition, 'Target', id='throw-demo/target')
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        self.assertIsNone(target.geometry)
+        world.add_object(target)
+        enc.add_being(target.id)
+        action = ThrowAction(world, actor.id, projectile.id, enc.time,
+            heavy_load_reference_lb=100.0,
+            elevation_degrees=45, target_id=target.id,
+            landing_elevation_m=0.0, id='throw-demo/targeted-action')
+        enc.schedule_choice((action,))
+        enc.step(RELEASE_BOUNDARY)
+        flight = projectile.__dict__['_projectile_flight']
+        self.assertEqual(flight.target_id, target.id)
+        self.assertAlmostEqual(flight.landing_position.x, target.get_position().x)
+        self.assertAlmostEqual(flight.landing_position.y, target.get_position().y)
+        self.assertEqual(flight.landing_position.z, target.get_position().z)
+        self.assertEqual(action.resolution.outcome, 'released')
+
     def test_native_release_and_each_integer_flight_boundary(self):
         world, enc, actor, projectile, rng, action = build_native_scene()
         initial_rng = rng.state

@@ -648,7 +648,8 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             and type(recipient.data.get('weight')) in (int,float)
             and 0 < recipient.data['weight'] <= 3.3,
             'unsupported Throw strength/weight bracket')
-        from throwing import release_velocity_yd_s, project_drag_free_trajectory
+        from throwing import (release_velocity_yd_s, project_drag_free_trajectory,
+                              aim_drag_free_trajectory_at_point)
         height=actor.data.get('height') or actor.data.get('length')
         speed=release_velocity_yd_s(strength=actor.data['abilities']['STR'],
             throw_skill_level=actor.data['skills'].get('throw',0),
@@ -656,18 +657,34 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             heavy_load_reference_lb=action.data['heavy_load_reference_lb'],
             height_inches=height,length_inches=actor.data.get('length'),
             size_category=actor.data.get('size_category'))
-        projected=project_drag_free_trajectory(release_velocity_yd_s=speed,
-            release_position=CartesianPosition(actor.position.x,actor.position.y,
-                actor.position.z+height*0.0254),
-            landing_elevation_m=action.data['landing_elevation_m'],
-            elevation_degrees=action.data['elevation_degrees'],
-            azimuth_degrees=action.data['azimuth_degrees'])
+        release_position=CartesianPosition(actor.position.x,actor.position.y,
+            actor.position.z+height*0.0254)
+        _require(effect.intended_target_id == action.target_id,
+            'targeted Throw release must preserve its selected Being identity')
+        if action.target_id is None:
+            projected=project_drag_free_trajectory(release_velocity_yd_s=speed,
+                release_position=release_position,
+                landing_elevation_m=action.data['landing_elevation_m'],
+                elevation_degrees=action.data['elevation_degrees'],
+                azimuth_degrees=action.data['azimuth_degrees'])
+        else:
+            target=entities.get(action.target_id)
+            _require(target is not None and target.category == 'being'
+                and target.position is not None,
+                'targeted Throw requires the Being point in the common snapshot')
+            _angle,_azimuth,projected=aim_drag_free_trajectory_at_point(
+                release_velocity_yd_s=speed,release_position=release_position,
+                target_position=target.position)
         expected_time=action.boundary+projected.flight_time_s
         _require(effect.release_position==projected.release_position.as_tuple()
             and effect.velocity_m_s==projected.velocity_m_s
             and effect.landing_position==projected.landing_position.as_tuple()
             and math.isclose(effect.impact_time,expected_time,rel_tol=1e-13,abs_tol=1e-13),
             'projectile release contradicts the adopted frozen launch calculation')
+        if effect.intended_target_id is not None:
+            _require(effect.intended_target_id in entities
+                and entities[effect.intended_target_id].category == 'being',
+                'targeted projectile must retain a participating Being identity')
         return effect.target_id, ('projectile_release', action.id, effect.target_id)
     if type(effect) in (DamageEffect, FatalEffect, ProtectionEffect):
         allowed_damage_outcomes=('normal','critical','hit self','fatal')

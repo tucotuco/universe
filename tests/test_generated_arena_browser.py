@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
 from action import Action
+from activities import DelayAction, ThrowAction
 from melee_defense import MeleeDefense
 from arena_web import ArenaSession, make_handler
 from atomic_publication import RNGCursor
@@ -71,6 +72,44 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         if result["content_type"].startswith("application/json"):
             body = json.loads(json.dumps(body) if type(body) is not str else body)
         return result["status"], body
+
+    def test_generated_arena_action_program_declares_targeted_throw_by_opaque_handles(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 5051)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        encounter, universe = candidate.encounter, candidate.universe
+        projectile_id = universe.make_object_for_being(player.id, "Rock", "Scenario Rock")
+        encounter.add_object(projectile_id)
+        encounter.activate_arena_for_player_action(player.id,
+            DelayAction(encounter, player.id, 0, encounter.time),
+            rng_owner=self.session._rng_cursor)
+        encounter.step(1)
+        view = self.session.public_view()
+        target_row = next(row for row in view["entities"]
+                          if row["category"] == "being" and row["name"].startswith(target.name))
+        projectile_row = next(row for row in view["character"]["inventory"]["items"]
+                              if row["name"] == "Scenario Rock")
+        inspected = self.session.inspect_entity({"handle": target_row["handle"]})
+        throw_row = next(row for row in inspected["action_catalog"]["entries"]
+                         if row["name"] == "throw")
+        self.assertEqual(throw_row["status"], "available")
+        self.assertEqual(throw_row["target"]["handle"], target_row["handle"])
+        self.assertEqual(throw_row["projectiles"][0]["handle"], projectile_row["handle"])
+        status, result = self.request("/api/generated/action-program", {"components": [{
+            "kind": "throw", "handle": target_row["handle"],
+            "projectile_handle": projectile_row["handle"]}]})
+        self.assertEqual(status, 200, result)
+        action = next(member.action for record in encounter._choice_book._choices.values()
+                      for member in record.members if type(member.action) is ThrowAction)
+        self.assertIs(type(action), ThrowAction)
+        self.assertEqual(action.target_id, target.id)
+        self.assertEqual(action.instrument_id, projectile_id)
+        self.assertNotIn(target.id, json.dumps(result))
+        self.assertNotIn(projectile_id, json.dumps(result))
+
 
     def test_general_action_program_http_accepts_sequential_and_validated_overlap(self):
         from dataclasses import replace
