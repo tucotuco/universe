@@ -1030,7 +1030,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def test_grab_selector_http_receipt_and_fresh_process_hold_continuation(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn("function submitGrappling(action,handle,hand=null,position=null)", page)
+        self.assertIn("function submitGrappling(action,handle,hand=null,position=null,exitCell=null)", page)
         self.assertIn("/api/generated/grappling", page)
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 7)
         status, generated = self.request("/api/generated/generate", {
@@ -1329,7 +1329,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def test_object_strike_has_shipped_selector_and_native_http_choice(self):
         status,page=self.request("/")
         self.assertEqual(status,200)
-        self.assertIn("function submitObjectStrike(handle,motion)",page)
+        self.assertIn("function submitObjectStrike(handle,motion,weaponHandle=null)",page)
         self.assertIn("/api/generated/object-strike",page)
         self.assertIn("function submitCoupDeGrace(handle,motion)",page)
         self.assertIn("/api/generated/coup-de-grace",page)
@@ -2162,6 +2162,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
     def test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance(self):
         stream = self.enable_trace()
         loadout_profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
+        # This JS handler exercise needs one reachable ground pickup. Duplicate
+        # Dagger instances create legitimate uncertain route cells unrelated to
+        # the handler's option-change ordering.
+        loadout_profile["categories"]["weapon"]["count"] = 1
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 1,
             trace_ui=True, trace_stream=stream, ground_loadout_profile=loadout_profile)
         _, page = self.request("/")
@@ -2175,12 +2179,24 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         player = self.session.active_candidate.participants[0].native.being
         player.current.body_parts["right hand"] = None
         state = self.session.public_view()
-        object_view = next(row for row in state["entities"]
-                           if row["category"] == "object" and row["type"] == "Dagger")
-        target = HexAddress(object_view["cell"]["column"], object_view["cell"]["row"])
+        object_views = [row for row in state["entities"]
+                        if row["category"] == "object" and row["type"] == "Dagger"]
+        selected = None
+        route_refusals = []
+        for candidate_object in object_views:
+            candidate_target = HexAddress(candidate_object["cell"]["column"],
+                                          candidate_object["cell"]["row"])
+            try:
+                self.session.choose_destination({"column": candidate_target.column,
+                    "row": candidate_target.row, "rate": "sprint", "facing_policy": "turn"})
+            except ArenaBrowserRequestError as exc:
+                route_refusals.append(str(exc))
+                continue
+            selected = candidate_object, candidate_target
+            break
+        self.assertIsNotNone(selected, route_refusals)
+        object_view, target = selected
         self.session.rename_entity({"handle": object_view["handle"], "name": "Renamed Dagger"})
-        self.session.choose_destination({"column": target.column, "row": target.row,
-                                         "rate": "sprint", "facing_policy": "turn"})
         for _ in range(100):
             if self.session.public_view()["movement_plan"] is None:
                 break

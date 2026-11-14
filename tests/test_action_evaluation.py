@@ -119,6 +119,61 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertIsNone(action.defended_by)
         self.assertIsNone(action.resolution)
 
+    def test_two_handed_strike_uses_explicit_free_hand_and_applies_weapon_multiplier(self):
+        self.a.size_category = 'medium'
+        self.a.current.body_parts['left hand'] = None
+        self.b.current.armor_id = None
+        action = MeleeStrike(self.enc, self.a.id, self.b.id, self.w1,
+                             motion='thrust', reach=2, two_handed=True)
+        self.schedule(action)
+        snapshot = self.snapshot(math.ceil(action.end_time))
+        result = self.scripted(snapshot, [15, 4])
+        body_damage = sum(effect.amount for effect in result.proposals[0].effects
+                          if type(effect) is DamageEffect
+                          and effect.target_id == self.b.id
+                          and effect.component == 'body')
+        self.assertEqual(body_damage, 6)  # floor(4 * 1.5), native Dagger damage die
+
+    def test_two_handed_strike_refuses_an_occupied_second_hand(self):
+        self.a.size_category = 'medium'
+        action = MeleeStrike(self.enc, self.a.id, self.b.id, self.w1,
+                             motion='thrust', reach=2, two_handed=True)
+        with self.assertRaisesRegex(ValueError, 'other hand free or a buckler'):
+            self.enc.prepare_action(action)
+
+    def test_shield_bash_uses_equipped_shield_native_motion_and_offhand_penalty(self):
+        from weapon import WeaponInstance
+        shield_id = self.world.make_weapon('Medium shield', 'Authored bash shield')
+        shield = self.world.get_object_by_id(shield_id)
+        self.a.possessions.append(shield_id)
+        self.a.weapons.append(shield_id)
+        shield.parent_container_id = self.a.id
+        self.a.current.body_parts['left hand'] = shield_id
+        self.a.current.tags['universe.native_dominant_hand'] = 'right hand'
+        self.assertIs(type(shield), WeaponInstance)
+        action = MeleeStrike(self.enc, self.a.id, self.b.id, shield_id,
+                             motion='swing', reach=2, shield_bash=True)
+        self.schedule(action)
+        snapshot = self.snapshot(math.ceil(action.end_time))
+        self.assertTrue(snapshot.actions[action.id].data['shield_bash'])
+        self.assertEqual(snapshot.actions[action.id].data['shield_hand'], 'left hand')
+        self.assertEqual(snapshot.entity(self.a.id).data['dominant_hand'], 'right hand')
+        result = self.scripted(snapshot, [10])
+        self.assertEqual(result.proposals[0].outcome, 'miss')  # -3 off-hand Dexterity adjustment
+
+    def test_tower_shield_bash_is_refused_natively(self):
+        shield_id = self.world.make_weapon('Tower shield', 'Authored tower shield')
+        shield = self.world.get_object_by_id(shield_id)
+        self.a.possessions.append(shield_id)
+        self.a.weapons.append(shield_id)
+        shield.parent_container_id = self.a.id
+        self.a.current.body_parts['left hand'] = shield_id
+        self.a.current.tags['universe.native_dominant_hand'] = 'right hand'
+        action = MeleeStrike(self.enc, self.a.id, self.b.id, shield_id,
+                             motion='swing', reach=2, shield_bash=True)
+        with self.assertRaisesRegex(ValueError, 'tower shields cannot be used'):
+            self.enc.prepare_action(action)
+
     def test_native_one_second_touch_uses_opposed_attack_totals_without_damage(self):
         self.b.set_position(CartesianPosition(.2, 0, 0))
         self.enc.enable_transactional_progression(quiescent=True)

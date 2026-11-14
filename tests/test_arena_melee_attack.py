@@ -102,7 +102,7 @@ class TestArenaMeleeAttack(unittest.TestCase):
                      if row["name"] == "thrust at being")
         self.assertEqual(entry["status"], "available", entry["reason"])
         self.assertEqual(entry["duration_seconds"], 4)
-        self.assertIn("Reach and path resolve at impact", entry["reason"])
+        self.assertIn("currently held native weapon", entry["reason"])
         status, accepted = self.request("/api/generated/melee-strike", {
             "handle": target["handle"], "motion": "thrust"})
         self.assertEqual(status, 200, accepted)
@@ -371,7 +371,7 @@ class TestArenaMeleeAttack(unittest.TestCase):
         import subprocess
         import tempfile
 
-        view = self.generate()
+        view = self.generate(opponent_strategy="none")
         view, target, _, _, _ = self.move_to_target_neighbor(view)
         status, view = self.request("/api/generated/inspect", {"handle": target["handle"]})
         self.assertEqual(status, 200)
@@ -396,7 +396,11 @@ class TestArenaMeleeAttack(unittest.TestCase):
         result = json.loads(run.stdout)
         strike = next(call for call in result["calls"]
                       if call["path"] == "/api/generated/melee-strike")
-        self.assertEqual(strike["body"], {"handle": target["handle"], "motion": "thrust"})
+        thrust = next(row for row in view["action_catalog"]["entries"]
+                      if row["name"] == "thrust at being")
+        self.assertEqual(strike["body"], {
+            "handle": target["handle"], "motion": "thrust",
+            "weapon_handle": thrust["weapon_options"][0]["handle"]})
         self.assertEqual(result["time"], view["time_seconds"] + 4)
         self.assertEqual(result["melee_action"]["status"], "completed")
         self.assertEqual(result["melee_action"]["outcome"], "normal")
@@ -578,7 +582,7 @@ class TestArenaMeleeAttack(unittest.TestCase):
             unequipped._rng_cursor.state))
         self.assertNotIn(unequipped.active_candidate.participants[1].native.being.id,
                          json.dumps(refused))
-        self.assertIn("initial Dagger", refused["error"])
+        self.assertIn("not currently held", refused["error"])
 
         unreadied = GeneratedArenaSession(root_seed_factory=lambda: 20261107)
         self.session = unreadied
@@ -597,13 +601,13 @@ class TestArenaMeleeAttack(unittest.TestCase):
         thrust = next(entry for entry in inspected["action_catalog"]["entries"]
                       if entry["name"] == "thrust at being")
         self.assertEqual(thrust["status"], "unavailable")
-        self.assertIn("held and readied", thrust["reason"])
+        self.assertIn("not currently held", thrust["reason"])
         before = (candidate.encounter.time, dict(candidate.universe.event_history),
                   dict(candidate.encounter._choice_book._choices), unreadied._rng_cursor.state)
         status, refused = self.request("/api/generated/melee-strike", {
             "handle": row["handle"], "motion": "thrust"})
         self.assertEqual(status, 409)
-        self.assertIn("held and readied", refused["error"])
+        self.assertIn("not currently held", refused["error"])
         self.assertEqual(before, (candidate.encounter.time, dict(candidate.universe.event_history),
                   dict(candidate.encounter._choice_book._choices), unreadied._rng_cursor.state))
         self.assertIn(dagger_id, player.possessions)

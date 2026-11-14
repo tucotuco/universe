@@ -110,7 +110,8 @@ class MeleeStrike(Action):
 
     def __init__(self, encounter, actor_id, target_id, weapon_id,
                  motion='thrust', reach=None, strategy=None,
-                 feint_source_action_id=None, charge=False):
+                 feint_source_action_id=None, charge=False, two_handed=False,
+                 shield_bash=False):
         if motion not in ('swing', 'thrust'):
             raise ValueError('motion must be swing or thrust')
         if isinstance(reach, bool) or not isinstance(reach, (int, float)):
@@ -119,9 +120,20 @@ class MeleeStrike(Action):
             raise ValueError('reach must be finite and positive')
         if type(charge) is not bool:
             raise TypeError('charge declaration must be an explicit Boolean')
+        if type(two_handed) is not bool:
+            raise TypeError('two-handed declaration must be an explicit Boolean')
+        if type(shield_bash) is not bool or (shield_bash and two_handed):
+            raise TypeError('shield bash must be an explicit one-handed attack')
         self.encounter = encounter
         self.reach = float(reach)
         self.charge = charge
+        self.two_handed = two_handed
+        self.shield_bash = shield_bash
+        self.shield_hand = None
+        if shield_bash:
+            actor = encounter.get_being(actor_id)
+            self.shield_hand = (None if actor is None else next((slot for slot, value
+                in actor.current.body_parts.items() if value == weapon_id), None))
         self.hit_type = None
         self.combat_result = None
         self._simultaneous_eligibility = None
@@ -167,11 +179,63 @@ class MeleeStrike(Action):
             raise ValueError('combatants must be able to participate')
         if not encounter.is_aware(self.actor_id, self.target_id):
             raise ValueError('actor is not aware of target')
+        hands = actor.current.body_parts
         weapon = self.get_instrument()
         if not isinstance(weapon, WeaponInstance):
             raise ValueError('instrument is not an instantiated Weapon')
-        if self.instrument_id not in actor.armed_with(encounter.universe).values():
+        shield_names = set(encounter.universe.library.weapon_dictionary
+                           .get_objects_in_category('Shields'))
+        if self.shield_bash:
+            shield_slots = actor.shielded_with(encounter.universe)
+            if (weapon.current.obj_type not in shield_names
+                    or self.instrument_id not in shield_slots.values()):
+                raise ValueError('Shield bash requires an actually equipped native shield')
+            if 'tower' in weapon.current.obj_type.casefold():
+                raise ValueError('tower shields cannot be used to Shield bash')
+            if not any(slot in ('left hand','right hand') and value == self.instrument_id
+                       for slot,value in hands.items()):
+                raise ValueError('Shield bash requires a shield mounted on a represented hand')
+            tags = actor.current.tags
+            dominant = (tags.get('universe.native_dominant_hand')
+                        if type(tags) is dict else None)
+            if dominant not in ('left hand','right hand'):
+                raise ValueError('Shield bash requires explicitly authored dominant-hand evidence')
+        elif self.instrument_id not in actor.armed_with(encounter.universe).values():
             raise ValueError('actor does not hold that weapon')
+        occupied_hands = {slot: value for slot, value in hands.items()
+                          if slot in ('left hand', 'right hand')}
+        weapon_hand = next((slot for slot, value in occupied_hands.items()
+                            if value == self.instrument_id), None)
+        if weapon_hand is None:
+            raise ValueError('weapon is not held in an explicitly represented hand')
+        being_sizes = {'diminutive': 'D', 'tiny': 'T', 'small': 'S',
+                       'medium': 'M', 'large': 'L', 'huge': 'H',
+                       'gargantuan': 'G', 'colossal': 'C'}
+        size_codes = ('D', 'T', 'S', 'M', 'L', 'H', 'G', 'C')
+        being_size = being_sizes.get(getattr(actor, 'size_category', None))
+        weapon_size = weapon.get_weapon_size()
+        if self.shield_bash:
+            size_delta = None
+        elif being_size is None or weapon_size not in size_codes:
+            if self.two_handed:
+                raise ValueError('two-handed weapon use requires known native Being and weapon sizes')
+            size_delta = None
+        else:
+            size_delta = size_codes.index(weapon_size) - size_codes.index(being_size)
+            if size_delta > 1:
+                raise ValueError('weapon is more than one size category larger than the Being')
+            if size_delta == 1 and not self.two_handed:
+                raise ValueError('a weapon one size larger than the Being requires two hands')
+        if self.two_handed:
+            other_hand = 'left hand' if weapon_hand == 'right hand' else 'right hand'
+            if other_hand not in occupied_hands:
+                raise ValueError('two-handed strike requires both native hands to be represented')
+            if occupied_hands[other_hand] is not None:
+                held = encounter.universe.get_object_by_id(occupied_hands[other_hand])
+                shield_names = encounter.universe.library.weapon_dictionary.get_objects_in_category('Shields')
+                if (held is None or held.current.obj_type not in shield_names
+                        or 'buckler' not in held.current.obj_type.casefold()):
+                    raise ValueError('two-handed strike requires the other hand free or a buckler')
         if self.feint_source_action_id is not None:
             from action_evaluation import ActionProposal
             source = encounter.universe.get_event_by_id(self.feint_source_action_id)

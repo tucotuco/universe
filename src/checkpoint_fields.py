@@ -283,8 +283,8 @@ FIELD_ADAPTERS = {
         "required": 'action_dictionary armor_dictionary being_dictionary name object_dictionary skill_dictionary type weapon_dictionary'.split(),
     },
     'melee_combat.MeleeStrike': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _simultaneous_eligibility actor_id canceled_at cancellation_reason charge combat_result defended_by encounter end_time event_type hit_type id instrument_id location name parent_event_id reach resolution start_time strategy target_id threat_at_schedule type universe'.split(),
-        "required": '_simultaneous_eligibility actor_id combat_result defended_by encounter end_time event_type hit_type instrument_id location name parent_event_id reach resolution start_time strategy target_id type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _simultaneous_eligibility actor_id canceled_at cancellation_reason charge combat_result defended_by encounter end_time event_type hit_type id instrument_id location name parent_event_id reach resolution shield_bash start_time strategy target_id threat_at_schedule two_handed type universe'.split(),
+        "required": '_simultaneous_eligibility actor_id combat_result defended_by encounter end_time event_type hit_type instrument_id location name parent_event_id reach resolution shield_bash start_time strategy target_id two_handed type universe'.split(),
     },
     'melee_defense.MeleeDefense': {
         "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id canceled_at cancellation_reason defended_action_ids encounter end_time event_type id instrument_id kind location name parent_event_id parry_motion prepared_defense_action_id ready_at resolution result start_position start_time strategy strategy_pool success target_action_id target_id target_position threat_at_schedule type universe'.split(),

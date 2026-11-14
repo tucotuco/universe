@@ -323,7 +323,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
-        for key in ('reach','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','two_handed','shield_bash','shield_hand','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge','charge_continuation_source_id','bull_rush_target_willing','end_run_exit_position','end_run_movement_conditions','end_run_occupant_willing','end_run_rate','end_run_origin_position','end_run_target_position','end_run_origin_cell','end_run_target_cell','end_run_phase_result'):
             if key in ad:
                 selected[key] = (position(ad[key]) if key in (
@@ -521,11 +521,15 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             category = 'being'
             skills = native_data(cd['skills'], (Skills,))
             abilities = freeze(native_data(cd['abilities'], (Abilities,))['abilities'])
+            being_size = object.__getattribute__(obj, '__dict__').get('size_category')
+            size_codes = {'diminutive':'D','tiny':'T','small':'S','medium':'M',
+                          'large':'L','huge':'H','gargantuan':'G','colossal':'C'}
             data.update(skills=freeze(skills['skills']), weapon_skills=freeze(skills['weapon_skills']),
                 race=freeze(cd.get('race')),
                 abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
                 posture=freeze(obj.get_posture()),
-                size_category=freeze(object.__getattribute__(obj, '__dict__').get('size_category')),
+                size_category=freeze(being_size), size_code=freeze(size_codes.get(being_size)),
+                dominant_hand=freeze((cd.get('tags') or {}).get('universe.native_dominant_hand')),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
                 height=freeze(cd.get('height')), length=freeze(cd.get('length')),
                 body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),
@@ -570,8 +574,10 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                     or type(location.get('owner_id')) is not str
                     or not location['owner_id']):
                 raise EvaluationIntegrityError('native Weapon draw-location record is malformed')
+            original_type = native_data(od['original'], (WeaponDefinition,))['obj_type']
             data.update(attacks=freeze(cd['attacks']), size=freeze(cd['weapon_size']),
-                        original_type=freeze(native_data(od['original'], (WeaponDefinition,))['obj_type']),
+                        original_type=freeze(original_type), is_shield=freeze(original_type in shield_names),
+                        two_handed_design=freeze(tags.get('universe.native_two_handed_design') is True),
                         draw_location=freeze(location),
                         ready_preparation=freeze(native_ready_preparation(obj)))
         elif type(obj) is ArmorInstance:
@@ -1167,6 +1173,11 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
             outcome = 'target_down'
         elif outcome is None and (action.instrument_id not in actor.data['held'] or weapon is None or weapon.hp <= 0):
             outcome = 'weapon_unavailable'
+        elif outcome is None and action.data.get('shield_bash') is True and (
+                action.instrument_id not in actor.data.get('shields', ())
+                or 'tower' in (weapon.data.get('original_type') or '').casefold()
+                or actor.data.get('dominant_hand') not in ('left hand','right hand')):
+            outcome = 'shield_unavailable'
         elif outcome is None and status != 'in_reach':
             outcome = status
         elif outcome is None and any(d.eligible and d.success and d.kind in ('parry', 'dodge') for d in dependencies):
@@ -1215,9 +1226,12 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 feint_bonus = 2 if action.data.get('feint_source_action_id') is not None else 0
                 pin_bonus = 4 if any(row[2] == target.id for row in pinned_controls) else 0
                 priority_penalty = action.data.get('multiple_action_priority', 0) or 0
+                offhand_penalty = (3 if action.data.get('shield_bash') is True
+                    and action.data.get('shield_hand') != actor.data.get('dominant_hand')
+                    and not (actor.data.get('skills', {}).get('ambidexterity', 0) or 0) else 0)
                 return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0)
-                    + actor.data['strategy']['attack'] - priority_penalty
+                    + actor.data['strategy']['attack'] - priority_penalty - offhand_penalty
                     + feint_bonus + pin_bonus
                     + (2 if action.data.get('charge') is True and not charge_intercepted else 0)
                     + (2 if pole_set_charge else 0),
@@ -1303,7 +1317,12 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 action.data['strategy']['extra_damage']
                 + (0 if charge_intercepted else charge_extra_damage) + pole_extra_damage,
                 rng.roll, shield, armor, body,
-                damage_dice=2 if pole_set_charge else 1)
+                damage_dice=2 if pole_set_charge else 1,
+                weapon_damage_multiplier=(1.5 if action.family == 'melee'
+                    and action.data.get('two_handed') is True
+                    and ('DTSMLHGC'.index(weapon.data.get('size'))
+                         <= 'DTSMLHGC'.index(actor.data.get('size_code')))
+                    and weapon.data.get('two_handed_design') is not True else 1.0))
             if coup_de_grace:
                 damage_dealt = sum(effect.amount for effect in effects
                     if type(effect) is DamageEffect and effect.target_id == target.id
@@ -2092,7 +2111,7 @@ def ready_weapon_eligibility(snapshot, action):
         return 'unavailable'
     if _helpless(actor):
         return 'unable_to_act'
-    if target.data.get('original_type') != 'Dagger':
+    if target.data.get('is_shield') is True:
         return 'unsupported_weapon'
     if action.data.get('hand') not in ('left hand', 'right hand'):
         return 'hand_unavailable'

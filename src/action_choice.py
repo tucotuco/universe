@@ -159,6 +159,9 @@ def declaration(action, *, _initialization=None):
         data = dict(data, **_initialization)
     names = ('id', 'universe', 'event_type', 'start_time', 'end_time', 'actor_id',
              'target_id', 'instrument_id', 'parent_event_id', 'encounter', 'reach',
+             'two_handed',
+             'shield_bash',
+             'shield_hand',
              'kind', 'target_action_id', 'minimum_distance', 'practice_experience',
              'max_distance', 'spotting_conditions', 'declared_roll', 'episode_time', 'topic', 'generate',
              'substituted_claim', 'received_accounts', 'seed', 'random_key',

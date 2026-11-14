@@ -74,6 +74,114 @@ def draw_scenario():
 
 
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_generated_arena_exposes_native_shield_bash_and_persists_pending_choice(self):
+        session, candidate, player = arena(seed=20261148)
+        shield_id = candidate.universe.make_weapon("Medium shield", "Authored Arena shield")
+        shield = candidate.universe.get_object_by_id(shield_id)
+        player.possessions.append(shield_id)
+        player.weapons.append(shield_id)
+        shield.parent_container_id = player.id
+        shield_hand = next(slot for slot in ("left hand", "right hand")
+                           if player.current.body_parts.get(slot) is None)
+        player.current.body_parts[shield_hand] = shield_id
+        dominant = "right hand" if shield_hand == "left hand" else "left hand"
+        player.current.tags["universe.native_dominant_hand"] = dominant
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, shield.id, "object", shield.name,
+            "Medium shield", None, "carried", candidate.encounter.time, 0.0)
+        ledger._current[shield.id] = evidence
+        ledger._history.append(evidence)
+        activate(session)
+        target = candidate.participants[1].native.being
+        target_view = next(row for row in session.public_view()["entities"]
+                           if row.get("category") == "being"
+                           and row["name"].startswith(target.name))
+        action_catalog = session.inspect_entity({"handle": target_view["handle"]})["action_catalog"]
+        bash = next(row for row in action_catalog["entries"] if row["name"] == "Shield bash")
+        self.assertEqual(bash["status"], "available")
+        self.assertTrue(any(row["type"] == "Medium shield" for row in bash["weapon_options"]))
+        shield_view = next(row for row in session.public_view()["entities"]
+                           if row["name"] == shield.name)
+        session.choose_melee_strike({"handle": target_view["handle"],
+            "motion": "swing", "weapon_handle": shield_view["handle"],
+            "shield_bash": True})
+        saved = session.save_encounter_bytes()
+        script = ("import sys;sys.path.insert(0,'src');"
+            "from arena_browser_session import GeneratedArenaSession;"
+            "s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read());"
+            "c=s.active_candidate;b=c.universe.get_object_by_id(sys.argv[1]);"
+            "assert any(m.action.instrument_id==b.id and m.action.shield_bash "
+            "for r in c.encounter._choice_book._choices.values() for m in r.members);"
+            "print('restored-shield-bash-choice')")
+        restored = subprocess.run([sys.executable, "-B", "-c", script, shield.id],
+            input=saved, cwd=ROOT, capture_output=True, check=False, timeout=30)
+        self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
+        self.assertEqual(restored.stdout.decode().strip(), "restored-shield-bash-choice")
+
+    def test_generated_arena_draws_non_dagger_weapon_with_identity_preserved_after_fresh_process_load(self):
+        session, candidate, player = arena(seed=20261147)
+        activate(session)
+        weapon_id = candidate.encounter.make_weapon("Longsword", "Authored test longsword")
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        player.possessions.append(weapon_id)
+        weapon.parent_container_id = player.id
+        free_hand = next(slot for slot in ("left hand", "right hand")
+                         if player.current.body_parts.get(slot) is None)
+        author_worn_sheath_draw_location(weapon, player.id)
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, weapon.id, "object", weapon.name,
+            "Longsword", None, "carried", candidate.encounter.time, 0.0)
+        ledger._current[weapon.id] = evidence
+        ledger._history.append(evidence)
+        handle, inspected = select_draw(session, weapon)
+        draw_row = next(row for row in inspected["action_catalog"]["entries"]
+                        if row["name"] == "ready weapon")
+        self.assertEqual(draw_row["status"], "available")
+        self.assertIn("2 seconds", draw_row["reason"])
+        session.choose_ready_weapon({"handle": handle, "hand": free_hand})
+        session.advance_one_second()
+        session.advance_one_second()
+        self.assertEqual(player.current.body_parts[free_hand], weapon.id)
+        self.assertEqual(weapon.parent_container_id, player.id)
+        handle, inspected = select_draw(session, weapon)
+        self.assertEqual(next(row for row in inspected["action_catalog"]["entries"]
+                              if row["name"] == "ready object")["status"], "available")
+        session.choose_ready_preparation({"handle": handle, "motion": "swing"})
+        session.advance_one_second()
+        session.advance_one_second()
+        player.size_category = "medium"
+        other_hand = "right hand" if free_hand == "left hand" else "left hand"
+        player.current.body_parts[other_hand] = None
+        target = candidate.participants[1].native.being
+        target_view = next(row for row in session.public_view()["entities"]
+                           if row.get("category") == "being"
+                           and row["name"].startswith(target.name))
+        selected_weapon = next(row for row in session.public_view()["entities"]
+                               if row["name"] == weapon.name)
+        catalog = session.inspect_entity({"handle": target_view["handle"]})["action_catalog"]
+        melee_row = next(row for row in catalog["entries"] if row["name"] == "swing at being")
+        self.assertTrue(any(row["type"] == "Longsword" and row["grip"] == "two-handed"
+                            for row in melee_row["weapon_options"]))
+        session.choose_melee_strike({"handle": target_view["handle"],
+            "motion": "swing", "weapon_handle": selected_weapon["handle"],
+            "two_handed": True})
+        saved = session.save_encounter_bytes()
+        script = ("import sys;sys.path.insert(0,'src');"
+            "from arena_browser_session import GeneratedArenaSession;"
+            "s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read());"
+            "c=s.active_candidate;b=c.universe.get_object_by_id(sys.argv[1]);"
+            "p=c.participants[0].native.being;"
+            "assert b.current.obj_type=='Longsword' and b.parent_container_id==p.id;"
+            "assert b.id in p.possessions and b.id in p.weapons;"
+            "assert b.id in p.current.body_parts.values();"
+            "assert any(m.action.instrument_id==b.id for r in c.encounter._choice_book._choices.values() "
+            "for m in r.members);"
+            "print('restored-non-dagger-draw-and-pending-strike')")
+        restored = subprocess.run([sys.executable, "-B", "-c", script, weapon.id],
+            input=saved, cwd=ROOT, capture_output=True, check=False, timeout=30)
+        self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
+        self.assertEqual(restored.stdout.decode().strip(), "restored-non-dagger-draw-and-pending-strike")
+
     def test_generated_arena_offers_and_persists_adopted_set_pole_control(self):
         session, candidate, player = arena(seed=20261144)
         activate(session)

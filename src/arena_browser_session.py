@@ -893,14 +893,13 @@ class GeneratedArenaSession:
         if evidence is None or evidence.category != "object" or evidence.present_state != "carried":
             return None, (), "Select a currently perceived, carried Weapon first."
         obj = candidate.universe.get_object_by_id(entity_id)
-        if (type(obj) is not WeaponInstance or obj.id != entity_id
-                or obj.current.obj_type != "Dagger"):
-            return None, (), "Initial readying currently supports only an ordinary native Dagger."
+        if type(obj) is not WeaponInstance or obj.id != entity_id:
+            return None, (), "Initial readying requires a native Weapon Object."
         if (entity_id not in player.possessions or player.possessions.count(entity_id) != 1
                 or obj.parent_container_id != player.id or obj.get_position() is not None):
-            return None, (), "The selected Dagger is not in the player's native carried custody."
+            return None, (), "The selected Weapon is not in the player's native carried custody."
         if entity_id in player.weapons or entity_id in player.current.body_parts.values():
-            return None, (), "This Dagger is already held/readied."
+            return None, (), "This Weapon is already held/readied."
         if player.current.hit_points <= 0 or player.is_helpless():
             return None, (), "The player Being cannot perform a voluntary Action in its current native condition."
         if (not candidate.encounter.arena_activation_enabled
@@ -914,21 +913,21 @@ class GeneratedArenaSession:
         try:
             location = native_weapon_draw_location(obj)
         except (TypeError, ValueError):
-            return None, (), "The native Dagger draw-location record is malformed."
+            return None, (), "The native Weapon draw-location record is malformed."
         if location is None:
             return None, (), (
-                "The carried Dagger has no authored drawable source location. Ground Pick up does "
+                "The carried Weapon has no authored drawable source location. Ground Pick up does "
                 "not designate a sheath or hand; retrieval time is undetermined."
             )
         if location["owner_id"] != player.id:
-            return None, (), "The Dagger's drawable sheath is not assigned to the player Being."
+            return None, (), "The Weapon's drawable sheath is not assigned to the player Being."
         body_parts = player.current.body_parts
         hands = tuple(sorted(slot for slot, held in body_parts.items()
                              if slot in ReadyWeaponAction.HANDS and held is None))
         if not hands:
             return None, (), (
                 "No explicitly modeled, free native left or right hand is available for this "
-                "otherwise drawable Dagger."
+                "otherwise drawable Weapon."
             )
         return obj, hands, (
             "Native Draw from the explicitly authored worn sheath takes 2 seconds. "
@@ -974,8 +973,8 @@ class GeneratedArenaSession:
         return tuple(options), "Ready prepares only the selected motion; the benefit remains until this Weapon is used."
 
     @staticmethod
-    def _initial_ready_dagger_id(candidate, player):
-        """Return only the actual Dagger Object committed by initial Arena-ready state."""
+    def _initial_ready_weapon_id(candidate, player):
+        """Return the actual primary Weapon Object committed by initial Arena-ready state."""
         for row in candidate.initial_equipment_provenance:
             if type(row) is not dict or row.get("being_id") != player.id:
                 continue
@@ -986,7 +985,7 @@ class GeneratedArenaSession:
                 for unit in specification.get("equipment", {}).get("units", ()):
                     if (unit.get("role") == "primary_weapon"
                             and unit.get("category") == "weapon"
-                            and unit.get("native_type_key") == "Dagger"):
+                    and type(unit.get("native_type_key")) is str):
                         return object_ids.get(unit.get("equipment_id"))
             # Strict compatibility for already-saved U-ARENA-009 initial kits.
             weapon = row.get("weapon")
@@ -994,6 +993,80 @@ class GeneratedArenaSession:
                     and type(weapon) is dict and weapon.get("type") == "Dagger"):
                 return weapon.get("object_id")
         return None
+
+    # Kept as a private compatibility alias for adjacent Arena controls which
+    # still use the historical name. The returned identity is no longer
+    # restricted to a Dagger.
+    _initial_ready_dagger_id = _initial_ready_weapon_id
+
+    def _melee_weapon_options(self, candidate, player, target_id, evidence, motion):
+        """Project only currently held, observer-addressable weapon/grip choices."""
+        from weapon import WeaponInstance
+        shield_names = set(candidate.universe.library.weapon_dictionary
+                           .get_objects_in_category('Shields'))
+        options = []
+        for hand, object_id in sorted(player.current.body_parts.items()):
+            if hand not in ('left hand', 'right hand') or object_id is None:
+                continue
+            weapon = candidate.universe.get_object_by_id(object_id)
+            handle = self._view_handles.get(object_id)
+            if (type(weapon) is not WeaponInstance or handle is None
+                    or weapon.current.obj_type in shield_names):
+                continue
+            for two_handed in (False, True):
+                try:
+                    _action, _weapon, prepared, _distance, _reach = self._melee_strike_preflight(
+                        candidate, player, target_id, evidence, motion,
+                        weapon_id=object_id, two_handed=two_handed)
+                except (ArenaBrowserRequestError, TypeError, ValueError):
+                    continue
+                options.append({"handle": handle, "name": weapon.name or weapon.current.obj_type,
+                    "type": weapon.current.obj_type, "hand": hand,
+                    "grip": "two-handed" if two_handed else "one-handed",
+                    "duration_seconds": prepared.end_time - prepared.start_time})
+        return options
+
+    def _shield_bash_options(self, candidate, player, target_id, evidence):
+        options = []
+        for hand, shield_id in sorted(player.shielded_with(candidate.universe).items()):
+            shield = candidate.universe.get_object_by_id(shield_id)
+            handle = self._view_handles.get(shield_id)
+            if handle is None or shield is None:
+                continue
+            for motion in shield.get_melee_types():
+                try:
+                    _action, _weapon, prepared, _distance, _reach = self._melee_strike_preflight(
+                        candidate, player, target_id, evidence, motion,
+                        weapon_id=shield_id, shield_bash=True)
+                except (ArenaBrowserRequestError, TypeError, ValueError):
+                    continue
+                options.append({"handle": handle, "name": shield.name or shield.current.obj_type,
+                    "type": shield.current.obj_type, "hand": hand, "motion": motion,
+                    "duration_seconds": prepared.end_time - prepared.start_time})
+        return options
+
+    def _object_strike_weapon_options(self, candidate, player, object_id, evidence, motion):
+        from weapon import WeaponInstance
+        shield_names = set(candidate.universe.library.weapon_dictionary
+                           .get_objects_in_category('Shields'))
+        options = []
+        for hand, weapon_id in sorted(player.current.body_parts.items()):
+            if hand not in ('left hand','right hand') or weapon_id is None:
+                continue
+            weapon = candidate.universe.get_object_by_id(weapon_id)
+            handle = self._view_handles.get(weapon_id)
+            if (type(weapon) is not WeaponInstance or handle is None
+                    or weapon.current.obj_type in shield_names):
+                continue
+            try:
+                _action, prepared, _distance, _reach = self._object_strike_preflight(
+                    candidate, player, object_id, evidence, motion, weapon_id=weapon_id)
+            except (ArenaBrowserRequestError, TypeError, ValueError):
+                continue
+            options.append({"handle": handle, "name": weapon.name or weapon.current.obj_type,
+                "type": weapon.current.obj_type, "hand": hand,
+                "duration_seconds": prepared.end_time - prepared.start_time})
+        return options
 
     @staticmethod
     def _player_melee_action(candidate, player):
@@ -2394,9 +2467,10 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _melee_strike_preflight(self, candidate, player, entity_id, evidence, motion,
-                                supported=True, charge=False):
+                                supported=True, charge=False, weapon_id=None,
+                                two_handed=False, shield_bash=False):
         if motion not in ("swing", "thrust"):
-            raise ArenaBrowserRequestError("Choose the native Dagger Swing or Thrust motion.")
+            raise ArenaBrowserRequestError("Choose the native weapon Swing or Thrust motion.")
         if not supported or not _has_native_transactional_action_contract(MeleeStrike):
             raise ArenaBrowserRequestError("The native melee scheduler or resolver contract is unavailable.")
         if evidence is None or evidence.category != "being" or evidence.present_state != "present":
@@ -2415,22 +2489,26 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("A native melee Action is already resolving for the player.")
         if player.get_hit_points() <= 0 or target.get_hit_points() <= 0:
             raise ArenaBrowserRequestError("Both Beings must have positive native hit points to schedule a strike.")
-        weapon_id = self._initial_ready_dagger_id(candidate, player)
+        weapon_id = (self._initial_ready_weapon_id(candidate, player)
+                     if weapon_id is None else weapon_id)
         from weapon import WeaponInstance
         weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
+        shield_names = set(candidate.universe.library.weapon_dictionary
+                           .get_objects_in_category("Shields"))
         if (type(weapon) is not WeaponInstance or weapon.id not in player.weapons
                 or weapon.id not in player.armed_with(candidate.universe).values()
                 or weapon.parent_container_id != player.id or weapon.get_position() is not None
-                or weapon.current.obj_type != "Dagger"):
+                or (weapon.current.obj_type in shield_names) != shield_bash):
             raise ArenaBrowserRequestError(
-                "The API-created initial Dagger is not currently held and readied by the player.")
+                "The selected native weapon or shield is not currently held for the requested attack.")
         if motion not in weapon.get_melee_types():
-            raise ArenaBrowserRequestError(f"The native Dagger does not support {motion}.")
+            raise ArenaBrowserRequestError(f"The native {weapon.current.obj_type} does not support {motion}.")
         reach = effective_melee_reach_meters(player.current, weapon.current)
         feint_source = self._available_feint_source(candidate, player, target.id)
         action = MeleeStrike(encounter, player.id, target.id, weapon.id,
                              motion=motion, reach=reach,
-                             feint_source_action_id=feint_source, charge=charge)
+                             feint_source_action_id=feint_source, charge=charge,
+                             two_handed=two_handed, shield_bash=shield_bash)
         try:
             prepared = encounter.prepare_action(action)
         except Exception as exc:
@@ -2440,7 +2518,7 @@ class GeneratedArenaSession:
         return action, weapon, prepared, distance, reach
 
     def _object_strike_preflight(self, candidate, player, entity_id, evidence, motion,
-                                 supported=True):
+                                 supported=True, weapon_id=None):
         if motion not in ('swing', 'thrust'):
             raise ArenaBrowserRequestError('Choose the native Swing or Thrust motion.')
         if not supported or not _has_native_transactional_action_contract(Action):
@@ -2460,15 +2538,16 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError('The Object has no supported material hardness and positive hit points.')
         if not encounter.initiated or encounter.progression_mode != 'transactional':
             raise ArenaBrowserRequestError('Activate the native Encounter before striking an Object.')
-        weapon_id = self._initial_ready_dagger_id(candidate, player)
+        weapon_id = (self._initial_ready_weapon_id(candidate, player)
+                     if weapon_id is None else weapon_id)
         weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
         from weapon import WeaponInstance
         if (type(weapon) is not WeaponInstance or weapon.current.hit_points <= 0
                 or weapon.id not in player.armed_with(candidate.universe).values()
                 or weapon.parent_container_id != player.id or weapon.get_position() is not None):
-            raise ArenaBrowserRequestError('Strike an Object requires a usable held and readied Dagger.')
+            raise ArenaBrowserRequestError('Strike an Object requires a usable, actually held Weapon.')
         if motion not in weapon.get_melee_types():
-            raise ArenaBrowserRequestError(f'The native Dagger does not support {motion}.')
+            raise ArenaBrowserRequestError(f'The native {weapon.current.obj_type} does not support {motion}.')
         from melee_combat import effective_melee_reach_meters
         reach = effective_melee_reach_meters(player.current, weapon.current)
         action = Action(candidate.universe, encounter.time, encounter.time + 1,
@@ -2486,8 +2565,9 @@ class GeneratedArenaSession:
         return action, prepared, distance, reach
 
     def choose_object_strike(self, payload):
-        if type(payload) is not dict or set(payload) != {'handle','motion'}:
-            raise ArenaBrowserRequestError('Strike an object requires one perceived target handle and motion.')
+        if (type(payload) is not dict or set(payload) not in
+                (frozenset({'handle','motion'}), frozenset({'handle','motion','weapon_handle'}))):
+            raise ArenaBrowserRequestError('Strike an object requires a perceived target handle, motion, and optional held Weapon handle.')
         handle, motion = payload['handle'], payload['motion']
         with self._lock:
             if self._active is None:
@@ -2499,7 +2579,13 @@ class GeneratedArenaSession:
             if ledger is None or ledger.observer_id != player.id:
                 raise ArenaBrowserRequestError('Player perception evidence is unavailable.')
             evidence = None if entity_id is None else next((row for row in ledger.current if row.entity_id == entity_id),None)
-            action, prepared, distance, reach = self._object_strike_preflight(candidate,player,entity_id,evidence,motion)
+            weapon_id = (None if 'weapon_handle' not in payload else next(
+                (key for key, value in self._view_handles.items()
+                 if value == payload['weapon_handle']), None))
+            if 'weapon_handle' in payload and weapon_id is None:
+                raise ArenaBrowserRequestError('Selected Weapon handle is not in current observer evidence.')
+            action, prepared, distance, reach = self._object_strike_preflight(
+                candidate,player,entity_id,evidence,motion,weapon_id=weapon_id)
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -2756,9 +2842,17 @@ class GeneratedArenaSession:
 
     def choose_melee_strike(self, payload):
         if (type(payload) is not dict or set(payload) not in
-                (frozenset(("handle", "motion")), frozenset(("handle", "motion", "charge")))
-                or ("charge" in payload and type(payload["charge"]) is not bool)):
-            raise ArenaBrowserRequestError("melee attack requires a perceived target, motion, and optional Boolean Charge declaration")
+                (frozenset(("handle", "motion")), frozenset(("handle", "motion", "charge")),
+                 frozenset(("handle", "motion", "weapon_handle")),
+                 frozenset(("handle", "motion", "two_handed")),
+                 frozenset(("handle", "motion", "weapon_handle", "two_handed")),
+                 frozenset(("handle", "motion", "weapon_handle", "shield_bash")),
+                 frozenset(("handle", "motion", "weapon_handle", "shield_bash", "two_handed")),
+                 frozenset(("handle", "motion", "charge", "weapon_handle")))
+                or ("charge" in payload and type(payload["charge"]) is not bool)
+                or ("two_handed" in payload and type(payload["two_handed"]) is not bool)
+                or ("shield_bash" in payload and type(payload["shield_bash"]) is not bool)):
+            raise ArenaBrowserRequestError("melee attack requires a perceived target, motion, and supported weapon/grip options")
         handle, motion = payload["handle"], payload["motion"]
         if type(handle) is not str or type(motion) is not str:
             raise ArenaBrowserRequestError("melee target and motion must be text")
@@ -2774,9 +2868,16 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("player perception evidence is unavailable")
             evidence = None if entity_id is None else next(
                 (row for row in ledger.current if row.entity_id == entity_id), None)
+            weapon_id = (None if "weapon_handle" not in payload else next(
+                (key for key, value in self._view_handles.items()
+                 if value == payload["weapon_handle"]), None))
+            if "weapon_handle" in payload and weapon_id is None:
+                raise ArenaBrowserRequestError("Selected Weapon handle is not in current observer evidence.")
             action, _, prepared, _, _ = self._melee_strike_preflight(
                 candidate, player, entity_id, evidence, motion,
-                charge=payload.get("charge", False))
+                charge=payload.get("charge", False), weapon_id=weapon_id,
+                two_handed=payload.get("two_handed", False),
+                shield_bash=payload.get("shield_bash", False))
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -3197,6 +3298,8 @@ class GeneratedArenaSession:
                 target_view = (None if selected is None else {"handle": handle,
                     "name": selected["name"], "type": selected["type"],
                     "present_state": selected["present_state"]})
+                weapon_options = (self._melee_weapon_options(candidate, player,
+                    entity_id, evidence, motion) if evidence is not None else [])
                 if supported_actions.get(MeleeStrike, False):
                     try:
                         _, weapon, prepared, distance, reach = self._melee_strike_preflight(
@@ -3214,13 +3317,21 @@ class GeneratedArenaSession:
                 if self._melee_action_pending(candidate, pending_melee):
                     status = "unavailable"
                     reason = "A player MeleeStrike is already resolving."
+                elif weapon_options:
+                    status = "available"
+                    first = weapon_options[0]
+                    duration = first["duration_seconds"]
+                    display_name = f"{first['type']} {motion.title()} ({duration:g} s)"
+                    reason = ("Choose a currently held native weapon and grip. Every choice uses its "
+                              "native timing, reaches the target through the Action evaluator, and "
+                              "validates explicit hand use.")
                 catalog_rows.append({
                     "name": name, "group": "Being targets", "target_type": "being",
                     "required_skill": source_row["required_skill"],
                     "is_melee": source_row["is_melee"], "status": status,
                     "display_name": display_name, "reason": reason,
                     "target": target_view, "motion": motion,
-                    "duration_seconds": duration,
+                    "duration_seconds": duration, "weapon_options": weapon_options,
                 })
                 continue
             if name.casefold() in ("swing at object", "thrust at object"):
@@ -3229,6 +3340,8 @@ class GeneratedArenaSession:
                 object_view = (None if selected is None else {"handle": handle,
                     "name": selected["name"], "type": selected["type"],
                     "present_state": selected["present_state"]})
+                weapon_options = (self._object_strike_weapon_options(candidate, player,
+                    entity_id, evidence, motion) if evidence is not None else [])
                 if supported_actions.get(Action, False):
                     try:
                         _, prepared, distance, reach = self._object_strike_preflight(
@@ -3240,14 +3353,20 @@ class GeneratedArenaSession:
                                   "resolve in the common Action batch.")
                     except ArenaBrowserRequestError as exc:
                         reason = str(exc)
-                else:
+                if weapon_options:
+                    status = "available"
+                    duration = weapon_options[0]["duration_seconds"]
+                    reason = ("Choose a currently held native weapon. Its motion timing, reach, "
+                              "hardness and hit-point effects resolve in the shared Action snapshot.")
+                elif not supported_actions.get(Action, False):
+                    status = "not_implemented"
                     reason = "The native Object-strike resolver is unavailable."
                 catalog_rows.append({"name":name,"group":"Object targets","target_type":"object",
                     "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
-                    "status":status,"display_name":f"Dagger {motion.title()} at Object"+
+                    "status":status,"display_name":f"{weapon_options[0]['type'] if weapon_options else 'Weapon'} {motion.title()} at Object"+
                         (f" ({duration:g} s)" if duration is not None else ""),
                     "reason":reason,"target":object_view,"motion":motion,
-                    "duration_seconds":duration})
+                    "duration_seconds":duration,"weapon_options":weapon_options})
                 continue
             elif name.casefold()=="disarm (armed)":
                 status,reason="unavailable","Select a perceived opponent-held weapon; an advanced skill with your attacking weapon is required."
@@ -3532,6 +3651,21 @@ class GeneratedArenaSession:
             run_reason = "The native Run scheduler or resolver contract is unavailable."
         arena_rows = [{"name": "Run", "group": "Arena Actions", "status": run_status,
                        "reason": run_reason}]
+        if evidence is not None and evidence.category == "being":
+            bash_options = self._shield_bash_options(candidate, player, entity_id, evidence)
+            catalog_rows.append({
+                "name": "Shield bash", "group": "Being targets", "target_type": "being",
+                "required_skill": "armed combat", "is_melee": True,
+                "status": "available" if bash_options else "unavailable",
+                "display_name": "Shield bash",
+                "reason": ("Choose an equipped non-tower shield and native attack motion. "
+                    "Off-hand status uses explicit dominant-hand evidence; the adopted penalty "
+                    "applies unless Ambidexterity is present." if bash_options else
+                    "Shield bash requires an eligible equipped shield, known dominant hand, and supported attack motion."),
+                "target": {"handle": handle, "name": selected["name"],
+                           "type": selected["type"], "present_state": selected["present_state"]},
+                "weapon_options": bash_options,
+            })
 
         if supported_actions.get(SpotAction):
             spot_status, spot_reason = "unavailable", _SPOT_DISABLED
