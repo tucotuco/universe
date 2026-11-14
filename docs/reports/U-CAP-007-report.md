@@ -9,8 +9,8 @@
 ## Execution interval
 
 - Start time: `2026-11-14T11:21:02-08:00` (recorded when this execution began; America/Los_Angeles).
-- End time: pending final closeout capture.
-- Elapsed time: pending final closeout calculation.
+- End time: `2026-11-14T15:46:43-08:00` (America/Los_Angeles; captured immediately before this final report-only closeout correction).
+- Elapsed time: `PT4H25M41S` (calculated from the recorded start and end timestamps).
 
 ## Outcome
 
@@ -76,7 +76,7 @@ Additional exact-file fresh-process check: loaded the save downloaded by Chrome 
 - `02f72d2dd94f07198515489e9fc8b6adb4221763` — archived accepted U-CAP-006 closeout, reconciled TASKS/handoff, and installed U-CAP-007 assignment.
 - `a5cff346a4363c3e0525ba652177c03fe78ca324` — completed U-CAP-006 active-path removals after its archive copies.
 - `73171f8ed904bb20e3306e451ba62a71814f6de1` — `Make generated Arena Actions playable`; six reviewed source/test paths only.
-- Documentation closeout commit: pending.
+- `843135e8f244d0afd534439d3969064935aa1b8a` — `Close out U-CAP-007 generated Arena browser`; scoped TASKS and report commit.
 
 Before the implementation commit, `git diff --cached --check` passed and `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B tools/check_publication_safety.py --staged` reported `staged-audit files=12 findings=0 result=PASS`. The implementation commit used `git commit --only` for the six reviewed files.
 
@@ -90,7 +90,7 @@ D docs/reports/U-CAP-003-report.md
 R docs/reports/U-THROW-001-rule-sync-proposal.patch -> docs/reports/archive/U-THROW-001-rule-sync-proposal.patch
 ```
 
-`docs/assignments/universe-arena.json` is also untracked in the worktree; it was preserved and not staged or inspected as part of this assignment. No push occurred. Final HEAD and working-tree/index disposition: pending documentation commit and final audit.
+`docs/assignments/universe-arena.json` is also untracked in the worktree; it was preserved and not staged or inspected as part of this assignment. No push occurred. After the two U-CAP-007 commits, `HEAD` was `843135e8f244d0afd534439d3969064935aa1b8a`; the tracked worktree was clean and exactly the five historical archive paths above remained staged. The untracked Arena save remained untouched. A final report-only timestamp correction follows this closeout commit.
 
 ## Bounded limitation and review disposition
 
