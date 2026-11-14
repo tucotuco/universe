@@ -5,8 +5,8 @@
 ## Execution interval
 
 - Start time: 2026-11-13T18:48:00-08:00 (captured when execution began)
-- End time: 2026-11-13T20:56:36-08:00 (captured immediately before final closeout)
-- Elapsed time: PT2H8M36S
+- End time: 2026-11-13T20:57:10-08:00 (captured immediately before final report-only audit commit)
+- Elapsed time: PT2H9M10S
 
 ## Acceptance matrix
 
@@ -55,4 +55,5 @@ Other separately completed focused checks: target movement-away/generated hit/ge
 - Arrival attack/damage, miss, simultaneous impacts, movement-away, thrown Coup de grace and related UI/tests: `f52e7a8da29275d9a20c5c1cd50b454fae62dce9` (`Complete targeted Throw impact and ranged coup`).
 - Bounded Shoot/Deflect request refusals and stronger resolved-impact persistence assertion: `736ef028780d9eea98bb669263cb7667e60835cb` (`Fail closed for unsupported ranged actions`).
 - Fixture and native shield/armor regression plus task-state reconciliation: `3226db030dba4dd1b3fe714c22126cd7d5cdb89a` (`Verify ranged combat fixtures and status`).
-- The report closeout is included in an audited documentation commit. The unrelated staged U-CAP-002 archival deletions and U-THROW-001 patch archive rename remain outside all U-CAP-004 commits. No push has been performed.
+- First audited report closeout commit: `e7fea0d36badf25d3cbed3c3077e2d93423830bc` (`Close out bounded targeted ranged combat`). Final verification immediately before this report-only audit commit recorded HEAD `e7fea0d36badf25d3cbed3c3077e2d93423830bc` and only the unrelated U-CAP-002 archival deletions plus U-THROW-001 patch archive rename staged. `git diff --cached --check` passed; staged publication-safety audit passed with 0 findings. This report-only update records the measured end time and verification snapshot.
+- The unrelated staged U-CAP-002 archival deletions and U-THROW-001 patch archive rename remain outside all U-CAP-004 commits. No push has been performed.
