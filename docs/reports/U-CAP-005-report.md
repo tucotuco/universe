@@ -14,8 +14,8 @@
 ### Verification continuation
 
 - Start: `2026-11-13T23:49:21-08:00` (captured when this continuation began; UTC `2026-11-14T07:49:21Z`).
-- End: to be captured immediately before closeout.
-- Elapsed: to be calculated from the captured continuation interval.
+- End: `2026-11-14T00:09:16-08:00` (captured immediately before closeout; UTC `2026-11-14T08:09:16Z`).
+- Elapsed: `PT19M55S`.
 
 The independent accepted U-CAP-004 archival/reconciliation operation ran within the recorded interval and was completed in `fdb4798d6066d7f3fe8ea82b6641e76ae4a585ce`.
 
@@ -53,7 +53,8 @@ All commands below used the repository `.venv` unless noted.
 - Current generated browser — `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser` — **67 tests passed** (111.556 s). The fixes are test-only: payload-key/coordinate checks avoid matching explanatory prose, and the mixed program is selected by represented components.
 - Current atomic publication and interval staging — `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_atomic_publication tests.test_interval_staging` — **127 tests passed** (57.332 s). The former 31 errors comprised 30 choices missing the adopted Multi-action skill and priority allocations plus one malformed generic Delay fixture. Test-only helpers now declare acquired skill and the adopted fixed priority penalties; the separate run/spot fixtures are scheduled without illegal overlap. The unsupported-family test now exercises a supported native Delay receipt. No Multiple-action or atomic-resolution rule was weakened. A further targeted run of the three representative atomic/interval cases passed (3 tests, 0.797 s).
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m compileall -q src examples` reports `IndentationError` in untouched `src/location.py:57` (function beginning at line 55). Compiling the same file from baseline `2148876` reports the identical error at line 57: its function body is already empty. This verified pre-existing issue is outside U-CAP-005 and is recorded in `TASKS.md`.
-- No runtime source was changed in this continuation. The U-CAP-005 native and generated acceptance tests remain covered by the earlier results above. Final `git diff --check`, cached diff check, publication-safety audit, exact staged paths, final HEAD and unrelated staged archive preservation are recorded below.
+- The dedicated generated Stun/Subdue fresh-process pair was rerun after fixture repairs: **2 tests passed** (5.977 s). Together with the native acceptance suite above, the U-CAP-005 behavior remains green.
+- No runtime source was changed in this continuation. `git diff --check` and `git diff --cached --check` passed. The pre-commit staged-content audit initially flagged the report's temporary-checkout path; that path was removed. The repeat audit passed with `findings=0` (13 staged paths, including preserved user archive entries).
 
 ## Separate U-CAP-004 closeout and task state
 
@@ -75,4 +76,4 @@ The accepted U-CAP-004 assignment/report were moved with `git mv` to their archi
 
 ## Final repository state
 
-The following unrelated historical archive changes were already staged before this continuation and are preserved outside the U-CAP-005 commit: deletes of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md` and `docs/reports/U-CAP-003-report.md`, plus the Git-aware move of `docs/reports/U-THROW-001-rule-sync-proposal.patch` into `docs/reports/archive/`. Final HEAD, U-CAP-005 commit, staged audit and status are recorded before closeout.
+Verification changes and TASKS/report reconciliation are committed as `02cdc9b996a3ec41c27ac956ead84212418e6c92` (`Reconcile U-CAP-005 verification fixtures`). The post-commit staged-content audit passed with `findings=0` across the six remaining staged paths. `git diff --check` and `git diff --cached --check` passed. The only staged paths are the unrelated historical archive changes present before this continuation: deletions of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md` and `docs/reports/U-CAP-003-report.md`, and the Git-aware rename of `docs/reports/U-THROW-001-rule-sync-proposal.patch` to `docs/reports/archive/U-THROW-001-rule-sync-proposal.patch`. No U-CAP-005 changes remain unstaged. The report closeout itself is committed separately after its execution interval is recorded.
