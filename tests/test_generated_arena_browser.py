@@ -113,8 +113,143 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         flight = universe.get_object_by_id(projectile_id).__dict__["_projectile_flight"]
         self.assertEqual(action.resolution.outcome, "released")
         self.assertEqual(flight.target_id, target.id)
+        self.assertLess(math.dist(flight.landing_position.as_tuple(),
+                                  target.get_position().as_tuple()), 1e-6)
         self.assertAlmostEqual(flight.landing_position.x, target.get_position().x)
         self.assertAlmostEqual(flight.landing_position.y, target.get_position().y)
+        hp_before_impact = target.current.hit_points
+        encounter.step(1)
+        flight = universe.get_object_by_id(projectile_id).__dict__["_projectile_flight"]
+        self.assertIn(flight.impact_outcome, ("hit", "miss"))
+        self.assertEqual(flight.impact_outcome, "hit")
+        if flight.impact_outcome == "hit":
+            self.assertLess(target.current.hit_points, hp_before_impact)
+        else:
+            self.assertEqual(target.current.hit_points, hp_before_impact)
+            state = universe.get_object_by_id(projectile_id).__dict__["_atomic_projectile_history"][-1]
+            self.assertIn(state.miss_direction, range(1, 9))
+        impact_view = self.session.public_view()
+        observed_projectile = next(row for row in impact_view["projectiles"]
+            if row["handle"] == projectile_row["handle"])
+        self.assertEqual(observed_projectile["outcome"],
+                         flight.impact_outcome)
+
+    def test_generated_arena_targeted_throw_miss_records_direction_without_destination(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 5051)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        encounter, universe = candidate.encounter, candidate.universe
+        projectile_id = universe.make_object_for_being(player.id, "Rock", "Scenario Rock")
+        encounter.add_object(projectile_id)
+        encounter.activate_arena_for_player_action(player.id,
+            DelayAction(encounter, player.id, 0, encounter.time),
+            rng_owner=self.session._rng_cursor)
+        encounter.step(1)
+        self.session._rng_cursor.state = random.Random(165).getstate()
+        view = self.session.public_view()
+        target_row = next(row for row in view["entities"]
+            if row["category"] == "being" and row["name"].startswith(target.name))
+        projectile_row = next(row for row in view["character"]["inventory"]["items"]
+            if row["name"] == "Scenario Rock")
+        status, _ = self.request("/api/generated/action-program", {"components": [{
+            "kind": "throw", "handle": target_row["handle"],
+            "projectile_handle": projectile_row["handle"]}]})
+        self.assertEqual(status, 200)
+        encounter.step(5)
+        object_data = universe.get_object_by_id(projectile_id).__dict__
+        flight = object_data["_projectile_flight"]
+        state = object_data["_atomic_projectile_history"][-1]
+        self.assertEqual(flight.impact_outcome, "miss")
+        self.assertIn(flight.miss_direction, range(1, 9))
+        self.assertEqual(state.miss_direction, flight.miss_direction)
+        self.assertEqual(state.impact_damage, 0)
+        self.assertNotEqual(state.position, flight.landing_position)
+        player_projectile = next(row for row in self.session.public_view()["projectiles"]
+            if row["handle"] == projectile_row["handle"])
+        self.assertEqual(player_projectile["status"], "miss_unresolved")
+        self.assertEqual(player_projectile["miss_direction"], flight.miss_direction)
+
+    def test_generated_arena_declares_a_held_dagger_throw_by_opaque_handles(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 5051)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        encounter, universe = candidate.encounter, candidate.universe
+        weapon_id = universe.make_weapon_for_being(player.id, "Dagger", "Scenario Dagger")
+        player.set_body_part_holds_object("right hand", weapon_id)
+        encounter.add_object(weapon_id)
+        encounter.activate_arena_for_player_action(player.id,
+            DelayAction(encounter, player.id, 0, encounter.time),
+            rng_owner=self.session._rng_cursor)
+        encounter.step(1)
+        view = self.session.public_view()
+        target_row = next(row for row in view["entities"]
+            if row["category"] == "being" and row["name"].startswith(target.name))
+        weapon_row = next(row for row in view["character"]["inventory"]["items"]
+            if row["name"] == "Scenario Dagger")
+        self.assertIn("readied in right hand", weapon_row["status"])
+        status, result = self.request("/api/generated/action-program", {"components": [{
+            "kind": "throw", "handle": target_row["handle"],
+            "projectile_handle": weapon_row["handle"]}]})
+        self.assertEqual(status, 200, result)
+        action = next(member.action for record in encounter._choice_book._choices.values()
+            for member in record.members if type(member.action) is ThrowAction)
+        self.assertEqual(action.instrument_id, weapon_id)
+        self.assertNotIn(weapon_id, json.dumps(result))
+
+    def test_generated_arena_offers_thrown_coup_de_grace_for_eligible_aware_target(self):
+        from dataclasses import replace
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 5051)
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        encounter, universe = candidate.encounter, candidate.universe
+        player.set_position(CartesianPosition(1.0, 1.0, 0.0))
+        target.set_position(CartesianPosition(1.5, 1.0, 0.0))
+        target.current.hit_points = 0
+        ledger = player._arena_perception_ledger
+        evidence = replace(ledger._current[target.id], position=target.get_position())
+        ledger._current[target.id] = evidence
+        ledger._history = [evidence if row.entity_id == target.id else row
+                           for row in ledger._history]
+        weapon_id = universe.make_weapon_for_being(player.id, "Dagger", "Coup Dagger")
+        player.set_body_part_holds_object("right hand", weapon_id)
+        encounter.add_object(weapon_id)
+        encounter.activate_arena_for_player_action(player.id,
+            DelayAction(encounter, player.id, 0, encounter.time),
+            rng_owner=self.session._rng_cursor)
+        encounter.step(1)
+        view = self.session.public_view()
+        target_row = next(row for row in view["entities"]
+            if row["category"] == "being" and row["name"].startswith(target.name))
+        weapon_row = next(row for row in view["character"]["inventory"]["items"]
+            if row["name"] == "Coup Dagger")
+        inspected = self.session.inspect_entity({"handle": target_row["handle"]})
+        throw_row = next(row for row in inspected["action_catalog"]["entries"]
+            if row["name"] == "throw")
+        deflect_row = next(row for row in inspected["action_catalog"]["entries"]
+            if row["name"].casefold().startswith("deflect"))
+        shoot_row = next(row for row in inspected["action_catalog"]["entries"]
+            if row["name"].casefold().startswith("shoot"))
+        self.assertIn("throughout its complete trajectory", deflect_row["reason"])
+        self.assertIn("no arrow", shoot_row["reason"])
+        dagger_option = next(row for row in throw_row["projectiles"]
+            if row["handle"] == weapon_row["handle"])
+        self.assertTrue(dagger_option["coup_de_grace"])
+        status, result = self.request("/api/generated/action-program", {"components": [{
+            "kind": "throw", "handle": target_row["handle"],
+            "projectile_handle": weapon_row["handle"], "coup_de_grace": True}]})
+        self.assertEqual(status, 200, result)
+        action = next(member.action for record in encounter._choice_book._choices.values()
+            for member in record.members if type(member.action) is ThrowAction)
+        self.assertTrue(action.coup_de_grace)
 
 
     def test_general_action_program_http_accepts_sequential_and_validated_overlap(self):

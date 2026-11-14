@@ -407,6 +407,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         if type(action) is ThrowAction:
             for key in ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m'):
                 selected[key] = freeze(ad[key])
+            selected['coup_de_grace'] = freeze(ad.get('coup_de_grace', False))
         if type(action) is PickUpAction:
             selected['map_width_cells'] = freeze(ad['map_width_cells'])
             selected['map_height_cells'] = freeze(ad['map_height_cells'])
@@ -613,6 +614,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 if type(flight) is not ProjectileFlight:
                     raise UnsupportedEvaluation('unreviewed Object flight descriptor in Spot snapshot')
                 data['projectile_status'] = (
+                    flight.status if flight.status == 'miss_unresolved' else
                     'landed' if flight.impact_time <= boundary else 'in_flight')
         spatial_role = ('aggregate_extent' if type(obj) is StatisticalGroup
                         else 'physical_entity')
@@ -789,6 +791,14 @@ class ProjectileReleaseEffect:
     landing_position: tuple
     landing_elevation_m: float
     intended_target_id: str | None = None
+    attack_bonus: int = 0
+    range_dc_adjustment: int = 0
+    source_moving: bool = False
+    attacker_id: str | None = None
+    extra_damage: int = 0
+    damage_potential: int | None = None
+    damage_penetration: str = 'B'
+    coup_de_grace: bool = False
 
 
 @dataclass(frozen=True)
@@ -985,6 +995,99 @@ def _helpless(actor):
     d = actor.data
     return (actor.hp <= 0 or d['fatigue_level'] == 5 or d['states'].get('paralyzed', False)
         or d['states'].get('stunned', False) or any(d['abilities'][k] == 0 for k in ('STR','DEX','CON')))
+
+
+def resolve_targeted_throw_arrival(snapshot, flight, projectile_id, rng):
+    """Resolve the adopted point-target Throw roll at its flight boundary.
+
+    A hit is available only while the intended Being remains at the represented
+    aim point. A miss records its adopted d8 direction, but its unadopted miss
+    distance remains unresolved and is never converted into a guessed position.
+    """
+    target = snapshot.entities.get(flight.target_id)
+    if target is None or target.category != 'being' or target.position is None:
+        return 'target_moved', None, (), 0
+    landing = flight.landing_position
+    if math.dist(target.position.as_tuple(), landing.as_tuple()) > 1e-6:
+        return 'target_moved', None, (), 0
+    attacker = snapshot.entities.get(flight.attacker_id)
+    projectile = snapshot.entities.get(projectile_id)
+    if attacker is None or attacker.category != 'being' or projectile is None:
+        raise EvaluationIntegrityError('targeted projectile arrival lost its native source facts')
+    posture_adjustment = {'lying': 4, 'prone': 4, 'sitting': 2,
+                          'kneeling': 2}.get(target.data.get('posture'), 0)
+    size_adjustment = {'diminutive': 12, 'tiny': 8, 'small': 4,
+                       'large': -4, 'huge': -8, 'gargantuan': -12,
+                       'colossal': -16}.get(target.data.get('size_category'), 0)
+    moving_adjustment = 2 if target.id in snapshot.moving_ids else 0
+    source_adjustment = 4 if flight.source_moving else 0
+    dc = (snapshot.difficulty + flight.range_dc_adjustment + posture_adjustment
+          + size_adjustment + moving_adjustment + source_adjustment)
+    target_defense = target.data.get('strategy', {}).get('defense', 0)
+    rng.action_id = flight.source_action_id
+    from action_calculations import attack_hits, hit_outcome, saving_throw, armor_impact, shield_impact
+    from utils import experience_level, saving_throw_experience_modifier
+    def hits(roll, difficulty):
+        return attack_hits(roll, flight.attack_bonus, target_defense, difficulty)
+    def save(being, difficulty):
+        return saving_throw(rng.roll('1d20'), difficulty,
+            saving_throw_experience_modifier(experience_level(being.data['experience'])))
+    coup_de_grace = getattr(flight, 'coup_de_grace', False)
+    if coup_de_grace and _helpless(target):
+        attack = 'critical'
+    elif coup_de_grace:
+        return 'target_moved', None, (), 0
+    else:
+        attack = hit_outcome(dc, rng.roll, hits,
+            lambda difficulty: save(target, difficulty),
+            lambda difficulty: save(attacker, difficulty))
+    if attack == 'fatal':
+        return 'fatal', None, (FatalEffect(flight.source_action_id, target.id),), 0
+    if attack not in ('normal', 'critical'):
+        direction = rng.roll('1d8')
+        return 'miss', direction, (), 0
+
+    target_velocity = snapshot.motion_velocities_m_s.get(target.id, (0.0, 0.0, 0.0))
+    relative_speed = math.dist(flight.velocity_m_s, target_velocity)
+    if flight.damage_potential is not None:
+        potential = flight.damage_potential
+        penetration = flight.damage_penetration
+    else:
+        maximum = 2 * projectile.data['weight'] * (relative_speed / 20.0) ** 2
+        potential = math.floor(maximum + 0.5)
+        penetration = 'B'
+    effects = []
+    if potential == 0:
+        return 'hit', None, (), 0
+    ordinary = rng.roll(f'1d{potential}') + flight.extra_damage
+    critical = rng.roll(f'1d{potential}') if attack == 'critical' else 0
+    protected = ordinary
+    shields = tuple(target.data.get('shields', ()))
+    if shields:
+        shield_id = rng.choose_shield(shields)
+        shield = snapshot.entity(shield_id)
+        intercepted, through = shield_impact(protected, shield.data['size'], rng.roll('1d10+0'))
+        effects.append(ProtectionEffect(flight.source_action_id, shield_id, 'shield',
+            protected, through, intercepted))
+        if intercepted:
+            effects.append(DamageEffect(flight.source_action_id, shield_id, protected, 'shield'))
+        protected = through
+    armor_id = target.data.get('armor_id')
+    if armor_id is not None:
+        armor = snapshot.entity(armor_id)
+        dealt, through = armor_impact(protected, armor.data['defenses'], penetration)
+        effects.extend((ProtectionEffect(flight.source_action_id, armor_id,
+            'armor', protected, through, True),
+            DamageEffect(flight.source_action_id, armor_id, dealt, 'armor')))
+        protected = through
+    effects.append(DamageEffect(flight.source_action_id, target.id, protected, 'body'))
+    if critical:
+        effects.append(DamageEffect(flight.source_action_id, target.id, critical, 'critical_bypass'))
+    if coup_de_grace and target.hp - protected - critical > -10:
+        if not save(target, 10 + protected + critical):
+            effects.append(FatalEffect(flight.source_action_id, target.id))
+            return 'fatal', None, tuple(effects), protected + critical
+    return 'hit', None, tuple(effects), protected + critical
 
 
 def _defense(snapshot, action, rng):
@@ -2294,7 +2397,8 @@ def _activity(snapshot, action, rng):
         projectile = snapshot.entity(action.instrument_id)
         if actor.position is None:
             outcome = 'unplaced'
-        elif action.instrument_id not in actor.data.get('possessions', ()):
+        elif (action.instrument_id not in actor.data.get('possessions', ())
+                and action.instrument_id not in actor.data.get('held', ())):
             outcome = 'unavailable'
         else:
             # Generated NPCs preserve their measured source stature in the
@@ -2323,11 +2427,32 @@ def _activity(snapshot, action, rng):
                 _angle, _azimuth, trajectory = aim_drag_free_trajectory_at_point(
                     release_velocity_yd_s=speed, release_position=release,
                     target_position=target.position)
+            weapon_skill = (actor.data['weapon_skills'].get(projectile.data.get('original_type'), 0) or 0
+                            if projectile.category == 'weapon' else 0)
+            attack_bonus = ((actor.data['skills'].get('throw', 0) or 0) + weapon_skill
+                + action.data.get('strategy', {}).get('attack', 0)
+                - (action.data.get('multiple_action_priority', 0) or 0))
+            range_dc_adjustment = 0
+            if intended_target_id is not None:
+                horizontal_range_yards = math.hypot(target.position.x-actor.position.x,
+                    target.position.y-actor.position.y) / 0.9144
+                height_m = release.z - target.position.z
+                if height_m > 0:
+                    increment_yards = speed * math.sqrt(2 * height_m / 10.0)
+                    if increment_yards > 0 and horizontal_range_yards > increment_yards:
+                        range_dc_adjustment = math.ceil(horizontal_range_yards/increment_yards)-1
             effects.append(ProjectileReleaseEffect(action.id, projectile.id,
                 snapshot.boundary, release.as_tuple(), trajectory.velocity_m_s,
                 snapshot.boundary + trajectory.flight_time_s,
                 trajectory.landing_position.as_tuple(),
-                trajectory.landing_position.z, intended_target_id))
+                trajectory.landing_position.z, intended_target_id, attack_bonus,
+                range_dc_adjustment, actor.id in snapshot.moving_ids, actor.id,
+                action.data.get('strategy', {}).get('extra_damage', 0),
+                (projectile.data.get('attacks', {}).get('R', {}).get('d')
+                 if projectile.category == 'weapon' else None),
+                (projectile.data.get('attacks', {}).get('R', {}).get('p', 'B')
+                 if projectile.category == 'weapon' else 'B'),
+                action.data.get('coup_de_grace', False)))
             outcome = 'released'
             metadata.extend((('release_speed_yd_s', speed),
                              ('impact_time', snapshot.boundary + trajectory.flight_time_s)))

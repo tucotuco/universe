@@ -94,6 +94,7 @@ class TestArenaPersistence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             pending = Path(directory) / "pending-throw.json"
             airborne = Path(directory) / "airborne-throw.json"
+            impact = Path(directory) / "impact-throw.json"
             pending.write_bytes(pending_bytes)
             script = """
 import json,pathlib,sys
@@ -140,6 +141,8 @@ print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple()
             continued_projectile = continued_candidate.universe.get_object_by_id(object_id)
             continued_candidate.encounter.step(1)
             encounter.step(1)
+            self.assertIn(projectile.__dict__["_projectile_flight"].impact_outcome,
+                          ("hit", "miss", "fatal", "target_moved"))
             self.assertEqual(continued_candidate.encounter.time, encounter.time)
             self.assertEqual(continued_projectile.get_position(), projectile.get_position())
             self.assertEqual(continued_projectile.__dict__["_projectile_flight"],
@@ -147,6 +150,31 @@ print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple()
             self.assertEqual(tuple(continued_projectile.__dict__["_atomic_projectile_history"]),
                              tuple(projectile.__dict__["_atomic_projectile_history"]))
             self.assertEqual(continued._rng_cursor.state, source._rng_cursor.state)
+            impact.write_bytes(continued.save_encounter_bytes())
+            verify_impact = """
+import json,pathlib,sys
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();s.load_encounter_bytes(pathlib.Path(sys.argv[1]).read_bytes())
+c=s.active_candidate;o=c.universe.get_object_by_id(sys.argv[2]);t=c.universe.get_object_by_id(sys.argv[3])
+f=o.__dict__['_projectile_flight'];h=o.__dict__['_atomic_projectile_history'][-1]
+assert f.impact_outcome in ('hit','miss','fatal','target_moved')
+assert h.impact_outcome==f.impact_outcome
+print(json.dumps({'outcome':f.impact_outcome,'direction':f.miss_direction,
+ 'hp':t.current.hit_points,'damage':h.impact_damage,'rng':s._rng_cursor.state},separators=(',',':')))
+"""
+            checked = subprocess.run([sys.executable, "-S", "-c", verify_impact,
+                str(impact), object_id, target.id], cwd=ROOT, env=env,
+                capture_output=True, text=True, check=False)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            result = json.loads(checked.stdout)
+            self.assertEqual(result["outcome"],
+                projectile.__dict__["_projectile_flight"].impact_outcome)
+            self.assertEqual(result["direction"],
+                projectile.__dict__["_projectile_flight"].miss_direction)
+            self.assertEqual(result["damage"],
+                projectile.__dict__["_atomic_projectile_history"][-1].impact_damage)
+            self.assertEqual(result["hp"], target.current.hit_points)
+            self.assertEqual(self._tuplify(result["rng"]), continued._rng_cursor.state)
 
     def test_repeatable_three_process_movement_continuation(self):
         uninterrupted = self._new_moving_session()

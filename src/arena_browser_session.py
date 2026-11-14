@@ -740,6 +740,18 @@ class GeneratedArenaSession:
             address = None if p is None else candidate.arena_map.layout.cell_at_position(p)
             pickup_available, pickup_unavailable_reason = self._pickup_status_unlocked(
                 candidate, player.native.being, evidence.entity_id, evidence)
+            projectile_evidence = None
+            if evidence.category == 'object':
+                observed = candidate.universe.get_object_by_id(evidence.entity_id)
+                from throwing import ProjectileFlight
+                flight = (None if observed is None else object.__getattribute__(
+                    observed, '__dict__').get('_projectile_flight'))
+                if type(flight) is ProjectileFlight:
+                    projectile_evidence = {
+                        "status": flight.status,
+                        "outcome": flight.impact_outcome,
+                        "miss_direction": flight.miss_direction,
+                    }
             perceived.append({
                 "handle": handle, "category": evidence.category,
                 "name": self._display_names.get(evidence.entity_id, evidence.name),
@@ -750,12 +762,17 @@ class GeneratedArenaSession:
                 "cell": None if address is None else {"column": address.column, "row": address.row},
                 "pickup_available": pickup_available,
                 "pickup_unavailable_reason": pickup_unavailable_reason,
+                "projectile": projectile_evidence,
             })
         # The player may address directly held inventory through the same
         # opaque session handle contract as perceived entities. This is
         # player-owned inventory evidence, never a handle to another Being's
         # private Object graph.
-        for object_id in tuple(player.native.being.possessions):
+        visible_inventory_ids = tuple(dict.fromkeys(tuple(player.native.being.possessions)
+            + tuple(player.native.being.weapons)
+            + tuple(value for value in player.native.being.current.body_parts.values()
+                    if value is not None)))
+        for object_id in visible_inventory_ids:
             obj = candidate.universe.get_object_by_id(object_id)
             if (obj is not None and obj.parent_container_id in (None, player.native.being.id)
                     and object_id not in self._view_handles):
@@ -770,6 +787,29 @@ class GeneratedArenaSession:
             candidate, player.native.being, selected, supported_actions)
         action_programs = self._action_program_views(
             candidate, player.native.being, ledger)
+        owned_projectiles = []
+        from object import ObjectInstance
+        from throwing import ProjectileFlight
+        for object_id in candidate.encounter.non_being_object_list:
+            obj = candidate.universe.get_object_by_id(object_id)
+            flight = (None if obj is None else object.__getattribute__(
+                obj, '__dict__').get('_projectile_flight'))
+            if (type(obj) is not ObjectInstance or type(flight) is not ProjectileFlight
+                    or flight.attacker_id != player.native.being.id):
+                continue
+            handle = self._view_handles.get(object_id)
+            if handle is None:
+                handle = secrets.token_urlsafe(18)
+                self._view_handles[object_id] = handle
+            p = obj.get_position()
+            owned_projectiles.append({
+                "handle": handle,
+                "status": flight.status,
+                "outcome": flight.impact_outcome,
+                "miss_direction": flight.miss_direction,
+                "position_meters": None if p is None else
+                    {"x": p.x, "y": p.y, "z": p.z},
+            })
         return {
             "state": "active",
             "starter_ground_equipment_available": self._ground_loadout_profile is not None,
@@ -820,6 +860,7 @@ class GeneratedArenaSession:
                                   "attack opportunity" if opponent_decision["kind"] == "attack" else
                                   "waiting" if self._opponent_strategy in ("attack_only", "defense_only") else "inactive"),
             "entities": perceived,
+            "projectiles": owned_projectiles,
             "selected_entity": selected,
             "action_catalog": action_catalog,
             "action_programs": action_programs,
@@ -1937,6 +1978,7 @@ class GeneratedArenaSession:
                    "shield_handle",
                    "weapon_handle",
                    "projectile_handle",
+                   "coup_de_grace",
                    "start_offset_seconds", "priority_penalty", "strategy"}
         normalized = []
         for component in payload["components"]:
@@ -1960,6 +2002,9 @@ class GeneratedArenaSession:
                 raise ArenaBrowserRequestError("Each component strategy uses nonnegative integer allocations.")
             if "unarmed" in component and type(component["unarmed"]) is not bool:
                 raise ArenaBrowserRequestError("The Disarm mode selector must be boolean.")
+            if ("coup_de_grace" in component
+                    and type(component["coup_de_grace"]) is not bool):
+                raise ArenaBrowserRequestError("The thrown Coup de grace selector must be boolean.")
             normalized.append(component)
         offsets = [component.get("start_offset_seconds", 0) for component in normalized]
         if offsets != sorted(offsets):
@@ -2016,7 +2061,8 @@ class GeneratedArenaSession:
                 elif kind == "throw" and type(component.get("projectile_handle")) is str:
                     action, _prepared, _projectile_id = self._throw_preflight(
                         candidate, player, entity_id, evidence,
-                        component["projectile_handle"])
+                        component["projectile_handle"],
+                        coup_de_grace=component.get("coup_de_grace", False))
                 elif kind == "ready-weapon":
                     from activities import ReadyWeaponAction
                     if evidence is None or evidence.category not in ("object", "weapon"):
@@ -3604,7 +3650,7 @@ class GeneratedArenaSession:
                     else {"handle": handle, "name": selected["name"],
                           "type": selected["type"],
                           "present_state": selected["present_state"]})
-                projectiles, reason = self._throw_projectile_options(candidate, player)
+                projectiles, reason = self._throw_projectile_options(candidate, player, entity_id)
                 status = "unavailable"
                 duration = None
                 if target_view is None:
@@ -3619,7 +3665,8 @@ class GeneratedArenaSession:
                         status = "available"
                         duration = prepared.end_time - prepared.start_time
                         reason = ("Four-second native Throw aimed at the selected Being's represented point; "
-                                  "actual hit/miss resolution is still being integrated.")
+                                  "projectile arrival resolves the attack and damage; a miss records its d8 "
+                                  "direction with destination unresolved.")
                     except ArenaBrowserRequestError as exc:
                         reason = str(exc)
                 catalog_rows.append({"name": name, "group": "Being targets",
@@ -3646,6 +3693,12 @@ class GeneratedArenaSession:
             elif name.casefold() == "throw":
                 reason = ("The native Throw resolver has a narrow authored parameter bracket, but the Arena "
                           "has no supported control for its load and trajectory inputs.")
+            elif name.casefold().startswith("deflect"):
+                reason = ("Unavailable: observer-owned evidence does not establish awareness of one missile "
+                          "throughout its complete trajectory, and its redirected Missing destination is unresolved.")
+            elif name.casefold().startswith("shoot"):
+                reason = ("Unavailable: adopted bow data provide timing, range, and damage but no arrow "
+                          "velocity/flight-time or native ammunition release profile.")
             else:
                 reason = ("No reviewed native generated-Arena submission and resolution contract is "
                           "connected to this catalog Action.")
@@ -3917,28 +3970,51 @@ class GeneratedArenaSession:
                 "entries": catalog_rows + arena_rows,
                 "program_resources": resources}
 
-    def _throw_projectile_options(self, candidate, player):
+    def _throw_projectile_options(self, candidate, player, target_id):
         """Return only direct player possessions with observer-owned opaque handles."""
         from object import ObjectInstance
+        from weapon import WeaponInstance
         from being import BeingInstance
+        target = candidate.encounter.get_being(target_id) if type(target_id) is str else None
+        coup_eligible = bool(target is not None and target is not player
+            and candidate.encounter.is_aware(player.id, target.id)
+            and target.is_helpless() and not player.is_helpless()
+            and target.get_position() is not None and player.get_position() is not None
+            and math.hypot(player.get_position().x-target.get_position().x,
+                           player.get_position().y-target.get_position().y) <= 0.9144)
         rows = []
-        for object_id in tuple(player.possessions):
+        direct_ids = tuple(dict.fromkeys(tuple(player.possessions)
+            + tuple(player.weapons) + tuple(value for value in player.current.body_parts.values()
+                if value is not None)))
+        for object_id in direct_ids:
             obj = candidate.universe.get_object_by_id(object_id)
             handle = self._view_handles.get(object_id)
-            if (type(obj) is not ObjectInstance or isinstance(obj, BeingInstance)
+            if (type(obj) not in (ObjectInstance, WeaponInstance) or isinstance(obj, BeingInstance)
                     or handle is None or obj.parent_container_id not in (None, player.id)
                     or obj.get_position() is not None):
                 continue
             weight = obj.current.weight
-            if type(weight) in (int, float) and math.isfinite(weight) and 0 < weight <= 3.3:
+            is_eligible_weapon = (type(obj) is WeaponInstance
+                and object_id in player.weapons
+                and object_id in player.current.body_parts.values()
+                and obj.current.attacks.get('R', {}).get('t') == 4
+                and type(obj.current.attacks.get('R', {}).get('d')) is int
+                and type(obj.current.attacks.get('R', {}).get('p')) is str)
+            if ((type(obj) is ObjectInstance and object_id in player.possessions
+                    or is_eligible_weapon)
+                    and type(weight) in (int, float) and math.isfinite(weight)
+                    and 0 < weight <= 3.3):
                 rows.append({"handle": handle, "name": obj.name or obj.current.obj_type,
-                    "type": obj.current.obj_type, "weight_pounds": float(weight)})
+                    "type": obj.current.obj_type, "weight_pounds": float(weight),
+                    "weapon": is_eligible_weapon,
+                    "coup_de_grace": bool(is_eligible_weapon and coup_eligible)})
         return tuple(rows), ("Select an eligible held Object with a native weight and a currently authorized handle."
             if not rows else "")
 
     def _throw_preflight(self, candidate, player, target_id, evidence,
-                         projectile_handle):
+                         projectile_handle, *, coup_de_grace=False):
         from object import ObjectInstance
+        from weapon import WeaponInstance
         from being import BeingInstance
         from movement_intent import _HEAVY_LOAD_UPPER_LB
         if (type(target_id) is not str or target_id == player.id
@@ -3950,8 +4026,10 @@ class GeneratedArenaSession:
                               if value == projectile_handle), None)
         obj = (None if projectile_id is None else
                candidate.universe.get_object_by_id(projectile_id))
-        if (type(obj) is not ObjectInstance or isinstance(obj, BeingInstance)
-                or projectile_id not in player.possessions
+        if (type(obj) not in (ObjectInstance,WeaponInstance) or isinstance(obj, BeingInstance)
+                or (projectile_id not in player.possessions
+                    and not (type(obj) is WeaponInstance and projectile_id in player.weapons
+                        and projectile_id in player.current.body_parts.values()))
                 or obj.parent_container_id not in (None, player.id)
                 or obj.get_position() is not None
                 or type(obj.current.weight) not in (int, float)
@@ -3960,13 +4038,19 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("Throw requires an authorized handle for an eligible Object in the player's custody.")
         if player.current.abilities.STR() != 10:
             raise ArenaBrowserRequestError("The current native Throw bracket supports Strength 10 only.")
+        if type(coup_de_grace) is not bool:
+            raise ArenaBrowserRequestError("The thrown Coup de grace selector must be Boolean.")
+        if coup_de_grace and (type(obj) is not WeaponInstance
+                or not candidate.encounter.is_aware(player.id, target_id)
+                or player.is_helpless()):
+            raise ArenaBrowserRequestError("Thrown Coup de grace requires an aware helpless target and an able Actor.")
         reference = _HEAVY_LOAD_UPPER_LB.get(10)
         if type(reference) not in (int, float) or not math.isfinite(reference) or reference <= 0:
             raise ArenaBrowserRequestError("The adopted Strength 10 heavy-load reference is unavailable.")
         action = ThrowAction(candidate.universe, player.id, projectile_id,
             candidate.encounter.time, heavy_load_reference_lb=reference,
             elevation_degrees=45.0, target_id=target_id,
-            landing_elevation_m=0.0)
+            landing_elevation_m=0.0, coup_de_grace=coup_de_grace)
         try:
             prepared = action.prepare_schedule(candidate.encounter)
         except (TypeError, ValueError) as exc:

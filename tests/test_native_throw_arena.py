@@ -23,6 +23,84 @@ from throwing import ProjectileFlight, ProjectileBoundaryState
 
 
 class NativeThrowTests(unittest.TestCase):
+    def test_held_four_second_dagger_throw_uses_native_range_damage_profile(self):
+        world, enc, actor, _projectile, rng, original = build_native_scene()
+        book = enc.__dict__['_choice_book']
+        book.undo(book.for_action(original.id).id)
+        target_definition = world.library.being_dictionary.get_object_definition('Human')
+        target = BeingInstance(target_definition, 'Target', id='throw-demo/dagger-target')
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        world.add_object(target);enc.add_being(target.id)
+        weapon_id = world.make_weapon_for_being(actor.id, 'Dagger', 'Thrown Dagger')
+        enc.add_object(weapon_id)
+        actor.set_body_part_holds_object('right hand', weapon_id)
+        dagger = world.get_object_by_id(weapon_id)
+        action = ThrowAction(world, actor.id, weapon_id, enc.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id='throw-demo/dagger-action')
+        enc.schedule_choice((action,));enc.step(4)
+        self.assertEqual(action.resolution.outcome, 'released')
+        self.assertNotIn(weapon_id, actor.weapons)
+        self.assertNotIn(weapon_id, actor.possessions)
+        self.assertNotIn(weapon_id, actor.current.body_parts.values())
+        self.assertEqual(dagger.__dict__['_projectile_flight'].damage_potential,
+                         dagger.current.attacks['R']['d'])
+        initial_target_hp = target.current.hit_points
+        for _ in range(4):
+            if dagger.__dict__['_projectile_flight'].impact_outcome is not None:
+                break
+            enc.step(1)
+        flight = dagger.__dict__['_projectile_flight']
+        self.assertIn(flight.impact_outcome, ('hit','miss','fatal','target_moved'))
+        if flight.impact_outcome == 'hit':
+            self.assertLess(target.current.hit_points, initial_target_hp)
+
+    def test_thrown_coup_de_grace_auto_criticals_helpless_target_with_fortitude_consequence(self):
+        world, enc, actor, _projectile, rng, original = build_native_scene(seed=816)
+        book = enc.__dict__['_choice_book']
+        book.undo(book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition('Human')
+        target = BeingInstance(definition, 'Helpless Target', id='throw-demo/helpless-target')
+        target.set_position(CartesianPosition(0.5, 0.0, 0.0))
+        target.current.hit_points = 0
+        world.add_object(target);enc.add_being(target.id)
+        enc.mark_aware(actor.id, target.id)
+        weapon_id = world.make_weapon_for_being(actor.id, 'Dagger', 'Coup Dagger')
+        actor.set_body_part_holds_object('right hand', weapon_id)
+        enc.add_object(weapon_id)
+        weapon = world.get_object_by_id(weapon_id)
+        target.set_position(CartesianPosition(2.0, 0.0, 0.0))
+        out_of_range = ThrowAction(world, actor.id, weapon_id, enc.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, coup_de_grace=True,
+            id='throw-demo/ranged-coup-too-far')
+        with self.assertRaisesRegex(ValueError, 'within one yard'):
+            out_of_range.prepare_schedule(enc)
+        target.set_position(CartesianPosition(0.5, 0.0, 0.0))
+        action = ThrowAction(world, actor.id, weapon_id, enc.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, coup_de_grace=True,
+            id='throw-demo/ranged-coup')
+        enc.schedule_choice((action,))
+        enc.step(4)
+        flight = weapon.__dict__['_projectile_flight']
+        self.assertTrue(flight.coup_de_grace)
+        self.assertLessEqual(math.hypot(actor.get_position().x-target.get_position().x,
+                                        actor.get_position().y-target.get_position().y), 0.9144)
+        for _ in range(4):
+            if weapon.__dict__['_projectile_flight'].impact_outcome is not None:
+                break
+            enc.step(1)
+        flight = weapon.__dict__['_projectile_flight']
+        self.assertIn(flight.impact_outcome, ('hit', 'fatal'))
+        self.assertLess(target.current.hit_points, 0)
+        effects = atomic_publication.target_effects_from(target, action.id)
+        critical_damage = [row.effect.amount for row in effects
+            if row.effect.__class__.__name__ == 'DamageEffect'
+            and row.effect.target_id == target.id
+            and row.effect.component == 'critical_bypass']
+        self.assertEqual(len(critical_damage), 1)
+
     def test_targeted_throw_aims_at_explicit_being_point_without_body_geometry(self):
         world, enc, actor, projectile, _rng, original = build_native_scene()
         book = object.__getattribute__(enc, '__dict__')['_choice_book']
@@ -45,6 +123,79 @@ class NativeThrowTests(unittest.TestCase):
         self.assertAlmostEqual(flight.landing_position.y, target.get_position().y)
         self.assertEqual(flight.landing_position.z, target.get_position().z)
         self.assertEqual(action.resolution.outcome, 'released')
+
+    def test_target_movement_before_arrival_prevents_a_retroactive_attack_roll(self):
+        world, enc, actor, projectile, rng, original = build_native_scene()
+        book = object.__getattribute__(enc, '__dict__')['_choice_book']
+        book.undo(book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition('Human')
+        target = BeingInstance(definition, 'Target', id='throw-demo/moving-target')
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        world.add_object(target)
+        enc.add_being(target.id)
+        action = ThrowAction(world, actor.id, projectile.id, enc.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id='throw-demo/moving-target-action')
+        enc.schedule_choice((action,))
+        enc.step(RELEASE_BOUNDARY)
+        flight = projectile.__dict__['_projectile_flight']
+        target.set_position(CartesianPosition(9.0, 0.0, 0.0))
+        target_hp = target.current.hit_points
+        rng_before = rng.state
+        enc.step(4)
+        resolved = projectile.__dict__['_projectile_flight']
+        state = projectile.__dict__['_atomic_projectile_history'][-1]
+        self.assertEqual(resolved.impact_outcome, 'target_moved')
+        self.assertEqual(resolved.status, 'landed')
+        self.assertEqual(state.position, flight.landing_position)
+        self.assertEqual(target.current.hit_points, target_hp)
+        self.assertEqual(state.impact_damage, 0)
+        self.assertEqual(rng.state, rng_before)
+
+    def test_simultaneous_targeted_arrivals_are_order_independent_and_stack_damage(self):
+        results = []
+        for reverse in (False, True):
+            world, enc, actor, _initial_projectile, rng, original = build_native_scene(seed=422)
+            book = object.__getattribute__(enc, '__dict__')['_choice_book']
+            book.undo(book.for_action(original.id).id)
+            definition = world.library.being_dictionary.get_object_definition('Human')
+            target = BeingInstance(definition, 'Target', id='throw-demo/shared-target')
+            target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+            second_actor = BeingInstance(definition, 'Second Thrower',
+                id='throw-demo/second-thrower')
+            second_actor.set_position(CartesianPosition(16.0, 0.0, 0.0))
+            world.add_object(target);world.add_object(second_actor)
+            enc.add_being(target.id);enc.add_being(second_actor.id)
+            first_id = world.make_object_for_being(actor.id, 'Rock', 'First Rock')
+            second_id = world.make_object_for_being(second_actor.id, 'Rock', 'Second Rock')
+            enc.add_object(first_id);enc.add_object(second_id)
+            first = ThrowAction(world, actor.id, first_id, enc.time,
+                heavy_load_reference_lb=100.0, elevation_degrees=45,
+                target_id=target.id, id='throw-demo/first')
+            second = ThrowAction(world, second_actor.id, second_id, enc.time,
+                heavy_load_reference_lb=100.0, elevation_degrees=45,
+                target_id=target.id, id='throw-demo/second')
+            actions = (second, first) if reverse else (first, second)
+            enc.schedule_choice(actions)
+            # Give the first impact a natural 20 in both declaration orders.
+            # This exercises a real hit while still leaving the second
+            # projectile's result to common-snapshot simultaneous resolution.
+            rng.state = random.Random(116).getstate()
+            enc.step(4)
+            hp_before_impact = target.current.hit_points
+            enc.step(4)
+            flights = [world.get_object_by_id(key).__dict__['_projectile_flight']
+                       for key in (first_id, second_id)]
+            damages = [world.get_object_by_id(key).__dict__[
+                '_atomic_projectile_history'][-1].impact_damage
+                for key in (first_id, second_id)]
+            self.assertTrue(all(flight.impact_outcome in ('hit', 'miss', 'fatal')
+                                for flight in flights))
+            self.assertTrue(any(flight.impact_outcome == 'hit' for flight in flights))
+            self.assertEqual(hp_before_impact-target.current.hit_points, sum(damages))
+            results.append((tuple(flight.impact_outcome for flight in flights),
+                tuple(damages), target.current.hit_points, rng.state))
+        self.assertEqual(results[0], results[1])
 
     def test_native_release_and_each_integer_flight_boundary(self):
         world, enc, actor, projectile, rng, action = build_native_scene()

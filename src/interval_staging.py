@@ -583,9 +583,22 @@ def _validate_closure(candidate):
             and update.next_flight.release_position==update.prior_flight.release_position
             and update.next_flight.landing_position==update.prior_flight.landing_position
             and update.next_flight.velocity_m_s==update.prior_flight.velocity_m_s
-            and (update.state.status=='landed')==(update.prior_flight.impact_time<=candidate.boundary)
+            and update.next_flight.target_id==update.prior_flight.target_id
+            and update.next_flight.attack_bonus==update.prior_flight.attack_bonus
+            and update.next_flight.range_dc_adjustment==update.prior_flight.range_dc_adjustment
+            and update.next_flight.source_moving==update.prior_flight.source_moving
+            and update.next_flight.attacker_id==update.prior_flight.attacker_id
+            and update.next_flight.extra_damage==update.prior_flight.extra_damage
+            and update.next_flight.damage_potential==update.prior_flight.damage_potential
+            and update.next_flight.damage_penetration==update.prior_flight.damage_penetration
+            and getattr(update.next_flight,'coup_de_grace',False)==getattr(update.prior_flight,'coup_de_grace',False)
+            and ((update.state.status in ('landed','miss_unresolved'))
+                 == (update.prior_flight.impact_time<=candidate.boundary))
             and (update.next_flight.landing_recorded_at==float(candidate.boundary)
-                 if update.state.status=='landed' else update.next_flight.landing_recorded_at is None),
+                 if update.state.status=='landed' else update.next_flight.landing_recorded_at is None)
+            and (update.state.status!='miss_unresolved'
+                 or (update.state.impact_outcome=='miss'
+                     and update.state.miss_direction in range(1,9))),
             'inconsistent projectile boundary projection')
     operation=candidate.adult_member_candidate
     if operation is not None:
@@ -679,9 +692,10 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
         for key in tuple(positions):
             flight=object.__getattribute__(objects[key],'__dict__').get('_projectile_flight')
             if flight is None:continue
-            _require(type(flight) is ProjectileFlight and flight.status in ('in_flight','landed'),
+            _require(type(flight) is ProjectileFlight
+                and flight.status in ('in_flight','landed','miss_unresolved'),
                 'unsupported projectile flight descriptor')
-            if flight.status=='landed':continue
+            if flight.status!='in_flight':continue
             history=object.__getattribute__(objects[key],'__dict__').get('_atomic_projectile_history')
             prior_state=history[-1] if type(history) is list and history else None
             _require(type(prior_state) is ProjectileBoundaryState
@@ -896,6 +910,73 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                 _require(spatial not in spatial_owners, 'aliased mutable spatial state')
                 spatial_owners[spatial]=key
         supported=build_supported_candidate(context)
+        # Resolve targeted Throws only when their committed trajectory reaches
+        # the next integer Encounter boundary. The attack and all simultaneous
+        # Actions use this same postmovement/preaction snapshot; the following
+        # changes stay inside the interval's single atomic publication.
+        from action_evaluation import (resolve_targeted_throw_arrival,
+            _ProvisionalRandom, EffectIdentity, IdentifiedEffect)
+        from action_settlement import _project_hp
+        impact_rng = _ProvisionalRandom(supported.boundary.provisional_rng_state)
+        impact_effects = dict(supported.boundary.effects)
+        impact_targets = dict(supported.boundary.targets)
+        impact_source_slots = {}
+        for identity in impact_effects:
+            impact_source_slots[identity.source_action_id] = max(
+                impact_source_slots.get(identity.source_action_id, -1), identity.slot)
+        updated_projectiles = []
+        for update in sorted(projectile_updates,
+                key=lambda row:row.prior_flight.source_effect_identity):
+            flight = update.next_flight
+            if flight.target_id is None or flight.impact_time > next_boundary:
+                updated_projectiles.append(update)
+                continue
+            outcome, direction, resolved_effects, damage = resolve_targeted_throw_arrival(
+                context.snapshot, flight, update.object_id, impact_rng)
+            impact_state = replace(update.state, impact_outcome=outcome,
+                miss_direction=direction, impact_damage=damage)
+            resolved_flight = replace(flight, impact_outcome=outcome,
+                miss_direction=direction)
+            # A missed trajectory's true destination is not specified by the
+            # adopted miss rule. Retain its prior committed position and mark
+            # the destination unresolved instead of landing at the target point.
+            if outcome == 'miss':
+                history = object.__getattribute__(objects[update.object_id], '__dict__').get(
+                    '_atomic_projectile_history', ())
+                positions[update.object_id] = history[-1].position
+                impact_state = replace(impact_state, position=history[-1].position)
+                impact_state = replace(impact_state, status='miss_unresolved')
+                resolved_flight = replace(resolved_flight,
+                    status='miss_unresolved', landing_recorded_at=None)
+            updated_projectiles.append(replace(update, next_flight=resolved_flight,
+                state=impact_state))
+            for effect in resolved_effects:
+                impact_source_slots[flight.source_action_id] = (
+                    impact_source_slots.get(flight.source_action_id, -1) + 1)
+                identity = EffectIdentity(encounter.id, next_boundary,
+                    flight.source_action_id, 'effect', impact_source_slots[flight.source_action_id])
+                row = IdentifiedEffect(identity, effect)
+                impact_effects[identity] = row
+                target = impact_targets[effect.target_id]
+                incoming = target.incoming + (row,)
+                total, hp, fatals = _project_hp(target.starting_hp, incoming)
+                impact_targets[effect.target_id] = replace(target,
+                    projected_hp=hp, actual_damage=total, fatal_effect_ids=fatals,
+                    incoming=incoming)
+                actor_id = flight.attacker_id
+                if actor_id in impact_targets:
+                    actor = impact_targets[actor_id]
+                    impact_targets[actor_id] = replace(actor,
+                        outgoing_effect_ids=actor.outgoing_effect_ids + (identity,))
+        if any(update.next_flight.impact_outcome is not None for update in updated_projectiles):
+            boundary_candidate = replace(supported.boundary,
+                targets=MappingProxyType(impact_targets),
+                effects=MappingProxyType(impact_effects),
+                provisional_rng_state=impact_rng.rng.getstate(),
+                trace=supported.boundary.trace + tuple(impact_rng.trace))
+            supported = replace(supported, boundary=boundary_candidate,
+                effects=boundary_candidate.effects)
+            projectile_updates = updated_projectiles
         # Derive adopted interruptions from the complete successful proposal
         # batch before building queue changes. These cancellations share the
         # Trip/release publication boundary and never rewrite same-boundary

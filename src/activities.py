@@ -16,14 +16,16 @@ from experience import ActionResolution, SkillExercise
 from perception import Perception
 from spatial.state import CartesianPosition
 from object import ObjectInstance
+from weapon import WeaponInstance
 
 
 class ThrowAction(Action):
-    """Narrow native drag-free Throw release (no target or impact mechanics)."""
+    """Native drag-free Throw with bounded target, impact, and Coup de grace rules."""
 
     def __init__(self, universe, actor_id, instrument_id, start_time, *,
                  heavy_load_reference_lb, elevation_degrees, azimuth_degrees=0.0,
-                 landing_elevation_m=0.0, target_id=None, id=None):
+                 landing_elevation_m=0.0, target_id=None, coup_de_grace=False,
+                 id=None):
         values = (start_time, heavy_load_reference_lb, elevation_degrees,
                   azimuth_degrees, landing_elevation_m)
         if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
@@ -34,6 +36,8 @@ class ThrowAction(Action):
             raise ValueError('Throw requires native actor and Object identities')
         if target_id is not None and (type(target_id) is not str or not target_id):
             raise ValueError('Throw target must be a native Being identity')
+        if type(coup_de_grace) is not bool:
+            raise ValueError('thrown Coup de grace mode must be an explicit Boolean')
         super().__init__(universe, start_time, start_time + 4, 'throw', actor_id,
                          target_id=target_id, instrument_id=instrument_id, id=id)
         self.end_time = start_time + 4
@@ -41,6 +45,7 @@ class ThrowAction(Action):
         self.elevation_degrees = float(elevation_degrees)
         self.azimuth_degrees = float(azimuth_degrees)
         self.landing_elevation_m = float(landing_elevation_m)
+        self.coup_de_grace = coup_de_grace
 
     def prepare_schedule(self, encounter):
         if encounter.progression_mode != 'transactional':
@@ -49,7 +54,7 @@ class ThrowAction(Action):
             raise ValueError('native Throw currently supports the authored four-second bracket')
         actor = encounter.get_being(self.actor_id)
         obj = encounter.universe.get_object_by_id(self.instrument_id)
-        if actor is None or obj is None or type(obj) is not ObjectInstance:
+        if actor is None or type(obj) not in (ObjectInstance, WeaponInstance):
             raise ValueError('Throw requires a participating Being and registered ObjectInstance')
         if self.target_id is not None:
             from being import BeingInstance
@@ -57,11 +62,33 @@ class ThrowAction(Action):
             if (self.target_id not in encounter.being_list or type(target) is not BeingInstance
                     or target.get_position() is None or target is actor):
                 raise ValueError('Targeted Throw requires a positioned participating Being')
-        if self.instrument_id not in actor.possessions:
+        if self.coup_de_grace:
+            if (self.target_id is None or type(obj) is not WeaponInstance
+                    or actor.is_helpless() or not target.is_helpless()
+                    or not encounter.is_aware(actor.id, target.id)
+                    or math.hypot(actor.get_position().x-target.get_position().x,
+                                  actor.get_position().y-target.get_position().y) > 0.9144):
+                raise ValueError('thrown Coup de grace requires an aware helpless target within one yard and a thrown weapon')
+        if type(obj) is WeaponInstance:
+            held_hands = [hand for hand, held in actor.current.body_parts.items()
+                          if hand in ('left hand','right hand') and held == self.instrument_id]
+            ranged_time = obj.current.attacks.get('R', {}).get('t')
+            ranged_damage = obj.current.attacks.get('R', {}).get('d')
+            ranged_penetration = obj.current.attacks.get('R', {}).get('p')
+            if (self.instrument_id not in actor.weapons or len(held_hands) != 1
+                    or (self.instrument_id not in actor.possessions
+                        and actor.current.body_parts[held_hands[0]] != self.instrument_id)
+                    or type(ranged_time) is not int or ranged_time != 4
+                    or type(ranged_damage) is not int or ranged_damage <= 0
+                    or type(ranged_penetration) is not str or not ranged_penetration):
+                raise ValueError('native Throw supports held weapons with the authored four-second ranged profile')
+        elif self.instrument_id not in actor.possessions:
             raise ValueError('Throw Object must be available in actor possessions')
         from being import BeingInstance
         holders = [being.id for being in encounter.universe.object_registry.object_instances.values()
-                   if type(being) is BeingInstance and self.instrument_id in being.possessions]
+                   if type(being) is BeingInstance and (self.instrument_id in being.possessions
+                       or self.instrument_id in being.weapons
+                       or self.instrument_id in being.current.body_parts.values())]
         if holders != [actor.id]:
             raise ValueError('Throw Object must have exactly one native Being possessor')
         weight = obj.current.weight

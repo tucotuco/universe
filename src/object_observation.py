@@ -36,7 +36,7 @@ class ObjectObservation:
             raise TypeError('Object observation requires a native CartesianPosition')
         if (self.projectile_status is not None
                 and (type(self.projectile_status) is not str
-                     or self.projectile_status not in ('in_flight', 'landed'))):
+                     or self.projectile_status not in ('in_flight', 'landed', 'miss_unresolved'))):
             raise ValueError('unsupported native projectile status observation')
         if type(self.basis) is not str or self.basis != 'successful_deliberate_spot':
             raise ValueError('unsupported Object observation basis')

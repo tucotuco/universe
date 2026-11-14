@@ -493,14 +493,29 @@ def _make_plan(encounter,candidate,rng_owner):
         effect=row.effect
         if type(effect) is not ProjectileReleaseEffect:continue
         obj=objects.get(effect.target_id);source=events.get(effect.source_action_id)
-        if (obj is None or type(obj) is not ObjectInstance or source is None
+        if (obj is None or type(obj) not in (ObjectInstance,WeaponInstance) or source is None
                 or object.__getattribute__(obj,'__dict__').get('_projectile_flight') is not None
                 or (obj.spatial_state is not None and obj.get_position() is None)):
             raise PublicationRejected('projectile release target is unavailable or already in flight')
         actor=objects.get(source.actor_id)
-        if actor is None or effect.target_id not in actor.possessions:
+        if (actor is None or (effect.target_id not in actor.possessions
+                and not (type(obj) is WeaponInstance and effect.target_id in actor.weapons
+                    and effect.target_id in actor.current.body_parts.values()))):
             raise PublicationRejected('projectile release no longer owns its Object')
-        plan.contents('targets',actor.possessions,[key for key in actor.possessions if key!=effect.target_id])
+        if effect.target_id in actor.possessions:
+            plan.contents('targets',actor.possessions,
+                [key for key in actor.possessions if key!=effect.target_id])
+        if type(obj) is WeaponInstance:
+            held_hands=[hand for hand,value in actor.current.body_parts.items()
+                if hand in ('left hand','right hand') and value==effect.target_id]
+            if effect.target_id not in actor.weapons or len(held_hands)!=1:
+                raise PublicationRejected('thrown weapon custody or hand changed before release')
+            weapons=list(actor.weapons);weapons.remove(effect.target_id)
+            parts=dict(actor.current.body_parts);parts[held_hands[0]]=None
+            plan.contents('targets',actor.weapons,weapons)
+            plan.contents('targets',actor.current.body_parts,parts)
+        if obj.parent_container_id is not None:
+            plan.attr('targets',obj,'parent_container_id',None)
         identity=(row.identity.encounter_id,row.identity.boundary,row.identity.source_action_id,
                   row.identity.channel,row.identity.slot)
         release_position=CartesianPosition(*effect.release_position)
@@ -508,10 +523,19 @@ def _make_plan(encounter,candidate,rng_owner):
         from spatial.state import SpatialState
         release_spatial_state=(obj.spatial_state if obj.spatial_state is not None
             else SpatialState(release_position))
+        # SpatialState's ordinary constructor stores presentation precision.
+        # Projectile trajectory state is the reviewed full-precision exception.
+        if obj.spatial_state is None:
+            object.__setattr__(release_spatial_state,'position',release_position)
         released_projectile_spatial_states[obj.id]=release_spatial_state
         flight=ProjectileFlight(effect.source_action_id,effect.release_time,effect.impact_time,
             release_position,landing_position,effect.velocity_m_s,
-            effect.landing_elevation_m,identity,target_id=effect.intended_target_id)
+            effect.landing_elevation_m,identity,target_id=effect.intended_target_id,
+            attack_bonus=effect.attack_bonus,range_dc_adjustment=effect.range_dc_adjustment,
+            source_moving=effect.source_moving,attacker_id=effect.attacker_id,
+            extra_damage=effect.extra_damage,damage_potential=effect.damage_potential,
+            damage_penetration=effect.damage_penetration,
+            coup_de_grace=effect.coup_de_grace)
         state=ProjectileBoundaryState(effect.source_action_id,candidate.boundary,
             release_position,'in_flight',effect.impact_time,identity)
         if obj.spatial_state is None:
@@ -1009,6 +1033,10 @@ def _committed_consistency(encounter,candidate,plan):
                 raise PublicationRejected('projectile release post-write consistency failed: '
                     f'position={obj.spatial_state.position!r}, flight={obj.__dict__.get("_projectile_flight")!r}, '
                     f'possessed={effect.target_id in actor.possessions}')
+            if type(obj) is WeaponInstance and (effect.target_id in actor.weapons
+                    or effect.target_id in actor.current.body_parts.values()
+                    or obj.parent_container_id is not None):
+                raise PublicationRejected('thrown weapon release retained native hand or container custody')
         elif type(effect) is PickupEffect:
             obj=objects[effect.object_id]
             actor=objects[effect.target_id]

@@ -8,7 +8,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 import importlib
 
-from action_evaluation import (DamageEffect, FatalEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation)
 from spatial.state import CartesianPosition
 
@@ -594,9 +594,19 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
             previous = record.boundary
             _require(tuple(meta.actions) == record.action_ids and tuple(meta.effects) == record.effect_ids,
                      'incomplete committed coverage')
+            impacting_throw_sources = set()
+            for object_id, state in meta.projectile_states.items():
+                obj = objects.get(object_id)
+                flight = None if obj is None else object.__getattribute__(obj, '__dict__').get('_projectile_flight')
+                if (state.impact_outcome in ('hit', 'fatal') and flight is not None
+                        and flight.target_id is not None):
+                    impacting_throw_sources.add(state.source_action_id)
             for eid, row in meta.effects.items():
+                impact_effect = (eid.source_action_id in impacting_throw_sources
+                    and type(row.effect) in (DamageEffect, FatalEffect, ProtectionEffect))
                 _require(eid == row.identity and eid.encounter_id == encounter.id
-                    and eid.boundary == record.boundary and eid.source_action_id in meta.actions,
+                    and eid.boundary == record.boundary
+                    and (eid.source_action_id in meta.actions or impact_effect),
                     'foreign effect provenance')
                 if type(row.effect) is LocationObservationEffect:
                     declaration, facts = meta.actions[eid.source_action_id]
@@ -651,10 +661,14 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                 _require(type(object_id) is str and object_id in meta.target_anchors
                     and type(state) is ProjectileBoundaryState and state.boundary==record.boundary
                     and state.source_action_id==source[2] and source in projectile_effects
-                    and state.status in ('in_flight','landed'),
+                    and state.status in ('in_flight','landed','miss_unresolved'),
                     'invalid or uncaused committed projectile state')
                 _require(type(state.impact_time) in (int,float)
-                    and (state.status=='landed') == (state.impact_time<=record.boundary),
+                    and ((state.status in ('landed','miss_unresolved'))
+                         == (state.impact_time<=record.boundary))
+                    and (state.status!='miss_unresolved'
+                        or (state.impact_outcome=='miss'
+                            and state.miss_direction in range(1,9))),
                     'projectile landing chronology is inconsistent')
             batch_targets = {}
             for key, anchor in meta.target_anchors.items():

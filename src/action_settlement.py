@@ -188,6 +188,18 @@ def _effect(effect):
         _require(type(values['position']) is tuple and len(values['position']) == 3,
                  'invalid native position effect')
         for value in values['position']:_number(value)
+    if type(effect) is ProjectileReleaseEffect:
+        _identity(values['attacker_id'])
+        _require(type(values['attack_bonus']) is int
+            and type(values['range_dc_adjustment']) is int
+            and values['range_dc_adjustment'] >= 0
+            and type(values['source_moving']) is bool
+            and type(values['extra_damage']) is int,
+            'invalid targeted projectile attack declaration')
+        _require(values['damage_potential'] is None or
+            type(values['damage_potential']) is int and values['damage_potential'] > 0
+            and type(values['damage_penetration']) is str and bool(values['damage_penetration']),
+            'invalid thrown weapon damage profile')
     if type(effect) is GrappleStateEffect:
         _identity(values['actor_id']); _identity(values['state_id'])
         _require(values['kind'] in ('grip','control','posture')
@@ -630,11 +642,25 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         return effect.target_id, ('delay_defense', action.id, effect.defense)
     if type(effect) is ProjectileReleaseEffect:
         _require(action.family == 'throw' and proposal.outcome == 'released'
-                 and action.instrument_id == effect.target_id and recipient.category == 'object',
+                 and action.instrument_id == effect.target_id
+                 and recipient.category in ('object','weapon'),
                  'projectile release must target its declared Object instrument')
         _require(effect.release_time == action.boundary and effect.impact_time > effect.release_time
                  and action.nominal_end-action.start==4,
                  'invalid projectile release chronology')
+        coup_de_grace = action.data.get('coup_de_grace', False)
+        _require(type(coup_de_grace) is bool and effect.coup_de_grace == coup_de_grace,
+                 'thrown Coup de grace mode differs from its committed Action')
+        if coup_de_grace:
+            target = entities.get(action.target_id)
+            from action_evaluation import _helpless
+            _require(recipient.category == 'weapon' and target is not None
+                and target.category == 'being' and target.position is not None
+                and math.hypot(actor.position.x-target.position.x,
+                               actor.position.y-target.position.y) <= 0.9144
+                and target.id in snapshot.awareness.get(actor.id, ())
+                and _helpless(target) and not _helpless(actor),
+                'thrown Coup de grace requires an aware helpless target within one yard')
         _require(type(effect.release_position) is tuple and len(effect.release_position)==3
                  and type(effect.landing_position) is tuple and len(effect.landing_position)==3
                  and type(effect.velocity_m_s) is tuple and len(effect.velocity_m_s) == 3,
@@ -642,12 +668,24 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         for value in effect.release_position+effect.landing_position: _number(value)
         _number(effect.landing_elevation_m)
         for value in effect.velocity_m_s: _number(value)
-        if actor.position is None or effect.target_id not in actor.data.get('possessions', ()):
+        if actor.position is None or (effect.target_id not in actor.data.get('possessions', ())
+                and effect.target_id not in actor.data.get('held', ())):
             raise SettlementIntegrityError('Throw Object is not a positioned available possession')
         _require(actor.data.get('abilities',{}).get('STR')==10
             and type(recipient.data.get('weight')) in (int,float)
             and 0 < recipient.data['weight'] <= 3.3,
             'unsupported Throw strength/weight bracket')
+        if recipient.category == 'weapon':
+            _require(effect.target_id in actor.data.get('held',())
+                and type(recipient.data.get('attacks')) in (dict,MappingProxyType)
+                and type(recipient.data['attacks'].get('R')) in (dict,MappingProxyType)
+                and recipient.data['attacks']['R'].get('t') == 4
+                and recipient.data['attacks']['R'].get('d') == effect.damage_potential
+                and recipient.data['attacks']['R'].get('p') == effect.damage_penetration,
+                'thrown weapon lacks the supported held four-second range profile')
+        else:
+            _require(effect.damage_potential is None and effect.damage_penetration == 'B',
+                'generic thrown Object cannot substitute weapon damage data')
         from throwing import (release_velocity_yd_s, project_drag_free_trajectory,
                               aim_drag_free_trajectory_at_point)
         height=actor.data.get('height') or actor.data.get('length')
@@ -685,6 +723,29 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             _require(effect.intended_target_id in entities
                 and entities[effect.intended_target_id].category == 'being',
                 'targeted projectile must retain a participating Being identity')
+        weapon_skill = (actor.data['weapon_skills'].get(recipient.data.get('original_type'), 0) or 0
+                        if recipient.category == 'weapon' else 0)
+        expected_attack = ((actor.data['skills'].get('throw', 0) or 0) + weapon_skill
+            + action.data.get('strategy', {}).get('attack', 0)
+            - (action.data.get('multiple_action_priority', 0) or 0))
+        expected_range = 0
+        if effect.intended_target_id is not None:
+            target = entities[effect.intended_target_id]
+            horizontal_yards = math.hypot(target.position.x-actor.position.x,
+                target.position.y-actor.position.y) / 0.9144
+            height_m = release_position.z-target.position.z
+            if height_m > 0:
+                increment = speed*math.sqrt(2*height_m/10.0)
+                increment_yards = increment
+                if increment_yards > 0 and horizontal_yards > increment_yards:
+                    expected_range = math.ceil(horizontal_yards/increment_yards)-1
+        _require(effect.attacker_id == actor.id and effect.attack_bonus == expected_attack
+            and effect.range_dc_adjustment == expected_range
+            and effect.source_moving == (actor.id in snapshot.moving_ids)
+            and effect.extra_damage == action.data.get('strategy', {}).get('extra_damage', 0)
+            and effect.damage_penetration == (
+                recipient.data['attacks']['R']['p'] if recipient.category == 'weapon' else 'B'),
+            'projectile attack inputs differ from the native release snapshot')
         return effect.target_id, ('projectile_release', action.id, effect.target_id)
     if type(effect) in (DamageEffect, FatalEffect, ProtectionEffect):
         allowed_damage_outcomes=('normal','critical','hit self','fatal')

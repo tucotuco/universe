@@ -168,12 +168,36 @@ class ProjectileFlight:
     status: str = 'in_flight'
     landing_recorded_at: float | None = None
     target_id: str | None = None
+    attack_bonus: int = 0
+    range_dc_adjustment: int = 0
+    source_moving: bool = False
+    attacker_id: str | None = None
+    extra_damage: int = 0
+    damage_potential: int | None = None
+    damage_penetration: str = 'B'
+    impact_outcome: str | None = None
+    miss_direction: int | None = None
+    coup_de_grace: bool = False
 
     def __post_init__(self):
-        if not self.source_action_id or self.status not in ('in_flight', 'landed'):
+        if not self.source_action_id or self.status not in ('in_flight', 'landed', 'miss_unresolved'):
             raise ValueError('invalid native projectile flight identity/status')
         if self.target_id is not None and type(self.target_id) is not str:
             raise ValueError('projectile target must be a native Being identity')
+        if (type(self.attack_bonus) is not int or type(self.range_dc_adjustment) is not int
+                or self.range_dc_adjustment < 0 or type(self.source_moving) is not bool
+                or self.attacker_id is not None and type(self.attacker_id) is not str
+                or type(self.extra_damage) is not int
+                or self.damage_potential is not None and (type(self.damage_potential) is not int
+                    or self.damage_potential <= 0)
+                or type(self.damage_penetration) is not str or not self.damage_penetration
+                or self.impact_outcome not in (None, 'hit', 'miss', 'fatal', 'target_moved')
+                or self.miss_direction is not None and (type(self.miss_direction) is not int
+                    or self.miss_direction not in range(1,9))
+                or self.impact_outcome == 'miss' and self.miss_direction is None
+                or self.impact_outcome != 'miss' and self.miss_direction is not None
+                or type(getattr(self, 'coup_de_grace', False)) is not bool):
+            raise ValueError('invalid targeted projectile impact result')
         if (type(self.source_effect_identity) is not tuple or len(self.source_effect_identity) != 5
                 or self.source_effect_identity[2] != self.source_action_id):
             raise ValueError('projectile must retain its native release effect identity')
@@ -187,6 +211,9 @@ class ProjectileFlight:
             _finite_number(value, 'projectile velocity')
         if self.status == 'landed' and self.landing_recorded_at is None:
             raise ValueError('landed projectile requires its publication boundary')
+        if self.status == 'miss_unresolved' and (self.landing_recorded_at is not None
+                or self.impact_outcome != 'miss'):
+            raise ValueError('unresolved projectile miss cannot claim a landing boundary')
 
     def position_at(self, time):
         time = _finite_number(time, 'projectile time')
@@ -208,6 +235,9 @@ class ProjectileBoundaryState:
     status: str
     impact_time: float | None = None
     source_effect_identity: tuple = ()
+    impact_outcome: str | None = None
+    miss_direction: int | None = None
+    impact_damage: float = 0
 
 
 def project_drag_free_trajectory(*, release_velocity_yd_s, release_position,
