@@ -1,9 +1,9 @@
 # U-CAP-005 — Complete playable Stun, Subdue, and nonlethal-condition lifecycle
 
 **Repository:** active `~/Projects/universe` checkout only
-**Install at:** `docs/assignments/U-CAP-005.md`
-**Report at:** `docs/reports/U-CAP-005-report.md`
-**Invocation:** `Execute docs/assignments/U-CAP-005.md.`
+**Archived at:** `docs/assignments/archive/U-CAP-005.md`
+**Accepted report:** `docs/reports/archive/U-CAP-005-report.md`
+**Original invocation:** `Execute docs/assignments/U-CAP-005.md.`
 **Authorization:** routine source/test/docs changes, reproducible generated-Arena/browser validation, and small audited local commits are authorized. Do **not** push, rewrite/reset history, clean the worktree, delete user materials, or change `.venv`, ignored `legacy/`, saved worlds, backups, `universe-old`, `npc-generator`, or `universe-geology`.
 
 ## Outcome and stop condition

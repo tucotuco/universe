@@ -1,7 +1,7 @@
 # U-CAP-005 — Stun and Subdue implementation report
 
-**Status:** ACTIVE pending ChatGPT acceptance and report consumption. The functional implementation is complete; this continuation reconciles adjacent verification failures. Keep this report and its assignment in the active directories until acceptance and consumption.
-**Assignment:** [U-CAP-005](../assignments/U-CAP-005.md)
+**Status:** DONE (bounded), accepted by ChatGPT and consumed; archived under the permanent development workflow.
+**Assignment:** [U-CAP-005](../../assignments/archive/U-CAP-005.md)
 **Repository:** `~/Projects/universe`
 **Publication:** No push authorized or performed.
 
