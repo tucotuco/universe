@@ -1964,9 +1964,9 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertIsNone(dropped.parent_container_id)
         self.assertEqual(dropped.get_position(),self.enc.inspect_committed().target(self.w3).position)
 
-    def test_successful_sub_three_margin_has_no_clear_legal_landing(self):
+    def test_successful_sub_three_margin_lands_on_defender_hex_by_adopted_exception(self):
         self.a.current.skills.weapon_skills['Dagger']=2
-        self._place_disarm_hexes()
+        layout=self._place_disarm_hexes()
         self.enc.enable_transactional_progression(quiescent=True)
         weapon=self.world.get_object_by_id(self.w1)
         action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
@@ -1982,12 +1982,21 @@ class TestActionEvaluation(unittest.TestCase):
         receipt=self.enc.inspect_committed(action.end_time).action(action.id)
         self.assertEqual(receipt.facts.outcome,'landing_choice_pending')
         self.assertEqual(dict(receipt.facts.metadata)['margin'],1)
-        from atomic_publication import disarm_landing_options
-        self.assertEqual(disarm_landing_options(self.enc,self.w3),())
+        from atomic_publication import disarm_landing_options,choose_disarm_landing
+        options=disarm_landing_options(self.enc,self.w3)
+        defender_cell=layout.cell_at_position(self.b.get_position())
+        self.assertEqual(options,(defender_cell,))
         from transactional_progression import TransactionalProgressionError
         with self.assertRaisesRegex(TransactionalProgressionError,'landing is selected'):
             self.enc.step(1)
         self.assertEqual(self.enc.time,action.end_time)
+        choose_disarm_landing(self.enc,self.w3,defender_cell.column,defender_cell.row)
+        weapon=self.world.get_object_by_id(self.w3)
+        self.assertIsNone(weapon.parent_container_id)
+        self.assertEqual(layout.cell_at_position(weapon.get_position()),defender_cell)
+        self.assertEqual(weapon.get_position(),self.b.get_position())
+        self.assertIsNone(self.b.current.body_parts['right hand'])
+        self.assertEqual(self.enc.inspect_committed().target(self.w3).position,weapon.get_position())
 
     def test_disarm_applies_adopted_ranseur_bonus(self):
         from melee_combat import effective_melee_reach_meters
@@ -2484,6 +2493,36 @@ class TestActionEvaluation(unittest.TestCase):
         retry.feint_source_action_id=feint.id
         with self.assertRaisesRegex(ValueError,'forfeited or consumed'):
             retry.prepare_schedule(self.enc)
+
+    def test_feint_overlaps_opponent_attack_without_same_boundary_retroactivity(self):
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        weapon=self.world.get_object_by_id(self.w1)
+        from melee_combat import effective_melee_reach_meters
+        feint=Action(self.world,0,1,'feint',self.a.id,self.b.id,self.w1)
+        feint.feint_motion='thrust'
+        feint.reach=effective_melee_reach_meters(self.a.current,weapon.current)
+        feint.end_time=math.ceil(weapon.Tt()/2)
+        incoming=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,motion='thrust',reach=2)
+        incoming.end_time=feint.end_time
+        self.schedule(feint,incoming)
+        def roll(ctx,dice):
+            value=20 if ctx.action_id==feint.id else 2
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):
+            self.enc.step(feint.end_time)
+        committed=self.enc.inspect_committed(feint.end_time)
+        self.assertEqual(committed.action(feint.id).facts.outcome,'success')
+        self.assertEqual(committed.action(incoming.id).facts.outcome,'miss')
+        self.assertFalse(committed.action(feint.id).facts.effects)
+        self.assertFalse(any(type(effect).__name__=='DamageEffect'
+            for effect in committed.action(incoming.id).facts.effects))
+        followup=self.strike()
+        followup.feint_source_action_id=feint.id
+        self.assertEqual(followup.prepare_schedule(self.enc).actor_id,self.a.id)
 
     def test_native_coup_de_grace_automatically_criticals_and_makes_fortitude_save(self):
         from states import StatesList

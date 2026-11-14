@@ -191,22 +191,27 @@ def disarm_landing_options(encounter, weapon_id):
     origin=HexAddress(*pending['origin_cell'])
     if layout is None or not layout.contains(origin):
         raise PublicationRejected('pending Disarm has no authored Arena map')
-    occupied=set()
+    occupied={}
     for identity in encounter.being_list:
         being=encounter.get_being(identity)
         if being is not None and being.get_position() is not None:
             cell=layout.cell_at_position(being.get_position())
-            if cell is not None:occupied.add(cell)
+            if cell is not None:occupied.setdefault(cell,set()).add(identity)
     for other in encounter.universe.object_registry.object_instances.values():
         if other is obj or getattr(other,'parent_container_id',None) is not None:
             continue
         position=other.get_position() if hasattr(other,'get_position') else None
         if position is not None:
             cell=layout.cell_at_position(position)
-            if cell is not None:occupied.add(cell)
+            if cell is not None:occupied.setdefault(cell,set()).add(other.id)
+    def legal_occupancy(cell):
+        occupants=occupied.get(cell,set())
+        if not occupants:return True
+        return (pending['max_landing_hexes']==0 and cell==origin
+            and occupants=={pending['owner_id']})
     return tuple(HexAddress(column,row) for column in range(layout.width_columns)
         for row in range(layout.height_rows)
-        if (cell:=HexAddress(column,row)) and layout.contains(cell) and cell not in occupied
+        if (cell:=HexAddress(column,row)) and layout.contains(cell) and legal_occupancy(cell)
         and layout.distance(origin,cell)<=pending['max_landing_hexes'])
 
 

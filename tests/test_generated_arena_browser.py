@@ -1660,8 +1660,13 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         attacking=candidate.universe.get_object_by_id(player.weapons[0])
         player.current.skills.weapon_skills[attacking.original.obj_type]=2
         origin=player.get_position()
-        defender.set_position(CartesianPosition(origin.x+.1,origin.y,origin.z))
-        player.set_hex_facing(nearest_facing((.1,0,0)))
+        layout=candidate.arena_map.layout
+        player_cell=layout.cell_at_position(origin)
+        defender_cell=next(cell for cell in layout.neighbors(player_cell) if layout.contains(cell))
+        defender_position=layout.center_position(defender_cell,z=origin.z)
+        defender.set_position(defender_position)
+        player.set_hex_facing(nearest_facing((defender_position.x-origin.x,
+                                               defender_position.y-origin.y,0.0)))
         from dataclasses import replace
         for observer in (player,defender):
             ledger=observer._arena_perception_ledger
@@ -1746,6 +1751,89 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                 cwd=ROOT,check=True,capture_output=True,text=True)
         resolved=json.loads(child.stdout)
         self.assertEqual(resolved['position'],resolved['inspection'])
+
+    def test_generated_zero_range_disarm_lands_in_defender_hex_and_restores(self):
+        profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text())
+        self.session=GeneratedArenaSession(root_seed_factory=lambda:20261108,
+            ground_loadout_profile=profile)
+        status,_=self.request("/api/generated/generate",{
+            "starting_experience":"10000","width_cells":"10","height_cells":"5",
+            "equipment_mode":"equipped","opponent_strategy":"none"})
+        self.assertEqual(status,200)
+        candidate=self.session.active_candidate;encounter=candidate.encounter
+        player=candidate.participants[0].native.being;defender=candidate.participants[1].native.being
+        weapon=candidate.universe.get_object_by_id(defender.weapons[0])
+        attacking=candidate.universe.get_object_by_id(player.weapons[0])
+        player.current.skills.weapon_skills[attacking.original.obj_type]=2
+        origin=player.get_position()
+        layout=candidate.arena_map.layout
+        player_cell=layout.cell_at_position(origin)
+        defender_cell=next(cell for cell in layout.neighbors(player_cell) if layout.contains(cell))
+        defender_position=layout.center_position(defender_cell,z=origin.z)
+        defender.set_position(defender_position)
+        player.set_hex_facing(nearest_facing((defender_position.x-origin.x,
+                                               defender_position.y-origin.y,0.0)))
+        from dataclasses import replace
+        for observer in (player,defender):
+            ledger=observer._arena_perception_ledger
+            row=ledger._current.get(defender.id)
+            if row is not None:
+                updated=replace(row,position=defender.get_position())
+                ledger._current[defender.id]=updated
+                ledger._history=[updated if item.entity_id==defender.id else item
+                                 for item in ledger._history]
+        self.assertEqual(self.request("/api/generated/run",{})[0],200)
+        self.assertEqual(self.request("/api/generated/advance",{"seconds":1})[0],200)
+        handle=self.session._view_handles[weapon.id]
+        status,view=self.request("/api/generated/disarm",{"handle":handle,"motion":"thrust"})
+        self.assertEqual(status,200,view)
+        wire=self.session.save_encounter_bytes()
+        restored=GeneratedArenaSession(root_seed_factory=lambda:5)
+        view=restored.load_encounter_bytes(wire)
+        from action_evaluation import _ProvisionalRandom,RandomDraw
+        draws=iter((14,10))
+        def roll(ctx,dice):
+            value=next(draws);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):
+            while view['disarm_action']['status']=='executing':
+                view=restored.advance_one_second()
+        self.assertEqual(view['disarm_landing_choice']['maximum_landing_hexes'],0)
+        self.assertEqual(len(view['disarm_landing_choice']['cells']),1)
+        cell=view['disarm_landing_choice']['cells'][0]
+        defender_cell=restored.active_candidate.arena_map.layout.cell_at_position(
+            restored.active_candidate.participants[1].native.being.get_position())
+        self.assertEqual((cell['column'],cell['row']),
+                         (defender_cell.column,defender_cell.row))
+        landing_handle=view['disarm_landing_choice']['handle']
+        self.session=restored
+        status,view=self.request('/api/generated/disarm-landing',{
+            'handle':landing_handle,'column':cell['column'],'row':cell['row']})
+        self.assertEqual(status,200,view)
+        observed=next(row for row in view['entities'] if row['handle']==landing_handle)
+        self.assertEqual(observed['present_state'],'ground')
+        self.assertEqual(observed['cell'],cell)
+        dropped=restored.active_candidate.universe.get_object_by_id(weapon.id)
+        self.assertEqual(dropped.get_position(),
+            restored.active_candidate.participants[1].native.being.get_position())
+        resolved=restored.save_encounter_bytes()
+        code=("import json,sys;import tests.test_generated_arena_browser;"
+            "from arena_browser_session import GeneratedArenaSession;"
+            "s=GeneratedArenaSession(root_seed_factory=lambda:6);"
+            "s.load_encounter_bytes(open(sys.argv[1],'rb').read());"
+            "o=s.active_candidate.universe.get_object_by_id(sys.argv[2]);"
+            "p=s.active_candidate.participants[0].native.being._arena_perception_ledger.current;"
+            "e=next(r for r in p if r.entity_id==sys.argv[2]);"
+            "a=s.active_candidate.arena_map.layout.cell_at_position(e.position);"
+            "print(json.dumps({'cell':{'column':a.column,'row':a.row},"
+            "'position':o.get_position().as_tuple(),'owner':o.parent_container_id}))")
+        with tempfile.TemporaryDirectory() as directory:
+            saved=Path(directory)/'zero-range-disarm.arena';saved.write_bytes(resolved)
+            child=subprocess.run([sys.executable,'-c',code,str(saved),weapon.id],
+                cwd=ROOT,check=True,capture_output=True,text=True)
+        final=json.loads(child.stdout)
+        self.assertEqual(final['cell'],cell)
+        self.assertIsNone(final['owner'])
 
     def test_generated_arena_exposes_and_accepts_unarmed_disarm(self):
         status,page=self.request("/")

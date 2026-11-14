@@ -661,7 +661,13 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                     continue
                 occupies=(entity.category=='being'
                     or entity.pre_action.get('parent_container_id') is None)
-                _require(not (occupies and layout_for_landings.cell_at_position(entity.position)==address),
+                same_hex_exception=(landing.maximum_landing_hexes==0
+                    and landing.margin in (1,2)
+                    and landing.landing_cell==landing.origin_cell
+                    and entity_id==landing.owner_id and entity.category=='being'
+                    and layout_for_landings.cell_at_position(entity.position)==address)
+                _require(not (occupies and layout_for_landings.cell_at_position(entity.position)==address)
+                    or same_hex_exception,
                          'Disarm landing receipt names an occupied hex')
         authorized_spatial_transition_ids={
             row.effect.object_id if type(row.effect) is PickupEffect else row.effect.target_id
