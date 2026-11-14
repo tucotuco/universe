@@ -152,6 +152,37 @@ def _resource_skill_pool(encounter, action):
     return pool
 
 
+def _equipment_hand_resource_keys(encounter, action):
+    """Return explicit hand slots occupied by this Action over its interval."""
+    actor = encounter.get_being(action.actor_id)
+    if actor is None:
+        return ()
+    parts = getattr(actor.current, 'body_parts', {})
+    if type(parts) is not dict:
+        return ()
+    data = object.__getattribute__(action, '__dict__')
+    represented = {name for name in ('left hand', 'right hand') if name in parts}
+    used = set()
+    if data.get('two_handed') is True:
+        used.update(represented)
+    elif data.get('event_type') == 'ready weapon':
+        hand = data.get('hand')
+        if hand in represented:
+            used.add(hand)
+    elif data.get('event_type') in ('grab', 'grab object'):
+        hand = data.get('grab_hand')
+        if hand in represented:
+            used.add(hand)
+    elif data.get('event_type') == 'ready object':
+        object_id = getattr(action, 'target_id', None)
+        used.update(hand for hand in represented if parts.get(hand) == object_id)
+    else:
+        instrument_id = getattr(action, 'instrument_id', None)
+        if instrument_id is not None:
+            used.update(hand for hand in represented if parts.get(hand) == instrument_id)
+    return tuple(f'@hand/{actor.id}/{hand}' for hand in sorted(used))
+
+
 def declaration(action, *, _initialization=None):
     """Capture plan inputs, not mutable outcome fields or live Being state."""
     data = object.__getattribute__(action, '__dict__')
@@ -329,6 +360,44 @@ class ChoiceBook:
                             object_id, (reservation.start, reservation.boundary),
                             other.action_id, other.choice_id, (other.start, other.boundary)))
                 reservations.append(reservation)
+        proposed_hands = []
+        from transactional_progression import is_automatic_hold_schedule
+        for member, packet in packets:
+            for hand_key in _equipment_hand_resource_keys(self.encounter, member.action):
+                proposed_hands.append((member, packet, hand_key))
+        for index, (member, packet, hand_key) in enumerate(proposed_hands):
+            for other_member, other_packet, other_key in proposed_hands[:index]:
+                if (hand_key == other_key
+                        and max(packet.start_time, other_packet.start_time)
+                            < min(packet.end_time, other_packet.end_time)):
+                    hand_name = hand_key.rsplit('/', 1)[-1]
+                    errors.append(ChoiceDiagnostic('active_hand_conflict', member.key,
+                        f'Hand resource {hand_name} is claimed by another overlapping Action',
+                        interval=(packet.start_time, packet.end_time),
+                        conflicting_action=other_packet.action_id,
+                        conflicting_interval=(other_packet.start_time, other_packet.end_time)))
+            for book in self.encounter.universe._choice_books:
+                for record in book._choices.values():
+                    if (record.view.id == exclude_choice
+                            or record.view.state not in ('accepted', 'executing')):
+                        continue
+                    for other_member, other_packet in zip(record.members, record.prepared):
+                        if other_packet.action_id == interrupt:
+                            continue
+                        if is_automatic_hold_schedule(book.encounter, other_member.action):
+                            continue
+                        if (hand_key in _equipment_hand_resource_keys(
+                                book.encounter, other_member.action)
+                                and max(packet.start_time, other_packet.start_time)
+                                    < min(packet.end_time, other_packet.end_time)):
+                            hand_name = hand_key.rsplit('/', 1)[-1]
+                            errors.append(ChoiceDiagnostic('active_hand_conflict', member.key,
+                                f'Hand resource {hand_name} is claimed by another overlapping Action',
+                                interval=(packet.start_time, packet.end_time),
+                                conflicting_action=other_packet.action_id,
+                                conflicting_choice=record.view.id,
+                                conflicting_interval=(other_packet.start_time,
+                                                     other_packet.end_time)))
         for member, packet in packets:
             for record in (r for book in self.encounter.universe._choice_books for r in book._choices.values()):
                 if record.view.id == exclude_choice:
@@ -424,7 +493,6 @@ class ChoiceBook:
         for member, packet in packets:
             if _requires_multiple_action_capacity(member.action):
                 proposed_by_actor.setdefault(packet.actor_id, []).append((member, packet))
-        from transactional_progression import is_automatic_hold_schedule
         for book in self.encounter.universe._choice_books:
             for record in book._choices.values():
                 if record.view.id == exclude_choice or record.view.state not in ('accepted', 'executing'):

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from action import Action
 from action_choice import ChoiceMember, ChoiceRejected
-from activities import RunAction, SpotAction
+from activities import ReadyWeaponAction, RunAction, SpotAction
 from ai_duel import AgentDuel
 from encounter import Encounter, BoundaryInvariantError
 from event import Event
@@ -28,6 +28,7 @@ from spatial.state import CartesianPosition
 from strategy import Strategy
 from tactical_duel import TacticalDuel
 from universe import Universe
+from weapon import author_worn_sheath_draw_location
 
 
 class TestActionChoices(unittest.TestCase):
@@ -274,6 +275,28 @@ class TestActionChoices(unittest.TestCase):
         self.assertFalse(token.valid)
         self.assertTrue(any(d.object_id == self.w1 for d in token.diagnostics))
         self.assertEqual(defense.end_time, 0)
+
+    def test_two_handed_strike_reserves_both_hands_against_a_composed_draw(self):
+        self.a.size_category = 'medium'
+        self.a.current.body_parts['left hand'] = None
+        self.enc.enable_transactional_progression(quiescent=True)
+        self.enc.arena_activation_enabled = True
+        carried_id = self.enc.make_weapon('Longsword', 'Drawable resource conflict')
+        carried = self.world.get_object_by_id(carried_id)
+        self.a.possessions.append(carried_id)
+        carried.parent_container_id = self.a.id
+        author_worn_sheath_draw_location(carried, self.a.id)
+        strike = MeleeStrike(self.enc, self.a.id, self.b.id, self.w1,
+                             motion='thrust', reach=2, two_handed=True)
+        draw = ReadyWeaponAction(self.enc, self.a.id, carried_id, 'left hand', 0)
+        members = self.multiple_action_members((strike, draw), (0, 3))
+        validation = self.enc.validate_choice(self.enc.propose_choice(members))
+        self.assertFalse(validation.valid)
+        hand_conflicts = [d for d in validation.diagnostics
+                          if d.code == 'active_hand_conflict']
+        self.assertTrue(any('left hand' in d.reason for d in hand_conflicts),
+                        validation.diagnostics)
+        self.assertNotIn(self.a.id, ' '.join(d.reason for d in hand_conflicts))
 
     def test_one_retained_dodge_cannot_be_assigned_twice_in_one_choice(self):
         preparation = MeleeDefense(self.enc, self.a.id, kind='dodge',
