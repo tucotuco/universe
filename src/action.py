@@ -98,6 +98,85 @@ class Action(Event):
         Encounter invokes only reviewed native implementations. The Encounter
         argument is read-only during preparation, never an extension sandbox.
         """
+        if self.event_type in ('stun', 'subdue'):
+            from encounter import Encounter
+            from being import BeingInstance
+            from weapon import WeaponInstance
+            from spatial.state import CartesianPosition
+            if type(encounter) is not Encounter or encounter.progression_mode != 'transactional':
+                raise ValueError('Stun/Subdue require the native transactional Encounter pathway')
+            actor, target = encounter.get_being(self.actor_id), encounter.get_being(self.target_id)
+            if (type(actor) is not BeingInstance or type(target) is not BeingInstance
+                    or actor is target or self.actor_id not in encounter.being_list
+                    or self.target_id not in encounter.being_list
+                    or not encounter.is_aware(self.actor_id, self.target_id)):
+                raise ValueError('Stun/Subdue require two distinct aware participating Beings')
+            if actor.is_helpless() or actor.get_position() is None or target.get_position() is None:
+                raise ValueError('Stun/Subdue require a positioned able Actor and target')
+            if (type(self.reach) not in (int, float) or not math.isfinite(self.reach)
+                    or self.reach <= 0 or self.end_time <= self.start_time):
+                raise ValueError('Stun/Subdue require represented positive reach and timing')
+            if self.event_type == 'stun':
+                if (self.instrument_id is not None or (actor.current.skills.get_skill_level('stun') or 0) < 1
+                        or getattr(self, 'body_region', None) not in ('Arm', 'Leg')
+                        or getattr(self, 'motion', None) not in ('swing', 'thrust')):
+                    raise ValueError('Stun requires acquired skill and a represented unarmed body motion')
+                if self.body_region == 'Leg' and self.motion == 'thrust':
+                    raise ValueError('the represented Leg profile does not support thrust')
+                definition = encounter.universe.library.weapon_dictionary.objects[self.body_region]
+                base = definition.St() if self.motion == 'swing' else definition.Tt()
+                if self.end_time-self.start_time != max(1, base-self.strategy.timing_adjustment()):
+                    raise ValueError('Stun timing must match the selected adopted unarmed body motion')
+                armor_penalty = 0
+                armor_id = actor.current.armor_id
+                if armor_id is not None:
+                    armor = encounter.universe.get_object_by_id(armor_id)
+                    if armor is None:
+                        raise ValueError('Stun armor check penalty is unsupported')
+                    armor_penalty = armor.current.armor_check_penalty
+                strength_mod = math.floor((actor.STR()-10)/2)
+                dexterity_mod = math.floor((actor.DEX()-10)/2)
+                pool = max(0, 2*(actor.current.skills.get_skill_level('unarmed combat') or 0)
+                    + strength_mod + dexterity_mod - armor_penalty)
+                allocations = (self.strategy.attack,self.strategy.defense,
+                    self.strategy.timing,self.strategy.extra_damage)
+                if any(type(value) is not int or value < 0 for value in allocations) or sum(allocations) > pool:
+                    raise ValueError(f'Stun strategy exceeds its current {pool}-point pool')
+                if self.strategy.extra_damage > max(0,
+                        (actor.current.skills.get_skill_level('unarmed combat') or 0)+strength_mod):
+                    raise ValueError('Stun extra damage exceeds its unarmed combat and Strength limit')
+            else:
+                weapon = encounter.universe.get_object_by_id(self.instrument_id)
+                if (type(weapon) is not WeaponInstance
+                        or self.instrument_id not in actor.armed_with(encounter.universe).values()
+                        or self.motion not in ('swing', 'thrust')
+                        or self.motion not in weapon.get_melee_types()):
+                    raise ValueError('Subdue requires an actually held weapon and supported motion')
+                profile = weapon.current.attacks['S' if self.motion == 'swing' else 'T']
+                if profile.get('p') != 'B':
+                    raise ValueError('Subdue requires a bludgeon penetration profile')
+                if target.current.immunities.get('subdual') is True:
+                    raise ValueError('a represented subdual immunity prohibits this Action')
+                base = weapon.current.St() if self.motion == 'swing' else weapon.current.Tt()
+                if self.end_time-self.start_time != max(1, base-self.strategy.timing_adjustment()):
+                    raise ValueError('Subdue timing must match the selected weapon motion')
+            distance = encounter.distance_between_beings(self.actor_id, self.target_id)
+            if distance is None or distance <= 0:
+                raise ValueError('Stun/Subdue requires represented distinct target positions')
+            from arena_hex_map import layout_from_encounter_map
+            layout = layout_from_encounter_map(encounter.map)
+            if layout is None:
+                from action_calculations import melee_path_status
+                status, _ = melee_path_status(distance, self.reach,
+                    encounter.physical_path(self.actor_id,self.target_id))
+            else:
+                from action_calculations import melee_hex_path_status
+                status, _ = melee_hex_path_status(actor.get_position(),target.get_position(),
+                    self.reach,encounter.physical_path(self.actor_id,self.target_id),layout,
+                    actor.hex_facing)
+            if status != 'in_reach':
+                raise ValueError(f'Stun/Subdue target is not in supported melee reach: {status}')
+            return PreparedSchedule.from_action(self)
         if self.event_type == 'end-run':
             from encounter import Encounter
             from being import BeingInstance

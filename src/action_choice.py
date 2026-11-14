@@ -128,9 +128,18 @@ def _resource_skill_pool(encounter, action):
     skills = {str(name).casefold(): value
               for name, value in actor.current.skills.get_skills().items()}
     event = getattr(action, 'event_type', '').casefold()
-    if event in ('swing', 'thrust', 'disarm', 'strike object', 'break weapon',
+    if event in ('swing', 'thrust', 'subdue', 'disarm', 'strike object', 'break weapon',
                  'parry', 'block'):
         combat = skills.get('armed combat', 0) or 0
+    elif event in ('stun',):
+        combat = 2 * (skills.get('unarmed combat', 0) or 0)
+        combat += math.floor((actor.STR() - 10) / 2) + math.floor((actor.DEX() - 10) / 2)
+        armor_id = actor.current.armor_id
+        if armor_id is not None:
+            armor = encounter.universe.get_object_by_id(armor_id)
+            if armor is None:
+                raise ValueError('Stun strategy pool has unsupported armor')
+            combat -= armor.current.armor_check_penalty
     elif event in ('grab', 'hold', 'break hold', 'grapple', 'grapple escape',
                    'takedown', 'reverse', 'pin', 'trip', 'bull rush', 'overrun', 'wrest', 'grab object'):
         combat = skills.get('unarmed combat', 0) or 0
@@ -147,6 +156,8 @@ def _resource_skill_pool(encounter, action):
         if weapon_type is not None:
             weapon_rank = actor.get_weapon_skill_level(weapon_type) or 0
     pool = combat + weapon_rank
+    if event == 'stun':
+        pool = max(0, pool)
     if type(pool) is not int or pool < 0:
         raise ValueError('Multiple-action skill ranks must be nonnegative integers')
     return pool
@@ -194,6 +205,7 @@ def declaration(action, *, _initialization=None):
         data = dict(data, **_initialization)
     names = ('id', 'universe', 'event_type', 'start_time', 'end_time', 'actor_id',
              'target_id', 'instrument_id', 'parent_event_id', 'encounter', 'reach',
+             'motion', 'body_region',
              'two_handed',
              'shield_bash',
              'shield_hand',

@@ -13,7 +13,7 @@ from spatial.state import CartesianPosition
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
     EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, GrappleStateEffect, PositionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, EffectIdentity, IdentifiedEffect,
-    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, ObjectGripEffect, UnsupportedEvaluation,
+    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, ObjectGripEffect, StunEffect, SubdualEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
 
 
@@ -80,15 +80,15 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect)
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect)
 _FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
-_ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
+_ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'stunned', 'stunned_critical', 'stun_failed', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
     'history_request': frozenset(('unplaced', 'out_of_range', 'not_aware', 'heard')),
     'combat': _ATTACK_OUTCOMES | {'weapon_unavailable', 'touched', 'missed', 'unable_to_act',
         'unplaced', 'out_of_reach', 'blocked', 'uncertain_path', 'unsupported_reach'},
-    'melee': _ATTACK_OUTCOMES | {'unable_to_act', 'target_down', 'weapon_unavailable',
+    'melee': _ATTACK_OUTCOMES | {'stun_failed', 'unable_to_act', 'target_down', 'weapon_unavailable',
         'unplaced', 'out_of_reach', 'not_facing', 'blocked', 'uncertain_path',
         'parried', 'dodged', 'success', 'failure', 'ineligible_target', 'insufficient_charge_speed'},
     'object_strike': frozenset(('normal', 'critical', 'broken', 'miss', 'spectacular miss', 'drop weapon',
@@ -188,6 +188,14 @@ def _effect(effect):
         _require(type(values['position']) is tuple and len(values['position']) == 3,
                  'invalid native position effect')
         for value in values['position']:_number(value)
+    if type(effect) is StunEffect:
+        _identity(values['source_action_id'])
+        _require(type(values['duration_seconds']) is int and values['duration_seconds'] >= 1,
+                 'Stun duration must be a positive integer second count')
+    if type(effect) is SubdualEffect:
+        _identity(values['source_action_id'])
+        _require(type(values['amount']) is int and values['amount'] >= 0,
+                 'Subdual effect must be a nonnegative integer')
     if type(effect) is ProjectileReleaseEffect:
         _identity(values['attacker_id'])
         _require(type(values['attack_bonus']) is int
@@ -271,7 +279,13 @@ def _copy_proposal(proposal, actions, entities):
     _require(type(proposal.outcome) is str, 'opaque outcome')
     allowed = {'interrupted'} if action.lifecycle == 'cancelled' else _OUTCOMES[action.family]
     if action.family == 'melee' and action.lifecycle != 'cancelled':
-        allowed = (allowed & {'success', 'failure', 'unable_to_act', 'target_down',
+        allowed = (allowed & ({'stunned','stunned_critical','stun_failed','normal','critical','fatal','miss','hit self','spectacular miss','drop weapon',
+                              'unable_to_act','target_down','weapon_unavailable','unplaced','out_of_reach','not_facing','blocked','uncertain_path','parried','dodged'}
+                   if action.data.get('event_type') == 'stun' else
+                   {'normal','critical','fatal','hit self','miss','spectacular miss','drop weapon',
+                    'unable_to_act','target_down','weapon_unavailable','unplaced','out_of_reach','not_facing','blocked','uncertain_path','parried','dodged'}
+                   if action.data.get('event_type') == 'subdue' else
+                   {'success', 'failure', 'unable_to_act', 'target_down',
                               'weapon_unavailable', 'unplaced', 'out_of_reach',
                               'not_facing', 'blocked', 'uncertain_path', 'parried', 'dodged'}
                    if action.data.get('event_type') == 'feint' else
@@ -282,7 +296,7 @@ def _copy_proposal(proposal, actions, entities):
                               'uncertain_path', 'parried', 'dodged',
                               'ineligible_target', 'grapple_restricted',
                               'insufficient_charge_speed',
-                              })
+                              }))
     _require(proposal.outcome in allowed, 'outcome contradicts native Action family/lifecycle')
     targets = tuple(_identity(k) for k in _tuple(proposal.target_ids))
     _require(len(set(targets)) == len(targets) and all(k in entities for k in targets), 'invalid affected Target reference')
@@ -428,6 +442,19 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
     _identity(effect.target_id)
     _require(effect.target_id in entities, 'unknown effect recipient')
     recipient = entities[effect.target_id]
+    if type(effect) is StunEffect:
+        _require(action.family == 'melee' and action.data.get('event_type') == 'stun'
+                 and proposal.outcome in ('stunned','stunned_critical') and effect.target_id == action.target_id
+                 and recipient.category == 'being'
+                 and effect.duration_seconds >= 1,
+                 'Stun condition must be a successful declared Stun against a Being')
+        return effect.target_id, ('stun_condition', action.id, effect.target_id)
+    if type(effect) is SubdualEffect:
+        _require(action.family == 'melee' and action.data.get('event_type') == 'subdue'
+                 and proposal.outcome in ('normal','critical')
+                 and effect.target_id == action.target_id and recipient.category == 'being',
+                 'Subdual burden must come from a successful Subdue against a Being')
+        return effect.target_id, ('subdual_condition', action.id, effect.target_id)
     if type(effect) is ObjectGripEffect:
         _identity(effect.actor_id); _identity(effect.holder_id); _identity(effect.state_id)
         _require(action.family == 'grappling' and action.data.get('event_type') in ('grab object','wrest')
@@ -748,7 +775,9 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             'projectile attack inputs differ from the native release snapshot')
         return effect.target_id, ('projectile_release', action.id, effect.target_id)
     if type(effect) in (DamageEffect, FatalEffect, ProtectionEffect):
-        allowed_damage_outcomes=('normal','critical','hit self','fatal')
+        allowed_damage_outcomes=('normal','critical','stunned','stunned_critical','hit self','fatal')
+        if action.family == 'melee' and action.data.get('event_type') == 'stun':
+            allowed_damage_outcomes += ('stun_failed',)
         if action.family=='object_strike' and action.data.get('event_type')=='break weapon':
             allowed_damage_outcomes=allowed_damage_outcomes+('broken',)
         _require(action.family in ('combat', 'melee', 'object_strike') and proposal.outcome in allowed_damage_outcomes, 'damage/protection on an inapplicable Action')
@@ -776,7 +805,7 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             if layer in ('body', 'critical_bypass'):
                 _require(effect.target_id == body_id, 'body/self-hit recipient contradicts Action')
                 if layer == 'critical_bypass':
-                    _require(proposal.outcome in ('critical', 'fatal'), 'critical bypass on noncritical Action')
+                    _require(proposal.outcome in ('critical', 'stunned_critical', 'fatal'), 'critical bypass on noncritical Action')
             elif layer == 'armor':
                 _require(recipient.category == 'armor' and body.data.get('armor_id') == effect.target_id, 'armor recipient is not snapshot protection')
             else:
@@ -858,7 +887,8 @@ def _validate_complete_outcome(proposal, action, entities):
     practice = [e for e in effects if type(e) is PracticeEffect]
     expected_practice = None
     if action.lifecycle == 'pending':
-        if action.family == 'melee' and proposal.outcome in _ATTACK_OUTCOMES | {'parried', 'dodged'}:
+        if (action.family == 'melee' and action.data.get('event_type') != 'stun'
+                and proposal.outcome in _ATTACK_OUTCOMES | {'parried', 'dodged'}):
             expected_practice = (entities[action.instrument_id].data['original_type'], 10)
         elif (action.family == 'defense' and action.data.get('target_action_id') is not None
               and action.data['kind'] in ('parry', 'dodge')
@@ -876,6 +906,14 @@ def _validate_complete_outcome(proposal, action, entities):
     _require(len(awareness) == int((action.family in ('spot', 'observe_group') and proposal.outcome == 'success')
         or (action.family == 'history_request' and proposal.outcome == 'heard')), 'missing/extra Spot awareness')
     damage = [e for e in effects if type(e) is DamageEffect]
+    stuns = [e for e in effects if type(e) is StunEffect]
+    subduals = [e for e in effects if type(e) is SubdualEffect]
+    _require(len(stuns) == int(action.family == 'melee'
+        and action.data.get('event_type') == 'stun' and proposal.outcome in ('stunned','stunned_critical')),
+        'missing or extra native Stun duration')
+    _require(len(subduals) == int(action.family == 'melee'
+        and action.data.get('event_type') == 'subdue' and proposal.outcome in ('normal','critical')),
+        'missing or extra native Subdual burden')
     fatals = [e for e in effects if type(e) is FatalEffect]
     _require(len(fatals) == int(proposal.outcome == 'fatal'), 'missing/extra fatal effect')
     if action.family == 'object_strike':
@@ -888,9 +926,9 @@ def _validate_complete_outcome(proposal, action, entities):
         _require(dict(proposal.metadata).get('margin',0)>0
                  and drops[0].target_id==action.data.get('disarm_weapon_id'),
                  'Disarm does not release its specifically declared weapon')
-    if action.family in ('combat', 'melee') and proposal.outcome in ('normal', 'critical', 'hit self'):
+    if action.family in ('combat', 'melee') and proposal.outcome in ('normal', 'critical', 'stunned', 'stunned_critical', 'stun_failed', 'hit self'):
         _require(sum(e.component == 'body' for e in damage) == 1, 'missing body contribution')
-        _require(sum(e.component == 'critical_bypass' for e in damage) == int(proposal.outcome == 'critical'), 'missing/extra critical bypass')
+        _require(sum(e.component == 'critical_bypass' for e in damage) == int(proposal.outcome in ('critical','stunned_critical')), 'missing/extra critical bypass')
         body_id = action.actor_id if proposal.outcome == 'hit self' else action.target_id
         body = entities[body_id]
         shields = [e for e in effects if type(e) is ProtectionEffect and e.layer == 'shield']

@@ -14,7 +14,7 @@ from types import MappingProxyType, MethodType, FunctionType
 from _thread import RLock
 
 from action_evaluation import (EvaluationIntegrityError, UnsupportedEvaluation,
-    capture_snapshot, freeze, native_data, position, GrappleStateEffect)
+    capture_snapshot, freeze, native_data, position, GrappleStateEffect, StunEffect, SubdualEffect)
 from observer_proposals import capture_observer_context, build_supported_candidate
 from spatial.state import CartesianPosition, SpatialState, integrate_position
 from spatial.frame import LocalFrame
@@ -1008,6 +1008,26 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                         and view.actor_id==source.target_id
                         and view.start < next_boundary < view.nominal_end
                         and view.boundary>next_boundary):
+                    interrupt_ids.add(view.id)
+
+        incapacitated_ids = {row.effect.target_id for row in supported.boundary.effects.values()
+            if type(row.effect) is StunEffect}
+        subdual_totals = {}
+        for row in supported.boundary.effects.values():
+            if type(row.effect) is SubdualEffect:
+                subdual_totals[row.effect.target_id] = (
+                    subdual_totals.get(row.effect.target_id, 0) + row.effect.amount)
+        for target_id, amount in subdual_totals.items():
+            target = context.snapshot.entity(target_id)
+            states_view = target.data.get('states', {})
+            prior = states_view.get('subdual_damage_current', states_view.get('subdual_damage', 0))
+            if type(prior) is int and prior + amount >= target.hp:
+                incapacitated_ids.add(target_id)
+        for target_id in incapacitated_ids:
+            for view in context.snapshot.actions.values():
+                if (view.lifecycle == 'pending' and view.actor_id == target_id
+                        and view.start < next_boundary < view.nominal_end
+                        and view.boundary > next_boundary):
                     interrupt_ids.add(view.id)
 
         # Exactly the native settled ordering: finish due Actions, apply

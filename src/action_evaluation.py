@@ -266,7 +266,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','bull rush','overrun','end-run', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'stun', 'subdue', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','bull rush','overrun','end-run', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -308,7 +308,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                   'disarm' if type(action) is Action and ad['event_type']=='disarm' else
                   'object_strike' if type(action) is Action and ad['event_type'] in ('strike object','break weapon') else
                   'grappling' if type(action) is Action and ad['event_type'] in ('grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','bull rush','overrun') else
-                  'melee' if type(action) is Action and ad['event_type'] in ('feint', 'coup de grace')
+                  'melee' if type(action) is Action and ad['event_type'] in ('stun', 'subdue', 'feint', 'coup de grace')
                   else families[type(action)])
         multiple_action_priority = None
         book = object.__getattribute__(encounter, '__dict__').get('_choice_book')
@@ -323,7 +323,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
-        for key in ('reach','two_handed','shield_bash','shield_hand','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','body_region','two_handed','shield_bash','shield_hand','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge','charge_continuation_source_id','bull_rush_target_willing','end_run_exit_position','end_run_movement_conditions','end_run_occupant_willing','end_run_rate','end_run_origin_position','end_run_target_position','end_run_origin_cell','end_run_target_cell','end_run_phase_result'):
             if key in ad:
                 selected[key] = (position(ad[key]) if key in (
@@ -525,9 +525,23 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             being_size = object.__getattribute__(obj, '__dict__').get('size_category')
             size_codes = {'diminutive':'D','tiny':'T','small':'S','medium':'M',
                           'large':'L','huge':'H','gargantuan':'G','colossal':'C'}
+            state_values = dict(native_data(cd['states'], (States,))['states'])
+            stun_until = state_values.get('stunned_until')
+            if type(stun_until) in (int, float):
+                state_values['stunned'] = stun_active_at(stun_until, boundary)
+            burden = state_values.get('subdual_damage', 0)
+            anchor = state_values.get('subdual_recovery_anchor')
+            if type(burden) is int and type(anchor) in (int, float):
+                burden, _ = subdual_recovery_state(burden, anchor, boundary)
+                state_values['subdual_unconscious'] = burden >= current['hit_points']
+                state_values['subdual_damage_current'] = burden
             data.update(skills=freeze(skills['skills']), weapon_skills=freeze(skills['weapon_skills']),
                 race=freeze(cd.get('race')),
-                abilities=abilities, states=freeze(native_data(cd['states'], (States,))['states']),
+                immunities=freeze(cd.get('immunities', {})),
+                stun_category=freeze((cd.get('tags') or {}).get('universe.stun_category')),
+                stun_categories=freeze((cd.get('tags') or {}).get('universe.stun_categories', {})
+                    if type(cd.get('tags')) is dict else {}),
+                abilities=abilities, states=freeze(state_values),
                 posture=freeze(obj.get_posture()),
                 size_category=freeze(being_size), size_code=freeze(size_codes.get(being_size)),
                 dominant_hand=freeze((cd.get('tags') or {}).get('universe.native_dominant_hand')),
@@ -537,6 +551,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 fatigue_level=freeze(od['fatigue_level']),
                 exertion=freeze(native_data(od['exertion'], (Exertion,))),
                 fatigue_adjustments=freeze(od['exertion'].fatigue_levels))
+            data['unarmed_profiles'] = freeze({name:
+                native_data(weapon_dictionary['objects'][name], (WeaponDefinition,))['attacks']
+                for name in ('Arm','Leg') if name in weapon_dictionary['objects']})
             armor_penalty = 0
             armor_id = cd.get('armor_id')
             if armor_id is not None:
@@ -735,6 +752,36 @@ class DamageEffect:
     target_id: str
     amount: float
     component: str  # body, critical_bypass, shield, armor
+
+
+@dataclass(frozen=True)
+class StunEffect:
+    source_action_id: str
+    target_id: str
+    duration_seconds: int
+
+
+@dataclass(frozen=True)
+class SubdualEffect:
+    source_action_id: str
+    target_id: str
+    amount: int
+
+
+def subdual_recovery_state(amount, anchor, boundary):
+    """Return adopted one-point-per-hour Subdual burden and its exact anchor."""
+    if (type(amount) is not int or amount < 0 or type(anchor) not in (int, float)
+            or type(boundary) not in (int, float) or boundary < anchor):
+        return amount, anchor
+    hours = math.floor((boundary-anchor)/3600)
+    return max(0, amount-hours), anchor + hours*3600
+
+
+def stun_active_at(stunned_until, boundary):
+    """Stun remains active strictly before its committed expiration instant."""
+    return (type(stunned_until) in (int, float)
+            and type(boundary) in (int, float)
+            and boundary < stunned_until)
 
 
 @dataclass(frozen=True)
@@ -994,7 +1041,8 @@ class _ProvisionalRandom:
 def _helpless(actor):
     d = actor.data
     return (actor.hp <= 0 or d['fatigue_level'] == 5 or d['states'].get('paralyzed', False)
-        or d['states'].get('stunned', False) or any(d['abilities'][k] == 0 for k in ('STR','DEX','CON')))
+        or d['states'].get('stunned', False) or d['states'].get('subdual_unconscious', False)
+        or any(d['abilities'][k] == 0 for k in ('STR','DEX','CON')))
 
 
 def resolve_targeted_throw_arrival(snapshot, flight, projectile_id, rng):
@@ -1204,6 +1252,16 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
             pole_charge_speed=None, charge_intercepted=False):
     actor, target = snapshot.entity(action.actor_id), snapshot.entity(action.target_id)
     weapon = snapshot.entity(action.instrument_id) if action.instrument_id else None
+    if action.data.get('event_type') == 'stun':
+        from types import SimpleNamespace
+        region, motion = action.data.get('body_region'), action.data.get('motion')
+        profile = actor.data.get('unarmed_profiles', {}).get(region, {}).get(
+            'S' if motion == 'swing' else 'T')
+        if profile is not None:
+            weapon = SimpleNamespace(id=actor.id, category='weapon', hp=1,
+                obj_type=region, data={'attacks': {'S': profile, 'T': profile},
+                    'original_type': region, 'size': actor.data.get('size_code'),
+                    'two_handed_design': False})
     effects = []
     meta = []
     attempted = False
@@ -1289,12 +1347,14 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 and not any({actor.id, target.id} == {row[1], row[2]}
                             for row in snapshot.grapple_controls)):
             outcome = 'grapple_restricted'
-        elif outcome is None and (actor.hp <= 0 or actor.data['fatigue_level'] >= 5):
+        elif outcome is None and (actor.hp <= 0 or actor.data['fatigue_level'] >= 5
+                or actor.data['states'].get('subdual_unconscious', False)):
             outcome = 'unable_to_act'
         elif outcome is None and target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
         elif outcome is None and (
-                (action.instrument_id not in actor.data['held']
+                (action.data.get('event_type') != 'stun'
+                 and action.instrument_id not in actor.data['held']
                  and not (action.data.get('shield_bash') is True
                           and action.instrument_id in actor.data.get('shields', ())))
                 or weapon is None or weapon.hp <= 0):
@@ -1370,9 +1430,15 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                         and hand in ('left hand', 'right hand'))
                 buckler_penalty = (2 if action.data.get('shield_bash') is not True
                     and any(arm in weapon_hands for arm in buckler_arms) else 0)
+                skill_bonus = ((actor.data['skills'].get('unarmed combat', 0) or 0)
+                    if action.data.get('event_type') == 'stun' else
+                    actor.data['weapon_skills'].get(weapon.obj_type, 0))
+                armor_check_penalty = (actor.data.get('armor_check_penalty', 0)
+                    if action.data.get('event_type') == 'stun' else 0)
                 return attack_hits(roll - block_penalty - yield_penalty,
-                    actor.data['weapon_skills'].get(weapon.obj_type, 0)
+                    skill_bonus
                     + actor.data['strategy']['attack'] - priority_penalty - offhand_penalty
+                    - armor_check_penalty
                     - buckler_penalty
                     + feint_bonus + pin_bonus
                     + (2 if action.data.get('charge') is True and not charge_intercepted else 0)
@@ -1406,6 +1472,30 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                     return value
                 outcome = hit_outcome(snapshot.difficulty, combat_roll, hits,
                     lambda dc: save(target, dc), lambda dc: save(actor, dc))
+            stun_success = False
+            if action.data.get('event_type') == 'stun' and outcome in ('normal','critical','fatal'):
+                raw = attack_roll[0]
+                category = target.data.get('stun_category')
+                trained = actor.data.get('stun_categories', {}).get(category, 0) if category else 0
+                threat = raw is not None and raw >= 20 - ((trained or 0) // 2)
+                immune = (target.data.get('immunities', {}).get('critical hits') is True
+                          or target.data.get('immunities', {}).get('critical') is True)
+                eligible = snapshot.difficulty <= 20 and not immune
+                if outcome != 'fatal' and threat and eligible:
+                    stun_save = saving_throw(rng.roll('1d20'), 20,
+                        saving_throw_experience_modifier(experience_level(target.data['experience'])))
+                    stun_success = not stun_save
+                stun_confirmed_critical = outcome == 'critical'
+                if outcome != 'fatal':
+                    if stun_success:
+                        duration = sum(rng.roll('1d6') for _ in range(
+                            actor.data['skills'].get('stun', 0) or 0))
+                        effects.append(StunEffect(action.id, target.id, duration))
+                        outcome = 'stunned_critical' if stun_confirmed_critical else 'stunned'
+                    else:
+                        # A failed Stun attack deals half ordinary damage even
+                        # when the attack's critical confirmation succeeded.
+                        outcome = 'stun_failed'
             attempted = True
             redirected_pin = next((row for row in pinned_controls
                 if row[2] == target.id and row[1] != actor.id
@@ -1417,9 +1507,13 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                          snapshot.entity(redirected_pin[1]) if redirected_pin else target)
             if outcome == 'fatal':
                 effects.append(FatalEffect(action.id, target.id))
-            potential = weapon.data['attacks']['S' if action.data['event_type'] == 'swing' else 'T']['d']
-            penetration = weapon.data['attacks']['S' if action.data['event_type'] == 'swing' else 'T']['p']
+            motion = action.data.get('motion', action.data['event_type'])
+            attack_profile = weapon.data['attacks']['S' if motion == 'swing' else 'T']
+            potential = attack_profile['d']
+            penetration = attack_profile['p']
             def shield(damage):
+                if action.data.get('event_type') == 'stun' and outcome == 'stun_failed':
+                    damage //= 2
                 blocks = [d for d in dependencies if d.kind == 'block'
                           and d.eligible and d.success]
                 sid = (snapshot.actions[blocks[0].source_action_id].instrument_id
@@ -1447,15 +1541,19 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 effects.extend((ProtectionEffect(action.id, aid, 'armor', damage, through, True),
                                 DamageEffect(action.id, aid, dealt, 'armor')))
                 return through
+            damage_outcome = ('critical' if action.data.get('event_type') == 'stun'
+                and outcome == 'stunned_critical' else
+                'normal' if outcome in ('stunned','stun_failed') else outcome)
             def body(ordinary, critical):
                 effects.append(DamageEffect(action.id, recipient.id, ordinary, 'body'))
-                if outcome == 'critical':
+                if damage_outcome == 'critical':
                     effects.append(DamageEffect(action.id, recipient.id, critical, 'critical_bypass'))
             if pole_charge_speed is not None:
                 pole_extra_damage = math.floor((pole_charge_speed - 4.0) / 2.0)
             else:
                 pole_extra_damage = 0
-            damage_path(outcome, potential,
+            damage_path(damage_outcome,
+                potential,
                 action.data['strategy']['extra_damage']
                 + (0 if charge_intercepted else charge_extra_damage) + pole_extra_damage,
                 rng.roll, shield, armor, body,
@@ -1465,6 +1563,25 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                     and ('DTSMLHGC'.index(weapon.data.get('size'))
                          <= 'DTSMLHGC'.index(actor.data.get('size_code')))
                     and weapon.data.get('two_handed_design') is not True else 1.0))
+            if action.data.get('event_type') == 'subdue' and outcome in ('normal','critical'):
+                body_amount = sum(effect.amount for effect in effects
+                    if type(effect) is DamageEffect and effect.target_id == recipient.id
+                    and effect.component in ('body','critical_bypass'))
+                effects.append(SubdualEffect(action.id, recipient.id, int(body_amount)))
+                effects[:] = [DamageEffect(effect.source_action_id, effect.target_id,
+                    body_amount // 2 if effect.component == 'body' else 0,
+                    effect.component) if type(effect) is DamageEffect
+                    and effect.target_id == recipient.id and effect.component in ('body','critical_bypass') else effect
+                    for effect in effects]
+                final_layer = ('armor' if recipient.data.get('armor_id') is not None else
+                    'shield' if recipient.data.get('shields', ()) else None)
+                if final_layer is not None:
+                    last = next((i for i in range(len(effects)-1,-1,-1)
+                        if type(effects[i]) is ProtectionEffect and effects[i].layer == final_layer), None)
+                    if last is not None:
+                        row = effects[last]
+                        effects[last] = ProtectionEffect(row.source_action_id, row.target_id,
+                            row.layer, row.incoming, body_amount // 2, row.intercepted)
             if coup_de_grace:
                 damage_dealt = sum(effect.amount for effect in effects
                     if type(effect) is DamageEffect and effect.target_id == target.id
@@ -1487,13 +1604,13 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                         effects.append(GrappleStateEffect(action.id,grip[2],grip[1],
                             grip[0],'grip','release',grip[3],None))
     if outcome in ('parried','dodged'):
-        if attempted and action.family == 'melee':
+        if attempted and action.family == 'melee' and action.data.get('event_type') != 'stun':
             effects.append(PracticeEffect(action.id, actor.id, weapon.data['original_type'], 10))
         affected = tuple(dict.fromkeys((target.id,) + tuple(
             effect.target_id for effect in effects if hasattr(effect, 'target_id'))))
         return ActionProposal(action.id, actor.id, affected, outcome, tuple(effects),
                               tuple(dependencies), tuple(meta))
-    if attempted and action.family == 'melee':
+    if attempted and action.family == 'melee' and action.data.get('event_type') != 'stun':
         effects.append(PracticeEffect(action.id, actor.id, weapon.data['original_type'], 10))
     affected = tuple(dict.fromkeys((target.id,) + tuple(e.target_id for e in effects if hasattr(e, 'target_id'))))
     return ActionProposal(action.id, actor.id, affected, outcome, tuple(effects), tuple(dependencies), tuple(meta))

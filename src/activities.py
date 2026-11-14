@@ -19,6 +19,81 @@ from object import ObjectInstance
 from weapon import WeaponInstance
 
 
+def declare_stun(universe, encounter, actor_id, target_id, *, region, motion,
+                 strategy=None, id=None):
+    """Declare an adopted unarmed Stun using represented Arm/Leg weapon data."""
+    from being import BeingInstance
+    from weapon import WeaponDictionary
+    actor = encounter.get_being(actor_id)
+    target = encounter.get_being(target_id)
+    if (actor is None or target is None or actor is target
+            or not encounter.is_aware(actor_id, target_id)):
+        raise ValueError('Stun requires two distinct aware participating Beings')
+    if region not in ('Arm', 'Leg') or motion not in ('swing', 'thrust'):
+        raise ValueError('Stun requires a represented Arm/Leg and swing/thrust motion')
+    if region == 'Leg' and motion == 'thrust':
+        raise ValueError('the adopted Leg profile does not support thrust')
+    level = actor.current.skills.get_skill_level('stun') or 0
+    if level < 1:
+        raise ValueError('Stun requires acquired extraordinary Stun skill')
+    strategy = strategy or __import__('strategy').Strategy()
+    armor_penalty = 0
+    armor_id = actor.current.armor_id
+    if armor_id is not None:
+        armor = universe.get_object_by_id(armor_id)
+        if armor is None:
+            raise ValueError('Stun armor check penalty is unsupported')
+        armor_penalty = armor.current.armor_check_penalty
+    strength_mod = math.floor((actor.STR()-10)/2)
+    dexterity_mod = math.floor((actor.DEX()-10)/2)
+    pool = max(0, 2*(actor.current.skills.get_skill_level('unarmed combat') or 0)
+        + strength_mod + dexterity_mod - armor_penalty)
+    values = (strategy.attack,strategy.defense,strategy.timing,strategy.extra_damage)
+    if any(type(value) is not int or value < 0 for value in values) or sum(values) > pool:
+        raise ValueError(f'Stun strategy must allocate no more than its current {pool}-point pool')
+    if strategy.extra_damage > max(0,(actor.current.skills.get_skill_level('unarmed combat') or 0)+strength_mod):
+        raise ValueError('Stun extra damage exceeds its unarmed combat and Strength limit')
+    dictionary = universe.library.weapon_dictionary
+    definition = dictionary.objects.get(region)
+    if definition is None:
+        raise ValueError('native library lacks the adopted unarmed body profile')
+    timing = definition.St() if motion == 'swing' else definition.Tt()
+    action = Action(universe, encounter.time, encounter.time + timing, 'stun',
+                    actor_id, target_id, None, strategy=strategy, id=id)
+    action.end_time = encounter.time + max(1, timing - action.strategy.timing_adjustment())
+    action.motion, action.body_region = motion, region
+    action.reach = __import__('melee_combat').effective_melee_reach_meters(actor.current, definition)
+    return action
+
+
+def declare_subdue(universe, encounter, actor_id, target_id, weapon_id, *,
+                   motion, strategy=None, id=None):
+    """Declare Subdue with an actually held, represented melee weapon."""
+    from being import BeingInstance
+    actor, target = encounter.get_being(actor_id), encounter.get_being(target_id)
+    weapon = universe.get_object_by_id(weapon_id)
+    if (actor is None or target is None or actor is target
+            or not encounter.is_aware(actor_id, target_id)):
+        raise ValueError('Subdue requires two distinct aware participating Beings')
+    if type(weapon) is not WeaponInstance or weapon_id not in actor.armed_with(universe).values():
+        raise ValueError('Subdue requires an actually held native weapon')
+    if motion not in weapon.get_melee_types() or motion not in ('swing', 'thrust'):
+        raise ValueError('Subdue requires a represented melee weapon motion')
+    profile = weapon.current.attacks['S' if motion == 'swing' else 'T']
+    if profile.get('p') != 'B':
+        raise ValueError('Subdue requires a bludgeon penetration profile')
+    if target.current.immunities.get('subdual') is True:
+        raise ValueError('a represented subdual immunity prohibits this Action')
+    timing = weapon.current.St() if motion == 'swing' else weapon.current.Tt()
+    from melee_combat import effective_melee_reach_meters
+    action = Action(universe, encounter.time, encounter.time + timing, 'subdue',
+                    actor_id, target_id, weapon_id, strategy=strategy, id=id)
+    action.end_time = encounter.time + max(1, timing - action.strategy.timing_adjustment())
+    action.motion = motion
+    action.reach = effective_melee_reach_meters(actor.current, weapon.current)
+    return action
+
+
 class ThrowAction(Action):
     """Native drag-free Throw with bounded target, impact, and Coup de grace rules."""
 

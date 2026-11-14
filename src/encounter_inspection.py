@@ -7,9 +7,10 @@ No resolver, random generator, ledger realization or completion hook is called.
 from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 import importlib
+import math
 
-from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, freeze, native_data,
-                               EvaluationIntegrityError, UnsupportedEvaluation)
+from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect, freeze, native_data,
+                               EvaluationIntegrityError, UnsupportedEvaluation, subdual_recovery_state, stun_active_at)
 from spatial.state import CartesianPosition
 
 
@@ -20,6 +21,34 @@ class InspectionRejected(EvaluationIntegrityError):
 def _require(value, message):
     if not value:
         raise InspectionRejected(message)
+
+
+def _expected_condition_states(pre_action, target, boundary):
+    """Project receipt-backed Stun/Subdual condition state at one boundary."""
+    states = dict(pre_action['states'])
+    states.pop('subdual_damage_current', None)
+    stun_until = states.get('stunned_until')
+    if type(stun_until) in (int, float):
+        states['stunned'] = stun_active_at(stun_until, boundary)
+    burden = states.get('subdual_damage', 0)
+    anchor = states.get('subdual_recovery_anchor')
+    if type(burden) is int and type(anchor) in (int, float):
+        burden, states['subdual_recovery_anchor'] = subdual_recovery_state(
+            burden, anchor, boundary)
+        states['subdual_damage'] = burden
+        states['subdual_unconscious'] = burden >= target.projected_hp
+    stuns = [row.effect for row in target.incoming if type(row.effect) is StunEffect]
+    subduals = [row.effect for row in target.incoming if type(row.effect) is SubdualEffect]
+    if stuns:
+        states['stunned_until'] = max([boundary+effect.duration_seconds for effect in stuns]
+            + ([stun_until] if type(stun_until) in (int,float) else []))
+        states['stunned'] = stun_active_at(states['stunned_until'], boundary)
+    if subduals:
+        burden = states.get('subdual_damage', 0) + sum(effect.amount for effect in subduals)
+        states['subdual_damage'] = burden
+        states['subdual_recovery_anchor'] = boundary
+        states['subdual_unconscious'] = burden >= target.projected_hp
+    return states
 
 
 @dataclass(frozen=True)
@@ -178,7 +207,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',
@@ -377,7 +406,8 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
         if target.category == 'being':
             states=native_data(current['states'],(States,))
             abilities=native_data(current['abilities'],(Abilities,))
-            _require(detached(states['states']) == properties['states']
+            _require(detached(states['states']) == _expected_condition_states(
+                properties, target, meta.end)
                 and detached(abilities['abilities']) == properties['abilities']
                 and detached(current['body_parts']) == _expected_body_parts(meta, key, properties['body_parts'])
                 and detached(current['armor_id']) == properties['armor_id']

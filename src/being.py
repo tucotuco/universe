@@ -919,6 +919,8 @@ class BeingInstance(ObjectInstance):
             return True
         if self.is_stunned():
             return True
+        if self.current.get_state('subdual_unconscious') is True:
+            return True
         if self.get_hit_points() <= 0:
             return True
         if self.get_fatigue_level() == 5:

@@ -13,11 +13,11 @@ import threading
 import weakref
 from types import MappingProxyType
 
-from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, freeze
+from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, freeze, subdual_recovery_state, stun_active_at
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -784,6 +784,33 @@ def _make_plan(encounter,candidate,rng_owner):
     for key,target in supported.boundary.targets.items():
         obj=objects[key]
         if obj.current.hit_points!=target.projected_hp:plan.attr('targets',obj.current,'hit_points',target.projected_hp)
+        if type(obj) is BeingInstance:
+            incoming = [row.effect for row in target.incoming]
+            status = obj.current.states.states
+            projected = dict(status)
+            stun_until = projected.get('stunned_until')
+            if type(stun_until) in (int,float):
+                projected['stunned'] = stun_active_at(stun_until, candidate.boundary)
+            burden = projected.get('subdual_damage', 0)
+            anchor = projected.get('subdual_recovery_anchor')
+            if type(burden) is int and type(anchor) in (int,float):
+                burden, projected['subdual_recovery_anchor'] = subdual_recovery_state(
+                    burden, anchor, candidate.boundary)
+                projected['subdual_damage'] = burden
+            stun_rows = [effect for effect in incoming if type(effect) is StunEffect]
+            subdual_rows = [effect for effect in incoming if type(effect) is SubdualEffect]
+            if stun_rows:
+                projected['stunned_until'] = max([candidate.boundary + row.duration_seconds for row in stun_rows]
+                    + ([stun_until] if type(stun_until) in (int,float) else []))
+                projected['stunned'] = True
+            if subdual_rows:
+                burden += sum(row.amount for row in subdual_rows)
+                projected['subdual_damage'] = burden
+                projected['subdual_recovery_anchor'] = candidate.boundary
+            if 'subdual_damage' in projected:
+                projected['subdual_unconscious'] = projected['subdual_damage'] >= target.projected_hp
+            if projected != status:
+                plan.contents('targets', status, projected)
         record=TargetIntervalRecord(encounter.id,candidate.boundary,target)
         storage=plan.append('targets',obj,'_atomic_target_history',record)
         expected_spatial_state=(id(None) if key in picked_up_ids else

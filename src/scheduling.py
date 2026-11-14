@@ -29,7 +29,7 @@ class PreparedSchedule:
         data = object.__getattribute__(action, '__dict__')
         instrument = data.get('instrument_id')
         active = ((instrument,) if instrument is not None and
-                  data['event_type'] in ('swing', 'thrust', 'parry', 'block', 'throw') else ())
+                  data['event_type'] in ('swing', 'thrust', 'subdue', 'parry', 'block', 'throw') else ())
         if data['event_type'] in ('grab object','wrest') and data.get('target_id') is not None:
             active += (data['target_id'],)
         return cls(data['id'], data['start_time'],

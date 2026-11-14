@@ -17,8 +17,8 @@ from action import Action
 from action_choice import ChoiceMember
 from action_evaluation import (capture_snapshot, evaluate_snapshot, UnsupportedEvaluation,
     EvaluationIntegrityError, DamageEffect, FatalEffect, PracticeEffect, AwarenessEffect,
-    ProtectionEffect, ActionProposal, _ProvisionalRandom, RandomDraw, future_reality_request)
-from activities import RunAction, SpotAction, ReadyPreparationAction
+    ProtectionEffect, StunEffect, SubdualEffect, ActionProposal, _ProvisionalRandom, RandomDraw, future_reality_request)
+from activities import RunAction, SpotAction, ReadyPreparationAction, declare_stun, declare_subdue
 from encounter import Encounter
 from action_settlement import reconcile_boundary
 from library import Library
@@ -102,6 +102,263 @@ class TestActionEvaluation(unittest.TestCase):
             self.assertEqual(self.world.to_json(), state)
             self.assertEqual(random.getstate(), rng)
             self.assertEqual((self.enc.choice_state, self.enc.active_reservations), choices)
+
+    def test_stun_success_commits_duration_and_interrupts_only_later_completion(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        skills = self.world.get_skill_dictionary()
+        self.a.set_skill_level(skills, 'unarmed combat', 5)
+        self.a.set_skill_level(skills, 'stun', 2)
+        self.a.current.tags['universe.stun_categories'] = {'humanoid': 2}
+        self.b.current.tags['universe.stun_category'] = 'humanoid'
+        self.enc.enable_transactional_progression(quiescent=True)
+        stun = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                            region='Arm', motion='thrust')
+        later = MeleeStrike(self.enc, self.b.id, self.a.id, self.w3,
+                            motion='swing', reach=2)
+        self.assertGreater(later.end_time, stun.end_time)
+        self.enc.schedule_action(stun)
+        self.enc.schedule_action(later)
+        values = iter((19, 1, 2, 3, 1))
+        def roll(context, dice):
+            value = next(values)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(stun.end_time)
+        receipt = self.enc.inspect_committed(math.ceil(stun.end_time))
+        result = receipt.action(stun.id)
+        self.assertEqual(result.facts.outcome, 'stunned')
+        effect = next(row for row in result.facts.effects if type(row) is StunEffect)
+        self.assertEqual(effect.duration_seconds, 5)
+        self.assertEqual(self.b.current.states.states['stunned_until'], stun.end_time + 5)
+        from action_evaluation import stun_active_at
+        self.assertTrue(stun_active_at(stun.end_time+5, stun.end_time+4))
+        self.assertFalse(stun_active_at(stun.end_time+5, stun.end_time+5))
+        self.assertIn(later.id, self.enc.cancelled_action_list)
+        self.assertNotIn(later.id, receipt.actions)
+
+    def test_same_boundary_target_attack_survives_successful_stun(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        skills = self.world.get_skill_dictionary()
+        self.a.set_skill_level(skills, 'unarmed combat', 5)
+        self.a.set_skill_level(skills, 'stun', 1)
+        self.a.current.tags['universe.stun_categories'] = {'humanoid': 2}
+        self.b.current.tags['universe.stun_category'] = 'humanoid'
+        self.enc.difficulty_class = 1
+        self.enc.enable_transactional_progression(quiescent=True)
+        stun = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                            region='Arm', motion='swing')
+        incoming = MeleeStrike(self.enc, self.b.id, self.a.id, self.w3,
+                               motion='swing', reach=2)
+        self.assertEqual(stun.end_time, incoming.end_time)
+        self.enc.schedule_action(stun)
+        self.enc.schedule_action(incoming)
+        values = {stun.id: iter((19, 1, 2, 1)), incoming.id: iter((10, 2))}
+        def roll(context, dice):
+            value = next(values[context.action_id])
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(stun.end_time)
+        receipt = self.enc.inspect_committed(math.ceil(stun.end_time))
+        self.assertEqual(receipt.action(stun.id).facts.outcome, 'stunned')
+        self.assertIn(incoming.id, receipt.actions)
+        self.assertEqual(receipt.action(incoming.id).facts.outcome, 'normal')
+
+    def test_subdue_keeps_burden_separate_and_halves_hp_damage(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        skills = self.world.get_skill_dictionary()
+        weapon_id = self.world.make_weapon_for_being(self.a.id, 'Club', 'Scenario Club')
+        self.world.arm_being(self.a.id, weapon_id, 'right hand')
+        weapon = self.world.get_object_by_id(weapon_id)
+        self.a.set_weapon_skill_level(skills, weapon.current.obj_type, 3)
+        self.enc.difficulty_class = 1
+        self.enc.enable_transactional_progression(quiescent=True)
+        action = declare_subdue(self.world, self.enc, self.a.id, self.b.id,
+                                weapon_id, motion='swing')
+        self.enc.schedule_action(action)
+        def roll(context, dice):
+            sides = int(dice[2:].split('+')[0])
+            value = 10 if dice == '1d20' else sides
+            context.trace.append(RandomDraw(context.action_id, dice, sides, value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(action.end_time)
+        receipt = self.enc.inspect_committed(math.ceil(action.end_time))
+        outcome = receipt.action(action.id)
+        burden = next(row for row in outcome.facts.effects if type(row) is SubdualEffect)
+        body = next(row.amount for row in outcome.facts.effects
+                    if type(row) is DamageEffect and row.component == 'body')
+        self.assertGreater(burden.amount, 0)
+        self.assertEqual(body, burden.amount // 2)
+        self.assertEqual(self.b.current.hit_points, 100 - body)
+        self.assertEqual(self.b.current.states.states['subdual_damage'], burden.amount)
+        self.assertFalse(self.b.current.states.states['subdual_unconscious'])
+
+    def test_stun_failure_reasons_preserve_half_damage_and_receipt_outcome(self):
+        skills = self.world.get_skill_dictionary()
+        self.a.set_skill_level(skills, 'unarmed combat', 10)
+        self.a.set_skill_level(skills, 'stun', 1)
+        self.a.current.tags['universe.stun_categories'] = {'humanoid': 2}
+        self.b.current.tags['universe.stun_category'] = 'humanoid'
+        self.b.current.immunities['critical hits'] = True
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        self.enc.difficulty_class = 21
+        self.enc.enable_transactional_progression(quiescent=True)
+        action = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                              region='Arm', motion='thrust')
+        self.enc.schedule_action(action)
+        values = iter((19, 2))
+        def roll(context, dice):
+            value = next(values)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(action.end_time)
+        receipt = self.enc.inspect_committed(math.ceil(action.end_time))
+        outcome = receipt.action(action.id)
+        self.assertEqual(outcome.facts.outcome, 'stun_failed')
+        self.assertFalse(any(type(effect) is StunEffect for effect in outcome.facts.effects))
+        body = next(effect.amount for effect in outcome.facts.effects
+                    if type(effect) is DamageEffect and effect.component == 'body')
+        self.assertEqual(body, 1)
+
+    def test_stun_attack_roll_applies_armor_check_penalty(self):
+        skills = self.world.get_skill_dictionary()
+        self.a.set_skill_level(skills, 'unarmed combat', 10)
+        self.a.set_skill_level(skills, 'stun', 1)
+        self.a.current.tags['universe.stun_categories'] = {'humanoid': 2}
+        self.b.current.tags['universe.stun_category'] = 'humanoid'
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        armor_id = self.world.make_armor_for_being(self.a.id, 'Full plate armor', 'Scenario plate')
+        self.assertEqual(self.world.get_object_by_id(armor_id).current.armor_check_penalty, 8)
+        self.enc.difficulty_class = 22
+        self.enc.enable_transactional_progression(quiescent=True)
+        action = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                              region='Arm', motion='thrust')
+        self.enc.schedule_action(action)
+        iterator = iter((19,))
+        def roll(context, dice):
+            value = next(iterator)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(action.end_time)
+        outcome = self.enc.inspect_committed(math.ceil(action.end_time)).action(action.id)
+        self.assertEqual(outcome.facts.outcome, 'miss')
+        self.assertFalse(outcome.facts.effects)
+
+    def test_stun_confirmed_critical_and_fatal_pair_keep_distinct_damage_rules(self):
+        skills = self.world.get_skill_dictionary()
+        self.a.set_skill_level(skills, 'unarmed combat', 10)
+        self.a.set_skill_level(skills, 'stun', 2)
+        self.a.current.tags['universe.stun_categories'] = {'humanoid': 2}
+        self.b.current.tags['universe.stun_category'] = 'humanoid'
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        self.enc.difficulty_class = 1
+        self.enc.enable_transactional_progression(quiescent=True)
+        def resolve(action, values):
+            self.enc.schedule_action(action)
+            draws = iter(values)
+            def roll(context, dice):
+                value = next(draws)
+                context.trace.append(RandomDraw(context.action_id, dice,
+                    int(dice[2:].split('+')[0]), value))
+                return value
+            with patch.object(_ProvisionalRandom, 'roll', roll):
+                self.enc.step(math.ceil(action.end_time)-self.enc.time)
+            return self.enc.inspect_committed(math.ceil(action.end_time)).action(action.id)
+        critical = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                                region='Arm', motion='thrust')
+        critical_receipt = resolve(critical, (20, 5, 1, 2, 3, 2, 1))
+        self.assertEqual(critical_receipt.facts.outcome, 'stunned_critical')
+        critical_effects = tuple(row.effect for row in critical_receipt.effects)
+        self.assertTrue(any(type(effect) is DamageEffect and effect.component == 'critical_bypass'
+                            for effect in critical_effects))
+        self.assertEqual(next(effect.duration_seconds for effect in critical_effects
+                              if type(effect) is StunEffect), 5)
+
+        failed = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                              region='Arm', motion='thrust')
+        failed_receipt = resolve(failed, (19, 20, 2))
+        self.assertEqual(failed_receipt.facts.outcome, 'stun_failed')
+        failed_effects = tuple(row.effect for row in failed_receipt.effects)
+        self.assertEqual(next(effect.amount for effect in failed_effects
+            if type(effect) is DamageEffect and effect.component == 'body'), 1)
+        self.assertFalse(any(type(effect) is StunEffect for effect in failed_effects))
+
+        fatal = declare_stun(self.world, self.enc, self.a.id, self.b.id,
+                             region='Arm', motion='thrust')
+        fatal_receipt = resolve(fatal, (20, 20, 1))
+        self.assertEqual(fatal_receipt.facts.outcome, 'fatal')
+        self.assertTrue(any(type(row.effect) is FatalEffect for row in fatal_receipt.effects))
+
+    def test_simultaneous_subdue_effects_sum_for_unconsciousness_and_interruption(self):
+        from melee_combat import MeleeStrike
+        c_id = self.world.make_being('Human', 'C')
+        c = self.world.get_object_by_id(c_id)
+        c.set_position(CartesianPosition(.8, 0, 0))
+        c.set_geometry(Sphere(.25))
+        c.set_hit_points(100)
+        self.a.set_position(CartesianPosition(.2, 0, 0))
+        self.b.set_position(CartesianPosition(.5, 0, 0))
+        self.b.set_hit_points(2)
+        self.enc.add_being(c.id)
+        for observer in (self.a, self.b, c):
+            for observed in (self.a, self.b, c):
+                if observer.id != observed.id:
+                    self.enc.mark_aware(observer.id, observed.id)
+        club_a = self.world.make_weapon_for_being(self.a.id, 'Club', 'Club A')
+        club_c = self.world.make_weapon_for_being(c.id, 'Club', 'Club C')
+        self.world.arm_being(self.a.id, club_a, 'right hand')
+        self.world.arm_being(c.id, club_c, 'right hand')
+        self.a.set_weapon_skill_level(self.world.get_skill_dictionary(), 'Club', 3)
+        c.set_weapon_skill_level(self.world.get_skill_dictionary(), 'Club', 3)
+        target_weapon = self.world.make_weapon_for_being(self.b.id, 'Longsword', 'Target Longsword')
+        self.world.arm_being(self.b.id, target_weapon, 'right hand')
+        self.world.arm_being(self.b.id, self.w3, 'left hand')
+        self.enc.difficulty_class = 1
+        self.enc.enable_transactional_progression(quiescent=True)
+        first = declare_subdue(self.world, self.enc, self.a.id, self.b.id,
+                               club_a, motion='swing')
+        second = declare_subdue(self.world, self.enc, c.id, self.b.id,
+                                club_c, motion='swing')
+        target_action = MeleeStrike(self.enc, self.b.id, self.a.id,
+            target_weapon, motion='swing', reach=2)
+        self.assertGreater(target_action.end_time, first.end_time)
+        self.enc.schedule_action(first)
+        self.enc.schedule_action(second)
+        self.enc.schedule_action(target_action)
+        def roll(context, dice):
+            sides = int(dice[2:].split('+')[0])
+            value = 10 if dice == '1d20' else 1
+            context.trace.append(RandomDraw(context.action_id, dice, sides, value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(math.ceil(first.end_time))
+        receipt = self.enc.inspect_committed(math.ceil(first.end_time))
+        self.assertEqual(receipt.action(first.id).facts.outcome, 'normal')
+        self.assertEqual(receipt.action(second.id).facts.outcome, 'normal')
+        self.assertIn(target_action.id, self.enc.cancelled_action_list)
+        self.assertEqual(self.b.current.hit_points, 2)
+        self.assertEqual(self.b.current.states.states['subdual_damage'], 2)
+        self.assertTrue(self.b.current.states.states['subdual_unconscious'])
+
+    def test_subdue_declaration_rejects_nonbludgeon_and_known_immunity(self):
+        dagger = self.world.get_object_by_id(self.w1)
+        with self.assertRaisesRegex(ValueError, 'bludgeon'):
+            declare_subdue(self.world, self.enc, self.a.id, self.b.id,
+                           dagger.id, motion='thrust')
+        club_id = self.world.make_weapon_for_being(self.a.id, 'Club', 'Scenario Club')
+        self.world.arm_being(self.a.id, club_id, 'left hand')
+        self.b.current.immunities['subdual'] = True
+        with self.assertRaisesRegex(ValueError, 'immunity'):
+            declare_subdue(self.world, self.enc, self.a.id, self.b.id,
+                           club_id, motion='swing')
 
     def scripted(self, snapshot, values):
         iterator = iter(values)
