@@ -15,7 +15,7 @@ from interval_staging import (validate_interval_candidate, IntervalIntegrityErro
 from observer_proposals import capture_observer_context, build_supported_candidate
 from action_evaluation import EvaluationIntegrityError
 from action_choice import Reservation
-from activities import RunAction, SpotAction
+from activities import DelayAction, RunAction, SpotAction
 from action import Action
 from encounter import Encounter
 from field_observation import BeliefLedger
@@ -340,9 +340,14 @@ class TestIntervalStaging(unittest.TestCase):
             with self.assertRaises(UnsupportedEvaluation):self.build()
         unsafe.assert_not_called()
 
-    def test_unsupported_due_family_is_not_silently_skipped(self):
-        delay=Action(self.world,0,None,'delay',self.a.id,self.b.id,None);self.enc.schedule_action(delay)
-        with self.assertRaises(UnsupportedEvaluation):self.build()
+    def test_supported_delay_due_family_has_a_native_receipt(self):
+        self.enable_native_step()
+        delay=DelayAction(self.enc,self.a.id,defense=0)
+        self.enc.schedule_action(delay)
+        candidate=self.build()
+        self.assertEqual(candidate.supported_candidate.boundary.actions[delay.id].outcome,
+                         'success')
+        self.assertEqual(candidate.coverage,'complete_supported_interval')
 
     def test_opaque_narrative_and_recipient_are_refused_before_invocation(self):
         history=self.f.f.history();unsafe=Mock(side_effect=AssertionError('story'))

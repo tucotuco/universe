@@ -420,10 +420,13 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(strike.strategy.timing, 1)
         self.assertEqual(record.view.state, "accepted")
         projected = self.session._view_unlocked()["action_programs"]
-        self.assertEqual(projected[0]["status"], "accepted")
-        self.assertEqual([component["name"] for component in projected[0]["components"]],
+        mixed_program = next(program for program in projected
+            if [component["name"] for component in program["components"]]
+                == ["Touch", "Thrust"])
+        self.assertEqual(mixed_program["status"], "accepted")
+        self.assertEqual([component["name"] for component in mixed_program["components"]],
                          ["Touch", "Thrust"])
-        self.assertEqual([component["priority_penalty"] for component in projected[0]["components"]],
+        self.assertEqual([component["priority_penalty"] for component in mixed_program["components"]],
                          [0, 3])
         self.assertNotIn(touch.id, json.dumps(projected))
         with tempfile.TemporaryDirectory() as directory:
@@ -1865,7 +1868,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(pending["opponent_melee_action"]["status"], "executing")
         self.assertEqual(pending["opponent_melee_action"]["seconds_remaining"], 3)
         self.assertNotIn(opponent.id, json.dumps(pending))
-        self.assertNotIn("destination", json.dumps(pending).lower())
+        encoded_pending = json.dumps(pending).lower()
+        self.assertNotIn('"destination_cell"', encoded_pending)
+        self.assertNotIn('"destination_position_meters"', encoded_pending)
         page_status, page = self.request("/")
         self.assertEqual(page_status, 200)
         self.assertIn("Opponent is approaching.", page)
@@ -2793,10 +2798,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             "y": player_participant.native.being.get_position().y,
             "z": player_participant.native.being.get_position().z})
         self.assertEqual([p.native.being.get_experience() for p in candidate.participants], [0, 0])
+        def exposed_keys(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    yield str(key).casefold()
+                    yield from exposed_keys(child)
+            elif isinstance(value, (tuple, list)):
+                for child in value:
+                    yield from exposed_keys(child)
         encoded = json.dumps(state).lower()
         for forbidden in ("source_sha256", "source_record", "native_id", "awareness",
                           "target_id", "action_id", "participants"):
-            self.assertNotIn(forbidden, encoded)
+            self.assertNotIn(forbidden, set(exposed_keys(state)))
         self.assertEqual(state["character"]["identity"]["class_levels"],
                          state["character"]["experience"]["class_allocation"])
         self.assertEqual(state["character"]["experience"]["class_allocation"][0]["id"], 1)

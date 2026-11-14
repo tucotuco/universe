@@ -1,6 +1,6 @@
 # U-CAP-005 — Stun and Subdue implementation report
 
-**Status:** DONE (bounded) against the assignment criteria; awaiting ChatGPT review and consumption. Keep this report and its assignment in the active directories until that review.
+**Status:** ACTIVE pending ChatGPT acceptance and report consumption. The functional implementation is complete; this continuation reconciles adjacent verification failures. Keep this report and its assignment in the active directories until acceptance and consumption.
 **Assignment:** [U-CAP-005](../assignments/U-CAP-005.md)
 **Repository:** `~/Projects/universe`
 **Publication:** No push authorized or performed.
@@ -10,6 +10,12 @@
 - Start: `2026-11-13T21:07:54-08:00` (captured at execution start; UTC `2026-11-14T05:07:54Z`).
 - End: `2026-11-13T22:24:39-08:00` (captured immediately before closeout; UTC `2026-11-14T06:24:39Z`).
 - Elapsed: `PT1H16M45S`.
+
+### Verification continuation
+
+- Start: `2026-11-13T23:49:21-08:00` (captured when this continuation began; UTC `2026-11-14T07:49:21Z`).
+- End: to be captured immediately before closeout.
+- Elapsed: to be calculated from the captured continuation interval.
 
 The independent accepted U-CAP-004 archival/reconciliation operation ran within the recorded interval and was completed in `fdb4798d6066d7f3fe8ea82b6641e76ae4a585ce`.
 
@@ -39,13 +45,15 @@ All commands below used the repository `.venv` unless noted.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_action_evaluation` — **125 tests passed**, 111.573 s.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_stun_program_survives_fresh_load_and_interrupts_later_action tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_subdue_http_fresh_load_and_independent_condition` — **2 tests passed**, 5.666 s. The second test proves the fresh-loaded exact recovery calculation; the one-hour boundary is not simulated by 3,600 committed steps.
 
-**Adjacent checks run, with pre-existing issues outside the dedicated acceptance cases:**
+**Focused verification and baseline reconciliation:**
 
-- Checkpoint inventory, checkpoint choice descriptors and Action Choices — **99 tests, 2 errors**: `test_module_rng_is_not_silently_assumed_private` rejects an unbound checkpoint without its private RNG cursor; `test_readying_and_striking_the_same_held_weapon_conflict_for_its_hand` references an unimported `ReadyPreparationAction`.
-- Atomic publication and interval staging — **127 tests, 31 errors**. Reported failures largely come from fixture Actions that overlap without acquired Multi-action skill; the interval “unsupported due family” case reaches an existing settlement target-reference integrity rejection before its expected unsupported-family error. Dedicated atomic Stun/Subdue coverage passes in `tests.test_action_evaluation` and generated fresh-process tests.
-- Full `tests.test_generated_arena_browser` — **67 tests, 3 failures**. One observed failure, `test_attack_only_browser_requests_drive_native_approach_and_thrust`, asserts the entire response has no `destination` substring, while an existing Delay catalog explanation contains “redirected Missing destination is unresolved.” The other two failures were outside the two U-CAP-005 acceptance tests; a baseline comparison was not run. The acceptance pair above passes.
-- A broad `.venv/bin/python -B -m compileall -q src examples` check reports `IndentationError` in untouched `src/location.py:57` (function beginning at line 55). This source is unchanged in this work. All U-CAP-005 code paths were imported and executed by the passing native and generated tests.
-- `git diff --check` passed before closeout staging. Exact staged-scope audits and final Git status/HEAD are recorded after commits below.
+- Baseline: source and tests were extracted read-only from pre-U-CAP-005 commit `2148876` into a temporary baseline checkout. Four representative tests reproduced the same failures there: unbound module RNG checkpoint capture, missing `ReadyPreparationAction` import, overlap without Multi-action skill, and a malformed target-bearing generic Delay yielding `SettlementIntegrityError`. These were stale fixtures/expectations, not regressions in U-CAP-005.
+- Baseline generated Arena: targeted tests reproduced the broad “destination” substring and allowlist substring false positives against `2148876`; the mixed-program status test passed there. The current positional assertion was stale because the current projection includes one-member Action programs. Assertions now inspect represented payload keys and select the program by component names.
+- Current checkpoint inventory, checkpoint choice descriptors and Action Choices — `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_checkpoint_inventory tests.test_checkpoint_choice_descriptors tests.test_action_choices` — **99 tests passed** (15.604 s). The checkpoint test now expects refusal when no private module RNG cursor is supplied; the Action Choices fixture imports its native Ready preparation type.
+- Current generated browser — `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_generated_arena_browser` — **67 tests passed** (111.556 s). The fixes are test-only: payload-key/coordinate checks avoid matching explanatory prose, and the mixed program is selected by represented components.
+- Current atomic publication and interval staging — `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_atomic_publication tests.test_interval_staging` — **127 tests passed** (57.332 s). The former 31 errors comprised 30 choices missing the adopted Multi-action skill and priority allocations plus one malformed generic Delay fixture. Test-only helpers now declare acquired skill and the adopted fixed priority penalties; the separate run/spot fixtures are scheduled without illegal overlap. The unsupported-family test now exercises a supported native Delay receipt. No Multiple-action or atomic-resolution rule was weakened. A further targeted run of the three representative atomic/interval cases passed (3 tests, 0.797 s).
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m compileall -q src examples` reports `IndentationError` in untouched `src/location.py:57` (function beginning at line 55). Compiling the same file from baseline `2148876` reports the identical error at line 57: its function body is already empty. This verified pre-existing issue is outside U-CAP-005 and is recorded in `TASKS.md`.
+- No runtime source was changed in this continuation. The U-CAP-005 native and generated acceptance tests remain covered by the earlier results above. Final `git diff --check`, cached diff check, publication-safety audit, exact staged paths, final HEAD and unrelated staged archive preservation are recorded below.
 
 ## Separate U-CAP-004 closeout and task state
 
@@ -67,4 +75,4 @@ The accepted U-CAP-004 assignment/report were moved with `git mv` to their archi
 
 ## Final repository state
 
-At closeout, the report, assignment, TASKS and implementation files have no unstaged changes. The following unrelated historical archive changes remain staged as they were before U-CAP-005: deletes of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md` and `docs/reports/U-CAP-003-report.md`, plus the Git-aware move of `docs/reports/U-THROW-001-rule-sync-proposal.patch` into `docs/reports/archive/`. Final closeout verifies that status and records the actual HEAD in the Codex response.
+The following unrelated historical archive changes were already staged before this continuation and are preserved outside the U-CAP-005 commit: deletes of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md` and `docs/reports/U-CAP-003-report.md`, plus the Git-aware move of `docs/reports/U-THROW-001-rule-sync-proposal.patch` into `docs/reports/archive/`. Final HEAD, U-CAP-005 commit, staged audit and status are recorded before closeout.

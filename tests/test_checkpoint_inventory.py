@@ -190,10 +190,10 @@ class TestCheckpointInventory(fixtures.InspectionFixture):
 
     def test_module_rng_is_not_silently_assumed_private(self):
         self.enc.enable_transactional_progression(quiescent=True)
-        c=capture(self.world,self.enc,quiescent=True)
-        self.assertIn('module',tuple(strings(c.envelope)))
-        self.assertIn('rng_authority_scope_unbound',{d.code for d in c.diagnostics})
-        with self.assertRaises(CheckpointRejected):self.capture()
+        # The current checkpoint contract refuses an unbound module RNG before
+        # creating a candidate. Supplying a caller cursor is covered separately.
+        with self.assertRaisesRegex(CheckpointRejected, 'private RNG cursor'):
+            capture(self.world,self.enc,quiescent=True)
 
     def test_unsupported_generator_never_runs(self):
         history=self.f.f.f.history();self.enable();seen=[]

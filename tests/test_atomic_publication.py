@@ -19,6 +19,7 @@ from atomic_publication import (PHASES, publication_boundary, coordinated_access
     RNGCursor, target_interval_history, target_effects_from)
 from interval_staging import StaleInterval
 from action_evaluation import _ProvisionalRandom,RandomDraw,UnsupportedEvaluation
+from action_choice import ChoiceMember, _requires_multiple_action_capacity
 from activities import RunAction,SpotAction
 from field_observation import BeliefLedger
 from history_conversation import AskAboutPastAction
@@ -49,11 +50,44 @@ def raw_graph(world,encounter):
     return copy(world)
 
 
+def schedule_with_multiple_action_declarations(encounter, actions):
+    """Give simultaneous test fixtures adopted skill and fixed priorities."""
+    keyed = tuple((str(index), action) for index, action in enumerate(actions))
+    all_actions = {action.id: action for _, action in keyed}
+    def interval(action):
+        if isinstance(action, MeleeDefense) and action.target_action_id in all_actions:
+            strike = all_actions[action.target_action_id]
+            return strike.start_time, strike.end_time
+        return action.start_time, action.end_time
+    by_actor = {}
+    for key, action in keyed:
+        if _requires_multiple_action_capacity(action):
+            by_actor.setdefault(action.actor_id, []).append((key, action))
+    members = {key: ChoiceMember(key, action) for key, action in keyed}
+    allocations = {2: (0, 3), 3: (0, 1, 5), 4: (0, 1, 2, 6)}
+    for actor_id, rows in by_actor.items():
+        overlapping = [(key, action) for key, action in rows if any(
+            other_key != key and max(interval(action)[0], interval(other)[0])
+                < min(interval(action)[1], interval(other)[1])
+            for other_key, other in rows)]
+        if not overlapping:
+            continue
+        if len(overlapping) not in allocations:
+            raise AssertionError('atomic-publication fixture exceeds adopted priority table')
+        actor = encounter.get_being(actor_id)
+        actor.set_skill_level(encounter.universe.get_skill_dictionary(), 'multi-action', 1)
+        for (key, action), penalty in zip(overlapping, allocations[len(overlapping)]):
+            members[key] = ChoiceMember(key, action, priority_penalty=penalty)
+    return encounter.schedule_choice(tuple(members[key] for key, _ in keyed))
+
+
 class TestAtomicPublication(unittest.TestCase):
     def setUp(self):
         self.f=intervals.TestIntervalStaging();self.f.setUp()
         self.world,self.enc=self.f.world,self.f.enc
         self.a,self.b,self.c=self.f.a,self.f.b,self.f.c
+        for being in (self.a,self.b,self.c):
+            being.set_skill_level(self.world.get_skill_dictionary(),'multi-action',1)
 
     def build(self,boundary=1,**kwargs):return self.enc.prepare_interval_candidate(boundary,**kwargs)
 
@@ -73,10 +107,10 @@ class TestAtomicPublication(unittest.TestCase):
         one,two=self.f.f.observe(self.a,group,ledger=la),self.f.f.observe(self.b,group,ledger=lb)
         ask=AskAboutPastAction(self.world,self.c.id,self.a.id,0,episode_time=0,topic='lessons',generate=self.f.f.f.recipe(history),received_accounts=accounts)
         spot=self.f.spot();run=RunAction(self.world,self.c.id,0,1,1,experience=7)
-        self.enc.schedule_choice((one,two,ask,spot,run))
+        schedule_with_multiple_action_declarations(self.enc,(one,two,ask,spot,run))
         # Also exercise unpublished whole-choice registration and fractional starts.
-        future=RunAction(self.world,self.b.id,.2,1,1)
-        later=SpotAction(self.world,self.c.id,self.b.id,.7,duration=6,die_roll=20)
+        future=RunAction(self.world,self.b.id,two.end_time+.2,1,1)
+        later=SpotAction(self.world,self.c.id,self.b.id,spot.end_time+1.5,duration=6,die_roll=20)
         self.enc.schedule_choice((future,later))
         return self.build(velocities={self.c.id:(1,0,0),self.b.id:(.5,0,0)}),group,history,la,lb,accounts,(one,two,ask,spot,run,future,later)
 
@@ -583,9 +617,13 @@ class TestAtomicCombatPublication(unittest.TestCase):
     def setUp(self):
         self.f=combat.TestActionSettlement();self.f.setUp()
         self.world,self.enc,self.a,self.b=self.f.world,self.f.enc,self.f.a,self.f.b
+        for being in (self.a,self.b):
+            being.set_skill_level(self.world.get_skill_dictionary(),'multi-action',1)
+        self.a.set_ability('strength',50)
 
     def stage(self,actions,rolls):
-        self.enc.schedule_choice(actions);boundary=max(math.ceil(a.end_time) for a in actions)
+        schedule_with_multiple_action_declarations(self.enc,actions)
+        boundary=max(math.ceil(a.end_time) for a in actions)
         if boundary>1:self.enc.step(boundary-1)
         values=iter(rolls)
         def roll(rng,dice):

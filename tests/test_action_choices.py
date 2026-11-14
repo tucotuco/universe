@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from action import Action
 from action_choice import ChoiceMember, ChoiceRejected
-from activities import ReadyWeaponAction, RunAction, SpotAction
+from activities import ReadyPreparationAction, ReadyWeaponAction, RunAction, SpotAction
 from ai_duel import AgentDuel
 from encounter import Encounter, BoundaryInvariantError
 from event import Event
