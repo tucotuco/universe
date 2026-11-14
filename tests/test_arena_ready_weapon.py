@@ -230,6 +230,75 @@ class TestArenaReadyWeapon(unittest.TestCase):
         self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
         self.assertEqual(restored.stdout.decode().strip(), "restored-shield-bash-choice")
 
+    def test_generated_medium_shield_bash_resolves_after_fresh_process_restore(self):
+        session, candidate, player = arena(seed=20261148)
+        shield_id = candidate.universe.make_weapon("Medium shield", "Authored Arena bash shield")
+        shield = candidate.universe.get_object_by_id(shield_id)
+        player.possessions.append(shield_id)
+        player.weapons.append(shield_id)
+        shield.parent_container_id = player.id
+        hand = next(slot for slot in ("left hand", "right hand")
+                    if player.current.body_parts.get(slot) is None)
+        player.current.body_parts[hand] = shield_id
+        dominant = "right hand" if hand == "left hand" else "left hand"
+        player.current.tags["universe.native_dominant_hand"] = dominant
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, shield.id, "object", shield.name,
+            "Medium shield", None, "carried", candidate.encounter.time, 0.0)
+        ledger._current[shield.id] = evidence
+        ledger._history.append(evidence)
+        target = candidate.participants[1].native.being
+        layout = candidate.arena_map.layout
+        target_cell = layout.cell_at_position(target.get_position())
+        player_cell = layout.cell_at_position(player.get_position())
+        destination = min((cell for cell in layout.neighbors(target_cell)
+                           if cell != player_cell),
+            key=lambda cell: math.dist(layout.center_position(cell,
+                z=player.get_position().z).as_tuple(), player.get_position().as_tuple()))
+        # The fixture explicitly authors the Being's initial facing toward the
+        # target and asks the native movement route to preserve it.
+        from hex_facing import nearest_facing
+        destination_position = layout.center_position(destination, z=player.get_position().z)
+        player.set_hex_facing(nearest_facing((target.get_position().x-destination_position.x,
+            target.get_position().y-destination_position.y,
+            target.get_position().z-destination_position.z)))
+        session.choose_destination({"column": destination.column, "row": destination.row,
+            "rate": "sprint", "facing_policy": "maintain"})
+        while session.public_view()["movement_plan"] is not None:
+            session.advance_one_second()
+        target_row = next(row for row in session.public_view()["entities"]
+            if row.get("category") == "being" and row["name"].startswith(target.name))
+        shield_row = next(row for row in session.public_view()["entities"]
+            if row["name"] == shield.name)
+        session.choose_melee_strike({"handle": target_row["handle"], "motion": "swing",
+            "weapon_handle": shield_row["handle"], "shield_bash": True})
+        choice = next(member.action for row in candidate.encounter._choice_book._choices.values()
+            for member in row.members if getattr(member.action, "shield_bash", False))
+        save = session.save_encounter_bytes()
+        script = """import json,sys
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession()
+s.load_encounter_bytes(sys.stdin.buffer.read())
+c=s.active_candidate
+a=next(m.action for r in c.encounter._choice_book._choices.values()
+    for m in r.members if m.action.id==sys.argv[1])
+assert a.shield_bash and a.instrument_id==sys.argv[2]
+for _ in range(8):
+    s.advance_one_second()
+    if a.resolution is not None:
+        break
+assert a.resolution is not None
+print(json.dumps({'outcome':a.resolution.outcome,'time':c.encounter.time,
+    'shield_id':a.instrument_id,'target_id':a.target_id}))
+"""
+        restored = subprocess.run([sys.executable, "-B", "-c", script, choice.id, shield_id],
+            input=save, cwd=ROOT, capture_output=True, check=False, timeout=60)
+        self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
+        result = json.loads(restored.stdout)
+        self.assertIn(result["outcome"], ("normal", "miss"))
+        self.assertEqual(result["shield_id"], shield_id)
+        self.assertEqual(result["target_id"], target.id)
+
     def test_generated_arena_draws_non_dagger_weapon_with_identity_preserved_after_fresh_process_load(self):
         session, candidate, player = arena(seed=20261147)
         activate(session)

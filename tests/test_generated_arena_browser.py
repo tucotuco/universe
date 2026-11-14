@@ -1373,12 +1373,24 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         status,accepted=self.request("/api/generated/object-strike",{
             "handle":handle,"motion":"swing"})
         self.assertEqual(status,200,accepted)
+        hp_before = ground.hit_points()
+        rng_before = self.session._rng_cursor.state
         from action import Action
         action=next(member.action for choice in candidate.encounter._choice_book._choices.values()
                     for member in choice.members if type(member.action) is Action
                     and member.action.event_type=="strike object")
         self.assertEqual(action.event_type,"strike object")
         self.assertEqual(action.target_id,ground_id)
+        # The other generated Being has no modeled physical geometry. The
+        # server accepts the native declaration, then conservatively resolves
+        # the path as uncertain without consuming combat RNG or damaging the
+        # Object. This protects the boundary from a fixture-only success claim.
+        while action.resolution is None:
+            status, advanced = self.request("/api/generated/advance",{"seconds":1})
+            self.assertEqual(status,200,advanced)
+        self.assertEqual(action.resolution.outcome,"uncertain_path")
+        self.assertEqual(ground.hit_points(),hp_before)
+        self.assertEqual(self.session._rng_cursor.state,rng_before)
 
     def test_coup_de_grace_uses_browser_choice_and_pending_native_save_load(self):
         page=self.request("/")[1]

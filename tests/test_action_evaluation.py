@@ -1,9 +1,13 @@
 """Inactive native evaluation contracts; no future damage settlement assertions."""
 from dataclasses import FrozenInstanceError, fields, replace
+import json
+import os
 from pathlib import Path
 import math
 import random
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, Mock
 
@@ -1570,6 +1574,65 @@ class TestActionEvaluation(unittest.TestCase):
                              if type(effect) is DamageEffect and effect.component == 'object')
         self.assertEqual(object_damage, 6)
         self.assertEqual(target.hit_points(), 0)
+
+    def test_destroyed_object_and_strike_receipt_restore_in_fresh_process(self):
+        """A committed weapon/object outcome keeps identity, HP, and receipt on restart."""
+        from object import ObjectDefinition, ObjectInstance
+        from atomic_publication import RNGCursor
+        from transactional_progression import _BINDINGS
+
+        target = ObjectInstance(ObjectDefinition('authored hardwood save target', 12, 12, 12,
+            20, 1, 2, 6), name='Hardwood save target')
+        target.set_position(CartesianPosition(.5, 0, 0))
+        self.world.add_object(target)
+        self.enc.add_object(target.id)
+        self.enc.mark_aware(self.a.id, target.id)
+        self.enc.enable_transactional_progression(quiescent=True,
+            rng_owner=RNGCursor(random.Random(41).getstate()))
+        weapon = self.world.get_object_by_id(self.w1)
+        action = Action(self.world, 0, 1, 'strike object', self.a.id, target.id, self.w1)
+        action.object_motion = 'thrust'
+        from melee_combat import effective_melee_reach_meters
+        action.reach = effective_melee_reach_meters(self.a.current, weapon.current)
+        action.end_time = max(1, math.ceil(weapon.Tt()))
+        self.enc.schedule_action(action)
+
+        # Critical confirmation and both damage dice destroy the low-HP target.
+        values = iter([20, 20, 4, 4])
+        def roll(ctx, dice):
+            value = next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(action.end_time)
+        self.assertEqual(action.resolution.outcome, 'critical')
+        self.assertEqual(target.hit_points(), 0)
+
+        from arena_native_snapshot import capture, encode
+        saved = encode(capture(self.world, self.enc, _BINDINGS[id(self.enc)].rng_owner))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'destroyed-object.json'
+            path.write_bytes(saved)
+            child_env = dict(os.environ)
+            child_env['PYTHONPATH'] = os.pathsep.join((str(ROOT / 'tests'),
+                str(ROOT / 'src'), str(ROOT / 'examples')))
+            verify = (
+                "import json,sys; from arena_native_snapshot import decode,restore; "
+                "w,e,r=restore(decode(open(sys.argv[1],'rb').read())); "
+                "oid,aid=sys.argv[2:]; o=w.get_object_by_id(oid); a=w.event_history[aid]; "
+                "assert o.id==oid and o.hit_points()==0; "
+                "assert a.event_type=='strike object' and a.resolution.outcome=='critical'; "
+                "assert aid in e.finished_action_list; "
+                "print(json.dumps({'object_id':o.id,'hp':o.hit_points(),"
+                "'action_id':a.id,'outcome':a.resolution.outcome,'time':e.time}))")
+            restored = subprocess.run([sys.executable, '-c', verify, str(path),
+                target.id, action.id], cwd=ROOT, env=child_env, check=False,
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+            evidence = json.loads(restored.stdout)
+        self.assertEqual(evidence, {'object_id': target.id, 'hp': 0,
+            'action_id': action.id, 'outcome': 'critical', 'time': self.enc.time})
 
     def test_simultaneous_object_strikes_apply_hardness_per_blow_and_sum_atomically(self):
         from object import ObjectDefinition, ObjectInstance
