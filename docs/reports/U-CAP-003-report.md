@@ -17,7 +17,7 @@ There is no unresolved adopted-rule question in this slice. The remaining limits
 
 | Session | Start (ISO 8601, explicit offset) | End (ISO 8601, explicit offset) | Elapsed (ISO 8601 duration) |
 |---|---|---|---|
-| Current execution | 2026-11-13T15:37:40-08:00 | Pending final closeout capture | Pending |
+| Current execution | 2026-11-13T15:37:40-08:00 | 2026-11-13T16:37:29-08:00 | `PT0H59M49S` |
 
 Earlier U-CAP-003 execution intervals were not recorded in this report, so no estimate is provided for them. The interval above is the captured active execution interval for this report update.
 
@@ -54,7 +54,8 @@ No full repository suite was run. The generated-Arena `uncertain_path` result is
 
 - Repository: Universe checkout; branch `main`.
 - Starting HEAD: `93a997b5e508f9d68ac6be2d0823cb243acd7a79` (`Archive accepted U-CAP-002 and start U-CAP-003`).
-- Implementation commit: `a209cb7be83cf8ab4a5d94f1d766116eb96c4cfc` (`Add native non-Dagger and shield attacks`).
-- Before the implementation commit, the staged path inventory was inspected, `git diff --cached --check` passed, and `.venv/bin/python -B tools/check_publication_safety.py --staged` returned `staged-audit files=16 findings=0 result=PASS`. The commit used an explicit path list; it did not include unrelated staged U-CAP-002 archival deletions or the user's staged U-THROW-001 archival rename.
-- Documentation closeout commit and final working-tree audit are recorded after the final report/TASKS edits. No push was attempted.
+- Implementation/test commit: `a209cb7be83cf8ab4a5d94f1d766116eb96c4cfc` (`Add native non-Dagger and shield attacks`).
+- TASKS/report commit: `8765f7434adbe22321a8d73d20103bf3acb2ceee` (`Document bounded U-CAP-003 weapon outcome`). This report's final timestamp/closeout metadata is a report-only follow-up commit; its exact terminal hash is verified with `git rev-parse HEAD` and included in the Codex closeout.
+- Before the implementation commit, the staged path inventory was inspected, `git diff --cached --check` passed, and `.venv/bin/python -B tools/check_publication_safety.py --staged` returned `staged-audit files=16 findings=0 result=PASS`. Before the TASKS/report commit, the same checks returned `staged-audit files=6 findings=0 result=PASS`. The first documentation scan found the absolute local checkout path in this report; it was removed before the passing rerun. Both commits used explicit path lists and excluded unrelated staged U-CAP-002 archival deletions and the user's staged U-THROW-001 archival rename.
+- After the TASKS/report commit, `git diff --check` and `git diff --cached --check` passed. `git status --short` showed only the pre-existing staged U-CAP-002 archival deletions and U-THROW-001 archival rename; no U-CAP-003 files remained unstaged. No push was attempted.
 - `.venv`, ignored `legacy/`, local saved-world data, the independent `npc-generator`, repository backups, and `universe-geology` were not modified. The removed historical `docs/assignments/universe-arena.json` was not recreated or inspected.
