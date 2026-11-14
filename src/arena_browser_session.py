@@ -2495,8 +2495,10 @@ class GeneratedArenaSession:
         weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
         shield_names = set(candidate.universe.library.weapon_dictionary
                            .get_objects_in_category("Shields"))
+        equipped_shield_ids = set(player.shielded_with(candidate.universe).values())
         if (type(weapon) is not WeaponInstance or weapon.id not in player.weapons
-                or weapon.id not in player.armed_with(candidate.universe).values()
+                or (weapon.id not in equipped_shield_ids if shield_bash else
+                    weapon.id not in player.armed_with(candidate.universe).values())
                 or weapon.parent_container_id != player.id or weapon.get_position() is not None
                 or (weapon.current.obj_type in shield_names) != shield_bash):
             raise ArenaBrowserRequestError(
@@ -4144,7 +4146,7 @@ class GeneratedArenaSession:
         from armor import ArmorInstance
         from being import BeingInstance
         from object import ObjectInstance
-        from weapon import WeaponInstance
+        from weapon import WeaponInstance, native_forearm_buckler_attachment
 
         registry = candidate.universe.get_object_registry().object_instances
         from physical_contact import shared_object_holders
@@ -4234,6 +4236,8 @@ class GeneratedArenaSession:
                     kind = "object"
                 else:
                     raise ValueError("native inventory Object subtype is unsupported")
+                attachment = (native_forearm_buckler_attachment(item)
+                              if type(item) is WeaponInstance and kind == "shield" else None)
                 if object_id == armor_id:
                     if type(item) is not ArmorInstance:
                         raise ValueError("native armor slot does not reference an Armor Object")
@@ -4241,6 +4245,9 @@ class GeneratedArenaSession:
                 elif object_id in body_slots:
                     status = (f"held shield at {body_slots[object_id]} (native shield reference)"
                               if kind == "shield" else f"readied in {body_slots[object_id]}")
+                elif (attachment is not None and attachment["owner_id"] == being.id
+                      and object_id in being.possessions and parent_id == being.id):
+                    status = f"attached to {attachment['arm']} forearm"
                 elif parent_name is not None:
                     status = f"contained in {parent_name}"
                 else:

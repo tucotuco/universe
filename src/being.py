@@ -1123,6 +1123,19 @@ class BeingInstance(ObjectInstance):
             an_object = universe.get_object_by_id(object_id)
             if an_object is not None and an_object.current.obj_type in weapon_dict.get_objects_in_category('Shields'):
                 shielded[body_location]=object_id
+        from weapon import WeaponInstance, native_forearm_buckler_attachment
+        for object_id in self.weapons:
+            shield = universe.get_object_by_id(object_id)
+            if type(shield) is not WeaponInstance:
+                continue
+            attachment = native_forearm_buckler_attachment(shield)
+            if (attachment is None or attachment['owner_id'] != self.id
+                    or shield.current.obj_type not in weapon_dict.get_objects_in_category('Shields')
+                    or shield.parent_container_id != self.id or shield.get_position() is not None
+                    or object_id not in self.possessions):
+                continue
+            location = f"{attachment['arm']} forearm"
+            shielded[location] = object_id
         return shielded
     
     def armed_with(self, universe):

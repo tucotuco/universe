@@ -18,7 +18,8 @@ from arena_perception import ArenaPerceptionEvidence
 from atomic_publication import PublicationFailure, _WritePlan
 from melee_combat import MeleeStrike
 from weapon import (DRAWABLE_WORN_SHEATH, NATIVE_DRAW_LOCATION_TAG, WeaponInstance,
-                    author_worn_sheath_draw_location, native_weapon_draw_location,
+                    author_forearm_buckler_attachment, author_worn_sheath_draw_location,
+                    native_weapon_draw_location,
                     re_ready_time_after_strike, native_ready_preparation,
                     weapon_readying_time)
 
@@ -75,6 +76,53 @@ def draw_scenario():
 
 
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_generated_forearm_buckler_shows_free_hand_and_restores_bash_choice(self):
+        session, candidate, player = arena(seed=20261148)
+        buckler_id = candidate.encounter.make_weapon("Buckler", "Authored forearm buckler")
+        buckler = candidate.universe.get_object_by_id(buckler_id)
+        player.possessions.append(buckler_id)
+        player.weapons.append(buckler_id)
+        buckler.parent_container_id = player.id
+        author_forearm_buckler_attachment(buckler, player.id, "left")
+        player.current.tags["universe.native_dominant_hand"] = "right hand"
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, buckler.id, "object", buckler.name,
+            "Buckler", None, "carried", candidate.encounter.time, 0.0)
+        ledger._current[buckler.id] = evidence
+        ledger._history.append(evidence)
+        activate(session)
+        view = session.public_view()
+        inventory_row = next(row for row in view["character"]["inventory"]["items"]
+                             if row["type"] == "Buckler")
+        self.assertEqual(inventory_row["status"], "attached to left forearm")
+        self.assertEqual(next(row for row in view["character"]["anatomy"]["hands"]
+                              if row["name"] == "left hand")["occupancy"], "empty")
+        target = candidate.participants[1].native.being
+        target_view = next(row for row in view["entities"]
+                           if row.get("category") == "being" and row["name"].startswith(target.name))
+        catalog = session.inspect_entity({"handle": target_view["handle"]})["action_catalog"]
+        bash = next(row for row in catalog["entries"] if row["name"] == "Shield bash")
+        self.assertEqual(bash["status"], "available", bash["reason"])
+        self.assertTrue(any(row["type"] == "Buckler" for row in bash["weapon_options"]))
+        session.choose_melee_strike({"handle": target_view["handle"], "motion": "swing",
+            "weapon_handle": inventory_row["handle"], "shield_bash": True})
+        saved = session.save_encounter_bytes()
+        script = ("import sys;sys.path.insert(0,'src');"
+            "from arena_browser_session import GeneratedArenaSession;"
+            "s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read());"
+            "c=s.active_candidate;p=c.participants[0].native.being;"
+            "b=c.universe.get_object_by_id(sys.argv[1]);"
+            "assert p.shielded_with(c.universe)['left forearm']==b.id;"
+            "assert p.current.body_parts['left hand'] is None;"
+            "assert any(m.action.instrument_id==b.id and m.action.shield_bash "
+            "for r in c.encounter._choice_book._choices.values() for m in r.members);"
+            "print('restored-forearm-buckler-and-bash-choice')")
+        restored = subprocess.run([sys.executable, "-B", "-c", script, buckler.id],
+            input=saved, cwd=ROOT, capture_output=True, check=False, timeout=30)
+        self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
+        self.assertEqual(restored.stdout.decode().strip(),
+                         "restored-forearm-buckler-and-bash-choice")
+
     def test_generated_long_sword_draw_ready_with_shield_blocks_two_handed_use(self):
         session, candidate, player = arena(seed=20261150)
         player.size_category = "medium"

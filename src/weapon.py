@@ -18,6 +18,42 @@ from utils import convert_to_numeric
 NATIVE_DRAW_LOCATION_TAG = "universe.native_draw_location"
 DRAWABLE_WORN_SHEATH = "worn_sheath"
 NATIVE_READY_PREPARATION_TAG = "universe.native_ready_preparation"
+NATIVE_SHIELD_ATTACHMENT_TAG = "universe.native_shield_attachment"
+
+
+def native_forearm_buckler_attachment(shield):
+    """Return explicit owner/arm evidence for a native forearm-worn buckler."""
+    if type(shield) is not WeaponInstance:
+        raise TypeError("shield attachment evidence requires an exact native WeaponInstance")
+    tags = shield.current.tags
+    if type(tags) is not dict:
+        raise ValueError("native shield tags are malformed")
+    record = tags.get(NATIVE_SHIELD_ATTACHMENT_TAG)
+    if record is None:
+        return None
+    if (type(record) is not dict or set(record) != {"kind", "owner_id", "arm"}
+            or record.get("kind") != "forearm_buckler"
+            or type(record.get("owner_id")) is not str or not record["owner_id"]
+            or record.get("arm") not in ("left", "right")
+            or "buckler" not in shield.current.obj_type.casefold()):
+        raise ValueError("native shield attachment record is malformed")
+    return record
+
+
+def author_forearm_buckler_attachment(shield, owner_id, arm):
+    """Author explicit per-instance forearm attachment; the hand remains usable."""
+    if type(shield) is not WeaponInstance:
+        raise TypeError("buckler attachment requires an exact native WeaponInstance")
+    if type(owner_id) is not str or not owner_id or arm not in ("left", "right"):
+        raise ValueError("buckler attachment requires native owner and left/right arm evidence")
+    if "buckler" not in shield.current.obj_type.casefold():
+        raise ValueError("only an explicitly defined buckler can attach to a forearm")
+    if type(shield.current.tags) is not dict:
+        raise ValueError("native shield tags are malformed")
+    if native_forearm_buckler_attachment(shield) is not None:
+        raise ValueError("buckler already has native forearm attachment evidence")
+    shield.current.tags[NATIVE_SHIELD_ATTACHMENT_TAG] = {
+        "kind": "forearm_buckler", "owner_id": owner_id, "arm": arm}
 
 
 def native_weapon_draw_location(weapon):

@@ -165,6 +165,10 @@ def _equipment_hand_resource_keys(encounter, action):
     used = set()
     if data.get('two_handed') is True:
         used.update(represented)
+    elif data.get('shield_bash') is True:
+        hand = data.get('shield_hand')
+        if hand in represented:
+            used.add(hand)
     elif data.get('event_type') == 'ready weapon':
         hand = data.get('hand')
         if hand in represented:

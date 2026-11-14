@@ -132,8 +132,11 @@ class MeleeStrike(Action):
         self.shield_hand = None
         if shield_bash:
             actor = encounter.get_being(actor_id)
-            self.shield_hand = (None if actor is None else next((slot for slot, value
-                in actor.current.body_parts.items() if value == weapon_id), None))
+            location = (None if actor is None else next((slot for slot, value
+                in actor.shielded_with(encounter.universe).items() if value == weapon_id), None))
+            if location in ('left forearm', 'right forearm'):
+                location = location.split()[0] + ' hand'
+            self.shield_hand = location
         self.hit_type = None
         self.combat_result = None
         self._simultaneous_eligibility = None
@@ -185,6 +188,8 @@ class MeleeStrike(Action):
             raise ValueError('instrument is not an instantiated Weapon')
         shield_names = set(encounter.universe.library.weapon_dictionary
                            .get_objects_in_category('Shields'))
+        from weapon import native_forearm_buckler_attachment
+        buckler_attachment = native_forearm_buckler_attachment(weapon)
         if self.shield_bash:
             shield_slots = actor.shielded_with(encounter.universe)
             if (weapon.current.obj_type not in shield_names
@@ -192,8 +197,13 @@ class MeleeStrike(Action):
                 raise ValueError('Shield bash requires an actually equipped native shield')
             if 'tower' in weapon.current.obj_type.casefold():
                 raise ValueError('tower shields cannot be used to Shield bash')
-            if not any(slot in ('left hand','right hand') and value == self.instrument_id
-                       for slot,value in hands.items()):
+            attached_buckler = (buckler_attachment is not None
+                and buckler_attachment['owner_id'] == actor.id
+                and weapon.parent_container_id == actor.id
+                and self.instrument_id in actor.possessions)
+            if (not attached_buckler and not any(
+                    slot in ('left hand','right hand') and value == self.instrument_id
+                    for slot,value in hands.items())):
                 raise ValueError('Shield bash requires a shield mounted on a represented hand')
             tags = actor.current.tags
             dominant = (tags.get('universe.native_dominant_hand')
@@ -206,6 +216,8 @@ class MeleeStrike(Action):
                           if slot in ('left hand', 'right hand')}
         weapon_hand = next((slot for slot, value in occupied_hands.items()
                             if value == self.instrument_id), None)
+        if self.shield_bash and weapon_hand is None and buckler_attachment is not None:
+            weapon_hand = buckler_attachment['arm'] + ' hand'
         if weapon_hand is None:
             raise ValueError('weapon is not held in an explicitly represented hand')
         being_sizes = {'diminutive': 'D', 'tiny': 'T', 'small': 'S',

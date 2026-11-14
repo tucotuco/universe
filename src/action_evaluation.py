@@ -554,10 +554,28 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             data['weapons'] = freeze(od.get('weapons', ()))
             # Preserve category membership and insertion order, including RNG choice.
             shields = shield_names
+            attached_bucklers = []
+            attached_buckler_arms = []
+            from weapon import native_forearm_buckler_attachment
+            for shield_id in od.get('weapons', ()):
+                shield = objects.get(shield_id)
+                if type(shield) is not WeaponInstance:
+                    continue
+                attachment = native_forearm_buckler_attachment(shield)
+                if (attachment is not None and attachment['owner_id'] == obj.id
+                        and object_types.get(shield_id) in shields
+                        and shield.parent_container_id == obj.id
+                        and shield_id in od.get('possessions', ())
+                        and shield.get_position() is None):
+                    attached_bucklers.append(shield_id)
+                    attached_buckler_arms.append(attachment['arm'])
             data['held'] = tuple(v for v in data['body_parts'].values() if v is not None and
                 v in objects and object_types[v] in weapon_names)
-            data['shields'] = tuple(v for v in data['body_parts'].values() if v is not None and
-                v in objects and object_types[v] in shields)
+            data['shields'] = tuple(dict.fromkeys(
+                [v for v in data['body_parts'].values() if v is not None and
+                 v in objects and object_types[v] in shields] + attached_bucklers))
+            data['attached_bucklers'] = tuple(attached_bucklers)
+            data['buckler_arms'] = tuple(attached_buckler_arms)
             freeze(native_data(od['physical_fatigue'], (PhysicalFatigueState,)))
             freeze(od['physiology_id'])
         elif type(obj) is WeaponInstance:
@@ -1171,12 +1189,20 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
             outcome = 'unable_to_act'
         elif outcome is None and target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
-        elif outcome is None and (action.instrument_id not in actor.data['held'] or weapon is None or weapon.hp <= 0):
+        elif outcome is None and (
+                (action.instrument_id not in actor.data['held']
+                 and not (action.data.get('shield_bash') is True
+                          and action.instrument_id in actor.data.get('shields', ())))
+                or weapon is None or weapon.hp <= 0):
             outcome = 'weapon_unavailable'
         elif outcome is None and action.data.get('shield_bash') is True and (
                 action.instrument_id not in actor.data.get('shields', ())
                 or 'tower' in (weapon.data.get('original_type') or '').casefold()
                 or actor.data.get('dominant_hand') not in ('left hand','right hand')):
+            outcome = 'shield_unavailable'
+        elif outcome is None and action.data.get('shield_bash') is True and (
+                action.instrument_id not in actor.data.get('held', ())
+                and action.instrument_id not in actor.data.get('attached_bucklers', ())):
             outcome = 'shield_unavailable'
         elif outcome is None and status != 'in_reach':
             outcome = status
@@ -1229,9 +1255,21 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 offhand_penalty = (3 if action.data.get('shield_bash') is True
                     and action.data.get('shield_hand') != actor.data.get('dominant_hand')
                     and not (actor.data.get('skills', {}).get('ambidexterity', 0) or 0) else 0)
+                buckler_arms = actor.data.get('buckler_arms', ())
+                if action.data.get('two_handed') is True:
+                    weapon_hands = ('left', 'right')
+                else:
+                    weapon_hands = tuple(
+                        hand.removesuffix(' hand') for hand, object_id
+                        in actor.data.get('body_parts', {}).items()
+                        if object_id == action.instrument_id
+                        and hand in ('left hand', 'right hand'))
+                buckler_penalty = (2 if action.data.get('shield_bash') is not True
+                    and any(arm in weapon_hands for arm in buckler_arms) else 0)
                 return attack_hits(roll - block_penalty - yield_penalty,
                     actor.data['weapon_skills'].get(weapon.obj_type, 0)
                     + actor.data['strategy']['attack'] - priority_penalty - offhand_penalty
+                    - buckler_penalty
                     + feint_bonus + pin_bonus
                     + (2 if action.data.get('charge') is True and not charge_intercepted else 0)
                     + (2 if pole_set_charge else 0),

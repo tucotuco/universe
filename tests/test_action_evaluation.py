@@ -174,6 +174,43 @@ class TestActionEvaluation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'tower shields cannot be used'):
             self.enc.prepare_action(action)
 
+    def test_forearm_buckler_preserves_hand_and_applies_same_hand_attack_penalty(self):
+        from weapon import author_forearm_buckler_attachment
+        buckler_id = self.world.make_weapon('Buckler', 'Authored forearm buckler')
+        buckler = self.world.get_object_by_id(buckler_id)
+        self.a.possessions.append(buckler_id)
+        self.a.weapons.append(buckler_id)
+        buckler.parent_container_id = self.a.id
+        author_forearm_buckler_attachment(buckler, self.a.id, 'right')
+        self.assertEqual(self.a.current.body_parts['right hand'], self.w1)
+        self.assertEqual(self.a.shielded_with(self.world)['right forearm'], buckler_id)
+        action = self.strike()
+        self.schedule(action)
+        snapshot = self.snapshot(math.ceil(action.end_time))
+        actor_view = snapshot.entity(self.a.id)
+        self.assertEqual(actor_view.data['buckler_arms'], ('right',))
+        self.assertIn(buckler_id, actor_view.data['shields'])
+        result = self.scripted(snapshot, [10])
+        self.assertEqual(result.proposals[0].outcome, 'miss')
+
+    def test_forearm_buckler_can_make_its_native_shield_bash(self):
+        from weapon import author_forearm_buckler_attachment
+        buckler_id = self.world.make_weapon('Spiked buckler', 'Authored attached bash buckler')
+        buckler = self.world.get_object_by_id(buckler_id)
+        self.a.possessions.append(buckler_id)
+        self.a.weapons.append(buckler_id)
+        buckler.parent_container_id = self.a.id
+        author_forearm_buckler_attachment(buckler, self.a.id, 'left')
+        self.a.current.tags['universe.native_dominant_hand'] = 'right hand'
+        action = MeleeStrike(self.enc, self.a.id, self.b.id, buckler_id,
+                             motion='swing', reach=2, shield_bash=True)
+        self.schedule(action)
+        snapshot = self.snapshot(math.ceil(action.end_time))
+        self.assertEqual(action.shield_hand, 'left hand')
+        self.assertIn(buckler_id, snapshot.entity(self.a.id).data['shields'])
+        result = self.scripted(snapshot, [10])
+        self.assertEqual(result.proposals[0].outcome, 'miss')
+
     def test_native_one_second_touch_uses_opposed_attack_totals_without_damage(self):
         self.b.set_position(CartesianPosition(.2, 0, 0))
         self.enc.enable_transactional_progression(quiescent=True)
