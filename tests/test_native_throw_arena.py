@@ -101,6 +101,44 @@ class NativeThrowTests(unittest.TestCase):
             and row.effect.component == 'critical_bypass']
         self.assertEqual(len(critical_damage), 1)
 
+    def test_thrown_weapon_hit_applies_common_snapshot_shield_and_armor_effects(self):
+        world, enc, actor, _projectile, rng, original = build_native_scene(seed=116)
+        book = enc.__dict__['_choice_book']
+        book.undo(book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition('Human')
+        target = BeingInstance(definition, 'Armored Target', id='throw-demo/armored-target')
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        world.add_object(target);enc.add_being(target.id)
+        armor_id = world.make_armor_for_being(target.id, 'Leather armor', 'Target Armor')
+        shield_id = world.make_weapon_for_being(target.id, 'Small shield', 'Target Shield')
+        world.arm_being(target.id, shield_id, 'shield hand')
+        enc.add_object(armor_id);enc.add_object(shield_id)
+        dagger_id = world.make_weapon_for_being(actor.id, 'Dagger', 'Thrown Dagger')
+        actor.set_body_part_holds_object('right hand', dagger_id)
+        enc.add_object(dagger_id)
+        action = ThrowAction(world, actor.id, dagger_id, enc.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id='throw-demo/protected-hit')
+        enc.schedule_choice((action,))
+        rng.state = random.Random(116).getstate()
+        enc.step(4)
+        for _ in range(4):
+            if world.get_object_by_id(dagger_id).__dict__['_projectile_flight'].impact_outcome is not None:
+                break
+            enc.step(1)
+        flight = world.get_object_by_id(dagger_id).__dict__['_projectile_flight']
+        self.assertEqual(flight.impact_outcome, 'hit')
+        shield_effects = atomic_publication.target_effects_from(
+            world.get_object_by_id(shield_id), action.id)
+        armor_effects = atomic_publication.target_effects_from(
+            world.get_object_by_id(armor_id), action.id)
+        self.assertTrue(any(row.effect.__class__.__name__ == 'ProtectionEffect'
+            and row.effect.layer == 'shield' for row in shield_effects))
+        self.assertTrue(any(row.effect.__class__.__name__ == 'ProtectionEffect'
+            and row.effect.layer == 'armor' for row in armor_effects))
+        self.assertTrue(any(row.effect.__class__.__name__ == 'DamageEffect'
+            and row.effect.component == 'shield' for row in shield_effects))
+
     def test_targeted_throw_aims_at_explicit_being_point_without_body_geometry(self):
         world, enc, actor, projectile, _rng, original = build_native_scene()
         book = object.__getattribute__(enc, '__dict__')['_choice_book']

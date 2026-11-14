@@ -21,15 +21,42 @@ class TestArenaPersistence(unittest.TestCase):
         return tuple(TestArenaPersistence._tuplify(row) for row in value) if type(value) is list else value
 
     def _new_moving_session(self, *, ground_loadout_profile=None):
-        session = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+        seed = 20261026 if ground_loadout_profile is not None else 20261107
+        session = GeneratedArenaSession(root_seed_factory=lambda: seed,
                                        ground_loadout_profile=ground_loadout_profile)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
         candidate = session.active_candidate
         position = candidate.participants[0].native.being.get_position()
-        address = max(candidate.arena_map.layout.addresses(), key=lambda cell:
-            math.dist(candidate.arena_map.layout.center_position(cell, z=position.z).as_tuple(),
-                      position.as_tuple()))
+        layout = candidate.arena_map.layout
+        if ground_loadout_profile is None:
+            address = max(layout.addresses(), key=lambda cell:
+                math.dist(layout.center_position(cell, z=position.z).as_tuple(),
+                          position.as_tuple()))
+        else:
+            origin = layout.cell_at_position(position)
+            object_cells = {HexAddress(item.column, item.row)
+                            for item in candidate.ground_objects}
+            occupied_cells = {layout.cell_at_position(row.native.being.get_position())
+                for row in candidate.participants[1:]}
+            from movement_intent import MovementIntentRefusal, _movement_hexes
+            clear_routes = []
+            for cell in layout.addresses():
+                if cell == origin or cell in occupied_cells:
+                    continue
+                destination = layout.center_position(cell, z=position.z)
+                try:
+                    route = _movement_hexes(position, destination, layout) - {origin}
+                except MovementIntentRefusal:
+                    continue
+                if not route & object_cells and not route & occupied_cells:
+                    clear_routes.append((math.dist(destination.as_tuple(), position.as_tuple()), cell))
+            # Keep the route long enough to remain a pending movement choice
+            # after the first saved boundary, while avoiding every represented
+            # ground Object and other Being along its generated hex path.
+            address = max(clear_routes, default=(None, None))[1]
+            if address is None:
+                raise AssertionError("ground-object fixture needs a representable clear path")
         session.choose_destination({"column": address.column, "row": address.row,
                                    "rate": "walk", "facing_policy": "turn"})
         return session
@@ -143,7 +170,7 @@ print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple()
             continued_candidate.encounter.step(1)
             encounter.step(1)
             self.assertIn(projectile.__dict__["_projectile_flight"].impact_outcome,
-                          ("hit", "miss", "fatal"))
+                          ("hit", "miss"))
             self.assertEqual(continued_candidate.encounter.time, encounter.time)
             self.assertEqual(continued_projectile.get_position(), projectile.get_position())
             self.assertEqual(continued_projectile.__dict__["_projectile_flight"],
@@ -393,7 +420,10 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
 
     def test_pending_pickup_save_load_keeps_exact_one_second_boundary(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
-        source = GeneratedArenaSession(root_seed_factory=lambda: 6060,
+        # This generated seed places the selected Dagger adjacent to the
+        # player with a clear, represented route, so the strict movement
+        # validator does not need inferred clearance through other Objects.
+        source = GeneratedArenaSession(root_seed_factory=lambda: 6061,
                                        ground_loadout_profile=profile)
         source.generate({"starting_experience": "10000", "width_cells": "10", "height_cells": "5"})
         candidate = source.active_candidate
