@@ -3495,6 +3495,59 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn('/api/generated/pause',page)
         self.assertIn('/api/generated/resume',page)
 
+    def test_opt_in_scenario_selection_and_exact_fresh_process_continuation(self):
+        scenario = json.loads((ROOT / "examples/arena_scenarios/ordinary-dagger-draw.json")
+                              .read_text(encoding="utf-8"))
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 20261126,
+                                             authored_draw_scenario=scenario)
+        self.assertTrue(self.session.public_view()["playable_scenario_available"])
+        _, page = self.request("/")
+        self.assertIn("Playable scenario", page)
+        self.assertIn("Ordinary Dagger Draw · authored carried Dagger", page)
+        self.assertIn("authored_scenario:$('playableScenario').value||null", page)
+        status, ordinary = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "authored_scenario": None, "root_seed": "20261126"})
+        self.assertEqual(status, 200)
+        self.assertIsNone(ordinary["authored_scenario_id"])
+        self.assertFalse(any(item["name"] == "Drawable Dagger"
+                             for item in ordinary["character"]["inventory"]["items"]))
+        status, state = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "unequipped", "opponent_strategy": "none",
+            "authored_scenario": "ordinary-dagger-draw", "root_seed": "20261126"})
+        self.assertEqual(status, 200)
+        self.assertEqual(state["authored_scenario_id"], "ordinary-dagger-draw")
+        self.assertEqual(state["player"]["position_meters"]["z"], 0)
+        weapon = next(item for item in state["character"]["inventory"]["items"]
+                      if item["name"] == "Drawable Dagger")
+        self.assertEqual(weapon["status"], "carried; not readied")
+        status, pending = self.request("/api/generated/ready-weapon", {
+            "handle": weapon["handle"], "hand": "right hand"})
+        self.assertEqual((status, pending["ready_weapon_action"]["status"]), (200, "executing"))
+        with tempfile.TemporaryDirectory(prefix="arena-scenario-fresh-process-") as temp:
+            pending_path = Path(temp) / "pending.json"
+            completed_path = Path(temp) / "completed.json"
+            pending_path.write_bytes(self.session.save_encounter_bytes())
+            env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1",
+                       PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'examples'}:{ROOT / 'tests'}")
+            pending_code = """import json,sys; from pathlib import Path; from arena_browser_session import GeneratedArenaSession; s=GeneratedArenaSession(); v=s.load_encounter_bytes(Path(sys.argv[1]).read_bytes()); assert s._authored_scenario_id=='ordinary-dagger-draw'; assert v['ready_weapon_action']['status']=='executing'; assert v['ready_weapon_action']['seconds_remaining']==2; s.advance_one_second(); s.advance_one_second(); v=s.public_view(); assert v['ready_weapon_action']['status']=='completed'; assert v['authored_scenario_id']=='ordinary-dagger-draw'; Path(sys.argv[2]).write_bytes(s.save_encounter_bytes()); print(json.dumps({'scenario':v['authored_scenario_id'],'time':v['time_seconds'],'draw':v['ready_weapon_action']['status'],'held':v['character']['anatomy']['hands'][1]['occupancy']}))"""
+            first = subprocess.run([sys.executable, "-B", "-c", pending_code,
+                                    str(pending_path), str(completed_path)],
+                                   cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(json.loads(first.stdout), {
+                "scenario": "ordinary-dagger-draw", "time": 2, "draw": "completed", "held": "occupied"})
+            restore_code = """import json,sys; from pathlib import Path; from arena_browser_session import GeneratedArenaSession; s=GeneratedArenaSession(); v=s.load_encounter_bytes(Path(sys.argv[1]).read_bytes()); assert s._authored_scenario_id=='ordinary-dagger-draw'; assert v['ready_weapon_action']['outcome']=='success'; assert v['character']['inventory']['items'][0]['status']=='readied in right hand'; print(json.dumps({'scenario':v['authored_scenario_id'],'time':v['time_seconds'],'draw':v['ready_weapon_action']['outcome'],'item':v['character']['inventory']['items'][0]['status']}))"""
+            second = subprocess.run([sys.executable, "-B", "-c", restore_code,
+                                     str(completed_path)], cwd=ROOT, env=env,
+                                    capture_output=True, text=True, timeout=60)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(json.loads(second.stdout), {
+                "scenario": "ordinary-dagger-draw", "time": 2, "draw": "success",
+                "item": "readied in right hand"})
+
     def test_opt_in_draw_scenario_http_first_choice_and_forged_stale_refusal(self):
         from arena_authored_draw_scenario import validate_scenario
 

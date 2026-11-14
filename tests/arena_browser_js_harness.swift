@@ -242,6 +242,7 @@ globalThis.__done=false;globalThis.__failure='';globalThis.__result='';
   before=movementCount();await __clickMap(mapView.toX(opponent.position_meters.x),mapView.toY(opponent.position_meters.y));
   body=__text(__element('dialogBody'));
   if(movementCount()!==before||!body.includes(opponent.type)||!body.includes(opponent.present_state)||body.includes('Total native XP')||body.includes('inventory'))throw Error('opponent popup exceeded observer projection or changed movement');
+  const targetActions=__find(__element('dialogBody'),'actionSelector');if(!targetActions||!__text(targetActions).includes(`Your Actions targeting ${opponent.name}`)||!__text(targetActions).includes(`${currentView.action_catalog.entries.length} potential`))throw Error('opponent inspection did not expose the player-authorized Action catalog for that target');
   await __element('dialogClose').listeners.click();
   const shield=currentView.entities.find(e=>e.category==='object'&&e.type.toLowerCase()==='small shield');
   if(!shield)throw Error('Small Shield evidence missing');

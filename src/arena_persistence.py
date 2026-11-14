@@ -9,8 +9,8 @@ import math
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/5'
-_PREVIOUS_SCHEMA = 'universe.generated-arena-save/4'
+SCHEMA = 'universe.generated-arena-save/6'
+_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
 MAX_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 
@@ -103,6 +103,7 @@ def _session_record(session, native_wire):
         'initial_equipment_provenance':list(candidate.initial_equipment_provenance),
         'equipment_mode':candidate.equipment_mode,
         'opponent_strategy':session._opponent_strategy,
+        'authored_scenario_id':session._authored_scenario_id,
     }
 
 
@@ -129,7 +130,7 @@ def decode(wire):
     except (UnicodeDecodeError,json.JSONDecodeError,RecursionError) as exc:
         raise ArenaSaveRejected(f'Arena save is not valid UTF-8 JSON: {exc}') from exc
     if (type(data) is not dict or set(data)!=_FIELDS
-            or data['schema'] not in (SCHEMA, _PREVIOUS_SCHEMA)):
+            or data['schema'] not in (SCHEMA, *sorted(_PREVIOUS_SCHEMAS))):
         raise ArenaSaveRejected('unknown Arena save schema or field set')
     payload={key:data[key] for key in data if key!='sha256'}
     if type(data['sha256']) is not str or hashlib.sha256(_canonical(payload)).hexdigest()!=data['sha256']:
@@ -147,6 +148,8 @@ def decode(wire):
         'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
         'initial_equipment_provenance','equipment_mode'}
     if data['schema'] == SCHEMA:
+        required.update(('opponent_strategy', 'authored_scenario_id'))
+    elif data['schema'] == 'universe.generated-arena-save/5':
         required.add('opponent_strategy')
     if type(s) is not dict or set(s)!=required:
         raise ArenaSaveRejected('Arena session metadata has unknown or missing fields')
@@ -172,10 +175,14 @@ def decode(wire):
             or type(s['initial_equipment_provenance']) is not list
             or s['equipment_mode'] not in ('equipped','unequipped')):
         raise ArenaSaveRejected('Arena starting equipment provenance is malformed')
-    if data['schema'] == _PREVIOUS_SCHEMA:
+    if data['schema'] in _PREVIOUS_SCHEMAS:
+        s.setdefault('authored_scenario_id', None)
+    if data['schema'] == 'universe.generated-arena-save/4':
         s['opponent_strategy'] = 'none'
     if s['opponent_strategy'] not in ('none', 'attack_only', 'defense_only'):
         raise ArenaSaveRejected('Arena opponent strategy is unsupported')
+    if s['authored_scenario_id'] not in (None, 'ordinary-dagger-draw'):
+        raise ArenaSaveRejected('Arena authored scenario provenance is unsupported')
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)
         except (TypeError,ValueError) as exc:raise ArenaSaveRejected('movement plan encoding is invalid') from exc

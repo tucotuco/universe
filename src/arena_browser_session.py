@@ -156,6 +156,7 @@ class GeneratedArenaSession:
         self._root_seed_factory = root_seed_factory or (lambda: secrets.randbits(256))
         self._lock = threading.RLock()
         self._active = None
+        self._authored_scenario_id = None
         self._encounter_name = None
         self._player_name = None
         self._rng_cursor = None
@@ -437,6 +438,17 @@ class GeneratedArenaSession:
                 layout,0,tuple(meta['ground_loadout_provenance']),
                 tuple(meta['initial_equipment_provenance']),meta['equipment_mode'])
             self._validate_initial_equipment_provenance(candidate)
+            if meta.get('authored_scenario_id') == 'ordinary-dagger-draw':
+                from weapon import WeaponInstance
+                from arena_authored_draw_scenario import native_scenario_source
+                player = universe.get_object_by_id(meta['player_id'])
+                authored = [universe.get_object_by_id(object_id) for object_id in player.possessions]
+                if not any(type(item) is WeaponInstance and item.current.obj_type == 'Dagger'
+                           and native_scenario_source(item) == {'scenario_id': 'ordinary-dagger-draw',
+                                                               'owner_id': player.id}
+                           for item in authored):
+                    raise ArenaBrowserRequestError(
+                        "Saved authored scenario provenance does not match its native Dagger facts")
             plan_wire=(None if meta['movement_plan_base64'] is None else
                 base64.b64decode(meta['movement_plan_base64'],validate=True))
             plan_data=None if plan_wire is None else decode_plan(plan_wire)
@@ -456,7 +468,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError(f"Saved Arena file was refused: {exc}") from exc
 
         with self._lock:
-            old=(self._active,self._encounter_name,self._player_name,self._rng_cursor,
+            old=(self._active,self._authored_scenario_id,self._encounter_name,self._player_name,self._rng_cursor,
                  self._movement_plan,self._movement_sequence,self._display_names,
                  self._view_handles,self._selected_entity_handle,self._movement_outcome,
                  self._opponent_strategy,self._opponent_attack_refusal,
@@ -464,7 +476,7 @@ class GeneratedArenaSession:
                  self._pickup_action_outcome,self._ready_weapon_action_id,
                  self._ready_weapon_action_outcome,self._ready_weapon_end_time)
             try:
-                self._active=candidate;self._encounter_name=meta['encounter_name']
+                self._active=candidate;self._authored_scenario_id=meta.get('authored_scenario_id');self._encounter_name=meta['encounter_name']
                 self._player_name=meta['player_name'];self._rng_cursor=rng_owner
                 self._opponent_strategy=meta['opponent_strategy']
                 self._opponent_attack_refusal="restored"
@@ -511,7 +523,7 @@ class GeneratedArenaSession:
                     result=self._view_unlocked()
                 return result
             except BaseException:
-                (self._active,self._encounter_name,self._player_name,self._rng_cursor,
+                (self._active,self._authored_scenario_id,self._encounter_name,self._player_name,self._rng_cursor,
                  self._movement_plan,self._movement_sequence,self._display_names,
                  self._view_handles,self._selected_entity_handle,self._movement_outcome,
                  self._opponent_strategy,self._opponent_attack_refusal,
@@ -571,6 +583,7 @@ class GeneratedArenaSession:
                 "movement_reason": _MOVEMENT_DISABLED,
                 "starter_ground_equipment_available": self._ground_loadout_profile is not None,
                 "default_equipment_mode": self._default_equipment_mode,
+                "playable_scenario_available": self._authored_draw_scenario is not None,
             }
         candidate = self._active
         from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
@@ -827,6 +840,7 @@ class GeneratedArenaSession:
             })
         return {
             "state": "active",
+            "authored_scenario_id": self._authored_scenario_id,
             "starter_ground_equipment_available": self._ground_loadout_profile is not None,
             "default_equipment_mode": candidate.equipment_mode,
             "save_available": True,
@@ -4731,7 +4745,7 @@ class GeneratedArenaSession:
     def generate(self, payload):
         expected = {"starting_experience", "width_cells", "height_cells"}
         allowed_keys = expected | {"ground_equipment", "equipment_mode", "opponent_strategy",
-                                  "root_seed", "size_categories"}
+                                  "root_seed", "size_categories", "authored_scenario"}
         if (type(payload) is not dict or not expected <= set(payload)
                 or set(payload) - allowed_keys):
             raise ArenaBrowserRequestError("Generate requires XP, dimensions, and supported Arena options")
@@ -4764,6 +4778,16 @@ class GeneratedArenaSession:
         equipment_mode = payload.get("equipment_mode", self._default_equipment_mode)
         if equipment_mode not in ("equipped", "unequipped"):
             raise ArenaBrowserRequestError("equipment_mode must be equipped or unequipped")
+        scenario_id = payload.get("authored_scenario", self._authored_draw_scenario.get("scenario_id")
+                                  if self._authored_draw_scenario is not None else None)
+        if scenario_id not in (None, "ordinary-dagger-draw"):
+            raise ArenaBrowserRequestError("authored_scenario is not an available opt-in scenario")
+        if scenario_id is not None and self._authored_draw_scenario is None:
+            raise ArenaBrowserRequestError("the selected authored scenario is unavailable in this Arena server")
+        if scenario_id is not None and equipment_mode != "unequipped":
+            raise ArenaBrowserRequestError("the authored Dagger Draw scenario requires unequipped protagonists")
+        if scenario_id is not None and opponent_strategy != "none":
+            raise ArenaBrowserRequestError("the authored Dagger Draw scenario requires no autonomous opponent strategy")
         if opponent_strategy == "attack_only" and equipment_mode != "equipped":
             raise ArenaBrowserRequestError(
                 "Attack only requires the Arena's native equipped Being kit; choose equipped protagonists.")
@@ -4783,7 +4807,7 @@ class GeneratedArenaSession:
                 candidate.participants[0].native.being.size_category=size_categories["player"]
                 candidate.participants[1].native.being.size_category=size_categories["opponent"]
                 self._validate_initial_equipment_provenance(candidate)
-                if self._authored_draw_scenario is not None:
+                if scenario_id is not None:
                     from arena_authored_draw_scenario import author_scenario
                     author_scenario(candidate, self._authored_draw_scenario)
                 encounter = candidate.encounter
@@ -4806,6 +4830,7 @@ class GeneratedArenaSession:
                     "Arena generation failed; the previous active session was preserved.") from exc
 
             self._active = candidate
+            self._authored_scenario_id = scenario_id
             self._encounter_name = encounter.name
             self._player_name = candidate.participants[0].native.being.name
             self._rng_cursor = rng_cursor
@@ -4837,6 +4862,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("New Encounter accepts an empty request")
         with self._lock:
             self._active = None
+            self._authored_scenario_id = None
             self._encounter_name = self._player_name = None
             self._rng_cursor = None
             self._opponent_strategy = "none"

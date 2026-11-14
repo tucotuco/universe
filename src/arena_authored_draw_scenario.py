@@ -7,6 +7,7 @@ import copy
 
 SCENARIO_FORMAT = "universe-arena-authored-draw-scenario"
 SCENARIO_ID = "ordinary-dagger-draw"
+SCENARIO_SOURCE_TAG = "universe.arena_initial_scenario_source"
 
 
 class ArenaDrawScenarioRefusal(ValueError):
@@ -77,6 +78,8 @@ def author_scenario(candidate, value):
     player.possessions.append(object_id)
     weapon.parent_container_id = player.id
     author_worn_sheath_draw_location(weapon, player.id)
+    weapon.current.tags[SCENARIO_SOURCE_TAG] = {
+        "scenario_id": SCENARIO_ID, "owner_id": player.id}
     evidence = ArenaPerceptionEvidence(player.id, object_id, "object", weapon.name,
         "Dagger", None, "carried", 0, float(candidate.encounter.time),
         owner_id=player.id, equipment_status="carried")
@@ -94,3 +97,18 @@ def author_scenario(candidate, value):
                                            "__dict__")["_arena_perception_ledger"].current)):
         raise ArenaDrawScenarioRefusal("authored native Dagger identity or observer custody failed validation")
     return weapon
+
+
+def native_scenario_source(weapon):
+    """Read owner-linked generation provenance retained after Draw commits."""
+    from weapon import WeaponInstance
+    if type(weapon) is not WeaponInstance or type(weapon.current.tags) is not dict:
+        return None
+    record = weapon.current.tags.get(SCENARIO_SOURCE_TAG)
+    if record is None:
+        return None
+    if (type(record) is not dict or set(record) != {"scenario_id", "owner_id"}
+            or record.get("scenario_id") != SCENARIO_ID
+            or type(record.get("owner_id")) is not str or not record["owner_id"]):
+        raise ArenaDrawScenarioRefusal("authored scenario source tag is malformed")
+    return dict(record)
