@@ -1,6 +1,6 @@
 # U-CAP-006 — Tactical weapon control and deception report
 
-**Status:** ACTIVE. Supported implementation and verification are committed, but acceptance criterion A remains incomplete pending the landing-location rule clarification below. Keep this report and assignment in the active directories until ChatGPT accepts and consumes the closeout.
+**Status:** ACTIVE. The adopted post-roll landing choice is implemented through native state, generated Arena controls, atomic custody transfer, inspection receipts, and fresh-process persistence. Acceptance criterion A remains incomplete only for a successful Disarm margin of 1–2, where the zero-hex maximum leaves no unoccupied legal destination. Keep this report and assignment in the active directories until ChatGPT accepts and consumes the closeout.
 **Assignment:** [U-CAP-006](../assignments/U-CAP-006.md)
 **Repository:** Universe repository, branch `main`
 **Publication:** No push or history rewrite performed.
@@ -11,27 +11,38 @@
 - End: `2026-11-14T01:28:46-08:00` (captured immediately before closeout; `2026-11-14T09:28:46Z`).
 - Elapsed: `PT1H8M36S` (calculated from the recorded start and end).
 
+### Current continuation
+
+- Start: `2026-11-14T09:06:44-08:00` (`2026-11-14T17:06:44Z`), captured when this execution resumed.
+- End: `2026-11-14T09:55:26-08:00` (`2026-11-14T17:55:26Z`), captured immediately before documentation closeout.
+- Elapsed: `PT48M42S` (calculated from the captured start and end).
+- User decision applied: choose a Disarm landing **after** the opposed roll and persist the pending landing choice.
+- The choice is attached to the exact Weapon Object as a strict native tag; it records the committed source Action, actor, prior holder, opposed margin, maximum distance, and origin cell. Scheduling and Encounter progression stop until the choice is resolved. Generated Arena lists only vacant represented cells within the rolled range, uses the player's opaque observed Weapon handle, and posts the selected cell through `/api/generated/disarm-landing`.
+- The selected cell is applied in a same-time atomic publication: the prior holder's hand, weapon inventory and possession references are cleared; the same Weapon receives the chosen represented position; old Ready state and the pending tag are cleared. A typed `DisarmLandingReceipt` authorizes inspection of the same-boundary spatial/custody transition and is restored only after source Action, margin, cell, map and Object checks.
+- The same publication refreshes each participating observer's existing evidence for this already-visible Weapon, so the generated Arena immediately shows the selected ground cell. A regression assertion checks the post-choice view; pending and resolved checkpoint restoration still validate both current observer ledgers.
+- A winning margin of 1–2 gives `maximum_landing_hexes == 0`. The origin is occupied by the defender, and no other cell is in range. Because adopted text and criterion A disallow occupied landings, the system preserves the pending state and refuses progression rather than inventing an exception or destination. This is the only presently identified user decision needed for Disarm acceptance.
+
 ## Acceptance matrix
 
 | Criterion | Result | Evidence and bounded cases |
 |---|---|---|
-| A. Disarm and custody | **Partial; farther landing unresolved** | Armed and unarmed opposed rolls, grappled +5 exception, adopted Ranseur/Flail/conditional Lasso/Whip bonuses, gauntlet immunity, explicit owner-linked Locked-gauntlet attachment refusal, identity-preserving ground drop, margin-five unarmed same-ID transfer to a selected empty hand, Ready-state clearing, custody conflict and later weapon unavailability are implemented. Generated HTTP controls and fresh-process Save/Load cover ground-drop and hand-transfer routes. Exact farther landing selection/clearance and its relationship to post-roll margin are not implemented; see the decision required below. |
-| B. Break weapon and Feint | **Implemented for supported facts; bounded branches** | Break weapon covers an opponent attacking the actor, attacking a third Being, and defending with a designated Parry weapon; uses the opponent's actual weapon, swing timing, native hardness/HP, interruption and later-boundary availability. Successful and failed attempts, Parry linkage persistence and generated HTTP continuation are tested. Magic-target saves fail closed because saving bonuses are absent. Unarmed Break remains unavailable because native body durability as a weapon is not represented. Armed/unarmed Feint uses adopted timing and ordinary attack resolution without Feint damage, applies the one-use same-target follow-up bonus, and is shown in generated Arena controls with fresh-load coverage. |
+| A. Disarm and custody | **Partial only at zero distance** | Armed and unarmed opposed rolls, grappled +5 exception, adopted Ranseur/Flail/conditional Lasso/Whip bonuses, gauntlet immunity, explicit owner-linked Locked-gauntlet attachment refusal, margin-five unarmed same-ID transfer to a selected empty hand, Ready-state clearing, custody conflict and later weapon unavailability are implemented. Positive-range drops now resolve after the roll through a persisted, vacancy-checked destination choice and a same-ID atomic transfer. Generated HTTP and fresh-process tests cover pending and resolved choices. A margin of 1–2 has a zero-hex limit but no vacant destination; the occupied-origin conflict is the remaining rule blocker. |
+| B. Break weapon and Feint | **Implemented for supported facts; bounded branches** | Break weapon covers an opponent attacking the actor, attacking a third Being, and defending with a designated Parry weapon; uses the opponent's actual weapon, swing timing, native hardness/HP, interruption and later-boundary availability. Successful and failed attempts, Parry linkage persistence and generated HTTP continuation are tested. Magic-target saves fail closed because saving bonuses are absent. Unarmed Break remains unavailable because native body durability as a weapon is not represented. Armed/unarmed Feint uses adopted timing and ordinary attack resolution without Feint damage, applies the one-use same-target follow-up bonus, and is shown in generated Arena controls with fresh-load coverage. A focused test confirms choosing a different Action forfeits the benefit. |
 | C. Held-Object Grab and Wrest | **Implemented for adopted rules** | Distinct Object-Grab defense/DC, one-second Strength contest, same-ID custody transfer, ties/failures, release/interruption, stale custody, holder weapon conflict, simultaneous same-snapshot three-Being co-holding, late-fault rollback and fresh-process persistence are covered. No later contests between simultaneous co-holders were invented. |
 | D. Generated Arena and persistence | **Implemented for the supported variants** | Shipped JavaScript exposes opaque-handle controls for armed/unarmed Disarm, Break weapon, armed/unarmed Feint, Object Grab and Wrest. Automated generated-Arena HTTP tests execute native Choices and verify the exact same Object identity across saves and fresh Python processes. Pending, resolved, failure, interruption, custody, readiness, receipts, and RNG continuation are covered by focused tests. Chrome in this execution was used only to open/render the generated Arena page; no manual combat outcome is claimed. |
 
-**Overall:** Do not close U-CAP-006 yet. A farther Disarm landing is an explicit acceptance requirement and the adopted rule does not say when the exact landing cell is chosen relative to the opposed roll or how an over-range selection resolves. Current baseline drops the Object in the defender's hex; this does not demonstrate the assigned vacant-destination clearance requirement.
+**Overall:** Do not close U-CAP-006 yet. The user resolved destination timing by selecting after the opposed roll; exact over-range selection is therefore not applicable. Criterion A is blocked only by the adopted zero-distance limit for margins 1–2 versus the assignment's vacant-cell requirement.
 
-## Decision required to complete criterion A
+## Remaining rule decision
 
-The adopted Disarm text provides a maximum distance of one hex per full three points of winning margin, but no exact destination-selection phase. The assignment also requires a specified destination and says an occupied/unknown landing location is not legal. The current rule does not establish whether the target defender's occupied hex is a permitted default, or how to settle a farther destination selected before the random margin is known.
+The post-roll persisted choice has been implemented as directed. One edge still has no legal destination: a winning margin of 1 or 2 authorizes a maximum of zero hexes, while the defender occupies the only zero-distance hex and criterion A prohibits occupied landing locations.
 
-Minimal choices:
+Choose one:
 
-1. **Declare a destination before the contest.** If the contest margin permits it, land at that vacant hex; otherwise clamp to the nearest vacant hex on the selected direction within the permitted radius (and use an explicitly defined fallback if none exists). This is a one-boundary transaction, but adds an over-range/fallback rule.
-2. **Choose after the contest.** Resolve the opposed roll, then require selection of a vacant in-range hex before publishing custody. This preserves the full post-roll choice, but adds a pending resolution choice and its timing, interruption and Save/Load state.
+1. **Permit the defender's origin hex only when the limit is zero.** The same Weapon lands on the occupied hex without displacement; this is a narrow exception to the vacancy requirement.
+2. **Keep the no-occupied-cell rule.** A successful Disarm with a zero-hex limit cannot release the Weapon; define the exact result (for example, no custody change or a failed landing) before resuming progression.
 
-Please also confirm whether the defender's occupied hex is allowed as a zero-distance landing. The assignment's clearance clause currently excludes occupied landing locations, while the existing baseline/test route uses the defender's hex. No destination mechanic or occupancy exception is assumed pending this decision. All independent implementations and tests are complete for this interval.
+All independent supported-range implementation, tests, persistence and regression work is complete. The answer is needed only to resolve this zero-distance contradiction; no other branch depends on it.
 
 ## Implementation and runnable Arena evidence
 
@@ -43,56 +54,27 @@ Please also confirm whether the defender's occupied hex is allowed as a zero-dis
 
 ## Focused verification
 
-Final combined cohort command:
+Latest focused cohort: `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B`, using `unittest.TestSuite` and `unittest.TextTestRunner(verbosity=1)` over the 34 explicit methods listed below. The final rerun after adding post-choice observer-view assertions completed **34 tests in 49.835 seconds**, 0 failures, 0 errors.
 
-```text
-PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest <32 explicitly named tests>
-```
+This cohort verifies all independently supported U-CAP-006 outcomes after the post-roll landing implementation. Exact test methods:
 
-Result: **32 tests passed in 51.495 seconds.** The 32 tests were:
+- Native Disarm: `test_native_disarm_persists_post_roll_landing_then_releases_same_weapon_atomically`, `test_successful_sub_three_margin_has_no_clear_legal_landing`, `test_disarm_applies_adopted_ranseur_bonus`, `test_gauntlet_cannot_be_disarmed_without_random_draw`, `test_weapon_attached_to_authored_locked_gauntlet_cannot_be_disarmed`, `test_native_unarmed_disarm_uses_arm_profile_and_opposed_attack_roll`, `test_native_unarmed_disarm_takes_same_weapon_only_at_five_point_margin`, `test_native_unarmed_disarm_hand_choice_drops_on_margin_below_five`, `test_grappled_disarm_defender_loses_the_five_point_defense_bonus`, and `test_disarm_custody_loss_blocks_accepted_later_attack_with_that_weapon`.
+- Break weapon: `test_native_break_weapon_uses_pending_attack_motion_and_disables_it_next_boundary`, `test_native_break_weapon_failed_attempt_preserves_both_weapons`, `test_break_weapon_against_opponent_attacking_a_third_being_omits_their_damage`, `test_break_weapon_automatically_hits_opponents_designated_parry_weapon`, and `test_break_weapon_fails_closed_for_magic_target_without_magic_saving_facts`.
+- Feint: `test_native_armed_feint_is_half_timing_nondamaging_and_bonus_is_one_followup`, `test_native_unarmed_feint_uses_authored_arm_profile_and_same_target_followup`, `test_armed_feint_requires_advanced_weapon_skill_before_choice_mutation`, and `test_selected_different_action_forfeits_successful_feint`.
+- Generated Arena: `test_disarm_http_pending_save_load_commits_exact_weapon_to_ground`, `test_generated_arena_exposes_and_accepts_unarmed_disarm`, `test_break_weapon_http_choice_restores_pending_actual_weapon_action`, `test_armed_feint_uses_browser_route_and_pending_save_load`, and `test_unarmed_feint_is_composed_by_shipped_ui_and_survives_fresh_load`.
+- Object Grab/Wrest: `test_object_grab_uses_holder_defense_and_plus_five_dc`, `test_generated_http_grab_and_fresh_process_wrest_preserves_object_identity`, `test_failed_and_tied_wrest_leave_same_object_in_holder_hand`, `test_holder_weapon_attack_competing_with_wrest_preserves_custody`, `test_same_boundary_object_grabs_establish_independent_receipts`, `test_three_being_simultaneous_wrest_shares_same_object_and_persists`, `test_wrest_late_publication_fault_restores_custody_receipts_and_rng`, `test_same_boundary_disarm_prevents_wrest_transfer`, `test_earlier_disarm_invalidates_accepted_future_wrest_with_three_beings`, and `test_cancelled_pending_wrest_keeps_receipt_custody_and_rng`.
 
-- `TestActionEvaluation.test_native_disarm_releases_same_weapon_into_defender_hex_atomically`
-- `TestActionEvaluation.test_disarm_applies_adopted_ranseur_bonus`
-- `TestActionEvaluation.test_gauntlet_cannot_be_disarmed_without_random_draw`
-- `TestActionEvaluation.test_weapon_attached_to_authored_locked_gauntlet_cannot_be_disarmed`
-- `TestActionEvaluation.test_native_unarmed_disarm_uses_arm_profile_and_opposed_attack_roll`
-- `TestActionEvaluation.test_native_unarmed_disarm_takes_same_weapon_only_at_five_point_margin`
-- `TestActionEvaluation.test_native_unarmed_disarm_hand_choice_drops_on_margin_below_five`
-- `TestActionEvaluation.test_grappled_disarm_defender_loses_the_five_point_defense_bonus`
-- `TestActionEvaluation.test_disarm_custody_loss_blocks_accepted_later_attack_with_that_weapon`
-- `TestActionEvaluation.test_native_break_weapon_uses_pending_attack_motion_and_disables_it_next_boundary`
-- `TestActionEvaluation.test_native_break_weapon_failed_attempt_preserves_both_weapons`
-- `TestActionEvaluation.test_break_weapon_against_opponent_attacking_a_third_being_omits_their_damage`
-- `TestActionEvaluation.test_break_weapon_automatically_hits_opponents_designated_parry_weapon`
-- `TestActionEvaluation.test_break_weapon_fails_closed_for_magic_target_without_magic_saving_facts`
-- `TestActionEvaluation.test_native_armed_feint_is_half_timing_nondamaging_and_bonus_is_one_followup`
-- `TestActionEvaluation.test_native_unarmed_feint_uses_authored_arm_profile_and_same_target_followup`
-- `TestActionEvaluation.test_armed_feint_requires_advanced_weapon_skill_before_choice_mutation`
-- `TestGeneratedArenaBrowser.test_disarm_http_pending_save_load_commits_exact_weapon_to_ground`
-- `TestGeneratedArenaBrowser.test_generated_arena_exposes_and_accepts_unarmed_disarm`
-- `TestGeneratedArenaBrowser.test_break_weapon_http_choice_restores_pending_actual_weapon_action`
-- `TestGeneratedArenaBrowser.test_armed_feint_uses_browser_route_and_pending_save_load`
-- `TestGeneratedArenaBrowser.test_unarmed_feint_is_composed_by_shipped_ui_and_survives_fresh_load`
-- `TestNativeObjectWrest.test_object_grab_uses_holder_defense_and_plus_five_dc`
-- `TestNativeObjectWrest.test_generated_http_grab_and_fresh_process_wrest_preserves_object_identity`
-- `TestNativeObjectWrest.test_failed_and_tied_wrest_leave_same_object_in_holder_hand`
-- `TestNativeObjectWrest.test_holder_weapon_attack_competing_with_wrest_preserves_custody`
-- `TestNativeObjectWrest.test_same_boundary_object_grabs_establish_independent_receipts`
-- `TestNativeObjectWrest.test_three_being_simultaneous_wrest_shares_same_object_and_persists`
-- `TestNativeObjectWrest.test_wrest_late_publication_fault_restores_custody_receipts_and_rng`
-- `TestNativeObjectWrest.test_same_boundary_disarm_prevents_wrest_transfer`
-- `TestNativeObjectWrest.test_earlier_disarm_invalidates_accepted_future_wrest_with_three_beings`
-- `TestNativeObjectWrest.test_cancelled_pending_wrest_keeps_receipt_custody_and_rng`
+The generated Disarm test saves while the Action is pending, resolves and chooses a clear landing in a fresh process through the HTTP route, then saves again and verifies the resolved receipt in another fresh process. The prior 32-test cohort is historical and superseded by this 34-test result. Full repository suite was not run.
 
-`git diff --check` and `git diff --cached --check` passed. Staged publication-safety audit: `files=23 findings=0 result=PASS`. The staged set included the five already-staged historical archive changes, which remain excluded from the implementation commit.
+`py_compile` passed for all modified Python modules and the generated Arena entry point. `git diff --check` and `git diff --cached --check` passed after the observer-view correction. The staged publication-safety audit is recorded with the final scoped commits. No manual Chrome combat result is claimed; browser evidence here is the automated shipped JavaScript/HTTP/session route.
 
 ## Commits and repository state
 
 - `3491e795be85da536617dfad2878be842e2d08b0` — archive accepted U-CAP-005 and install U-CAP-006; maintained references and task-ID collision reconciliation.
-- `f81791d` — complete tactical Disarm custody transfer; includes supported implementation, persistence adapters and focused tests.
-- Implementation `HEAD` before the documentation closeout: `f81791d`. The documentation closeout commit follows this report update; its full hash is the final repository `HEAD` reported in the Codex chat closeout.
+- `f81791d` — initial tactical Disarm custody implementation and focused tests.
+- `554efbef84b9582b2da6480d4cfdedddfc233a10` — complete all independently supported U-CAP-006 implementation, persistence, generated controls, regression tests, and TASKS reconciliation. This is the implementation HEAD; 34 focused tests passed, `py_compile` and diff checks passed, and the 27-file staged publication-safety audit had zero findings. The report-only commit's 7-file staged audit also had zero findings.
 - The user's five staged archive paths remain staged and must not enter U-CAP-006 commits: U-CAP-002/U-CAP-003 assignment/report archival entries plus the U-THROW-001 patch rename.
-- No push, `reset`, cleanup or history rewrite occurred.
+- No push, `reset`, cleanup or history rewrite occurred. A report-only closeout commit follows this update; its hash and the final repository HEAD are included in the chat closeout.
 
 ## TASKS state
 
@@ -100,4 +82,4 @@ Result: **32 tests passed in 51.495 seconds.** The 32 tests were:
 
 ## Final repository state
 
-At documentation closeout, the only staged paths outside U-CAP-006 remain the five historical archive entries listed above. The implementation `HEAD` is `f81791d`; the documentation commit hash is reported in the final Codex chat. Execution interval recorded above. Keep this report active pending the landing decision and later ChatGPT review.
+At implementation closeout, `HEAD` is `554efbef84b9582b2da6480d4cfdedddfc233a10`; the report-only closeout commit hash and final HEAD are reported in the final Codex chat. The only remaining staged paths are the five previously staged historical archive entries listed above. The working tree contains no unrelated unstaged edits. Keep this report and assignment active pending the zero-distance rule decision and later ChatGPT review.
