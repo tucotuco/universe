@@ -2680,7 +2680,7 @@ class GeneratedArenaSession:
                 f'action=strike_object motion={motion} duration={prepared.end_time-prepared.start_time:g}s')
             return self._view_unlocked()
 
-    def _disarm_preflight(self,candidate,player,entity_id,evidence,motion,unarmed=False):
+    def _disarm_preflight(self,candidate,player,entity_id,evidence,motion,unarmed=False,take_hand=None):
         if motion not in ('swing','thrust') or evidence is None or evidence.category!='object' or evidence.present_state!='carried':
             raise ArenaBrowserRequestError('Select a perceived weapon held by the opposing Being.')
         owner_id=evidence.owner_id
@@ -2699,6 +2699,9 @@ class GeneratedArenaSession:
             if not any(hand in ('left hand','right hand') and value is None
                        for hand,value in player.current.body_parts.items()):
                 raise ArenaBrowserRequestError('Unarmed Disarm requires an available arm.')
+            if (take_hand is not None and (take_hand not in ('left hand','right hand')
+                    or player.current.body_parts.get(take_hand) is not None)):
+                raise ArenaBrowserRequestError('Selected Disarm take hand is not currently available.')
             from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
             reach=reference_arm_length_inches(height_inches=player.current.height,
                 length_inches=player.current.length,size_category=getattr(player,'size_category',None))*INCHES_TO_METERS
@@ -2719,6 +2722,7 @@ class GeneratedArenaSession:
             instrument_id=attacking.id
         action=Action(candidate.universe,encounter.time,encounter.time+1,'disarm',player.id,defender.id,instrument_id)
         action.disarm_weapon_id=weapon.id;action.disarm_motion=motion
+        if unarmed and take_hand is not None: action.disarm_hand=take_hand
         action.reach=reach
         action.end_time=encounter.time+max(1,timing-action.strategy.timing_adjustment())
         try:prepared=encounter.prepare_action(action)
@@ -2727,10 +2731,13 @@ class GeneratedArenaSession:
 
     def choose_disarm(self,payload):
         if (type(payload) is not dict or not {'handle','motion'}<=set(payload)
-                or set(payload)-{'handle','motion','unarmed'}
+                or set(payload)-{'handle','motion','unarmed','hand'}
                 or ('unarmed' in payload and type(payload['unarmed']) is not bool)):
             raise ArenaBrowserRequestError('Disarm requires a perceived held-weapon handle and attack motion.')
         handle,motion=payload['handle'],payload['motion'];unarmed=payload.get('unarmed',False)
+        take_hand=payload.get('hand')
+        if take_hand is not None and (not unarmed or take_hand not in ('left hand','right hand')):
+            raise ArenaBrowserRequestError('A Disarm take hand is available only for unarmed Disarm.')
         with self._lock:
             if self._active is None:raise ArenaBrowserRequestError('Generate an Encounter first.')
             candidate=self._active;player=candidate.participants[0].native.being
@@ -2738,7 +2745,7 @@ class GeneratedArenaSession:
             ledger=object.__getattribute__(player,'__dict__').get('_arena_perception_ledger')
             if ledger is None or ledger.observer_id!=player.id:raise ArenaBrowserRequestError('Player perception evidence is unavailable.')
             evidence=None if entity_id is None else next((row for row in ledger.current if row.entity_id==entity_id),None)
-            action,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion,unarmed)
+            action,prepared,_=self._disarm_preflight(candidate,player,entity_id,evidence,motion,unarmed,take_hand)
             try:candidate.encounter.schedule_action(action)
             except Exception as exc:raise ArenaBrowserRequestError('Native Disarm Choice refused; Arena state is unchanged.') from exc
             self._selected_entity_handle=handle
@@ -2758,7 +2765,7 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError('No currently perceived pending attack by this Being targets the player.')
         weapon_evidence=None if ledger is None else next(
             (row for row in ledger.current if row.entity_id==strike.instrument_id),None)
-        if (weapon_evidence is None or weapon_evidence.category!='weapon'
+        if (weapon_evidence is None or weapon_evidence.category not in ('object','weapon')
                 or weapon_evidence.present_state!='carried'
                 or weapon_evidence.owner_id!=defender.id):
             raise ArenaBrowserRequestError('The attacking weapon is not currently identified in player-owned perception.')
@@ -2800,9 +2807,9 @@ class GeneratedArenaSession:
             return self._view_unlocked()
 
     def _feint_preflight(self, candidate, player, entity_id, evidence, motion,
-                         supported=True):
+                         supported=True, unarmed=False, body_region=None):
         if motion not in ("swing", "thrust"):
-            raise ArenaBrowserRequestError("Choose the native Dagger Swing or Thrust motion.")
+            raise ArenaBrowserRequestError("Choose a represented Swing or Thrust motion.")
         if not supported or not _has_native_transactional_action_contract(Action):
             raise ArenaBrowserRequestError("The native Feint scheduler or resolver contract is unavailable.")
         if evidence is None or evidence.category != "being" or evidence.present_state != "present":
@@ -2821,25 +2828,39 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("The player already has a native Action accepted or resolving.")
         if player.get_hit_points() <= 0 or target.get_hit_points() <= 0:
             raise ArenaBrowserRequestError("Both Beings must have positive native hit points to schedule Feint.")
-        weapon_id = self._initial_ready_dagger_id(candidate, player)
-        from weapon import WeaponInstance
-        weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
-        if (type(weapon) is not WeaponInstance or weapon.id not in player.weapons
-                or weapon.id not in player.armed_with(candidate.universe).values()
-                or weapon.parent_container_id != player.id or weapon.get_position() is not None
-                or weapon.current.obj_type != "Dagger"):
-            raise ArenaBrowserRequestError("Feint requires the API-created Dagger to be held and readied.")
-        if motion not in weapon.get_melee_types():
-            raise ArenaBrowserRequestError(f"The native Dagger does not support {motion}.")
-        if (player.current.skills.weapon_skills.get(weapon.original.obj_type, 0) or 0) <= 1:
-            raise ArenaBrowserRequestError("Armed Feint requires advanced skill with the selected weapon.")
+        instrument_id = None
+        if unarmed:
+            if ((player.current.skills.get_skill_level('unarmed combat') or 0) <= 0
+                    or body_region not in ('Arm', 'Leg')):
+                raise ArenaBrowserRequestError(
+                    "Unarmed Feint requires Unarmed combat skill and a represented Arm or Leg profile.")
+            weapon = candidate.universe.library.weapon_dictionary.objects.get(body_region)
+            if weapon is None or weapon.attacks.get('S' if motion == 'swing' else 'T', {}).get('t') is None:
+                raise ArenaBrowserRequestError("The selected body profile does not support that motion.")
+        else:
+            weapon_id = self._initial_ready_dagger_id(candidate, player)
+            from weapon import WeaponInstance
+            weapon = candidate.universe.get_object_by_id(weapon_id) if type(weapon_id) is str else None
+            if (type(weapon) is not WeaponInstance or weapon.id not in player.weapons
+                    or weapon.id not in player.armed_with(candidate.universe).values()
+                    or weapon.parent_container_id != player.id or weapon.get_position() is not None
+                    or weapon.current.obj_type != "Dagger"):
+                raise ArenaBrowserRequestError("Armed Feint requires the API-created Dagger to be held and readied.")
+            if motion not in weapon.get_melee_types():
+                raise ArenaBrowserRequestError(f"The native Dagger does not support {motion}.")
+            if (player.current.skills.weapon_skills.get(weapon.original.obj_type, 0) or 0) <= 1:
+                raise ArenaBrowserRequestError("Armed Feint requires advanced skill with the selected weapon.")
+            instrument_id = weapon.id
         native_timing = weapon.St() if motion == "swing" else weapon.Tt()
         if type(native_timing) not in (int, float) or not math.isfinite(native_timing) or native_timing <= 0:
-            raise ArenaBrowserRequestError("The selected Dagger motion has no supported timing.")
+            raise ArenaBrowserRequestError("The selected Feint motion has no supported timing.")
         action = Action(candidate.universe, encounter.time, encounter.time + 1,
-                        "feint", player.id, target.id, weapon.id)
+                        "feint", player.id, target.id, instrument_id)
         action.feint_motion = motion
-        action.reach = effective_melee_reach_meters(player.current, weapon.current)
+        if unarmed:
+            action.body_region = body_region
+        action.reach = effective_melee_reach_meters(
+            player.current, weapon if unarmed else weapon.current)
         duration = max(1, math.ceil(native_timing / 2) - action.strategy.timing_adjustment())
         action.end_time = encounter.time + duration
         try:
@@ -2850,9 +2871,15 @@ class GeneratedArenaSession:
         return action, prepared
 
     def choose_feint(self, payload):
-        if type(payload) is not dict or set(payload) != {"handle", "motion"}:
-            raise ArenaBrowserRequestError("Feint requires one currently perceived Being handle and a motion")
+        if (type(payload) is not dict or not {"handle", "motion"} <= set(payload)
+                or set(payload) - {"handle", "motion", "unarmed", "body_region"}
+                or ("unarmed" in payload and type(payload["unarmed"]) is not bool)):
+            raise ArenaBrowserRequestError("Feint requires one perceived Being handle and a supported motion")
         handle, motion = payload["handle"], payload["motion"]
+        unarmed = payload.get("unarmed", False)
+        body_region = payload.get("body_region")
+        if unarmed != (body_region is not None):
+            raise ArenaBrowserRequestError("Unarmed Feint must identify its represented Arm or Leg profile")
         if type(handle) is not str or type(motion) is not str:
             raise ArenaBrowserRequestError("Feint target and motion must be text")
         with self._lock:
@@ -2867,7 +2894,8 @@ class GeneratedArenaSession:
             evidence = None if entity_id is None else next(
                 (row for row in ledger.current if row.entity_id == entity_id), None)
             action, prepared = self._feint_preflight(
-                candidate, player, entity_id, evidence, motion)
+                candidate, player, entity_id, evidence, motion,
+                unarmed=unarmed, body_region=body_region)
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:
@@ -2875,7 +2903,7 @@ class GeneratedArenaSession:
                     "native Feint Choice was not accepted; Arena state is unchanged") from exc
             self._selected_entity_handle = handle
             self._trace.native_advance(None, None,
-                f"action=feint motion={motion} duration={prepared.end_time-prepared.start_time:g}s")
+                f"action=feint mode={'unarmed' if unarmed else 'armed'} motion={motion} duration={prepared.end_time-prepared.start_time:g}s")
             return self._view_unlocked()
 
     def _coup_de_grace_preflight(self, candidate, player, entity_id, evidence, motion):
@@ -3340,26 +3368,37 @@ class GeneratedArenaSession:
                     "status":status,"display_name":"Coup de grace","reason":reason,
                     "target":target_view,"motions":motions,"duration_seconds":None if not motions else motions[0]["duration_seconds"]})
                 continue
-            if name.casefold() == "feint (armed)":
-                reason = "Select a perceived opposing Being; armed Feint requires advanced skill with a held weapon."
+            if name.casefold() in ("feint (armed)", "feint (unarmed)"):
+                unarmed = name.casefold() == "feint (unarmed)"
+                reason = ("Select a perceived opposing Being; unarmed Feint requires Unarmed combat skill."
+                    if unarmed else
+                    "Select a perceived opposing Being; armed Feint requires advanced skill with a held weapon.")
                 status, duration = "unavailable", None
                 motions = []
                 target_view = (None if selected is None else {"handle": handle,
                     "name": selected["name"], "type": selected["type"],
                     "present_state": selected["present_state"]})
                 if supported_actions.get(Action, False):
-                    for motion in ("swing", "thrust"):
-                        try:
-                            _, prepared = self._feint_preflight(
-                                candidate, player, entity_id, evidence, motion)
-                            motion_duration = prepared.end_time - prepared.start_time
-                            motions.append({"motion": motion, "duration_seconds": motion_duration})
-                        except ArenaBrowserRequestError as exc:
-                            reason = str(exc)
+                    profiles = (('Arm', 'Leg') if unarmed else (None,))
+                    for region in profiles:
+                        for motion in ("swing", "thrust"):
+                            try:
+                                _, prepared = self._feint_preflight(
+                                    candidate, player, entity_id, evidence, motion,
+                                    unarmed=unarmed, body_region=region)
+                                motion_duration = prepared.end_time - prepared.start_time
+                                row = {"motion": motion, "duration_seconds": motion_duration}
+                                if region is not None:
+                                    row["body_region"] = region
+                                motions.append(row)
+                            except ArenaBrowserRequestError as exc:
+                                reason = str(exc)
                     if motions:
                         status = "available"
                         duration = motions[0]["duration_seconds"]
-                        reason = ("Native armed Feint uses a false Dagger attack with no damage; "
+                        reason = (("Native unarmed Feint uses the selected body profile and Unarmed combat skill; "
+                                  if unarmed else "Native armed Feint uses a false Dagger attack with no damage; ")
+                                  + "the Feint deals no damage; "
                                   "base timing is half the selected attack timing, rounded up. "
                                   "A success grants +2 to the next chosen attack against this Being only.")
                 else:
@@ -3368,9 +3407,11 @@ class GeneratedArenaSession:
                     "name": name, "group": "Being targets",
                     "target_type": "being", "required_skill": source_row["required_skill"],
                     "is_melee": source_row["is_melee"], "status": status,
-                    "display_name": f"Feint with Dagger ({duration:g} s)" if duration is not None else "Feint with Dagger",
+                    "display_name": (f"Unarmed Feint ({duration:g} s)" if unarmed else
+                        f"Feint with Dagger ({duration:g} s)") if duration is not None else
+                        ("Unarmed Feint" if unarmed else "Feint with Dagger"),
                     "reason": reason, "target": target_view,
-                    "motion": "thrust", "motions": motions,
+                    "motion": "thrust", "motions": motions, "unarmed": unarmed,
                     "duration_seconds": duration,
                 })
                 continue
@@ -3491,6 +3532,8 @@ class GeneratedArenaSession:
                     "required_skill":source_row["required_skill"],"is_melee":source_row["is_melee"],
                     "status":status,"display_name":"Unarmed Disarm held weapon","reason":reason,
                     "target":target_view,"motions":motions,"unarmed":True,
+                    "take_hands":[hand for hand in ('left hand','right hand')
+                        if player.current.body_parts.get(hand) is None],
                     "duration_seconds":None if not motions else motions[0]["duration_seconds"]})
                 continue
             elif name.casefold()=="break weapon (armed)":

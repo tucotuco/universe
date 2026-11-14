@@ -66,6 +66,7 @@ _SUPPORTED_TAGS = frozenset({
     'action_evaluation.EffectIdentity', 'action_evaluation.AwarenessEffect',
     'action_evaluation.PracticeEffect', 'observer_proposals.LifecycleEffect',
     'action_evaluation.DropObjectEffect',
+    'action_evaluation.DisarmTakeEffect',
     'action_evaluation.GrappleStateEffect',
     'action_evaluation.PositionEffect',
     'action_evaluation.ObjectGripEffect',
@@ -222,7 +223,7 @@ class _Graph:
                                      CandidateSkillTransition)
         from experience import SkillUse, BatchSkillUse
         from action_evaluation import (IdentifiedEffect, EffectIdentity,
-                                       AwarenessEffect, PracticeEffect, DropObjectEffect,
+                                       AwarenessEffect, PracticeEffect, DropObjectEffect, DisarmTakeEffect,
                                        GrappleStateEffect, PositionEffect, ObjectGripEffect)
         from observer_proposals import LifecycleEffect, ActionOutcomeEffect
         from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger
@@ -307,6 +308,7 @@ class _Graph:
         elif tag == 'experience.BatchSkillUse': obj = BatchSkillUse(**values)
         elif tag == 'action_evaluation.IdentifiedEffect': obj = IdentifiedEffect(**values)
         elif tag == 'action_evaluation.DropObjectEffect': obj = DropObjectEffect(**values)
+        elif tag == 'action_evaluation.DisarmTakeEffect': obj = DisarmTakeEffect(**values)
         elif tag == 'action_evaluation.GrappleStateEffect': obj = GrappleStateEffect(**values)
         elif tag == 'action_evaluation.PositionEffect': obj = PositionEffect(**values)
         elif tag == 'action_evaluation.ObjectGripEffect': obj = ObjectGripEffect(**values)

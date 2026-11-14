@@ -9,7 +9,7 @@ from types import MappingProxyType
 import importlib
 import math
 
-from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation, subdual_recovery_state, stun_active_at)
 from spatial.state import CartesianPosition
 
@@ -185,6 +185,11 @@ def _expected_body_parts(meta, target_id, initial):
         elif type(effect) is DropObjectEffect and effect.owner_id == target_id:
             for slot,value in tuple(expected.items()):
                 if value==effect.target_id:expected[slot]=None
+        elif type(effect) is DisarmTakeEffect:
+            if effect.owner_id==target_id:
+                for slot,value in tuple(expected.items()):
+                    if value==effect.target_id:expected[slot]=None
+            if effect.actor_id==target_id:expected[effect.hand]=effect.target_id
         elif type(effect) is ObjectGripEffect and effect.operation=='transfer':
             if effect.actor_id==target_id:expected[effect.actor_hand]=effect.target_id
             if effect.holder_id==target_id and expected.get(effect.holder_hand)==effect.target_id:
@@ -207,7 +212,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',
@@ -358,6 +363,16 @@ def _validate_live_latest(encounter, targets, meta, objectives, recipients, acti
                     and key not in tuple(owner.current.body_parts.values())
                     and obj.parent_container_id is None and obj.get_position()==CartesianPosition(*row.effect.position),
                     'unreceipted native Disarm release')
+            if type(row.effect) is DisarmTakeEffect and row.effect.target_id==key:
+                owner=objects.get(row.effect.owner_id);actor=objects.get(row.effect.actor_id)
+                _require(owner is not None and actor is not None
+                    and key not in owner.weapons and key not in owner.possessions
+                    and key not in tuple(owner.current.body_parts.values())
+                    and key in actor.weapons and actor.weapons.count(key)==1
+                    and key in actor.possessions and actor.possessions.count(key)==1
+                    and actor.current.body_parts.get(row.effect.hand)==key
+                    and obj.parent_container_id==actor.id and obj.spatial_state is None,
+                    'unreceipted native Disarm take custody transfer')
             batches = _transfer_batches(meta, key)
             for boundary, transfers in batches.items():
                 from being import BeingInstance

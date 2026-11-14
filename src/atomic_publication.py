@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -669,6 +669,7 @@ def _make_plan(encounter,candidate,rng_owner):
         prior=actor.strategy
         plan.attr('targets',actor,'strategy',Strategy(prior.attack,effect.defense,
             prior.timing,prior.extra_damage))
+    from action import Action
     disarm_drops=[row.effect for row in supported.boundary.effects.values()
                   if type(row.effect) is DropObjectEffect]
     if len({effect.target_id for effect in disarm_drops})!=len(disarm_drops):
@@ -701,12 +702,57 @@ def _make_plan(encounter,candidate,rng_owner):
             if effect.target_id in possessions:possessions.remove(effect.target_id)
             plan.attr('targets',obj,'parent_container_id',None)
             plan.attr('targets',obj,'spatial_state',dropped_spatial_states[effect.target_id])
+            from weapon import NATIVE_READY_PREPARATION_TAG
+            tags=dict(obj.current.tags);tags.pop(NATIVE_READY_PREPARATION_TAG,None)
+            plan.contents('targets',obj.current.tags,tags)
         plan.contents('targets',owner.current.body_parts,body_parts)
         plan.contents('targets',owner.weapons,weapons)
         plan.contents('targets',owner.possessions,possessions)
+    disarm_takes=[row.effect for row in supported.boundary.effects.values()
+                  if type(row.effect) is DisarmTakeEffect]
+    all_disarm_claims=[effect.target_id for effect in disarm_drops+disarm_takes]
+    if len(all_disarm_claims)!=len(set(all_disarm_claims)):
+        raise PublicationRejected('simultaneous Disarm claims the same native weapon')
+    for effect in disarm_takes:
+        source=events.get(effect.source_action_id)
+        owner=objects.get(effect.owner_id);actor=objects.get(effect.actor_id)
+        obj=objects.get(effect.target_id)
+        if (type(source) is not Action or source.event_type!='disarm'
+                or source.actor_id!=effect.actor_id or source.target_id!=effect.owner_id
+                or source.disarm_weapon_id!=effect.target_id or source.disarm_hand!=effect.hand
+                or type(owner) is not BeingInstance or type(actor) is not BeingInstance
+                or type(obj) is not WeaponInstance or effect.actor_id not in encounter.being_list
+                or effect.owner_id not in encounter.being_list or owner is actor
+                or owner.weapons.count(effect.target_id)!=1 or obj.parent_container_id not in (None,owner.id)
+                or obj.spatial_state is not None or actor.current.body_parts.get(effect.hand,'missing') is not None
+                or effect.target_id in tuple(actor.current.body_parts.values())
+                or effect.target_id in actor.weapons or effect.target_id in actor.possessions):
+            raise PublicationRejected('Disarm take custody or receiving hand changed before atomic transfer')
+        slots=[slot for slot,value in owner.current.body_parts.items() if value==effect.target_id]
+        if len(slots)!=1:
+            raise PublicationRejected('Disarm take target does not occupy exactly one native hand')
+        if any(effect.target_id in tuple(getattr(other,name,()) or ())
+               for other in objects.values() if type(other) is BeingInstance
+               and other.id not in (owner.id,actor.id)
+               for name in ('possessions','weapons','body_parts','armor')):
+            raise PublicationRejected('Disarm take Object has an unrelated native custody reference')
+        owner_parts=dict(owner.current.body_parts);owner_parts[slots[0]]=None
+        actor_parts=dict(actor.current.body_parts);actor_parts[effect.hand]=effect.target_id
+        owner_weapons=list(owner.weapons);owner_weapons.remove(effect.target_id)
+        owner_possessions=list(owner.possessions)
+        if effect.target_id in owner_possessions:owner_possessions.remove(effect.target_id)
+        plan.contents('targets',owner.current.body_parts,owner_parts)
+        plan.contents('targets',owner.weapons,owner_weapons)
+        plan.contents('targets',owner.possessions,owner_possessions)
+        plan.contents('targets',actor.current.body_parts,actor_parts)
+        plan.contents('targets',actor.weapons,actor.weapons+[effect.target_id])
+        plan.contents('targets',actor.possessions,actor.possessions+[effect.target_id])
+        plan.attr('targets',obj,'parent_container_id',actor.id)
+        from weapon import NATIVE_READY_PREPARATION_TAG
+        tags=dict(obj.current.tags);tags.pop(NATIVE_READY_PREPARATION_TAG,None)
+        plan.contents('targets',obj.current.tags,tags)
     wrests=[row.effect for row in supported.boundary.effects.values()
             if type(row.effect) is ObjectGripEffect and row.effect.operation=='transfer']
-    from action import Action
     wrest_by_object={}
     for effect in wrests:
         wrest_by_object.setdefault(effect.target_id,[]).append(effect)
@@ -750,6 +796,9 @@ def _make_plan(encounter,candidate,rng_owner):
             plan.contents('targets',receiver.current.body_parts,receiver_parts)
             plan.contents('targets',receiver.weapons,receiver.weapons+[object_id])
             plan.contents('targets',receiver.possessions,receiver.possessions+[object_id])
+        from weapon import NATIVE_READY_PREPARATION_TAG
+        tags=dict(obj.current.tags);tags.pop(NATIVE_READY_PREPARATION_TAG,None)
+        plan.contents('targets',obj.current.tags,tags)
         # parent_container_id is the stable containment anchor for legacy
         # tree readers; every physical co-holder is represented in native
         # hands, weapons and possessions, all referencing this one Object ID.

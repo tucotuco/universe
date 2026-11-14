@@ -19,6 +19,50 @@ NATIVE_DRAW_LOCATION_TAG = "universe.native_draw_location"
 DRAWABLE_WORN_SHEATH = "worn_sheath"
 NATIVE_READY_PREPARATION_TAG = "universe.native_ready_preparation"
 NATIVE_SHIELD_ATTACHMENT_TAG = "universe.native_shield_attachment"
+NATIVE_LOCKED_GAUNTLET_WEAPON_TAG = "universe.native_locked_gauntlet_weapon_attachment"
+
+
+def native_locked_gauntlet_weapon_attachment(weapon):
+    """Return explicit owner-linked evidence that a held Weapon is attached.
+
+    This is instance-authored state. No attachment is inferred from names,
+    body slots, or a second gauntlet merely being carried.
+    """
+    if type(weapon) is not WeaponInstance:
+        raise TypeError("locked-gauntlet attachment evidence requires an exact native WeaponInstance")
+    tags=weapon.current.tags
+    if type(tags) is not dict:
+        raise ValueError("native Weapon tags are malformed")
+    record=tags.get(NATIVE_LOCKED_GAUNTLET_WEAPON_TAG)
+    if record is None:return None
+    if (type(record) is not dict or set(record)!={"owner_id","gauntlet_id"}
+            or any(type(record.get(key)) is not str or not record[key]
+                   for key in ("owner_id","gauntlet_id"))):
+        raise ValueError("native locked-gauntlet Weapon attachment record is malformed")
+    return record
+
+
+def author_locked_gauntlet_weapon_attachment(universe, weapon, owner_id, gauntlet_id):
+    """Author an explicit attachment only for a held Weapon and owned Locked gauntlet."""
+    from being import BeingInstance
+    if type(weapon) is not WeaponInstance:
+        raise TypeError("attachment target must be an exact native WeaponInstance")
+    owner=universe.get_object_by_id(owner_id) if type(owner_id) is str else None
+    gauntlet=universe.get_object_by_id(gauntlet_id) if type(gauntlet_id) is str else None
+    if (type(owner) is not BeingInstance or type(gauntlet) is not WeaponInstance
+            or gauntlet.original.obj_type!="Locked gauntlet"
+            or weapon.id not in owner.weapons
+            or sum(value==weapon.id for value in owner.current.body_parts.values())!=1
+            or gauntlet.id not in owner.weapons and gauntlet.id not in owner.possessions
+            or gauntlet.parent_container_id not in (None,owner.id)
+            or weapon.parent_container_id not in (None,owner.id)):
+        raise ValueError("attachment requires an owner's actually held Weapon and native owned Locked gauntlet")
+    if type(weapon.current.tags) is not dict:
+        raise ValueError("native Weapon tags are malformed")
+    if native_locked_gauntlet_weapon_attachment(weapon) is not None:
+        raise ValueError("Weapon already has locked-gauntlet attachment evidence")
+    weapon.current.tags[NATIVE_LOCKED_GAUNTLET_WEAPON_TAG]={
+        "owner_id":owner.id,"gauntlet_id":gauntlet.id}
 
 
 def native_forearm_buckler_attachment(shield):

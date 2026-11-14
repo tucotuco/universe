@@ -541,9 +541,11 @@ def validate_action_contract(encounter,action,*,_force=False):
             or data.get('end_time') - data.get('start_time') != 1):
         raise TransactionalProgressionError('native Touch must be an unarmed one-second Action')
     if type(action) is Action and data['event_type'] == 'feint':
-        if (data.get('instrument_id') is None or data.get('target_id') is None
-                or data.get('feint_motion') not in ('swing', 'thrust')):
-            raise TransactionalProgressionError('native Feint requires its target, weapon, and attack motion')
+        if (data.get('target_id') is None
+                or data.get('feint_motion') not in ('swing', 'thrust')
+                or (data.get('instrument_id') is None
+                    and data.get('body_region') not in ('Arm', 'Leg'))):
+            raise TransactionalProgressionError('native Feint requires its target, supported weapon/body profile, and attack motion')
     if type(action) is Action and data['event_type'] == 'coup de grace':
         if (data.get('instrument_id') is None or data.get('target_id') is None
                 or data.get('coup_motion') not in ('swing', 'thrust')):

@@ -11,7 +11,7 @@ FIELD_ADAPTERS = {
         "required": 'abilities'.split(),
     },
     'action.Action': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id body_region break_motion break_weapon_id bull_rush_target_willing canceled_at cancellation_reason charge_continuation_source_id coup_motion disarm_motion disarm_weapon_id end_time event_type feint_motion feint_source_action_id grab_hand grapple_id grapple_position grip_id holder_hand holder_id id instrument_id location motion name object_grip_id object_motion parent_event_id reach resolution start_position start_time strategy target_id threat_at_schedule touch_action_id touch_willing trip_defender_ability trip_size_categories trip_source_action_id type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle actor_id body_region break_motion break_target_action_id break_weapon_id bull_rush_target_willing canceled_at cancellation_reason charge_continuation_source_id coup_motion disarm_hand disarm_motion disarm_weapon_id end_time event_type feint_motion feint_source_action_id grab_hand grapple_id grapple_position grip_id holder_hand holder_id id instrument_id location motion name object_grip_id object_motion parent_event_id reach resolution start_position start_time strategy target_id threat_at_schedule touch_action_id touch_willing trip_defender_ability trip_size_categories trip_source_action_id type universe'.split(),
         "required": 'actor_id end_time event_type instrument_id location name parent_event_id resolution start_time strategy target_id type universe'.split(),
     },
     'action_choice.ChoiceBook': {
@@ -61,6 +61,10 @@ FIELD_ADAPTERS = {
     'action_evaluation.DropObjectEffect': {
         "allowed": 'owner_id position source_action_id target_id'.split(),
         "required": 'owner_id position source_action_id target_id'.split(),
+    },
+    'action_evaluation.DisarmTakeEffect': {
+        "allowed": 'actor_id hand owner_id source_action_id target_id'.split(),
+        "required": 'actor_id hand owner_id source_action_id target_id'.split(),
     },
     'action_evaluation.GrappleStateEffect': {
         "allowed": 'actor_id hand kind next_check operation position source_action_id state_id target_id'.split(),

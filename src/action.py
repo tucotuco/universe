@@ -92,7 +92,7 @@ class Action(Event):
         }
         return json.dumps(data, indent = 2)
 
-    def prepare_schedule(self, encounter):
+    def prepare_schedule(self, encounter, *, proposed_actions=None, target_action_id=None):
         """Derive a candidate without modifying this Action or the world.
 
         Encounter invokes only reviewed native implementations. The Encounter
@@ -343,13 +343,24 @@ class Action(Event):
                 raise ValueError('Feint requires two distinct participating Beings')
             if not encounter.is_aware(self.actor_id, self.target_id):
                 raise ValueError('Feint requires current native awareness of its target')
-            if (weapon is None or self.instrument_id not in actor.armed_with(encounter.universe).values()
-                    or motion not in ('swing', 'thrust')
-                    or motion not in weapon.get_melee_types()):
-                raise ValueError('Feint requires an actually held weapon and supported attack motion')
-            rank = actor.current.skills.weapon_skills.get(weapon.original.obj_type, 0)
-            if rank <= 1:
-                raise ValueError('armed Feint requires advanced skill with the selected weapon')
+            region = object.__getattribute__(self, '__dict__').get('body_region')
+            if motion not in ('swing', 'thrust'):
+                raise ValueError('Feint requires a supported attack motion')
+            if weapon is None:
+                if ((actor.current.skills.get_skill_level('unarmed combat') or 0) <= 0
+                        or region not in ('Arm', 'Leg')):
+                    raise ValueError('unarmed Feint requires Unarmed combat skill and a represented Arm or Leg profile')
+                weapon = encounter.universe.library.weapon_dictionary.objects.get(region)
+                if weapon is None or weapon.attacks.get('S' if motion == 'swing' else 'T', {}).get('t') is None:
+                    raise ValueError('unarmed Feint requires a supported native body-weapon motion')
+                skill = actor.current.skills.get_skill_level('unarmed combat') or 0
+            else:
+                if (self.instrument_id not in actor.armed_with(encounter.universe).values()
+                        or motion not in weapon.get_melee_types()):
+                    raise ValueError('armed Feint requires an actually held weapon and supported attack motion')
+                skill = actor.current.skills.weapon_skills.get(weapon.original.obj_type, 0)
+                if skill <= 1:
+                    raise ValueError('armed Feint requires advanced skill with the selected weapon')
             native_timing = weapon.St() if motion == 'swing' else weapon.Tt()
             if type(native_timing) not in (int, float) or not math.isfinite(native_timing) or native_timing <= 0:
                 raise ValueError('Feint requires a supported positive weapon attack timing')
@@ -358,7 +369,8 @@ class Action(Event):
                     or type(reach) not in (int, float) or not math.isfinite(reach) or reach <= 0):
                 raise ValueError('Feint timing or native reach declaration is invalid')
             from melee_combat import effective_melee_reach_meters
-            expected_reach = effective_melee_reach_meters(actor.current, weapon.current)
+            expected_reach = effective_melee_reach_meters(
+                actor.current, weapon if self.instrument_id is None else weapon.current)
             if not math.isclose(reach, expected_reach, rel_tol=1e-12, abs_tol=1e-12):
                 raise ValueError('Feint reach does not match native Being/weapon dimensions')
             return PreparedSchedule.from_action(self)
@@ -467,23 +479,38 @@ class Action(Event):
             if not math.isclose(reach,expected,rel_tol=1e-12,abs_tol=1e-12):
                 raise ValueError('Break weapon reach differs from native Being/weapon dimensions')
             from melee_combat import MeleeStrike
+            from melee_defense import MeleeDefense
             # A legal response may be chosen against an opponent's accepted
             # but not yet started Action. Choices are authoritative scheduler
             # state; checking only pending_action_list incorrectly rejected
             # that interval before its first one-second activation boundary.
             declarations=[encounter.universe.get_event_by_id(aid)
                           for aid in encounter.pending_action_list]
+            declarations.extend(row for row in (proposed_actions or {}).values()
+                                if type(row) in (MeleeStrike,MeleeDefense))
             book=encounter._choice_book
             for choice in book._choices.values():
                 if choice.view.state not in ('accepted','executing'):
                     continue
                 declarations.extend(member.action for member in choice.members
-                                    if type(member.action) is MeleeStrike)
-            declarations={row.id:row for row in declarations if type(row) is MeleeStrike}.values()
+                                    if type(member.action) in (MeleeStrike,MeleeDefense))
+            declarations={row.id:row for row in declarations
+                if type(row) in (MeleeStrike,MeleeDefense)}.values()
+            target_action_id=object.__getattribute__(self,'__dict__').get('break_target_action_id')
             attacks=[row for row in declarations if type(row) is MeleeStrike
-                and row.actor_id==defender.id and row.target_id==actor.id
+                and row.actor_id==defender.id
                 and row.instrument_id==victim_weapon.id
-                and math.ceil(row.end_time)==math.ceil(self.end_time)+1]
+                and math.ceil(row.end_time)==math.ceil(self.end_time)+1
+                and ((target_action_id is None and row.target_id==actor.id)
+                     or (target_action_id==row.id and row.target_id not in (actor.id,defender.id)))]
+            if target_action_id is not None:
+                attacks.extend(row for row in declarations if type(row) is MeleeDefense
+                    and row.id==target_action_id and row.actor_id==defender.id
+                    and row.kind=='parry' and row.instrument_id==victim_weapon.id
+                    and math.ceil(row.end_time)==math.ceil(self.end_time)+1
+                    and any(type(candidate) is MeleeStrike and candidate.id==row.target_action_id
+                        and candidate.actor_id==actor.id and candidate.target_id==defender.id
+                        for candidate in declarations))
             if len(attacks)!=1:
                 raise ValueError('Break weapon must resolve in the second before the targeted weapon attack')
             return PreparedSchedule.from_action(self)
@@ -514,11 +541,17 @@ class Action(Event):
                 if not any(hand in ('left hand','right hand') and value is None
                            for hand,value in actor.current.body_parts.items()):
                     raise ValueError('unarmed Disarm requires an available arm')
+                disarm_hand=object.__getattribute__(self,'__dict__').get('disarm_hand')
+                if (disarm_hand is not None and (disarm_hand not in ('left hand','right hand')
+                        or actor.current.body_parts.get(disarm_hand) is not None)):
+                    raise ValueError('unarmed Disarm take hand must be an available native hand')
                 timing={'swing':4,'thrust':3}[motion]
                 expected_reach=reference_arm_length_inches(
                     height_inches=actor.current.height,length_inches=actor.current.length,
                     size_category=getattr(actor,'size_category',None))*INCHES_TO_METERS
             else:
+                if object.__getattribute__(self,'__dict__').get('disarm_hand') is not None:
+                    raise ValueError('armed Disarm has no receiving-hand option')
                 if (type(weapon) is not WeaponInstance or weapon.id not in actor.armed_with(encounter.universe).values()
                         or actor.current.skills.weapon_skills.get(weapon.original.obj_type,0)<=1
                         or motion not in weapon.get_melee_types()):

@@ -1643,7 +1643,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
 
     def test_disarm_http_pending_save_load_commits_exact_weapon_to_ground(self):
         page=self.request("/")[1]
-        self.assertIn("function submitDisarm(handle,motion,unarmed=false)",page)
+        self.assertIn("function submitDisarm(handle,motion,unarmed=false,hand=null)",page)
         profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text())
         self.session=GeneratedArenaSession(root_seed_factory=lambda:20261108,
             ground_loadout_profile=profile)
@@ -1718,6 +1718,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertGreaterEqual(view['disarm_action']['maximum_landing_hexes'],0)
 
     def test_generated_arena_exposes_and_accepts_unarmed_disarm(self):
+        status,page=self.request("/")
+        self.assertEqual(status,200)
+        self.assertIn("Disarm custody result",page)
+        self.assertIn("Take in ${value}",page)
         profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text())
         self.session=GeneratedArenaSession(root_seed_factory=lambda:20261108,
             ground_loadout_profile=profile)
@@ -1746,8 +1750,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                  if item["name"]=="disarm (unarmed)")
         self.assertEqual(row["status"],"available",row["reason"])
         self.assertEqual({item["motion"] for item in row["motions"]},{"swing","thrust"})
+        self.assertIn(free_hand,row["take_hands"])
         status,accepted=self.request("/api/generated/disarm",{
-            "handle":handle,"motion":"thrust","unarmed":True})
+            "handle":handle,"motion":"thrust","unarmed":True,"hand":free_hand})
         self.assertEqual(status,200,accepted)
         self.assertEqual(accepted["disarm_action"]["status"],"executing")
         wire=self.session.save_encounter_bytes()
@@ -1762,16 +1767,127 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         with patch.object(_ProvisionalRandom,'roll',roll):
             while view['disarm_action']['status']=='executing':
                 view=restored.advance_one_second()
-        self.assertEqual(view['disarm_action']['outcome'],'disarmed')
-        dropped=restored.active_candidate.universe.get_object_by_id(target_weapon.id)
+        self.assertEqual(view['disarm_action']['outcome'],'disarmed_taken')
+        taken=restored.active_candidate.universe.get_object_by_id(target_weapon.id)
         restored_defender=restored.active_candidate.encounter.get_being(defender.id)
-        self.assertIsNone(dropped.parent_container_id)
-        self.assertEqual(dropped.get_position(),restored_defender.get_position())
+        restored_player=restored.active_candidate.encounter.get_being(player.id)
+        self.assertEqual(taken.parent_container_id,restored_player.id)
+        self.assertEqual(restored_player.current.body_parts[free_hand],target_weapon.id)
+        self.assertIsNone(restored_defender.current.body_parts.get('right hand'))
+
+        with tempfile.TemporaryDirectory() as directory:
+            saved=Path(directory)/'pending-unarmed-disarm-take.arena'
+            saved.write_bytes(wire)
+            child_code=(
+                "import json,sys;import tests.test_generated_arena_browser;"
+                "from unittest.mock import patch;"
+                "from action_evaluation import _ProvisionalRandom,RandomDraw;"
+                "from arena_browser_session import GeneratedArenaSession;"
+                "s=GeneratedArenaSession(root_seed_factory=lambda:8);"
+                "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read());it=iter((20,1));"
+                "exec('def roll(ctx,dice):\\n value=next(it);ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split(\"+\")[0]),value));return value');"
+                "cm=patch.object(_ProvisionalRandom,'roll',roll);cm.start();"
+                "exec('while v[\"disarm_action\"][\"status\"]==\"executing\":\\n v=s.advance_one_second()');cm.stop();"
+                "e=s.active_candidate.encounter;w=s.active_candidate.universe.get_object_by_id(sys.argv[2]);"
+                "a=e.get_being(sys.argv[3]);d=e.get_being(sys.argv[4]);"
+                "print(json.dumps({'outcome':v['disarm_action']['outcome'],'object':w.id,'owner':w.parent_container_id,'hand':a.current.body_parts[sys.argv[5]],'defender_hand':d.current.body_parts.get('right hand')}))")
+            child=subprocess.run([sys.executable,'-c',child_code,str(saved),target_weapon.id,
+                player.id,defender.id,free_hand],cwd=ROOT,check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(child.stdout),{
+            'outcome':'disarmed_taken','object':target_weapon.id,'owner':player.id,
+            'hand':target_weapon.id,'defender_hand':None})
+
+    def test_break_weapon_http_choice_restores_pending_actual_weapon_action(self):
+        status,page=self.request("/")
+        self.assertEqual(status,200)
+        self.assertIn("function submitBreakWeapon(handle)",page)
+        self.assertIn("/api/generated/break-weapon",page)
+        self.session=GeneratedArenaSession(root_seed_factory=lambda:20261109,
+            ground_loadout_profile=json.loads((ROOT/"tests/fixtures/arena/empty.json").read_text()))
+        status,_=self.request("/api/generated/generate",{
+            "starting_experience":"5000000","width_cells":"10","height_cells":"5",
+            "equipment_mode":"equipped","opponent_strategy":"none"})
+        self.assertEqual(status,200)
+        candidate=self.session.active_candidate
+        encounter=candidate.encounter
+        player=candidate.participants[0].native.being
+        opponent=candidate.participants[1].native.being
+        # This test-authored native Arena starts with represented close positions
+        # and an actual opposing weapon; the browser receives only its opaque
+        # perceived Being handle.
+        from spatial.state import CartesianPosition
+        origin=player.get_position()
+        opponent.set_position(CartesianPosition(origin.x+.1,origin.y,origin.z))
+        player.set_hex_facing(nearest_facing((.1,0,0)))
+        from melee_combat import MeleeStrike
+        opponent_weapon=next(iter(opponent.armed_with(candidate.universe).values()))
+        opponent_weapon_obj=candidate.universe.get_object_by_id(opponent_weapon)
+        opponent_weapon_obj.current.hit_points=1
+        opponent_weapon_obj.current.hardness=0
+        from action import Action
+        attack=MeleeStrike(encounter,opponent.id,player.id,opponent_weapon,
+            motion='thrust',reach=2)
+        attack.end_time=7
+        self.assertEqual(self.request("/api/generated/run",{})[0],200)
+        self.assertEqual(self.request("/api/generated/advance",{"seconds":1})[0],200)
+        attack.start_time=encounter.time
+        attack.end_time=encounter.time+6
+        encounter.schedule_action(attack)
+        status,view=self.request("/api/generated/advance",{"seconds":1})
+        self.assertEqual(status,200,view)
+        handle=self.session._view_handles[opponent.id]
+        inspected=self.request("/api/generated/inspect",{"handle":handle})
+        self.assertEqual(inspected[0],200,inspected[1])
+        row=next(item for item in inspected[1]["action_catalog"]["entries"]
+                 if item["name"].casefold()=="break weapon (armed)")
+        self.assertEqual(row["status"],"available",row["reason"])
+        status,accepted=self.request("/api/generated/break-weapon",{"handle":handle})
+        self.assertEqual(status,200,accepted)
+        action=next(member.action for choice in encounter._choice_book._choices.values()
+            for member in choice.members if type(member.action) is Action
+            and member.action.event_type=="break weapon")
+        self.assertEqual(action.break_weapon_id,opponent_weapon)
+        saved=self.session.save_encounter_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"pending-break.json";path.write_bytes(saved)
+            script="\n".join((
+                "import json,sys",
+                "from unittest.mock import patch",
+                "from action_evaluation import _ProvisionalRandom,RandomDraw",
+                "from arena_browser_session import GeneratedArenaSession",
+                "s=GeneratedArenaSession(root_seed_factory=lambda:1)",
+                "v=s.load_encounter_bytes(open(sys.argv[1],'rb').read())",
+                "c=s.active_candidate",
+                "pair=next((r,m) for r in c.encounter._choice_book._choices.values() for m in r.members if getattr(m.action,'event_type',None)=='break weapon')",
+                "r,m=pair; a=m.action",
+                "target=next(m.action for r in c.encounter._choice_book._choices.values() for m in r.members if getattr(m.action,'id',None)==sys.argv[2])",
+                "assert a.break_weapon_id==sys.argv[3] and c.encounter.time==2 and r.view.state=='accepted'",
+                "values=iter((20,20,4,4,4)); original=_ProvisionalRandom.roll",
+                "def roll(ctx,dice):",
+                "    if ctx.action_id==a.id:",
+                "        value=next(values); ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value)); return value",
+                "    return original(ctx,dice)",
+                "patcher=patch.object(_ProvisionalRandom,'roll',roll); patcher.start()",
+                "while a.id not in c.encounter.finished_action_list and c.encounter.time<7: v=s.advance_one_second()",
+                "break_outcome=c.encounter.inspect_committed(6).action(a.id).facts.outcome; hp=c.universe.get_object_by_id(a.break_weapon_id).hit_points()",
+                "while target.id not in c.encounter.finished_action_list and c.encounter.time<7: v=s.advance_one_second()",
+                "patcher.stop(); attack_outcome=c.encounter.inspect_committed(7).action(target.id).facts.outcome",
+                "print(json.dumps({'time':c.encounter.time,'weapon':a.break_weapon_id,'action':a.id,'finished':a.id in c.encounter.finished_action_list,'break':break_outcome,'hp':hp,'attack':attack_outcome}))"))
+            env=dict(os.environ);env['PYTHONPATH']=os.pathsep.join((str(ROOT/'tests'),str(ROOT/'src'),str(ROOT/'examples')))
+            restored=subprocess.run([sys.executable,"-B","-c",script,str(path),attack.id,opponent_weapon],cwd=ROOT,env=env,
+                check=False,capture_output=True,text=True,timeout=90)
+            self.assertEqual(restored.returncode,0,restored.stderr)
+            evidence=json.loads(restored.stdout)
+            self.assertEqual({key:evidence[key] for key in ('time','weapon','action','finished')},
+                {"time":7,"weapon":opponent_weapon,"action":action.id,"finished":True})
+            self.assertEqual(evidence['break'],'broken')
+            self.assertEqual(evidence['hp'],0)
+            self.assertEqual(evidence['attack'],'weapon_unavailable')
 
     def test_armed_feint_uses_browser_route_and_pending_save_load(self):
         status, page = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn("function submitFeint(handle,motion)", page)
+        self.assertIn("function submitFeint(handle,motion,unarmed=false", page)
         self.assertIn("/api/generated/feint", page)
         self.assertIn("actionFeint", page)
         self.session = GeneratedArenaSession(
@@ -1834,6 +1950,80 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             restored["save"].encode("utf-8"))
         self.assertEqual(restored_completed["time_seconds"], completed["time_seconds"])
         self.assertEqual(restored_completed["feint_action"], completed["feint_action"])
+
+    def test_unarmed_feint_is_composed_by_shipped_ui_and_survives_fresh_load(self):
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn("Unarmed Feint body profile and motion", page)
+        self.assertIn("body_region:item.body_region", page)
+        self.session = GeneratedArenaSession(
+            root_seed_factory=lambda: 20261108,
+            ground_loadout_profile=json.loads(
+                (ROOT / "tests/fixtures/arena/empty.json").read_text()))
+        status, _ = self.request("/api/generated/generate", {
+            "starting_experience": "5000000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        player.current.skills.skills['unarmed combat'] = 2
+        player.current.skills.weapon_skills['Dagger'] = 2
+        initial_position = player.get_position()
+        target.set_position(CartesianPosition(initial_position.x + 0.2,
+            initial_position.y, initial_position.z))
+        player.set_hex_facing(nearest_facing((1.0, 0.0, 0.0)))
+        candidate.encounter.difficulty_class = 1
+        self.assertEqual(self.request("/api/generated/run", {})[0], 200)
+        status, activated = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        target_handle = self.session._view_handles[target.id]
+        target_row = next(row for row in activated["entities"]
+            if row["category"] == "being" and row["handle"] == target_handle)
+        status, selected = self.request("/api/generated/inspect", {"handle": target_row["handle"]})
+        self.assertEqual(status, 200)
+        feint = next(row for row in selected["action_catalog"]["entries"]
+                     if row["name"] == "feint (unarmed)")
+        self.assertEqual(feint["status"], "available", feint["reason"])
+        self.assertIn({"motion": "thrust", "body_region": "Arm",
+                      "duration_seconds": 2}, feint["motions"])
+        status, accepted = self.request("/api/generated/feint", {
+            "handle": target_row["handle"], "motion": "thrust",
+            "unarmed": True, "body_region": "Arm"})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(accepted["feint_action"]["status"], "executing")
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "pending-unarmed-feint.arena"
+            save_path.write_bytes(self.session.save_encounter_bytes())
+            script = (
+                "import json,sys; import tests.test_generated_arena_browser; "
+                "from arena_browser_session import GeneratedArenaSession; "
+                "s=GeneratedArenaSession(root_seed_factory=lambda:91); "
+                "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
+                "v=s._view_unlocked();\n"
+                "while v['feint_action']['status']=='executing':\n v=s.advance_one_second()\n"
+                "c=s.active_candidate; a=c.participants[0].native.being; "
+                "f=s._player_feint_action(c,a); "
+                "r=c.encounter.inspect_committed(int(v['time_seconds'])).action(f.id); "
+                "handle=s._view_handles[f.target_id]; s.choose_melee_strike({'handle':handle,'motion':'thrust'}); "
+                "strike=next(m.action for rec in c.encounter._choice_book._choices.values() for m in rec.members "
+                "if type(m.action).__name__=='MeleeStrike' and m.action.actor_id==a.id); "
+                "print(json.dumps({'view':v,'outcome':r.facts.outcome,'effects':list(r.facts.effects),"
+                "'region':f.body_region,'instrument':f.instrument_id,'action_id':f.id,"
+                "'followup_feint_source':strike.feint_source_action_id}))")
+            child_env = dict(os.environ)
+            child_env['PYTHONPATH'] = os.pathsep.join((str(ROOT / 'tests'),
+                str(ROOT / 'src'), str(ROOT / 'examples')))
+            process = subprocess.run([sys.executable, "-c", script, str(save_path)],
+                cwd=ROOT, env=child_env, check=False, capture_output=True,
+                text=True, timeout=60)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            restored = json.loads(process.stdout)
+        self.assertEqual(restored['outcome'], 'success')
+        self.assertEqual(restored['effects'], [])
+        self.assertEqual(restored['region'], 'Arm')
+        self.assertIsNone(restored['instrument'])
+        self.assertEqual(restored['view']['feint_action']['status'], 'completed')
+        self.assertEqual(restored['followup_feint_source'], restored['action_id'])
 
     def test_attack_only_browser_requests_drive_native_approach_and_thrust(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())

@@ -1947,7 +1947,66 @@ class TestActionEvaluation(unittest.TestCase):
         dropped=self.world.get_object_by_id(self.w3)
         self.assertIsNone(dropped.parent_container_id)
         self.assertEqual(dropped.get_position(),self.b.get_position())
-        self.assertIs(dropped,self.world.get_object_by_id(self.w3))
+
+    def test_disarm_applies_adopted_ranseur_bonus(self):
+        from melee_combat import effective_melee_reach_meters
+        self.b.set_position(CartesianPosition(.2,0,0))
+        attacker=self.world.get_object_by_id(self.w1)
+        ranseur=self.world.library.get_weapon_definition('Ranseur')
+        attacker.original=ranseur
+        attacker.current=ranseur.copy()
+        self.a.current.skills.weapon_skills['Ranseur']=2
+        self.enc.enable_transactional_progression(quiescent=True)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
+        action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
+        action.reach=effective_melee_reach_meters(self.a.current,attacker.current)
+        action.end_time=attacker.Tt();self.enc.schedule_action(action)
+        rolls=iter((20,1))
+        def roll(ctx,dice):
+            value=next(rolls);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(action.end_time)
+        receipt=self.enc.inspect_committed(action.end_time).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertGreaterEqual(dict(receipt.facts.metadata)['margin'],3)
+
+    def test_gauntlet_cannot_be_disarmed_without_random_draw(self):
+        from melee_combat import effective_melee_reach_meters
+        self.b.set_position(CartesianPosition(.2,0,0))
+        gauntlet=self.world.library.get_weapon_definition('Gauntlet')
+        target=self.world.get_object_by_id(self.w3)
+        target.original=gauntlet;target.current=gauntlet.copy()
+        self.enc.enable_transactional_progression(quiescent=True)
+        immune=Action(self.world,self.enc.time,self.enc.time+1,'disarm',self.a.id,self.b.id,self.w1)
+        immune.disarm_weapon_id=self.w3;immune.disarm_motion='thrust'
+        attacker=self.world.get_object_by_id(self.w1)
+        self.a.current.skills.weapon_skills['Dagger']=2
+        immune.reach=effective_melee_reach_meters(self.a.current,attacker.current)
+        immune.end_time=self.enc.time+attacker.Tt();self.enc.schedule_action(immune)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=AssertionError('immune target drew RNG')):
+            self.enc.step(immune.end_time)
+        self.assertEqual(immune.resolution.outcome,'not_disarmable')
+        self.assertIs(target,self.world.get_object_by_id(self.w3))
+        self.assertEqual(self.b.current.body_parts['right hand'],self.w3)
+
+    def test_weapon_attached_to_authored_locked_gauntlet_cannot_be_disarmed(self):
+        from weapon import author_locked_gauntlet_weapon_attachment
+        from melee_combat import effective_melee_reach_meters
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.b.set_position(CartesianPosition(.2,0,0))
+        gauntlet_id=self.world.make_weapon_for_being(self.b.id,'Locked gauntlet','B locked gauntlet')
+        weapon=self.world.get_object_by_id(self.w3)
+        author_locked_gauntlet_weapon_attachment(self.world,weapon,self.b.id,gauntlet_id)
+        self.enc.enable_transactional_progression(quiescent=True)
+        attacking=self.world.get_object_by_id(self.w1)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
+        action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
+        action.reach=effective_melee_reach_meters(self.a.current,attacking.current)
+        action.end_time=attacking.Tt();self.enc.schedule_action(action)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=AssertionError('locked target drew RNG')):
+            self.enc.step(action.end_time)
+        self.assertEqual(action.resolution.outcome,'not_disarmable')
+        self.assertEqual(self.b.current.body_parts['right hand'],self.w3)
 
     def test_native_unarmed_disarm_uses_arm_profile_and_opposed_attack_roll(self):
         self.a.current.skills.skills['unarmed combat']=1
@@ -1974,6 +2033,93 @@ class TestActionEvaluation(unittest.TestCase):
         dropped=self.world.get_object_by_id(self.w3)
         self.assertIsNone(dropped.parent_container_id)
         self.assertEqual(dropped.get_position(),self.b.get_position())
+
+    def test_native_unarmed_disarm_takes_same_weapon_only_at_five_point_margin(self):
+        from action_evaluation import DisarmTakeEffect
+        self.a.current.skills.skills['unarmed combat']=1
+        self.a.current.body_parts['left hand']=None
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,None)
+        action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
+        action.disarm_hand='left hand'
+        from weapon import NATIVE_READY_PREPARATION_TAG
+        target_object=self.world.get_object_by_id(self.w3)
+        target_object.current.tags[NATIVE_READY_PREPARATION_TAG]={
+            'owner_id':self.b.id,'motion':'swing','ready_action_id':'prior-ready',
+            'completed_at':0,'readying_seconds':1}
+        from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
+        action.reach=reference_arm_length_inches(height_inches=self.a.current.height,
+            length_inches=self.a.current.length)*INCHES_TO_METERS
+        action.end_time=3;self.enc.schedule_action(action)
+        iterator=iter((20,1))
+        def roll(ctx,dice):
+            value=next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(3)
+        receipt=self.enc.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'disarmed_taken')
+        self.assertGreaterEqual(dict(receipt.facts.metadata)['margin'],5)
+        effect=next(row.effect for row in receipt.effects if type(row.effect) is DisarmTakeEffect)
+        self.assertEqual(effect.target_id,self.w3)
+        self.assertEqual(self.a.current.body_parts['left hand'],self.w3)
+        self.assertIsNone(self.b.current.body_parts['right hand'])
+        weapon=self.world.get_object_by_id(self.w3)
+        self.assertEqual(weapon.parent_container_id,self.a.id)
+        self.assertEqual(self.a.weapons.count(self.w3),1)
+        self.assertNotIn(self.w3,self.b.weapons)
+        self.assertNotIn(NATIVE_READY_PREPARATION_TAG,target_object.current.tags)
+
+    def test_native_unarmed_disarm_hand_choice_drops_on_margin_below_five(self):
+        self.a.current.skills.skills['unarmed combat']=1
+        self.a.current.body_parts['left hand']=None
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        action=Action(self.world,0,1,'disarm',self.a.id,self.b.id,None)
+        action.disarm_weapon_id=self.w3;action.disarm_motion='thrust'
+        action.disarm_hand='left hand'
+        from melee_combat import reference_arm_length_inches,INCHES_TO_METERS
+        action.reach=reference_arm_length_inches(height_inches=self.a.current.height,
+            length_inches=self.a.current.length)*INCHES_TO_METERS
+        action.end_time=3;self.enc.schedule_action(action)
+        iterator=iter((18,10))
+        def roll(ctx,dice):
+            value=next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(3)
+        receipt=self.enc.inspect_committed(3).action(action.id)
+        self.assertEqual(receipt.facts.outcome,'disarmed')
+        self.assertEqual(dict(receipt.facts.metadata)['margin'],4)
+        weapon=self.world.get_object_by_id(self.w3)
+        self.assertIsNone(weapon.parent_container_id)
+        self.assertIsNotNone(weapon.get_position())
+
+    def test_disarm_custody_loss_blocks_accepted_later_attack_with_that_weapon(self):
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.a.set_position(CartesianPosition(0,0,0))
+        self.b.set_position(CartesianPosition(.2,0,0))
+        self.enc.enable_transactional_progression(quiescent=True)
+        defender_weapon=self.world.get_object_by_id(self.w3)
+        from melee_combat import effective_melee_reach_meters
+        attack=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,motion='thrust',reach=2)
+        attack.end_time=8;self.enc.schedule_action(attack)
+        disarm_weapon=self.world.get_object_by_id(self.w1)
+        disarm=Action(self.world,0,1,'disarm',self.a.id,self.b.id,self.w1)
+        disarm.disarm_weapon_id=self.w3;disarm.disarm_motion='thrust'
+        disarm.reach=effective_melee_reach_meters(self.a.current,disarm_weapon.current)
+        disarm.end_time=disarm_weapon.Tt();self.enc.schedule_action(disarm)
+        iterator=iter((20,1))
+        def roll(ctx,dice):
+            value=next(iterator)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(8)
+        self.assertEqual(disarm.resolution.outcome,'disarmed')
+        self.assertEqual(attack.resolution.outcome,'weapon_unavailable')
+        self.assertEqual(defender_weapon.id,self.w3)
+        self.assertIsNone(self.b.current.body_parts['right hand'])
 
     def test_grappled_disarm_defender_loses_the_five_point_defense_bonus(self):
         from dataclasses import replace
@@ -2034,6 +2180,142 @@ class TestActionEvaluation(unittest.TestCase):
         later=self.enc.inspect_committed(math.ceil(follow.end_time)).action(follow.id)
         self.assertEqual(later.facts.outcome,'weapon_unavailable')
 
+    def test_native_break_weapon_failed_attempt_preserves_both_weapons(self):
+        self.a.set_position(CartesianPosition(0,0,0)); self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.enc.enable_transactional_progression(quiescent=True)
+        attacking=self.world.get_object_by_id(self.w1)
+        victim=self.world.get_object_by_id(self.w3)
+        victim_before=victim.hit_points();attacker_before=attacking.hit_points()
+        duration=max(1,math.ceil(attacking.St()))
+        follow=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,motion='thrust',reach=2)
+        follow.end_time=duration+1;self.enc.schedule_action(follow)
+        breaker=Action(self.world,0,1,'break weapon',self.a.id,self.b.id,self.w1)
+        breaker.break_weapon_id=self.w3;breaker.break_motion='swing'
+        from melee_combat import effective_melee_reach_meters
+        breaker.reach=effective_melee_reach_meters(self.a.current,attacking.current)
+        breaker.end_time=duration;self.enc.schedule_action(breaker)
+        values=iter((1,20))
+        def roll(ctx,dice):
+            value=next(values)
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(duration)
+        receipt=self.enc.inspect_committed(duration).action(breaker.id)
+        self.assertIn(receipt.facts.outcome,('miss','spectacular miss'))
+        self.assertEqual(victim.hit_points(),victim_before)
+        self.assertEqual(attacking.hit_points(),attacker_before)
+
+    def test_break_weapon_against_opponent_attacking_a_third_being_omits_their_damage(self):
+        from melee_combat import effective_melee_reach_meters
+        self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
+        third=self.world.get_object_by_id(self.world.make_being('Human','Third'))
+        third.set_position(CartesianPosition(.6,0,0));third.set_hit_points(100)
+        third.set_geometry(Sphere(.25))
+        self.enc.add_being(third.id)
+        self.enc.mark_aware(self.b.id,third.id);self.enc.mark_aware(third.id,self.b.id)
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.enc.enable_transactional_progression(quiescent=True)
+        attacking=self.world.get_object_by_id(self.w1);breaker_weapon=self.world.get_object_by_id(self.w2)
+        victim=self.world.get_object_by_id(self.w3)
+        victim.current.hit_points=1;victim.current.hardness=0
+        duration=max(1,math.ceil(attacking.St()))
+        follow=MeleeStrike(self.enc,self.b.id,third.id,self.w3,motion='thrust',reach=2)
+        follow.end_time=duration+1;self.enc.schedule_action(follow)
+        breaker=Action(self.world,0,1,'break weapon',self.a.id,self.b.id,self.w2)
+        breaker.break_weapon_id=self.w3;breaker.break_motion='swing'
+        breaker.break_target_action_id=follow.id
+        breaker.reach=effective_melee_reach_meters(self.a.current,breaker_weapon.current)
+        breaker.end_time=duration;self.enc.schedule_action(breaker)
+        values=iter((20,20,4,4))
+        draws=[]
+        def roll(ctx,dice):
+            draws.append(dice)
+            value=next(values);ctx.trace.append(RandomDraw(ctx.action_id,dice,
+                int(dice[2:].split('+')[0]),value));return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(duration)
+        receipt=self.enc.inspect_committed(duration).action(breaker.id)
+        self.assertEqual(receipt.facts.outcome,'broken')
+        self.assertEqual(victim.hit_points(),0)
+        self.assertEqual(draws,['1d20','1d20','1d4','1d4'])
+        self.enc.step(1)
+        later=self.enc.inspect_committed(duration+1).action(follow.id)
+        self.assertEqual(later.facts.outcome,'weapon_unavailable')
+
+    def test_break_weapon_automatically_hits_opponents_designated_parry_weapon(self):
+        from melee_combat import effective_melee_reach_meters
+        from melee_defense import MeleeDefense
+        self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.b.current.skills.weapon_skills['Dagger']=2
+        from atomic_publication import RNGCursor
+        self.enc.enable_transactional_progression(quiescent=True,
+            rng_owner=RNGCursor(random.Random(41).getstate()))
+        attacking=self.world.get_object_by_id(self.w1)
+        breaker_weapon=self.world.get_object_by_id(self.w2)
+        victim=self.world.get_object_by_id(self.w3)
+        victim.current.hit_points=1;victim.current.hardness=0
+        duration=max(1,math.ceil(attacking.St()))
+        attack=MeleeStrike(self.enc,self.a.id,self.b.id,self.w1,motion='thrust',reach=2)
+        attack.end_time=duration+1
+        parry=MeleeDefense(self.enc,self.b.id,self.a.id,kind='parry',
+            target_action_id=attack.id,weapon_id=self.w3,parry_motion='thrust')
+        parry.end_time=duration+1
+        breaker=Action(self.world,0,1,'break weapon',self.a.id,self.b.id,self.w2)
+        breaker.break_weapon_id=self.w3;breaker.break_motion='swing'
+        breaker.break_target_action_id=parry.id
+        breaker.reach=effective_melee_reach_meters(self.a.current,breaker_weapon.current)
+        breaker.end_time=duration
+        self.schedule(breaker,attack,parry)
+        from transactional_progression import _BINDINGS
+        from arena_native_snapshot import capture,encode
+        wire=encode(capture(self.world,self.enc,_BINDINGS[id(self.enc)].rng_owner))
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'break-parry-pending.json';path.write_bytes(wire)
+            script=("import sys; from arena_native_snapshot import decode,restore; "
+                "w,e,r=restore(decode(open(sys.argv[1],'rb').read())); "
+                "a=next(m.action for choice in e._choice_book._choices.values() for m in choice.members if getattr(m.action,'event_type',None)=='break weapon'); "
+                "assert a.break_target_action_id==sys.argv[2]; "
+                "assert any(m.action.id==a.break_target_action_id for choice in e._choice_book._choices.values() for m in choice.members); "
+                "print(a.break_target_action_id)")
+            child_env=dict(os.environ)
+            child_env['PYTHONPATH']=os.pathsep.join((str(ROOT/'tests'),str(ROOT/'src'),str(ROOT/'examples')))
+            restored=subprocess.run([sys.executable,'-B','-c',script,str(path),parry.id],
+                cwd=ROOT,env=child_env,check=False,capture_output=True,text=True,timeout=60)
+            self.assertEqual(restored.returncode,0,restored.stderr)
+            self.assertEqual(restored.stdout.strip(),parry.id)
+        draws=[]
+        def roll(ctx,dice):
+            draws.append(dice);value=4
+            ctx.trace.append(RandomDraw(ctx.action_id,dice,int(dice[2:].split('+')[0]),value))
+            return value
+        with patch.object(_ProvisionalRandom,'roll',roll):self.enc.step(duration)
+        result=self.enc.inspect_committed(duration).action(breaker.id)
+        self.assertEqual(result.facts.outcome,'broken')
+        self.assertEqual(draws,['1d4'])
+        self.enc.step(1)
+        parry_result=self.enc.inspect_committed(duration+1).action(parry.id)
+        self.assertEqual(parry_result.facts.outcome,'unable_to_defend')
+
+    def test_break_weapon_fails_closed_for_magic_target_without_magic_saving_facts(self):
+        from melee_combat import effective_melee_reach_meters
+        self.a.set_position(CartesianPosition(0,0,0));self.b.set_position(CartesianPosition(.2,0,0))
+        self.a.current.skills.weapon_skills['Dagger']=2
+        self.enc.enable_transactional_progression(quiescent=True)
+        attacking=self.world.get_object_by_id(self.w1);victim=self.world.get_object_by_id(self.w3)
+        victim.current.is_magical=True
+        duration=max(1,math.ceil(attacking.St()))
+        follow=MeleeStrike(self.enc,self.b.id,self.a.id,self.w3,motion='thrust',reach=2)
+        follow.end_time=duration+1;self.enc.schedule_action(follow)
+        breaker=Action(self.world,0,1,'break weapon',self.a.id,self.b.id,self.w1)
+        breaker.break_weapon_id=self.w3;breaker.break_motion='swing'
+        breaker.reach=effective_melee_reach_meters(self.a.current,attacking.current)
+        breaker.end_time=duration;self.enc.schedule_action(breaker)
+        with patch.object(_ProvisionalRandom,'roll',side_effect=AssertionError('unsupported magic save drew RNG')):
+            self.enc.step(duration)
+        self.assertEqual(breaker.resolution.outcome,'unsupported_object')
+        self.assertGreater(victim.hit_points(),0)
+
     def test_native_armed_feint_is_half_timing_nondamaging_and_bonus_is_one_followup(self):
         self.b.set_position(CartesianPosition(.2, 0, 0))
         self.a.current.skills.weapon_skills['Dagger'] = 2
@@ -2076,6 +2358,44 @@ class TestActionEvaluation(unittest.TestCase):
         repeated.feint_source_action_id = action.id
         with self.assertRaisesRegex(ValueError, 'forfeited or consumed'):
             repeated.prepare_schedule(self.enc)
+
+    def test_native_unarmed_feint_uses_authored_arm_profile_and_same_target_followup(self):
+        self.b.set_position(CartesianPosition(.2, 0, 0))
+        self.a.current.skills.skills['unarmed combat'] = 2
+        self.a.current.skills.weapon_skills['Dagger'] = 2
+        self.enc.enable_transactional_progression(quiescent=True)
+        arm = self.world.library.weapon_dictionary.objects['Arm']
+        action = Action(self.world, 0, 1, 'feint', self.a.id, self.b.id, None)
+        action.feint_motion = 'thrust'
+        action.body_region = 'Arm'
+        from melee_combat import effective_melee_reach_meters
+        action.reach = effective_melee_reach_meters(self.a.current, arm)
+        duration = math.ceil(arm.Tt() / 2)
+        action.end_time = duration
+        self.assertEqual(action.prepare_schedule(self.enc).end_time, duration)
+        self.enc.schedule_action(action)
+        rolls = iter([20])
+        def roll(ctx, dice):
+            value = next(rolls)
+            ctx.trace.append(RandomDraw(ctx.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(duration)
+        receipt = self.enc.inspect_committed(duration).action(action.id)
+        self.assertEqual(receipt.facts.outcome, 'success')
+        self.assertFalse(receipt.facts.effects)
+        self.enc.difficulty_class = 15
+        followup = self.strike()
+        followup.feint_source_action_id = action.id
+        self.enc.schedule_action(followup)
+        rolls = iter([11, 2])
+        with patch.object(_ProvisionalRandom, 'roll', roll):
+            self.enc.step(math.ceil(followup.end_time) - self.enc.time)
+        attack = self.enc.inspect_committed(math.ceil(followup.end_time)).action(followup.id)
+        self.assertIn(attack.facts.outcome, ('normal', 'critical'))
+        self.assertTrue(any(type(effect).__name__ == 'DamageEffect'
+                            for effect in attack.facts.effects))
 
     def test_armed_feint_requires_advanced_weapon_skill_before_choice_mutation(self):
         self.enc.enable_transactional_progression(quiescent=True)

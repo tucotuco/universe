@@ -788,6 +788,8 @@ class Encounter(Event):
         if type(action) is MeleeDefense:
             prepared = preparer(action, self, proposed_actions=_proposed_actions,
                                 target_action_id=_target_action_id)
+        elif type(action) is Action and action.event_type == 'break weapon':
+            prepared = preparer(action, self, proposed_actions=_proposed_actions)
         else:
             prepared = preparer(action, self)
         if (type(action) is Action and action.event_type == 'overrun'

@@ -323,7 +323,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         selected = {'event_type': ad['event_type'], 'strategy': strategy}
         if multiple_action_priority is not None:
             selected['multiple_action_priority'] = multiple_action_priority
-        for key in ('reach','body_region','two_handed','shield_bash','shield_hand','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','disarm_weapon_id','disarm_motion','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
+        for key in ('reach','body_region','two_handed','shield_bash','shield_hand','motion','feint_motion','feint_source_action_id','coup_motion','object_motion','break_motion','break_weapon_id','break_target_action_id','disarm_weapon_id','disarm_motion','disarm_hand','ready_motion','readying_seconds','kind','target_action_id','ready_at','threat_at_schedule',
                     'minimum_distance','practice_experience','max_distance','spotting_conditions','declared_roll','episode_time','topic','experience_policy','canceled_at','cancellation_reason','parry_motion','prepared_defense_action_id','strategy_pool','grab_hand','touch_action_id','touch_willing','grip_id','grapple_id','grapple_position','trip_source_action_id','trip_defender_ability','trip_size_categories','holder_id','holder_hand','object_grip_id','charge','charge_continuation_source_id','bull_rush_target_willing','end_run_exit_position','end_run_movement_conditions','end_run_occupant_willing','end_run_rate','end_run_origin_position','end_run_target_position','end_run_origin_cell','end_run_target_cell','end_run_phase_result'):
             if key in ad:
                 selected[key] = (position(ad[key]) if key in (
@@ -430,7 +430,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         # Position is an immutable native value; no arbitrary object survives.
         if type(action) is Action and ad['event_type'] == 'feint':
             if (ad.get('feint_motion') not in ('swing', 'thrust')
-                    or ad.get('instrument_id') is None
+                    or (ad.get('instrument_id') is None
+                        and ad.get('body_region') not in ('Arm', 'Leg'))
                     or type(ad.get('reach')) not in (int, float)
                     or not math.isfinite(ad['reach']) or ad['reach'] <= 0):
                 raise EvaluationIntegrityError('native Feint declaration is incomplete')
@@ -599,7 +600,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         elif type(obj) is WeaponInstance:
             category = 'weapon'
             from weapon import (NATIVE_DRAW_LOCATION_TAG, DRAWABLE_WORN_SHEATH,
-                                native_ready_preparation)
+                                native_ready_preparation,
+                                native_locked_gauntlet_weapon_attachment)
             tags = cd.get('tags')
             if type(tags) is not dict:
                 raise EvaluationIntegrityError('Weapon tags must be a native dictionary')
@@ -611,11 +613,27 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                     or not location['owner_id']):
                 raise EvaluationIntegrityError('native Weapon draw-location record is malformed')
             original_type = native_data(od['original'], (WeaponDefinition,))['obj_type']
+            weapon_categories = tuple(name for name, members in
+                weapon_dictionary.get('object_categories', {}).items()
+                if original_type in members)
             data.update(attacks=freeze(cd['attacks']), size=freeze(cd['weapon_size']),
                         original_type=freeze(original_type), is_shield=freeze(original_type in shield_names),
+                        weapon_categories=freeze(weapon_categories),
+                        is_magical=freeze(cd['is_magical']),
                         two_handed_design=freeze(tags.get('universe.native_two_handed_design') is True),
                         draw_location=freeze(location),
-                        ready_preparation=freeze(native_ready_preparation(obj)))
+                        ready_preparation=freeze(native_ready_preparation(obj)),
+                        locked_gauntlet_attachment=freeze(native_locked_gauntlet_weapon_attachment(obj)))
+            attachment=data['locked_gauntlet_attachment']
+            if attachment is not None:
+                owner=objects.get(attachment['owner_id']);gauntlet=objects.get(attachment['gauntlet_id'])
+                from being import BeingInstance
+                if (type(owner) is not BeingInstance or type(gauntlet) is not WeaponInstance
+                        or gauntlet.original.obj_type!='Locked gauntlet'
+                        or obj.id not in owner.weapons
+                        or sum(value==obj.id for value in owner.current.body_parts.values())!=1
+                        or gauntlet.id not in owner.weapons and gauntlet.id not in owner.possessions):
+                    raise EvaluationIntegrityError('locked-gauntlet attachment lacks authentic native owner/hand/Object custody')
         elif type(obj) is ArmorInstance:
             category = 'armor'
             data['defenses'] = freeze(cd['defenses'])
@@ -903,6 +921,16 @@ class DropObjectEffect:
 
 
 @dataclass(frozen=True)
+class DisarmTakeEffect:
+    """Transfer the exact disarmed Weapon to an unarmed attacker's selected hand."""
+    source_action_id: str
+    target_id: str
+    owner_id: str
+    actor_id: str
+    hand: str
+
+
+@dataclass(frozen=True)
 class GrappleStateEffect:
     """A Target-owned, receipt-backed physical grip or Grapple-control transition."""
     source_action_id: str
@@ -1182,6 +1210,8 @@ def _defense(snapshot, action, rng):
             if prepared['instrument_id'] not in actor.data['held']:
                 return ActionProposal(action.id, actor.id, (attacker.id,), 'unable_to_defend')
             parrying_weapon = snapshot.entity(prepared['instrument_id'])
+            if parrying_weapon.hp <= 0:
+                return ActionProposal(action.id, actor.id, (attacker.id,), 'unable_to_defend')
             incoming_weapon = snapshot.entity(strike.instrument_id)
             if (parrying_weapon.data.get('weight') is None
                     or incoming_weapon.data.get('weight') is None
@@ -1195,7 +1225,9 @@ def _defense(snapshot, action, rng):
     eligible = False
     success = False
     effects = ()
-    if _helpless(actor) or (kind == 'parry' and action.instrument_id not in actor.data['held']):
+    if (_helpless(actor) or (kind == 'parry' and
+            (action.instrument_id not in actor.data['held']
+             or snapshot.entity(action.instrument_id).hp <= 0))):
         outcome = 'unable_to_defend'
     elif kind == 'block' and action.instrument_id not in actor.data['shields']:
         outcome = 'unable_to_defend'
@@ -1255,6 +1287,17 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
     if action.data.get('event_type') == 'stun':
         from types import SimpleNamespace
         region, motion = action.data.get('body_region'), action.data.get('motion')
+        profile = actor.data.get('unarmed_profiles', {}).get(region, {}).get(
+            'S' if motion == 'swing' else 'T')
+        if profile is not None:
+            weapon = SimpleNamespace(id=actor.id, category='weapon', hp=1,
+                obj_type=region, data={'attacks': {'S': profile, 'T': profile},
+                    'original_type': region, 'size': actor.data.get('size_code'),
+                    'two_handed_design': False})
+    elif (action.family == 'melee' and action.data['event_type'] == 'feint'
+          and action.instrument_id is None):
+        from types import SimpleNamespace
+        region, motion = action.data.get('body_region'), action.data.get('feint_motion')
         profile = actor.data.get('unarmed_profiles', {}).get(region, {}).get(
             'S' if motion == 'swing' else 'T')
         if profile is not None:
@@ -1353,7 +1396,7 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
         elif outcome is None and target.hp <= 0 and action.data['event_type'] != 'coup de grace':
             outcome = 'target_down'
         elif outcome is None and (
-                (action.data.get('event_type') != 'stun'
+                (action.data.get('event_type') not in ('stun', 'feint')
                  and action.instrument_id not in actor.data['held']
                  and not (action.data.get('shield_bash') is True
                           and action.instrument_id in actor.data.get('shields', ())))
@@ -1431,7 +1474,9 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 buckler_penalty = (2 if action.data.get('shield_bash') is not True
                     and any(arm in weapon_hands for arm in buckler_arms) else 0)
                 skill_bonus = ((actor.data['skills'].get('unarmed combat', 0) or 0)
-                    if action.data.get('event_type') == 'stun' else
+                    if action.data.get('event_type') == 'stun'
+                    or (action.data.get('event_type') == 'feint'
+                        and action.instrument_id is None) else
                     actor.data['weapon_skills'].get(weapon.obj_type, 0))
                 armor_check_penalty = (actor.data.get('armor_check_penalty', 0)
                     if action.data.get('event_type') == 'stun' else 0)
@@ -1445,7 +1490,10 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                     + (2 if pole_set_charge else 0),
                     target_defense + parry_bonus, dc - adjustment)
             if action.family == 'melee' and action.data['event_type'] == 'feint':
-                if (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0) <= 1:
+                skill = ((actor.data['skills'].get('unarmed combat', 0) or 0)
+                    if action.instrument_id is None else
+                    (actor.data['weapon_skills'].get(weapon.obj_type, 0) or 0))
+                if skill <= (0 if action.instrument_id is None else 1):
                     outcome = 'weapon_unavailable'
                 else:
                     adjustment = actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
@@ -2125,9 +2173,19 @@ def _object_strike(snapshot, action, rng):
         defender = target
         victim_weapon = snapshot.entity(action.data['break_weapon_id'])
         following = [row for row in snapshot.actions.values()
-            if row.family == 'melee' and row.actor_id == defender.id
-            and row.target_id == actor.id and row.instrument_id == victim_weapon.id
+            if row.family in ('melee','defense') and row.actor_id == defender.id
+            and row.instrument_id == victim_weapon.id
             and row.boundary == action.boundary + 1]
+        target_action_id=action.data.get('break_target_action_id')
+        if target_action_id is None:
+            following=[row for row in following if row.family=='melee' and row.target_id==actor.id]
+        else:
+            following=[row for row in following if row.id==target_action_id and (
+                (row.family=='melee' and row.target_id not in (actor.id,defender.id))
+                or (row.family=='defense' and row.data.get('kind')=='parry'
+                    and any(candidate.id==row.data.get('target_action_id')
+                        and candidate.family=='melee' and candidate.actor_id==actor.id
+                        and candidate.target_id==defender.id for candidate in snapshot.actions.values()))) ]
         if len(following) != 1:
             return ActionProposal(action.id,actor.id,(defender.id,),
                 'no_prior_second_attack',metadata=())
@@ -2138,6 +2196,10 @@ def _object_strike(snapshot, action, rng):
         if (victim_weapon.id not in defender.data['held'] or weapon.id not in actor.data['held']
                 or weapon.hp<=0 or victim_weapon.hp<=0):
             return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=metadata)
+        # The adopted magical-weapon paragraph requires saving throws against
+        # DC 15 plus a magic bonus. No native saving-bonus fact is represented.
+        if victim_weapon.data.get('is_magical') is True:
+            return ActionProposal(action.id,actor.id,(defender.id,),'unsupported_object',metadata=metadata)
         status,distance=snapshot.melee_status(action)
         if status!='in_reach':
             return ActionProposal(action.id,actor.id,(defender.id,),status,metadata=metadata)
@@ -2146,21 +2208,30 @@ def _object_strike(snapshot, action, rng):
         if any(type(x) not in (int,float) or x<0 for x in (hardness,source_hardness)):
             return ActionProposal(action.id,actor.id,(defender.id,),'unsupported_object',metadata=metadata)
         motion='S'; attack_die=weapon.data['attacks'][motion]['d']
-        following_motion = following[0].data['event_type']
-        defender_die=victim_weapon.data['attacks']['S' if following_motion == 'swing' else 'T']['d']
+        opposing_defense=following[0].family=='defense'
+        following_motion = (following[0].data.get('parry_motion') if opposing_defense
+                            else following[0].data['event_type'])
+        attacking_actor=(not opposing_defense and following[0].target_id==actor.id)
+        defender_die=(victim_weapon.data['attacks']['S' if following_motion == 'swing' else 'T']['d']
+                      if attacking_actor else None)
+        opposing_level=(defender.data['strategy']['attack'] if attacking_actor else
+            following[0].data.get('strategy',{}).get('defense'))
+        if not opposing_defense and type(opposing_level) is not int:
+            return ActionProposal(action.id,actor.id,(defender.id,),'unsupported_object',metadata=metadata)
         skill=actor.data['weapon_skills'].get(weapon.data['original_type'],0)
         adjustment=actor.data['fatigue_adjustments'][actor.data['fatigue_level']]['ability_adjustment']
         if adjustment is None:
             return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=metadata)
         def hits(roll,dc):
-            return attack_hits(roll,skill+actor.data['strategy']['attack']-priority_penalty-defender.data['strategy']['attack'],0,dc-adjustment)
-        outcome=hit_outcome(snapshot.difficulty,rng.roll,hits,lambda dc:True,lambda dc:True)
+            return attack_hits(roll,skill+actor.data['strategy']['attack']-priority_penalty-opposing_level,0,dc-adjustment)
+        outcome=('normal' if opposing_defense else
+            hit_outcome(snapshot.difficulty,rng.roll,hits,lambda dc:True,lambda dc:True))
         effects=[]
         if outcome in ('normal','critical'):
             own_raw=rng.roll(f'1d{attack_die}')+action.data['strategy']['extra_damage']
             if outcome=='critical':own_raw+=rng.roll(f'1d{attack_die}')
-            other_raw=(rng.roll(f'1d{defender_die}')
-                       +following[0].data['strategy']['extra_damage'])
+            other_raw=((rng.roll(f'1d{defender_die}')
+                       +following[0].data['strategy']['extra_damage']) if attacking_actor else 0)
             total_raw=own_raw+other_raw
             threshold=hardness+victim_weapon.hp
             breaks=total_raw>=threshold
@@ -2231,6 +2302,16 @@ def _disarm(snapshot, action, rng):
         return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
     if (target_weapon.hp<=0 or target_weapon.id not in defender.data['held']):
         return ActionProposal(action.id,actor.id,(defender.id,),'weapon_unavailable',metadata=tuple(metadata))
+    # The adopted rule makes gauntlets immune to Disarm. Their native weapon
+    # identity is enough to enforce this without inferring a separate worn item.
+    if target_weapon.data.get('original_type') in ('Gauntlet','Locked gauntlet','Spiked gauntlet'):
+        return ActionProposal(action.id,actor.id,(defender.id,),'not_disarmable',metadata=tuple(metadata))
+    attachment=target_weapon.data.get('locked_gauntlet_attachment')
+    if (attachment is not None and attachment.get('owner_id')==defender.id
+            and attachment.get('gauntlet_id') in defender.data.get('weapons',())):
+        gauntlet=snapshot.entities.get(attachment['gauntlet_id'])
+        if gauntlet is not None and gauntlet.data.get('original_type')=='Locked gauntlet':
+            return ActionProposal(action.id,actor.id,(defender.id,),'not_disarmable',metadata=tuple(metadata))
     unarmed = attacker_weapon is None
     if unarmed:
         if ((actor.data['skills'].get('unarmed combat',0) or 0)<=0
@@ -2258,7 +2339,18 @@ def _disarm(snapshot, action, rng):
     if adjustment is None:
         return ActionProposal(action.id,actor.id,(defender.id,),'unable_to_act',metadata=tuple(metadata))
     priority_penalty=action.data.get('multiple_action_priority',0) or 0
-    attacker_total=rng.roll('1d20')+skill+actor.data['strategy']['attack']-priority_penalty-adjustment
+    disarm_bonus = 0
+    if not unarmed:
+        weapon_name = attacker_weapon.data.get('original_type')
+        categories = attacker_weapon.data.get('weapon_categories', ())
+        if ('Flails' in categories or weapon_name in ('Ranseur','Spiked chain')):
+            disarm_bonus = 2
+        elif weapon_name in ('Lasso','Whip'):
+            target_categories = target_weapon.data.get('weapon_categories', ())
+            if 'Swords' not in target_categories and target_weapon.data.get('size') != 'T':
+                disarm_bonus = 2
+    attacker_total=(rng.roll('1d20')+skill+actor.data['strategy']['attack']
+                    +disarm_bonus-priority_penalty-adjustment)
     grappled=any(row[2]==defender.id for row in snapshot.grapple_controls)
     defender_total=rng.roll('1d20')+defender.data['strategy']['defense']+(0 if grappled else 5)
     margin=attacker_total-defender_total
@@ -2267,6 +2359,11 @@ def _disarm(snapshot, action, rng):
         return ActionProposal(action.id,actor.id,(defender.id,),'failure',metadata=tuple(metadata))
     if defender.position is None:
         return ActionProposal(action.id,actor.id,(defender.id,),'unplaced',metadata=tuple(metadata[:-1]))
+    take_hand=action.data.get('disarm_hand')
+    if (unarmed and margin>=5 and take_hand in actor.data.get('free_hands',())):
+        effect=DisarmTakeEffect(action.id,target_weapon.id,defender.id,actor.id,take_hand)
+        return ActionProposal(action.id,actor.id,tuple(sorted((defender.id,target_weapon.id))),
+            'disarmed_taken',(effect,),metadata=tuple(metadata))
     effect=DropObjectEffect(action.id,target_weapon.id,defender.id,defender.position.as_tuple())
     return ActionProposal(action.id,actor.id,tuple(sorted((defender.id,target_weapon.id))),
         'disarmed',(effect,),metadata=tuple(metadata))
