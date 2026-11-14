@@ -1,6 +1,7 @@
 """Native two-second Draw from explicitly authored source and hand state."""
 from pathlib import Path
 import json
+import math
 import subprocess
 import sys
 import unittest
@@ -74,6 +75,69 @@ def draw_scenario():
 
 
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_generated_long_sword_draw_ready_with_shield_blocks_two_handed_use(self):
+        session, candidate, player = arena(seed=20261150)
+        player.size_category = "medium"
+        shield_id = candidate.encounter.make_weapon("Medium shield", "Authored carried shield")
+        shield = candidate.universe.get_object_by_id(shield_id)
+        player.possessions.append(shield_id)
+        player.weapons.append(shield_id)
+        shield.parent_container_id = player.id
+        player.current.body_parts["left hand"] = shield_id
+        player.current.body_parts["right hand"] = None
+
+        weapon_id = candidate.encounter.make_weapon("Longsword", "Authored sheathed longsword")
+        weapon = candidate.universe.get_object_by_id(weapon_id)
+        player.possessions.append(weapon_id)
+        weapon.parent_container_id = player.id
+        author_worn_sheath_draw_location(weapon, player.id)
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, weapon.id, "object", weapon.name,
+            "Longsword", None, "carried", candidate.encounter.time, 0.0)
+        ledger._current[weapon.id] = evidence
+        ledger._history.append(evidence)
+
+        target = candidate.participants[1].native.being
+        layout = candidate.arena_map.layout
+        target_cell = layout.cell_at_position(target.get_position())
+        destination = min((cell for cell in layout.neighbors(target_cell)
+                           if cell != layout.cell_at_position(player.get_position())),
+            key=lambda cell: math.dist(
+                layout.center_position(cell, z=player.get_position().z).as_tuple(),
+                player.get_position().as_tuple()))
+        session.choose_destination({"column": destination.column, "row": destination.row,
+                                    "rate": "sprint", "facing_policy": "turn"})
+        while session.public_view()["movement_plan"] is not None:
+            session.advance_one_second()
+
+        weapon_handle, _ = select_draw(session, weapon)
+        session.choose_ready_weapon({"handle": weapon_handle, "hand": "right hand"})
+        session.advance_one_second()
+        session.advance_one_second()
+        weapon_handle, _ = select_draw(session, weapon)
+        session.choose_ready_preparation({"handle": weapon_handle, "motion": "swing"})
+        session.advance_one_second()
+        session.advance_one_second()
+
+        target_view = next(row for row in session.public_view()["entities"]
+                           if row.get("category") == "being" and row["name"].startswith(target.name))
+        catalog = session.inspect_entity({"handle": target_view["handle"]})["action_catalog"]
+        strike = next(row for row in catalog["entries"] if row["name"] == "swing at being")
+        options = strike["weapon_options"]
+        self.assertTrue(any(row["type"] == "Longsword" and row["grip"] == "one-handed"
+                            for row in options))
+        self.assertFalse(any(row["type"] == "Longsword" and row["grip"] == "two-handed"
+                             for row in options))
+        with self.assertRaisesRegex(ArenaBrowserRequestError,
+                                    "Native swing Choice is unavailable"):
+            session.choose_melee_strike({"handle": target_view["handle"],
+                "motion": "swing", "weapon_handle": weapon_handle, "two_handed": True})
+        session.choose_melee_strike({"handle": target_view["handle"],
+            "motion": "swing", "weapon_handle": weapon_handle})
+        self.assertEqual(player.current.body_parts["left hand"], shield_id)
+        self.assertEqual(player.current.body_parts["right hand"], weapon_id)
+        self.assertEqual(native_ready_preparation(weapon)["motion"], "swing")
+
     def test_generated_arena_exposes_native_shield_bash_and_persists_pending_choice(self):
         session, candidate, player = arena(seed=20261148)
         shield_id = candidate.universe.make_weapon("Medium shield", "Authored Arena shield")
