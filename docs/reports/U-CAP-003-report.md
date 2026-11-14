@@ -19,9 +19,9 @@ No adopted-rule question is outstanding. Quick-draw timing and general shield Do
 |---|---|---|---|
 | Earlier partial session | 2026-11-13T15:37:40-08:00 | Not recorded | Unknown; not estimated |
 | Earlier continuation | 2026-11-13T17:09:04-08:00 | 2026-11-13T17:22:47-08:00 | PT0H13M43S |
-| Current continuation | 2026-11-13T17:35:37-08:00 | 2026-11-13T18:11:34-08:00 | PT0H35M57S |
+| Current continuation | 2026-11-13T17:35:37-08:00 | 2026-11-13T18:12:53-08:00 | PT0H37M16S |
 
-The first interval's start was captured but its end was not. Other earlier intervals were not recorded. No missing interval has been estimated. The current interval's start was captured when this continuation began and its end was captured immediately before documentation closeout; elapsed time is calculated from those timestamps.
+The first interval's start was captured but its end was not. Other earlier intervals were not recorded. No missing interval has been estimated. The current interval's start was captured when this continuation began; its end was captured from the clock immediately before final closeout, and elapsed time was calculated from those timestamps.
 
 ## Implementation and verification
 
@@ -56,8 +56,10 @@ The six suites total 301 passing tests. No full repository suite was run. A prio
 - Repository branch: local `main`; no push was attempted.
 - Current continuation started from `ccb02511c751499c53595ba2771b3369078d2152`.
 - New focused-test commit: `fc420054231c6c553e221e26da56e0989db468e0` (`Verify weapon lifecycle persistence and object contention`). It includes only `tests/test_action_choices.py`, `tests/test_action_evaluation.py` and `tests/test_arena_ready_weapon.py`.
+- TASKS/report closeout commit: `4415fa6b50456e692383122efae7c47b28700010` (`Submit bounded U-CAP-003 outcome for review`). It includes only `TASKS.md` and `docs/reports/U-CAP-003-report.md`; a final report-only commit records the exact end timestamp and is named in the chat closeout.
 - Existing implementation and integration evidence remains in commits `a209cb7be83cf8ab4a5d94f1d766116eb96c4cfc`, `1b7be0bb238f3600a7456fe7094480bd5d9f5c6d`, `2737eea72f2b026af0f9f493c9037330bd9d7cd8`, `bb81f798fffb1c0fc4bb22ff7761e5127cbc01dd`, `fe88ed3a3a6cae77fed2323739cfbcdc89e8bfaf`, and `00451bd830bed3a2a80f0f75aafa3f34be368ca4`.
 - Before the focused-test commit, the staged path inventory was reviewed. `git diff --check` and `git diff --cached --check` passed; `.venv/bin/python -B tools/check_publication_safety.py --staged` returned `staged-audit files=7 findings=0 result=PASS`. `git commit --only` included only the three reviewed test files.
+- Before the TASKS/report closeout commit, the staged path inventory was reviewed; `git diff --check` and `git diff --cached --check` passed, and the staged publication audit returned `staged-audit files=6 findings=0 result=PASS`. `git commit --only` included only TASKS and the active U-CAP-003 report.
 - Pre-existing staged paths remain untouched: deletion of `docs/assignments/U-CAP-002.md`, deletion of `docs/reports/U-CAP-002-report.md`, and the staged U-THROW-001 patch archive rename. No unrelated staged archival content was committed.
 - `.venv`, ignored `legacy/`, local saved-world data, `npc-generator`, repository backups, and `universe-geology` were not modified. No history rewrite or push occurred.
-- This report and the active assignment remain unarchived pending ChatGPT review and acceptance. The TASKS/report closeout commit and resulting HEAD are identified in the final closeout message; no unreviewed file is included in this report commit.
+- This report and the active assignment remain unarchived pending ChatGPT review and acceptance. The final report-only timestamp correction is the closing local commit; its hash and final HEAD are recorded in the chat closeout. No U-CAP-003 file is left unstaged.
