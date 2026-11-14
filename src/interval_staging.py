@@ -18,6 +18,7 @@ from action_evaluation import (EvaluationIntegrityError, UnsupportedEvaluation,
 from observer_proposals import capture_observer_context, build_supported_candidate
 from spatial.state import CartesianPosition, SpatialState, integrate_position
 from spatial.frame import LocalFrame
+from measured_values import truncate_position
 from encounter import Encounter
 from universe import Universe
 from action_choice import ChoiceBook, ChoiceView, ChoiceMember, Reservation, _Accepted, declaration
@@ -681,8 +682,15 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
             _require(type(flight) is ProjectileFlight and flight.status in ('in_flight','landed'),
                 'unsupported projectile flight descriptor')
             if flight.status=='landed':continue
-            _require(positions[key]==flight.position_at(ed['time']),
-                'projectile starting position disagrees with committed flight state')
+            history=object.__getattribute__(objects[key],'__dict__').get('_atomic_projectile_history')
+            prior_state=history[-1] if type(history) is list and history else None
+            _require(type(prior_state) is ProjectileBoundaryState
+                and prior_state.boundary==ed['time']
+                and prior_state.source_action_id==flight.source_action_id
+                and prior_state.source_effect_identity==flight.source_effect_identity
+                and prior_state.position==flight.position_at(ed['time'])
+                and prior_state.position==positions[key],
+                'projectile starting position disagrees with its committed boundary state')
             landed=flight.impact_time<=next_boundary
             target_position=flight.landing_position if landed else flight.position_at(next_boundary)
             next_flight=replace(flight,status='landed' if landed else 'in_flight',
@@ -719,11 +727,16 @@ def prepare_interval_candidate(encounter, next_boundary, *, velocities=None, vel
                                              MappingProxyType(old),MappingProxyType(new)))
             now=dest
             if now<next_boundary:start(now,'before_boundary')
-        # The staged final positions become authoritative at this committed
-        # native boundary. Keep intermediate integration arithmetic precise,
-        # then truncate every persisted Cartesian coordinate toward zero.
-        from measured_values import truncate_position
-        positions={key:None if value is None else truncate_position(value)
+        # Preserve the adopted full precision of each projectile boundary.
+        # Other spatial positions keep the established hundredth-unit commit
+        # representation.
+        exact_projectile_positions={key:value for key,value in positions.items()
+            if type(object.__getattribute__(objects[key],'__dict__').get('_projectile_flight'))
+            is ProjectileFlight}
+        exact_projectile_positions.update({update.object_id:update.state.position
+                                           for update in projectile_updates})
+        positions={key:(None if value is None else
+                        exact_projectile_positions.get(key,truncate_position(value)))
                    for key,value in positions.items()}
         boundary_motion = {key: vector for key, vector in motion.items()
                            if key not in movement_stop_times

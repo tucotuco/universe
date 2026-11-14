@@ -198,12 +198,17 @@ class NativeThrowTests(unittest.TestCase):
         _, enc, _, projectile, rng, _ = build_native_scene()
         enc.step(4)
         candidate=enc.prepare_interval_candidate(5,rng_owner=rng)
-        before=projectile.get_position()
+        # Keep the original native position object so restoring it doesn't
+        # create a second identity change in the interval read fence.
+        before=projectile.spatial_state.position
         projectile.spatial_state.position=CartesianPosition(before.x+0.25,before.y,before.z)
         with self.assertRaises(StaleInterval):
             validate_interval_candidate(enc,candidate,rng_owner=rng)
         projectile.spatial_state.position=before
-        validate_interval_candidate(enc,candidate,rng_owner=rng)
+        # A candidate stays stale once an authoritative dependency was
+        # replaced, even if an equal position is later restored.
+        with self.assertRaises(StaleInterval):
+            validate_interval_candidate(enc,candidate,rng_owner=rng)
 
 
 if __name__ == '__main__':
