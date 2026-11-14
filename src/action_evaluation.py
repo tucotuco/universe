@@ -2295,12 +2295,17 @@ def _activity(snapshot, action, rng):
         elif action.instrument_id not in actor.data.get('possessions', ()):
             outcome = 'unavailable'
         else:
-            height = actor.data['height']
+            # Generated NPCs preserve their measured source stature in the
+            # native Being `length` field; the static Being table's `height`
+            # field is zero for those records. Use the measured stature as the
+            # release-height/arm-length source rather than inventing a default.
+            height = actor.data['height'] or actor.data.get('length')
             speed = release_velocity_yd_s(strength=actor.data['abilities']['STR'],
                 throw_skill_level=actor.data['skills'].get('throw', 0),
                 projectile_weight_lb=projectile.data['weight'],
                 heavy_load_reference_lb=action.data['heavy_load_reference_lb'],
-                height_inches=height)
+                height_inches=height, length_inches=actor.data.get('length'),
+                size_category=actor.data.get('size_category'))
             release = CartesianPosition(actor.position.x, actor.position.y,
                 actor.position.z + height * 0.0254)
             trajectory = project_drag_free_trajectory(release_velocity_yd_s=speed,

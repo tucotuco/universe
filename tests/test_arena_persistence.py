@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from arena_browser_session import GeneratedArenaSession
 from arena_browser_session import ArenaBrowserRequestError
 from arena_hex_map import HexAddress
+from activities import DelayAction, ThrowAction
 
 
 class TestArenaPersistence(unittest.TestCase):
@@ -59,6 +60,90 @@ class TestArenaPersistence(unittest.TestCase):
                 candidate.participants, loaded.participants):
             self.assertEqual(source_being.native.being._arena_perception_ledger.history,
                              loaded_participant.native.being._arena_perception_ledger.history)
+
+    def test_generated_throw_pending_and_in_flight_survive_fresh_process(self):
+        # NPC and measured stature come from npcgen. The Rock and placement
+        # are explicit native scenario facts; no Browser request mutates the
+        # generated world graph.
+        source = GeneratedArenaSession(root_seed_factory=lambda: 5051)
+        source.generate({"starting_experience": "10000",
+                         "width_cells": "10", "height_cells": "5"})
+        candidate = source.active_candidate
+        being = candidate.participants[0].native.being
+        encounter = candidate.encounter
+        universe = candidate.universe
+        self.assertEqual(being.current.abilities.STR(), 10)
+        object_id = universe.make_object_for_being(being.id, "Rock", "Scenario Rock")
+        projectile = universe.get_object_by_id(object_id)
+        projectile.set_position(being.get_position())
+        encounter.add_object(object_id)
+        encounter.activate_arena_for_player_action(being.id,
+            DelayAction(encounter, being.id, 0, encounter.time),
+            rng_owner=source._rng_cursor)
+        encounter.step(1)
+        throw = ThrowAction(universe, being.id, object_id, encounter.time,
+            heavy_load_reference_lb=80, elevation_degrees=80,
+            id="arena-test/throw")
+        encounter.schedule_action(throw)
+        encounter.step(1)
+        self.assertIn(throw.id, encounter.pending_action_list)
+        pending_bytes = source.save_encounter_bytes()
+
+        with tempfile.TemporaryDirectory() as directory:
+            pending = Path(directory) / "pending-throw.json"
+            airborne = Path(directory) / "airborne-throw.json"
+            pending.write_bytes(pending_bytes)
+            script = """
+import json,pathlib,sys
+from arena_browser_session import GeneratedArenaSession
+from activities import ThrowAction
+s=GeneratedArenaSession();s.load_encounter_bytes(pathlib.Path(sys.argv[1]).read_bytes())
+c=s.active_candidate;e=c.encounter;o=c.universe.get_object_by_id(sys.argv[3])
+assert any(type(c.universe.event_history[action_id]) is ThrowAction
+           for action_id in e.pending_action_list)
+e.step(4)
+f=o.__dict__['_projectile_flight'];h=o.__dict__['_atomic_projectile_history']
+assert f.status=='in_flight' and h[-1].boundary==6
+pathlib.Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
+print(json.dumps({'time':e.time,'id':o.id,'position':o.get_position().as_tuple(),
+ 'flight':(f.release_time,f.impact_time,f.release_position.as_tuple(),
+           f.landing_position.as_tuple(),f.velocity_m_s,f.status),
+ 'history':[(r.boundary,r.position.as_tuple(),r.status) for r in h],
+ 'rng':s._rng_cursor.state},separators=(',',':')))
+"""
+            env = {"PYTHONPATH": str(ROOT / "src")}
+            completed = subprocess.run([sys.executable, "-S", "-c", script,
+                str(pending), str(airborne), object_id], cwd=ROOT, env=env,
+                capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            restored = json.loads(completed.stdout)
+
+            encounter.step(4)
+            flight = projectile.__dict__["_projectile_flight"]
+            history = projectile.__dict__["_atomic_projectile_history"]
+            self.assertEqual(restored["time"], encounter.time)
+            self.assertEqual(restored["id"], projectile.id)
+            self.assertEqual(tuple(restored["position"]), projectile.get_position().as_tuple())
+            self.assertEqual(restored["flight"], [flight.release_time, flight.impact_time,
+                list(flight.release_position.as_tuple()), list(flight.landing_position.as_tuple()),
+                list(flight.velocity_m_s), flight.status])
+            self.assertEqual(restored["history"], [[row.boundary,
+                list(row.position.as_tuple()), row.status] for row in history])
+            self.assertEqual(self._tuplify(restored["rng"]), source._rng_cursor.state)
+
+            continued = GeneratedArenaSession()
+            continued.load_encounter_bytes(airborne.read_bytes())
+            continued_candidate = continued.active_candidate
+            continued_projectile = continued_candidate.universe.get_object_by_id(object_id)
+            continued_candidate.encounter.step(1)
+            encounter.step(1)
+            self.assertEqual(continued_candidate.encounter.time, encounter.time)
+            self.assertEqual(continued_projectile.get_position(), projectile.get_position())
+            self.assertEqual(continued_projectile.__dict__["_projectile_flight"],
+                             projectile.__dict__["_projectile_flight"])
+            self.assertEqual(tuple(continued_projectile.__dict__["_atomic_projectile_history"]),
+                             tuple(projectile.__dict__["_atomic_projectile_history"]))
+            self.assertEqual(continued._rng_cursor.state, source._rng_cursor.state)
 
     def test_repeatable_three_process_movement_continuation(self):
         uninterrupted = self._new_moving_session()

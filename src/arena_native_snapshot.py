@@ -13,7 +13,7 @@ import math
 import threading
 from types import MappingProxyType
 
-SCHEMA = 'universe.generated-arena-native-state/2'
+SCHEMA = 'universe.generated-arena-native-state/3'
 _FIELDS = frozenset(('schema', 'compatibility', 'inventory', 'sha256'))
 MAX_BYTES = 64 * 1024 * 1024
 
@@ -36,6 +36,7 @@ _ARENA_TAGS = frozenset({
     'spatial.state.SpatialState','spatial.geometry.Sphere','spatial.geometry.AxisAlignedBox',
     'arena_perception.ArenaPerceptionEvidence',
     'arena_perception.ArenaPerceptionLedger','activities.RunAction','activities.SpotAction',
+    'activities.ThrowAction','throwing.ProjectileFlight','throwing.ProjectileBoundaryState',
     'activities.PickUpAction','activities.ReadyWeaponAction','activities.ReadyPreparationAction','activities.DelayAction','melee_combat.MeleeStrike',
     'melee_combat.MeleeResult','melee_defense.MeleeDefense',
     'atomic_publication.PublishedInterval','atomic_publication.TargetIntervalRecord',
@@ -48,7 +49,7 @@ _ARENA_TAGS = frozenset({
     'observer_proposals.ActionOutcomeEffect','observer_proposals.LifecycleEffect',
     'observer_proposals.ReservationReleaseEffect',
     'observer_proposals.ObserverProjection','frozen_practice.PracticeProjection',
-    'action_evaluation.DefenseEffect',
+    'action_evaluation.DefenseEffect','action_evaluation.ProjectileReleaseEffect',
     'frozen_practice.CandidatePracticeUse','frozen_practice.CandidateSkillTransition',
     'experience.SkillUse','experience.BatchSkillUse','experience.SkillExercise',
     'experience.ActionResolution','interval_staging.AuthorityReference',
@@ -324,16 +325,23 @@ def restore(envelope):
     # Restore is an authoritative admission boundary: never normalize a file
     # whose saved measured state was written with a different precision rule.
     from object import ObjectDefinition
+    from object import ObjectInstance
     from spatial.state import SpatialState
     from spatial.geometry import AxisAlignedBox, Sphere
+    from throwing import ProjectileFlight
     from measured_values import is_truncated_measurement
+    exact_projectile_spatial_ids = {
+        id(obj.spatial_state) for obj in cache.values()
+        if type(obj) is ObjectInstance and type(obj.spatial_state) is SpatialState
+        and type(obj.__dict__.get('_projectile_flight')) is ProjectileFlight
+    }
     for obj in cache.values():
         if isinstance(obj, ObjectDefinition):
             for name in ObjectDefinition._MEASURED_ATTRIBUTES:
                 if not is_truncated_measurement(getattr(obj, name, None)):
                     raise ArenaNativeSnapshotRejected(
                         f'native {name} measurement is not canonically truncated')
-        if type(obj) is SpatialState:
+        if type(obj) is SpatialState and id(obj) not in exact_projectile_spatial_ids:
             if any(not is_truncated_measurement(value)
                    for value in obj.position.as_tuple()):
                 raise ArenaNativeSnapshotRejected(

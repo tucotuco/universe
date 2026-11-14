@@ -649,11 +649,13 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             and 0 < recipient.data['weight'] <= 3.3,
             'unsupported Throw strength/weight bracket')
         from throwing import release_velocity_yd_s, project_drag_free_trajectory
-        height=actor.data.get('height')
+        height=actor.data.get('height') or actor.data.get('length')
         speed=release_velocity_yd_s(strength=actor.data['abilities']['STR'],
             throw_skill_level=actor.data['skills'].get('throw',0),
             projectile_weight_lb=recipient.data['weight'],
-            heavy_load_reference_lb=action.data['heavy_load_reference_lb'],height_inches=height)
+            heavy_load_reference_lb=action.data['heavy_load_reference_lb'],
+            height_inches=height,length_inches=actor.data.get('length'),
+            size_category=actor.data.get('size_category'))
         projected=project_drag_free_trajectory(release_velocity_yd_s=speed,
             release_position=CartesianPosition(actor.position.x,actor.position.y,
                 actor.position.z+height*0.0254),
