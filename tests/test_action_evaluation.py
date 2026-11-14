@@ -211,6 +211,23 @@ class TestActionEvaluation(unittest.TestCase):
         result = self.scripted(snapshot, [10])
         self.assertEqual(result.proposals[0].outcome, 'miss')
 
+    def test_forearm_buckler_does_not_occupy_the_hand_for_two_handed_use(self):
+        from weapon import author_forearm_buckler_attachment
+        self.a.size_category = 'medium'
+        self.a.current.body_parts['left hand'] = None
+        buckler_id = self.world.make_weapon('Buckler', 'Authored free-hand buckler')
+        buckler = self.world.get_object_by_id(buckler_id)
+        self.a.possessions.append(buckler_id)
+        self.a.weapons.append(buckler_id)
+        buckler.parent_container_id = self.a.id
+        author_forearm_buckler_attachment(buckler, self.a.id, 'left')
+        action = MeleeStrike(self.enc, self.a.id, self.b.id, self.w1,
+                             motion='thrust', reach=2, two_handed=True)
+        prepared = self.enc.prepare_action(action)
+        self.assertEqual(prepared.action_id, action.id)
+        self.assertIsNone(self.a.current.body_parts['left hand'])
+        self.assertEqual(self.a.shielded_with(self.world)['left forearm'], buckler_id)
+
     def test_native_one_second_touch_uses_opposed_attack_totals_without_damage(self):
         self.b.set_position(CartesianPosition(.2, 0, 0))
         self.enc.enable_transactional_progression(quiescent=True)
