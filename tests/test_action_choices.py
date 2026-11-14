@@ -298,6 +298,20 @@ class TestActionChoices(unittest.TestCase):
                         validation.diagnostics)
         self.assertNotIn(self.a.id, ' '.join(d.reason for d in hand_conflicts))
 
+    def test_readying_and_striking_the_same_held_weapon_conflict_for_its_hand(self):
+        self.enc.enable_transactional_progression(quiescent=True)
+        self.enc.add_object(self.w1)
+        ready = ReadyPreparationAction(self.enc, self.a.id, self.w1, 'thrust', 0)
+        strike = self.strike(self.w1)
+        members = self.multiple_action_members((ready, strike), (0, 3))
+        validation = self.enc.validate_choice(self.enc.propose_choice(members))
+        self.assertFalse(validation.valid)
+        conflicts = [row for row in validation.diagnostics
+                     if row.code == 'active_hand_conflict']
+        self.assertTrue(any('right hand' in row.reason for row in conflicts),
+                        validation.diagnostics)
+        self.assertNotIn(self.a.id, ' '.join(row.reason for row in conflicts))
+
     def test_one_retained_dodge_cannot_be_assigned_twice_in_one_choice(self):
         preparation = MeleeDefense(self.enc, self.a.id, kind='dodge',
             strategy=Strategy(defense=0, timing=0))

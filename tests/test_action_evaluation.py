@@ -1551,6 +1551,9 @@ class TestActionEvaluation(unittest.TestCase):
         self.world.add_object(target)
         self.enc.add_object(target.id)
         self.enc.mark_aware(self.a.id, target.id)
+        clear_path = self.enc.physical_path(self.a.id, target.id)
+        self.assertEqual(clear_path.intersections, ())
+        self.assertEqual(clear_path.unmodeled_entity_ids, ())
         self.enc.enable_transactional_progression(quiescent=True)
         weapon = self.world.get_object_by_id(self.w1)
         action = Action(self.world, 0, 1, 'strike object', self.a.id, target.id, self.w1)
@@ -1636,7 +1639,7 @@ class TestActionEvaluation(unittest.TestCase):
 
     def test_simultaneous_object_strikes_apply_hardness_per_blow_and_sum_atomically(self):
         from object import ObjectDefinition, ObjectInstance
-        target=ObjectInstance(ObjectDefinition('test copper plate',12,12,12,20,1,1,20),
+        target=ObjectInstance(ObjectDefinition('test copper plate',12,12,12,20,1,1,3),
                               name='test copper plate')
         target.set_position(CartesianPosition(1.0,0,0));self.world.add_object(target)
         self.enc.add_object(target.id)
@@ -1659,7 +1662,9 @@ class TestActionEvaluation(unittest.TestCase):
         impacts=[effect for action in actions for effect in inspected.action(action.id).effects
                  if type(effect.effect) is DamageEffect and effect.effect.component=='object']
         self.assertEqual([row.effect.amount for row in impacts],[2,2])
-        self.assertEqual(target.hit_points(),16)
+        # Each blow clears hardness against the shared pre-action state; both
+        # proposals publish even though their combined durability loss destroys it.
+        self.assertEqual(target.hit_points(),-1)
 
     def test_native_disarm_releases_same_weapon_into_defender_hex_atomically(self):
         self.a.current.skills.weapon_skills['Dagger']=2
