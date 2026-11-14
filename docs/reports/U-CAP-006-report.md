@@ -22,6 +22,13 @@
 - The same publication refreshes each participating observer's existing evidence for this already-visible Weapon, so the generated Arena immediately shows the selected ground cell. A regression assertion checks the post-choice view; pending and resolved checkpoint restoration still validate both current observer ledgers.
 - A winning margin of 1–2 gives `maximum_landing_hexes == 0`. The origin is occupied by the defender, and no other cell is in range. Because adopted text and criterion A disallow occupied landings, the system preserves the pending state and refuses progression rather than inventing an exception or destination. This is the only presently identified user decision needed for Disarm acceptance.
 
+### Rule-question clarification interval
+
+- Start: `2026-11-14T10:25:54-08:00` (`2026-11-14T18:25:54Z`), captured when responding to the request for clarification.
+- End: `2026-11-14T10:26:20-08:00` (`2026-11-14T18:26:20Z`), captured immediately before this clarification closeout.
+- Elapsed: `PT26S` (calculated from the recorded start and end).
+- The concrete case is a successful Disarm roll with margin 1 or 2. Its adopted limit is zero hexes, and the defender occupies the only cell at that distance. Option 1 allows the weapon to land in that same cell alongside the defender, as a narrow exception to the assignment's vacant-cell rule. Option 2 keeps the weapon in the defender's hand and treats the Disarm as having no custody effect despite the successful roll, then lets the Encounter continue. The question asks which gameplay result should apply.
+
 ## Acceptance matrix
 
 | Criterion | Result | Evidence and bounded cases |
@@ -39,8 +46,8 @@ The post-roll persisted choice has been implemented as directed. One edge still 
 
 Choose one:
 
-1. **Permit the defender's origin hex only when the limit is zero.** The same Weapon lands on the occupied hex without displacement; this is a narrow exception to the vacancy requirement.
-2. **Keep the no-occupied-cell rule.** A successful Disarm with a zero-hex limit cannot release the Weapon; define the exact result (for example, no custody change or a failed landing) before resuming progression.
+1. **Allow same-cell landing only at zero distance.** The dropped Weapon occupies the defender's hex alongside them, without displacement; this is a narrow exception to the vacancy requirement.
+2. **No custody effect at zero distance.** The Weapon stays in the defender's hand and the Disarm has no effect, despite the successful roll; the Encounter continues. This preserves the vacancy requirement.
 
 All independent supported-range implementation, tests, persistence and regression work is complete. The answer is needed only to resolve this zero-distance contradiction; no other branch depends on it.
 
