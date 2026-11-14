@@ -1986,6 +1986,10 @@ class TestActionEvaluation(unittest.TestCase):
         options=disarm_landing_options(self.enc,self.w3)
         defender_cell=layout.cell_at_position(self.b.get_position())
         self.assertEqual(options,(defender_cell,))
+        attacker_position=self.a.get_position()
+        self.a.set_position(self.b.get_position())
+        self.assertEqual(disarm_landing_options(self.enc,self.w3),())
+        self.a.set_position(attacker_position)
         from transactional_progression import TransactionalProgressionError
         with self.assertRaisesRegex(TransactionalProgressionError,'landing is selected'):
             self.enc.step(1)
