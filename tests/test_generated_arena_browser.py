@@ -2300,6 +2300,39 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("Opponent is approaching.", page)
         self.assertIn("s.opponent_activity==='attack opportunity'", page)
 
+    def test_attack_only_pursuit_resumes_after_ground_object_enters_native_custody(self):
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 14,
+            ground_item_descriptions=[{"source_item_id": "pursuit-ground-shield",
+                "category": "shield", "native_type_key": "Small shield", "quantity": 1,
+                "ordinary": True, "magical": False, "mechanics": None,
+                "origin": "uact-full-002-pursuit-test.v1"}])
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "attack_only", "root_seed": "14"})
+        self.assertEqual(status, 200, generated)
+        candidate = self.session.active_candidate
+        player, opponent = (row.native.being for row in candidate.participants)
+        placement = candidate.ground_objects[0]
+        shield = candidate.universe.get_object_by_id(placement.native_object_id)
+        # Activate and commit observer evidence while the authored ground
+        # Object is still free; conservative pursuit correctly waits then.
+        self.request("/api/generated/run", {})
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(self.session._opponent_decision(candidate)["reason"],
+                         "unmodeled_ground_objects")
+        # Model the result of a successful native pickup: immutable placement
+        # provenance remains, while live custody and position no longer say
+        # that an Object occupies its original cell.
+        player.add_possession(shield.id)
+        shield.parent_container_id = player.id
+        shield.spatial_state = None
+        self.assertIsNone(shield.get_position())
+        self.assertEqual(candidate.ground_objects[0].native_object_id, shield.id)
+        decision = self.session._opponent_decision(candidate)
+        self.assertEqual(decision["kind"], "move", decision)
+        self.assertNotEqual(decision.get("reason"), "unmodeled_ground_objects")
+        self.assertNotIn(shield.id, json.dumps(self.session.public_view()))
+
     def test_seeded_two_sided_browser_combat_hit_and_fresh_process_continuation(self):
         from action_evaluation import DamageEffect
         from melee_combat import MeleeStrike

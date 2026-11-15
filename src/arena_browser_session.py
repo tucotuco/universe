@@ -1887,10 +1887,17 @@ class GeneratedArenaSession:
             return {"kind": "attack", "reason": "native_thrust_in_reach"}
         if status not in ("not_facing", "out_of_reach"):
             return {"kind": "none", "reason": "native_thrust_" + str(status)}
-        # The current ordinary starter profile includes unmodeled ground
-        # Objects. Keep its conservative path behavior; attack-only pursuit
-        # is limited to explicitly empty-ground encounters.
-        if candidate.ground_objects:
+        # Ground placements are immutable provenance for the published Arena,
+        # not a live inventory. Do not strand attack-only pursuit after the
+        # player has lawfully picked up every placed Object. Native movement
+        # validation still rejects routes that cross a currently grounded
+        # Object cell, so only live uncontained ground Objects block pursuit.
+        if any(
+            (native := candidate.universe.get_object_by_id(row.native_object_id)) is not None
+            and native.parent_container_id is None
+            and native.get_position() is not None
+            for row in candidate.ground_objects
+        ):
             return {"kind": "none", "reason": "unmodeled_ground_objects"}
         layout = candidate.arena_map.layout
         ledger = object.__getattribute__(opponent, "__dict__").get("_arena_perception_ledger")
