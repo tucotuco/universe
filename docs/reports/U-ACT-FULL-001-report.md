@@ -12,12 +12,14 @@
 
 - U-OBS-001 was accepted DONE (bounded). Its assignment and consumed report are in `docs/assignments/archive/U-OBS-001.md` and `docs/reports/archive/U-OBS-001-report.md`; its original perception limitations remain in TASKS and are preserved as future gate work.
 - Verified U-ACT-FULL-001 unused before activation. It is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed; U-NET-001 remains DEFERRED. Both Arena modes, observer-specific knowledge and the frozen Playtest Edition remain protected.
-- HEAD at the start: `33b11f7c4514d6d764e6baed6e4aac8c09b43df6`; current implementation HEAD after assignment activation: `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` (`Activate Action coverage assignment`).
+- HEAD at the start: `33b11f7c4514d6d764e6baed6e4aac8c09b43df6`; assignment activation: `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` (`Activate Action coverage assignment`); coverage milestone: `5923020` (`Audit adopted Encounter action variants`).
 - The pre-existing index entries for U-CAP-002/U-CAP-003/U-OBS-001 active-path deletions and the U-THROW-001 patch rename are preserved and excluded from our commits. The untracked `docs/assignments/universe-arena.json` save remains untouched. No push.
 
 ## Acceptance matrix progress
 
-The source-linked matrix is [action-implementation-coverage.md](../encounters/action-implementation-coverage.md). It enumerates 43 source-linked Action/variant rows: **36 PARTIAL, 4 OPEN, 1 BLOCKED, 1 NOT AN INDEPENDENT ACTION, 1 VERIFY, 0 FULL**. This is deliberately not a gate pass; prior DONE (bounded) implementations remain bounded. The matrix identifies implementation paths and focused tests per row, and gives the ordered remaining-cluster plan.
+The source-linked matrix is [action-implementation-coverage.md](../encounters/action-implementation-coverage.md). It enumerates 51 source-linked Action/variant rows: **40 PARTIAL, 4 OPEN, 5 BLOCKED, 1 NOT AN INDEPENDENT ACTION, 1 VERIFY, 0 FULL**. This is deliberately not a gate pass; prior DONE (bounded) implementations remain bounded. The matrix identifies implementation paths and focused tests per row, and gives the ordered remaining-cluster plan.
+
+The inventory audit verified `U-ACT-040` and `U-ACT-041` unused, then registered mounted Dismount and Armor Don/Remove in the sole canonical `TASKS.md` register. Their exact missing mount/rider and armor-part state is recorded in the matrix. No other stable ID was recycled.
 
 ### Equipment/weapon findings
 
@@ -54,5 +56,6 @@ The actual served Chrome tab is present at `http://127.0.0.1:51863/`. Its curren
 ## Commits and status changes
 
 - `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` — activation, U-OBS archival reference reconciliation and assignment installation. This commit preserved unrelated staged archive entries.
+- `5923020` — committed the source-linked variant audit and removed the duplicated active-path U-OBS assignment/report copies while preserving their accepted archived copies. The matrix has since been expanded with newly reconciled catalog variants; those follow-up docs are uncommitted at this report revision.
 - No new implementation variant has yet been committed. U-ACT-FULL-001 remains the only ACTIVE program; no Action Completeness gate status was changed.
 - Publication was not authorized; nothing was pushed.

@@ -189,7 +189,9 @@
 - [x] **U-ACT-036 — Run Action — DONE bounded.** Native `RunAction` for associated task/skill; distinct from continuous walk/jog/run/sprint **movement intention**.
 - [x] **U-ACT-037 — Deliberate Spot — DONE bounded native, Arena availability contextual.** Six-second native target-free observer discovery, separate from initial unobstructed automatic Arena perception; authored geometry required for the bounded Spot demonstration.
 - [x] **U-ACT-038 — Listen — DONE bounded native, Arena availability contextual.** Six-second native target-free Listen uses adopted racial aptitude/Hearing modifiers and explicit authored audibility evidence; no general acoustic propagation is inferred.
-- [ ] **U-ACT-039 — Remaining configured Action catalog — VERIFY.** `src/config/actions.tsv` previously contained 53 labels; a catalog label is not evidence of a supported transactional resolver. Audit executable variants without treating all labels as missing code or implementation.
+- [ ] **U-ACT-039 — Remaining configured Action catalog — VERIFY.** `src/config/actions.tsv` contains 56 labels; a catalog label is not evidence of a supported transactional resolver. Audit executable variants without treating all labels as missing code or implementation.
+- [ ] **U-ACT-040 — Dismount — BLOCKED for mounted Arena gameplay.** The adopted timing table provides ordinary and Ride-fast dismount timing, but current generated Beings have no native mount/rider relation, mount occupancy, or mounted position state. The related takedown of a mounted rider remains a separate U-ACT-012 Grapple variant.
+- [ ] **U-ACT-041 — Armor Don/Remove and partial armor — BLOCKED.** The timing table gives aggregate duration and the partial-donning die, but current armor records do not model independently donned armor pieces or their wearer/coverage state. Do not treat `armor_id` as proof of partial armor.
 
 ## IDEAS — retained possibilities, not authorized work
 
