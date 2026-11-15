@@ -2184,6 +2184,87 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertIn("Opponent is approaching.", page)
         self.assertIn("s.opponent_activity==='attack opportunity'", page)
 
+    def test_seeded_two_sided_browser_combat_hit_and_fresh_process_continuation(self):
+        from action_evaluation import DamageEffect
+        from melee_combat import MeleeStrike
+
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 14)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "attack_only",
+            "root_seed": "14"})
+        self.assertEqual(status, 200, generated)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, opponent = (row.native.being for row in candidate.participants)
+        player_hp_before, opponent_hp_before = player.get_hit_points(), opponent.get_hit_points()
+        self.assertEqual([candidate.universe.get_object_by_id(value).current.obj_type
+                          for value in player.weapons], ["Dagger"])
+        self.assertEqual([candidate.universe.get_object_by_id(value).current.obj_type
+                          for value in opponent.weapons], ["Dagger"])
+
+        status, moved = self.request("/api/generated/destination", {
+            "column": 8, "row": 1, "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200, moved)
+        status, moved = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual((status, moved["time_seconds"], moved["player"]["cell"]),
+                         (200, 1, {"column": 8, "row": 1}))
+        self.assertEqual(moved["player"]["hex_facing"], 5)
+        target_handle = self.session._view_handles[opponent.id]
+        target_view = self.session.inspect_entity({"handle": target_handle})
+        self.assertIsNone(target_view["selected_being"]["condition"]["hit_points_current"])
+        self.assertIn("Unknown", target_view["selected_being"]["condition"]["status"])
+        status, accepted = self.request("/api/generated/action-program", {"components": [{
+            "kind": "melee", "handle": target_handle, "motion": "thrust"}]})
+        self.assertEqual(status, 200, accepted)
+        strike = next(member.action for record in encounter._choice_book._choices.values()
+                      for member in record.members
+                      if type(member.action) is MeleeStrike and member.action.actor_id == player.id)
+        self.assertEqual(strike.instrument_id, next(iter(player.weapons)))
+        for _ in range(4):
+            status, state = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, state)
+        self.assertEqual(state["time_seconds"], 5)
+        player_record = encounter.inspect_committed(5).action(strike.id)
+        self.assertEqual(player_record.facts.outcome, "normal")
+        self.assertTrue(any(type(effect) is DamageEffect and effect.amount > 0
+                            for effect in player_record.facts.effects))
+        self.assertLess(opponent.get_hit_points(), opponent_hp_before)
+        player_melee_view = state["melee_action"]
+        self.assertEqual(player_melee_view["result_label"], "hit")
+        self.assertTrue(player_melee_view["damage_committed"])
+        self.assertEqual(player_melee_view["weapon_name"], "Dagger")
+        self.assertEqual(player_melee_view["impact_distance_meters"],
+                         dict(player_record.facts.metadata)["distance"])
+        status, state = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual((status, state["time_seconds"]), (200, 6))
+        opponent_strikes = [action for action in self.session._all_melee_actions(candidate)
+                            if action.actor_id == opponent.id]
+        self.assertTrue(opponent_strikes)
+        self.assertTrue(any(action.id in encounter.finished_action_list
+                            and encounter.inspect_committed(5).action(action.id).facts.outcome
+                            == "normal" for action in opponent_strikes))
+        self.assertLess(player.get_hit_points(), player_hp_before)
+        observer = json.dumps(state)
+        self.assertNotIn(opponent.id, observer)
+
+        with tempfile.TemporaryDirectory(prefix="arena-two-sided-fresh-process-") as temp:
+            save_path = Path(temp) / "chrome-equivalent-save.json"
+            save_path.write_bytes(self.session.save_encounter_bytes())
+            child_env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1",
+                             PYTHONPATH=os.pathsep.join((str(ROOT / "tests"),
+                                 str(ROOT / "src"), str(ROOT / "examples"))))
+            child_code = """import json,sys; from pathlib import Path; from arena_browser_session import GeneratedArenaSession; from melee_combat import MeleeStrike; from action_evaluation import DamageEffect; s=GeneratedArenaSession(); v=s.load_encounter_bytes(Path(sys.argv[1]).read_bytes()); c=s.active_candidate; p,o=(r.native.being for r in c.participants); assert c.encounter.time==6 and c.root_seed==14 and v['opponent_strategy']=='attack_only'; actions=s._all_melee_actions(c); ps=next(a for a in actions if a.actor_id==p.id); pf=c.encounter.inspect_committed(5).action(ps.id).facts; assert pf.outcome=='normal' and any(type(e) is DamageEffect and e.amount>0 for e in pf.effects); os=[a for a in actions if a.actor_id==o.id]; assert any(a.id in c.encounter.finished_action_list and c.encounter.inspect_committed(5).action(a.id).facts.outcome=='normal' for a in os); assert (p.get_hit_points(),o.get_hit_points())==(23,16); [s.advance_one_second() for _ in range(3)]; assert c.encounter.time==9; later=next(a for a in s._all_melee_actions(c) if a.actor_id==o.id and a.start_time==5); assert later.id in c.encounter.finished_action_list; print(json.dumps({'restored':6,'continued':9,'player_hp':p.get_hit_points(),'opponent_hp':o.get_hit_points(),'player_hit':'normal','player_damage':sum(e.amount for e in pf.effects if type(e) is DamageEffect and e.amount>0),'opponent_action_count':len(s._all_melee_actions(c))}))"""
+            process = subprocess.run([sys.executable, "-B", "-c", child_code, str(save_path)],
+                cwd=ROOT, env=child_env, check=False, capture_output=True,
+                text=True, timeout=60)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            restored = json.loads(process.stdout)
+        self.assertEqual((restored["restored"], restored["continued"]), (6, 9))
+        self.assertEqual((restored["player_hp"], restored["opponent_hp"]), (23, 16))
+        self.assertGreater(restored["player_damage"], 0)
+        self.assertGreaterEqual(restored["opponent_action_count"], 2)
+
     def enable_trace(self):
         import io
         stream = io.StringIO()

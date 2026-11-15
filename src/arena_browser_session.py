@@ -1209,8 +1209,17 @@ class GeneratedArenaSession:
                     "outcome": "unavailable", "duration_seconds": action.end_time - action.start_time,
                     "seconds_remaining": 0, "target_name": target_name}
         distance = dict(record.facts.metadata).get("distance")
+        from action_evaluation import DamageEffect
+        outcome = record.facts.outcome
+        hit = outcome in ("normal", "critical", "fatal")
+        damage_committed = any(type(effect) is DamageEffect and effect.amount > 0
+                               for effect in record.facts.effects)
+        weapon = candidate.universe.get_object_by_id(action.instrument_id)
         return {"name": action.event_type.title(), "status": "completed",
-                "outcome": record.facts.outcome,
+                "outcome": outcome,
+                "result_label": ("hit" if hit else outcome),
+                "damage_committed": damage_committed,
+                "weapon_name": None if weapon is None else weapon.name,
                 "duration_seconds": action.end_time - action.start_time,
                 "seconds_remaining": 0, "target_name": target_name,
                 "impact_distance_meters": distance}
