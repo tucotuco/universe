@@ -1,6 +1,6 @@
 # Adopted Encounter Action/variant coverage
 
-**Status:** current audit for U-ACT-FULL-001, 2026-11-15. `TASKS.md` remains the sole status register. A prior DONE (bounded) assignment is evidence for only the bounded row described here; it never implies Action-level `FULL`.
+**Status:** current 52-row adopted Action/variant audit maintained through U-ACT-FULL-002, 2026-11-15. `TASKS.md` remains the sole status register. A prior DONE (bounded) assignment is evidence for only the bounded row described here; it never implies Action-level `FULL`.
 
 **Sources:** the [adopted Encounter rules r61](encounters-working-draft-adopted-r61.md), especially [rounds and resolution](encounters-working-draft-adopted-r61.md#rounds), [equipment](encounters-working-draft-adopted-r61.md#shields-and-armor), [Appendix III](encounters-working-draft-adopted-r61.md#appendix-iii-attack-actions), and [Appendix IV](encounters-working-draft-adopted-r61.md#appendix-iv-defense-actions), plus actually adopted [r62](encounters-consistency-decisions-r62.md), [r63](encounters-consistency-decisions-r63.md), [r64](encounters-consistency-decisions-r64.md), [r65](encounters-consistency-decisions-r65.md), [r67](encounters-consistency-decisions-r67.md), [r68](encounters-consistency-decisions-r68.md), [r69](encounters-consistency-decisions-r69.md), and [r70](encounters-consistency-decisions-r70.md) supplements. Revision 66 is withdrawn and is not treated as a rule.
 
