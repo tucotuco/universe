@@ -122,6 +122,17 @@ def trace_sightline(start, end, entities, *, exclude_ids=()):
     for entity_id, entity in entities:
         if entity_id in excluded:
             continue
+        # Contained inventory shares its owner's registry presence but has no
+        # independent spatial extent at the owner's reference point. Counting
+        # every carried item as unknown geometry incorrectly blocks sightlines
+        # for equipped Beings. Free, unmodeled entities remain fail-closed.
+        parent = getattr(entity, "parent_container_id", None)
+        if parent is None:
+            data = getattr(entity, "data", None)
+            if hasattr(data, "get"):
+                parent = data.get("parent_container_id")
+        if parent not in (None, "universe"):
+            continue
         # An absent shape/placement is not automatically transparent.
         if getattr(entity, "geometry", None) is None or entity.get_position() is None:
             unmodeled.append(entity_id)

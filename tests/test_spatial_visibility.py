@@ -69,6 +69,13 @@ class TestSightline(unittest.TestCase):
         self.assertEqual(result.status, 'unknown')  # absent geometry is not transparent
         self.assertEqual(result.unmodeled_entity_ids, ('missing',))
 
+    def test_contained_inventory_is_not_an_independent_sightline_obstacle(self):
+        carried = self.obstacle('carried', P(4, 0, 0))
+        carried.parent_container_id = 'observer'
+        result = self.trace(('carried', carried))
+        self.assertEqual(result.status, 'clear')
+        self.assertEqual(result.unmodeled_entity_ids, ())
+
     def test_movement_recalculates_occlusion(self):
         obstacle = self.obstacle('moving', P(5, 0, 0), Sphere(1), 1)
         self.assertEqual(self.trace(('moving', obstacle)).status, 'blocked')

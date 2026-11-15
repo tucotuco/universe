@@ -57,8 +57,9 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         return result["status"], body
 
     def test_authored_spot_http_controls_match_native_seeded_route(self):
-        """Shipped HTTP choices preserve the native authored Spot outcome."""
-        self.session = GeneratedArenaSession(root_seed_factory=lambda: 73111)
+        """Browser-default equipped movement preserves the authored Spot route."""
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 73111,
+                                             default_equipment_mode="equipped")
         self.assertEqual(self.request("/api/generated/profile", {"profile_id": "none"})[0], 200)
         status, initial = self.request("/api/generated/generate", {
             "starting_experience": "10000", "width_cells": "5", "height_cells": "5",
@@ -74,6 +75,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn(hidden.id, json.dumps(planned))
         self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(candidate.encounter.time, 1)
+        self.assertEqual(player.get_position().as_tuple(), (2.2, 0.5, 0.0))
+        path = candidate.encounter.line_of_sight(player.id, hidden.id)
+        self.assertEqual(path.status, "clear", path.unmodeled_entity_ids)
         self.assertEqual(self.request("/api/generated/stop", {})[0], 200)
         status, accepted = self.request("/api/generated/spot", {})
         self.assertEqual(status, 200)
