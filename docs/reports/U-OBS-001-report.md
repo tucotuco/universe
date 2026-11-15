@@ -38,15 +38,21 @@
 - A live route to hex `(2, 2)` committed native movement and the browser exposed the native Spot button without adding the target to the visible list. The Spot Choice was accepted and ran for six native seconds. That route remained obstructed, and the native result was `no_clear_path`; no hidden identity was disclosed.
 - A subsequent attempt to select the fixture test’s `(2, 0)` route was refused by native movement prerequisites in the browser; no time or position changed. This differs from the passing session-level test, where that route commits and clears the authored sightline. The discrepancy needs a focused browser-route investigation before a successful served-Chrome discovery can be claimed. The `no_clear_path` run is not presented as the successful acceptance scenario.
 
+### Continuation verification — 2026-11-15
+
+- Added `test_authored_spot_http_controls_match_native_seeded_route`, which drives the exact seed-73111 authored scenario through `GeneratedArenaSession`'s HTTP-facing controls. It confirms the tested `(2, 0)` route commits, Spot succeeds, target name/ID remain absent from requests and pre-success responses, and only the observer gains awareness. This establishes parity between the native and HTTP/session route.
+- Repeated the live Chrome discrepancy on port 50536. The page committed its first movement second, accepted Spot, then reported `no_clear_path` at six seconds. The observer view continued to omit the hidden Being's name and ID. A later alternate UI destination was accepted as a plan, but native movement prerequisites refused its next second without advancing time or position. This is an unresolved UI/native-route integration defect, not evidence of a missing adopted perception rule; successful served-Chrome discovery remains an acceptance gap.
+- No new Encounter rules were adopted. No acoustic physics, access assumptions, or generated Being geometry were added. Search, Listen, incidental opportunities and Action/Event observation still need implementation; the assignment remains ACTIVE.
+
 ## Focused verification
 
 Latest combined focused command:
 
 ```text
-PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=src:examples:tests:../npc-generator .venv/bin/python -B -m unittest tests.test_spot_action tests.test_generated_arena_spot_readiness tests.test_checkpoint_arena_perception tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process tests.test_arena_persistence.TestArenaPersistence.test_observed_motion_interval_survives_fresh_process_save_load tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=src:examples:tests:../npc-generator .venv/bin/python -B -m unittest tests.test_spot_action tests.test_generated_arena_spot_readiness tests.test_checkpoint_arena_perception tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process tests.test_arena_persistence.TestArenaPersistence.test_observed_motion_interval_survives_fresh_process_save_load tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_authored_spot_http_controls_match_native_seeded_route -q
 ```
 
-**28 tests passed in 11.857 seconds.** This includes Spot timing/privacy, authored occlusion, two-observer knowledge divergence, visibility checkpoint encoding, observer current/history and motion Save/Load, fresh-process native discovery, plus the shipped-JavaScript movement handler. No full repository suite was run.
+**29 tests passed in 16.378 seconds.** This includes Spot timing/privacy, authored occlusion, two-observer knowledge divergence, visibility checkpoint encoding, observer current/history and motion Save/Load, fresh-process native discovery, the shipped-JavaScript movement handler, and the new exact-seed HTTP/session route parity test. No full repository suite was run.
 
 Earlier focused evidence retained from the prior execution:
 
@@ -73,6 +79,16 @@ Earlier focused evidence retained from the prior execution:
 - `54568af7978428d281e409f7549b243073b58ec5` — record verified commit evidence in this report; its staged publication-safety audit passed with 7 files and 0 findings.
 - At the last status inspection, HEAD was `54568af7978428d281e409f7549b243073b58ec5`; the only staged entries were the five pre-existing archive paths (four removals and one rename), and `docs/assignments/universe-arena.json` remained protected and untracked. The final staged audit passed with 7 paths and 0 findings.
 - No push or history rewrite was attempted.
+
+### Continuation interval and verified repository state
+
+- Start: **2026-11-15T00:22:06-08:00** (captured at the beginning of this continuation; earlier work is recorded in its own intervals above).
+- End: **2026-11-15T01:06:56-08:00** (captured immediately before report closeout).
+- Elapsed: **PT44M50S**.
+- Starting HEAD: `469e8d30be6498915db6b875a08ce5a778f06dce`. Pre-report-commit HEAD: `f7f9ece6e970843a8826dc9ed63e17a2b18c1364`.
+- `tests/test_generated_arena_browser.py` adds the exact-seed HTTP/session route parity test; TASKS now distinguishes that passing route from the unresolved live Chrome discrepancy. Focused verification: **29 passed in 16.378 seconds**, exact command recorded above.
+- Commit `f7f9ece` contains only `TASKS.md` and `tests/test_generated_arena_browser.py`. Before commit, the inspected index contained those two intended paths plus the five pre-existing staged archive paths; `git diff --cached --check` passed and the staged publication-safety audit passed with 8 files and 0 findings. `git commit --only` excluded the unrelated archive entries.
+- The temporary `src/action_evaluation.py` diagnostic print was removed and is not committed. The untracked user save remains untouched. U-OBS-001 remains ACTIVE; Search/Listen, incidental opportunities, observed Action/Event evidence, and successful served-Chrome discovery remain incomplete. No push or history rewrite was attempted.
 
 ## Task-register reconciliation — 2026-11-15
 
