@@ -63,6 +63,25 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
         self.assertIn('id="observationHistorySection"', _GENERATED_PAGE)
         self.assertIn("function renderObservationHistory(s)", _GENERATED_PAGE)
 
+    def test_observer_history_records_only_native_committed_motion_segments(self):
+        session = self._session()
+        candidate = session.active_candidate
+        player, observer = (row.native.being for row in candidate.participants)
+        origin = candidate.arena_map.layout.cell_at_position(player.get_position())
+        destination = next(cell for cell in candidate.arena_map.layout.addresses()
+                           if cell != origin)
+        session.choose_destination({"column": destination.column, "row": destination.row,
+                                    "rate": "sprint", "facing_policy": "turn"})
+        session.advance_one_second()
+        evidence = next(row for row in observer._arena_perception_ledger.history
+                        if row.entity_id == player.id and row.boundary == 1)
+        self.assertIsNotNone(evidence.motion_interval)
+        self.assertEqual(evidence.motion_interval[0], 0.0)
+        self.assertGreater(evidence.motion_interval[1], 0.0)
+        self.assertLessEqual(evidence.motion_interval[1], 1.0)
+        self.assertTrue(any(evidence.motion_interval[2:]))
+        self.assertNotIn(player.id, json.dumps(session.public_view()["observation_history"]))
+
     def test_uninitiated_candidate_cannot_start_target_free_spot_and_refusal_is_atomic(self):
         session = self._session()
         candidate = session.active_candidate

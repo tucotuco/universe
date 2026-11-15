@@ -29,6 +29,7 @@ class ArenaPerceptionEvidence:
     basis: str = BASIS
     owner_id: str | None = None
     equipment_status: str | None = None
+    motion_interval: tuple | None = None
 
     def __post_init__(self):
         if any(type(value) is not str or not value for value in
@@ -52,6 +53,13 @@ class ArenaPerceptionEvidence:
             raise ValueError("visible equipment status requires its owner identity")
         if self.position is not None and type(self.position) is not CartesianPosition:
             raise TypeError("Arena position evidence requires native CartesianPosition")
+        if self.motion_interval is not None:
+            motion = self.motion_interval
+            if (type(motion) is not tuple or len(motion) != 5
+                    or any(type(value) not in (int, float) or not math.isfinite(value)
+                           for value in motion)
+                    or motion[1] <= motion[0]):
+                raise ValueError("observed motion requires a finite increasing interval and velocity")
         if type(self.boundary) is not int or self.boundary < 0:
             raise ValueError("Arena evidence boundary must be a nonnegative integer")
         if type(self.time) not in (int, float) or not math.isfinite(self.time) or self.time < 0:
@@ -167,7 +175,8 @@ def refresh_candidate_names(encounter):
             updated = ArenaPerceptionEvidence(previous.observer_id, previous.entity_id,
                 previous.category, obj.name or obj.current.obj_type, previous.type_key,
                 previous.position, previous.present_state, 0, 0.0,
-                owner_id=previous.owner_id, equipment_status=previous.equipment_status)
+                owner_id=previous.owner_id, equipment_status=previous.equipment_status,
+                motion_interval=previous.motion_interval)
             ledger._current[entity_id] = updated
             for index, row in enumerate(ledger._history):
                 if row.entity_id == entity_id:

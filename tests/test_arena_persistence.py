@@ -118,6 +118,48 @@ print(json.dumps({'time':v['time_seconds'],'history':clean(v['observation_histor
         self.assertEqual(resumed["history"], expected)
         self.assertEqual(resumed["current"], visible)
 
+    def test_observed_motion_interval_survives_fresh_process_save_load(self):
+        source = GeneratedArenaSession(root_seed_factory=lambda: 20261115)
+        source.generate({"starting_experience": "10000",
+                         "width_cells": "5", "height_cells": "5"})
+        candidate = source.active_candidate
+        player = candidate.participants[0].native.being
+        observer = candidate.participants[1].native.being
+        origin = candidate.arena_map.layout.cell_at_position(player.get_position())
+        destination = next(cell for cell in candidate.arena_map.layout.addresses()
+                           if cell != origin)
+        source.choose_destination({"column": destination.column, "row": destination.row,
+                                   "rate": "sprint", "facing_policy": "turn"})
+        source.advance_one_second()
+        observed = [row for row in observer._arena_perception_ledger.history
+                    if row.entity_id == player.id and row.boundary == 1]
+        self.assertEqual(len(observed), 1)
+        expected = observed[0]
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "observer-motion-save.json"
+            save_path.write_bytes(source.save_encounter_bytes())
+            script = """
+import json,pathlib,sys
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();s.load_encounter_bytes(pathlib.Path(sys.argv[1]).read_bytes())
+o=s.active_candidate.participants[1].native.being
+r=next(x for x in o._arena_perception_ledger.history
+       if x.entity_id==sys.argv[2] and x.boundary==1)
+print(json.dumps({'time':s.active_candidate.encounter.time,
+ 'position':None if r.position is None else r.position.as_tuple(),
+ 'motion':r.motion_interval,'boundary':r.boundary},sort_keys=True))
+"""
+            result = subprocess.run([sys.executable, "-S", "-c", script,
+                str(save_path), player.id], cwd=ROOT,
+                env={"PYTHONPATH": str(ROOT / "src"), "PYTHONDONTWRITEBYTECODE": "1"},
+                capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        resumed = json.loads(result.stdout)
+        self.assertEqual(resumed["time"], 1)
+        self.assertEqual(resumed["position"], list(expected.position.as_tuple()))
+        self.assertEqual(resumed["motion"], list(expected.motion_interval))
+        self.assertEqual(resumed["boundary"], expected.boundary)
+
     def test_generated_throw_pending_and_in_flight_survive_fresh_process(self):
         # NPC and measured stature come from npcgen. The Rock and placement
         # are explicit native scenario facts; no Browser request mutates the

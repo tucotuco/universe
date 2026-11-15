@@ -118,6 +118,29 @@ print(repr(roundtrip))
                        for participant in candidate.participants))
         self.assertEqual(after, before)
 
+    def test_motion_evidence_has_strict_versioned_checkpoint_encoding(self):
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261115)
+        session.generate({"starting_experience": "10000",
+                          "width_cells": "5", "height_cells": "5"})
+        candidate = session.active_candidate
+        player = candidate.participants[0].native.being
+        observer = candidate.participants[1].native.being
+        origin = candidate.arena_map.layout.cell_at_position(player.get_position())
+        destination = next(cell for cell in candidate.arena_map.layout.addresses()
+                           if cell != origin)
+        session.choose_destination({"column": destination.column, "row": destination.row,
+                                    "rate": "sprint", "facing_policy": "turn"})
+        session.advance_one_second()
+        data = _native_encoding(candidate, observer)
+        row = next(value for key, value in data[3] if key == player.id)
+        self.assertEqual(row[0], "universe.arena-perception-evidence/3")
+        decoded = _decode(candidate, observer, data)
+        self.assertEqual(decoded.current[0].motion_interval,
+                         observer._arena_perception_ledger.current[0].motion_interval)
+        self.assertEqual(encode_arena_perception_ledger(decoded, observer=observer,
+            encounter=candidate.encounter,
+            registry=candidate.universe.object_registry.object_instances), data)
+
     def test_current_position_and_ground_to_carried_history_are_preserved(self):
         session, _, candidate, player, placement, item = ground_fixture(seed=20261107)
         address = HexAddress(placement.column, placement.row)

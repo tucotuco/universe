@@ -1122,6 +1122,12 @@ def _make_plan(encounter,candidate,rng_owner):
     weapon_draws = {row.effect.object_id: (row.effect.target_id,row.effect.hand)
                     for row in supported.boundary.effects.values()
                     if type(row.effect) is ReadyWeaponEffect}
+    observed_motion = {}
+    for segment in candidate.movement:
+        for entity_id, velocity in segment.velocities.items():
+            vector = tuple(float(value) for value in velocity)
+            if any(vector):
+                observed_motion[entity_id] = (float(segment.start), float(segment.end), *vector)
     for observer_id in encounter.being_list:
         observer = objects.get(observer_id)
         if type(observer) is not BeingInstance:
@@ -1162,12 +1168,13 @@ def _make_plan(encounter,candidate,rng_owner):
                 view.data.get('name') or prior.type_key,
                 prior.type_key if prior.category == 'being' else view.obj_type,
                 None if carried else position, state, candidate.boundary,
-                float(candidate.boundary), BASIS, owner_id, equipment_status)
+                float(candidate.boundary), BASIS, owner_id, equipment_status,
+                observed_motion.get(entity_id))
             current[entity_id] = updated
             if (updated.name, updated.type_key, updated.position, updated.present_state,
-                    updated.owner_id, updated.equipment_status) != (
+                    updated.owner_id, updated.equipment_status, updated.motion_interval) != (
                     prior.name, prior.type_key, prior.position, prior.present_state,
-                    prior.owner_id, prior.equipment_status):
+                    prior.owner_id, prior.equipment_status, prior.motion_interval):
                 history.append(updated)
         plan.contents('observers', ledger._current, current)
         plan.contents('observers', ledger._history, history)

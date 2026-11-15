@@ -777,6 +777,8 @@ class GeneratedArenaSession:
                 "present_state": evidence.present_state,
                 "equipment_status": evidence.equipment_status,
                 "position_meters": None if p is None else {"x": p.x, "y": p.y, "z": p.z},
+                "observed_motion_interval": (None if evidence.motion_interval is None
+                    else list(evidence.motion_interval)),
                 "cell": None if address is None else {"column": address.column, "row": address.row},
                 "pickup_available": pickup_available,
                 "pickup_unavailable_reason": pickup_unavailable_reason,
@@ -800,6 +802,8 @@ class GeneratedArenaSession:
                 "present_state": evidence.present_state,
                 "position_meters": None if p is None else
                     {"x": p.x, "y": p.y, "z": p.z},
+                "observed_motion_interval": (None if evidence.motion_interval is None
+                    else list(evidence.motion_interval)),
                 "boundary": evidence.boundary,
                 "time_seconds": evidence.time,
             })

@@ -14,6 +14,7 @@ from arena_perception import (
 
 LEDGER_SCHEMA = "universe.arena-perception-ledger/2"
 EVIDENCE_SCHEMA = "universe.arena-perception-evidence/2"
+MOTION_EVIDENCE_SCHEMA = "universe.arena-perception-evidence/3"
 POSITION_SCHEMA = "universe.cartesian-position-binary64/1"
 MAX_LEDGER_ENTITIES = 3002  # Two Beings plus the adopted 3,000-object Arena ceiling.
 MAX_HISTORY_ROWS = 16_384
@@ -22,6 +23,7 @@ _LEDGER_FIELDS = frozenset(("_current", "_history", "environment", "observer_id"
 _EVIDENCE_FIELDS = frozenset((
     "basis", "boundary", "category", "entity_id", "name", "observer_id",
     "position", "present_state", "time", "type_key", "owner_id", "equipment_status",
+    "motion_interval",
 ))
 
 
@@ -136,18 +138,50 @@ def _evidence_data(row):
           "visible Object equipment status requires its owner identity")
     _need(fields["category"] == "object" or owner_id is None,
           "Being evidence cannot contain an Object owner")
-    return (EVIDENCE_SCHEMA, fields["observer_id"], fields["entity_id"],
+    motion = fields["motion_interval"]
+    if motion is None:
+        motion_data = None
+    else:
+        _need(type(motion) is tuple and len(motion) == 5
+              and all(type(value) is float and math.isfinite(value) for value in motion)
+              and motion[1] > motion[0],
+              "observed motion interval must contain finite canonical binary64 values")
+        motion_data = tuple(value.hex() for value in motion)
+    base = (fields["observer_id"], fields["entity_id"],
             fields["category"], fields["name"], fields["type_key"], position,
             state, fields["boundary"], _time_data(fields["time"]), fields["basis"],
             owner_id, equipment_status)
+    if motion_data is None:
+        return (EVIDENCE_SCHEMA, *base)
+    return (MOTION_EVIDENCE_SCHEMA, *base, motion_data)
 
 
 def _evidence_from_data(data):
-    _need(type(data) is tuple and len(data) == 13
-          and type(data[0]) is str and data[0] == EVIDENCE_SCHEMA,
+    _need(type(data) is tuple and type(data[0]) is str
+          and ((data[0] == EVIDENCE_SCHEMA and len(data) == 13)
+               or (data[0] == MOTION_EVIDENCE_SCHEMA and len(data) == 14)),
           "malformed Arena perception evidence record")
-    (_, observer_id, entity_id, category, name, type_key, position, state,
-     boundary, time_data, basis, owner_id, equipment_status) = data
+    if data[0] == EVIDENCE_SCHEMA:
+        (_, observer_id, entity_id, category, name, type_key, position, state,
+         boundary, time_data, basis, owner_id, equipment_status) = data
+        motion_interval = None
+    else:
+        (_, observer_id, entity_id, category, name, type_key, position, state,
+         boundary, time_data, basis, owner_id, equipment_status, motion_data) = data
+        _need(type(motion_data) is tuple and len(motion_data) == 5
+              and all(type(value) is str for value in motion_data),
+              "malformed observed motion interval")
+        values = []
+        for text in motion_data:
+            try:
+                value = float.fromhex(text)
+            except ValueError as exc:
+                raise ArenaPerceptionCheckpointRejected(
+                    "observed motion is not hexadecimal") from exc
+            _need(math.isfinite(value) and value.hex() == text,
+                  "observed motion is not canonical finite binary64")
+            values.append(value)
+        motion_interval = tuple(values)
     values = (observer_id, entity_id, category, name, type_key, state, basis)
     _need(all(type(value) is str and value for value in values),
           "Arena evidence identity and label values must be nonempty text")
@@ -157,7 +191,7 @@ def _evidence_from_data(data):
     try:
         return ArenaPerceptionEvidence(observer_id, entity_id, category, name, type_key,
             _decode_position(position), state, boundary, _decode_time(time_data), basis,
-            owner_id, equipment_status)
+            owner_id, equipment_status, motion_interval)
     except (TypeError, ValueError) as exc:
         raise ArenaPerceptionCheckpointRejected(
             f"malformed Arena perception evidence value: {exc}") from exc
