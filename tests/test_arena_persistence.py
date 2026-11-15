@@ -88,6 +88,36 @@ class TestArenaPersistence(unittest.TestCase):
             self.assertEqual(source_being.native.being._arena_perception_ledger.history,
                              loaded_participant.native.being._arena_perception_ledger.history)
 
+    def test_observer_current_view_and_history_restore_in_fresh_process(self):
+        source = GeneratedArenaSession(root_seed_factory=lambda: 20261114)
+        source.generate({"starting_experience": "10000",
+                         "width_cells": "5", "height_cells": "5"})
+        before = source.public_view()
+        expected = [{key: value for key, value in row.items() if key != "handle"}
+                    for row in before["observation_history"]]
+        visible = [{key: value for key, value in row.items() if key != "handle"}
+                   for row in before["entities"]]
+        with tempfile.TemporaryDirectory() as directory:
+            save_path = Path(directory) / "observer-save.json"
+            save_path.write_bytes(source.save_encounter_bytes())
+            script = """
+import json,pathlib,sys
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();v=s.load_encounter_bytes(pathlib.Path(sys.argv[1]).read_bytes())
+clean=lambda rows:[{k:x for k,x in row.items() if k!='handle'} for row in rows]
+print(json.dumps({'time':v['time_seconds'],'history':clean(v['observation_history']),
+ 'current':clean(v['entities'])},sort_keys=True,separators=(',',':')))
+"""
+            result = subprocess.run([sys.executable, "-S", "-c", script,
+                str(save_path)], cwd=ROOT, env={"PYTHONPATH": str(ROOT / "src"),
+                "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True,
+                check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        resumed = json.loads(result.stdout)
+        self.assertEqual(resumed["time"], before["time_seconds"])
+        self.assertEqual(resumed["history"], expected)
+        self.assertEqual(resumed["current"], visible)
+
     def test_generated_throw_pending_and_in_flight_survive_fresh_process(self):
         # NPC and measured stature come from npcgen. The Rock and placement
         # are explicit native scenario facts; no Browser request mutates the

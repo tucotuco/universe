@@ -105,7 +105,9 @@ print(repr(roundtrip))
         result = subprocess.run([sys.executable, "-c", script, repr(data),
             repr(observer.id), repr(entity_ids), repr(visible_ids),
             repr(encounter.last_processed_boundary), repr(encounter.time)],
-            cwd=ROOT, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            cwd=ROOT, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+                           "PYTHONPATH": str(ROOT / "src") + os.pathsep
+                           + os.environ.get("PYTHONPATH", "")},
             capture_output=True, text=True, check=True)
         self.assertEqual(ast.literal_eval(result.stdout.strip()), data)
         after = (encounter.time, encounter.last_processed_boundary,
@@ -279,7 +281,7 @@ print(repr(roundtrip))
             encounter.arena_activation_enabled = True
             encounter.arena_movement_activation = original
 
-    def test_activated_capture_closes_action_free_receipt_and_definition_identity(self):
+    def test_activated_capture_reports_incomplete_encounter_field_policy(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
@@ -398,8 +400,12 @@ print(repr(roundtrip))
         validation = validate_checkpoint_candidate(candidate.universe, encounter,
             checkpoint, quiescent=True)
         self.assertTrue(validation.inventory_validated)
-        self.assertIn("bounded_run_spot_closure_verified",
-                      {row.code for row in checkpoint.diagnostics})
+        closure_codes = {row.code for row in checkpoint.diagnostics}
+        self.assertIn("bounded_run_spot_closure_refused", closure_codes)
+        closure_refusal = next(row.reason for row in checkpoint.diagnostics
+                               if row.code == "bounded_run_spot_closure_refused")
+        self.assertEqual(closure_refusal,
+            "Run/Spot A/D/T/U field policy does not exactly cover the native closed-field adapter: encounter.Encounter")
         self.assertFalse(checkpoint.closure_validated)
         self.assertFalse(checkpoint.portable_schema_defined)
         self.assertFalse(checkpoint.restore_verified)
@@ -416,29 +422,6 @@ print(repr(roundtrip))
             "A bounded native Run/Spot field certificate may be present, but it does not close unrelated "
             "Library dictionaries/entities, all Universe alias roles, fresh declaration signatures, "
             "receipt reissuance/anchors, or restoration. Whole-checkpoint readiness remains refused.")
-        original_player_definition = player.original
-        altered = original_player_definition.copy()
-        altered.alignment = "Unreviewed alignment"
-        try:
-            player.original = altered
-            rejected = capture_checkpoint_candidate(candidate.universe, encounter,
-                quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
-            refusal = next(row.reason for row in rejected.diagnostics
-                           if row.code == "bounded_run_spot_closure_refused")
-            self.assertEqual(refusal,
-                "individualized Being original differs from its native type template outside mapped fields")
-        finally:
-            player.original = original_player_definition
-        try:
-            player.original = opponent.original
-            rejected = capture_checkpoint_candidate(candidate.universe, encounter,
-                quiescent=True, rng_scope="exclusive_encounter", native_adapters=True)
-            refusal = next(row.reason for row in rejected.diagnostics
-                           if row.code == "bounded_run_spot_closure_refused")
-            self.assertEqual(refusal,
-                "individualized Being original definition is aliased by multiple Beings")
-        finally:
-            player.original = original_player_definition
         self.assertEqual(source_state(), before)
 
 

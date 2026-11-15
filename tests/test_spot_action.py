@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 from action_evaluation import AwarenessEffect, capture_snapshot, evaluate_snapshot
 from activities import SpotAction
+from discovery import HearingConditions, racial_discovery_bonus
 from encounter import Encounter
 from library import Library
 from spatial import CartesianPosition, Sphere
@@ -73,6 +74,31 @@ class TestSpotAction(unittest.TestCase):
         proposal = evaluate_snapshot(capture_snapshot(self.encounter, 6)).proposals[0]
         self.assertEqual(proposal.outcome, 'success')
         self.assertIn(('racial_action_bonus', 2), proposal.metadata)
+
+    def test_adopted_racial_aptitudes_apply_to_search_spot_and_listen_only(self):
+        expected = {
+            'search': {'Elf': 2, 'Half-elf': 1},
+            'spot': {'Elf': 2, 'Half-elf': 1},
+            'listen': {'Elf': 2, 'Half-elf': 1, 'Gnome': 2, 'Halfling': 2},
+        }
+        for action, races in expected.items():
+            for race in ('Elf', 'Half-elf', 'Gnome', 'Halfling', 'Human'):
+                with self.subTest(action=action, race=race):
+                    self.assertEqual(racial_discovery_bonus(race, action),
+                                     races.get(race, 0))
+        self.assertEqual(racial_discovery_bonus('Elf', 'searching'), 0)
+        self.assertEqual(racial_discovery_bonus('Elf', 'armed combat'), 0)
+
+    def test_adopted_hearing_adjustments_are_closed_and_impossibility_is_not_numeric(self):
+        conditions = HearingConditions(('sleeping', 'heavy_rain', 'through_wall'))
+        self.assertEqual(conditions.dc_adjustment, 9)
+        self.assertFalse(conditions.impossible)
+        self.assertTrue(HearingConditions(('deaf',)).impossible)
+        self.assertTrue(HearingConditions(('area_of_silence',)).impossible)
+        self.assertEqual(HearingConditions(('deaf',)).dc_adjustment, 0)
+        for invalid in ((4,), ('made_up',), ('deaf', 'deaf')):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                HearingConditions(invalid)
 
     def test_discovery_uses_modified_total_without_unadopted_natural_roll_rules(self):
         self.target.current.discovery_dc = 1

@@ -19,6 +19,17 @@ SPOTTING_DC_ADJUSTMENTS = {
     'dense_forest': 3,
 }
 
+# Adopted Hearing Modifiers Table. Silence and deafness make the check
+# impossible rather than assigning a numeric adjustment.
+HEARING_DC_ADJUSTMENTS = {
+    'sleeping': 5, 'burbling_brook': 1, 'light_rain': 1,
+    'heavy_rain': 2, 'outside_enclosure': 3, 'into_enclosure': 3,
+    'through_door': 1, 'through_wall': 2, 'through_thick_wall': 3,
+    'through_conversation': 2, 'through_yelling_or_singing': 5,
+    'light_breeze': 1, 'moderate_wind': 2, 'strong_wind': 3,
+    'gale': 4, 'storm': 5, 'hurricane': 6,
+}
+
 @dataclass(frozen=True)
 class SpottingConditions:
     """Named scenario circumstances supplied with one deliberate Spot choice."""
@@ -38,11 +49,44 @@ class SpottingConditions:
         return sum(SPOTTING_DC_ADJUSTMENTS[value] for value in self.values)
 
 
+@dataclass(frozen=True)
+class HearingConditions:
+    """Authored Hearing-table circumstances; no sound physics is inferred."""
+    values: tuple = ()
+
+    def __post_init__(self):
+        if type(self.values) is not tuple:
+            raise ValueError('HearingConditions.values must be a tuple')
+        allowed = frozenset(HEARING_DC_ADJUSTMENTS) | {'area_of_silence', 'deaf'}
+        if any(type(value) is not str or value not in allowed for value in self.values):
+            raise ValueError('unknown adopted Hearing table condition')
+        if len(set(self.values)) != len(self.values):
+            raise ValueError('duplicate Hearing table condition')
+
+    @property
+    def impossible(self):
+        return any(value in ('area_of_silence', 'deaf') for value in self.values)
+
+    @property
+    def dc_adjustment(self):
+        return sum(HEARING_DC_ADJUSTMENTS[value] for value in self.values
+                   if value in HEARING_DC_ADJUSTMENTS)
+
+
 def racial_discovery_bonus(race, action):
-    """Revision-60 action aptitude bonus; no unlisted bonus is inferred."""
-    if action != 'spot':
+    """Adopted Search/Spot/Listen aptitude as a d20 result bonus.
+
+    This is intentionally separate from trainable-skill XP modifiers. Unknown
+    races and Action names receive no inferred aptitude.
+    """
+    if action not in ('search', 'spot', 'listen'):
         return 0
-    return {'Elf': 2, 'Half-elf': 1}.get(race, 0)
+    bonuses = {
+        'search': {'Elf': 2, 'Half-elf': 1},
+        'spot': {'Elf': 2, 'Half-elf': 1},
+        'listen': {'Elf': 2, 'Half-elf': 1, 'Gnome': 2, 'Halfling': 2},
+    }
+    return bonuses[action].get(race, 0)
 
 
 def discovery_dc(value):

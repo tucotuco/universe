@@ -782,6 +782,27 @@ class GeneratedArenaSession:
                 "pickup_unavailable_reason": pickup_unavailable_reason,
                 "projectile": projectile_evidence,
             })
+        # Keep observer history inspectable separately from the current
+        # projection. The records come only from this Being's native ledger;
+        # native Entity IDs are replaced with the session's opaque handles.
+        observation_history = []
+        for evidence in ledger.history:
+            handle = self._view_handles.get(evidence.entity_id)
+            if handle is None:
+                handle = secrets.token_urlsafe(18)
+                self._view_handles[evidence.entity_id] = handle
+            p = evidence.position
+            observation_history.append({
+                "handle": handle,
+                "category": evidence.category,
+                "name": self._display_names.get(evidence.entity_id, evidence.name),
+                "type": evidence.type_key,
+                "present_state": evidence.present_state,
+                "position_meters": None if p is None else
+                    {"x": p.x, "y": p.y, "z": p.z},
+                "boundary": evidence.boundary,
+                "time_seconds": evidence.time,
+            })
         # The player may address directly held inventory through the same
         # opaque session handle contract as perceived entities. This is
         # player-owned inventory evidence, never a handle to another Being's
@@ -933,6 +954,7 @@ class GeneratedArenaSession:
                                   "attack opportunity" if opponent_decision["kind"] == "attack" else
                                   "waiting" if self._opponent_strategy in ("attack_only", "defense_only") else "inactive"),
             "entities": perceived,
+            "observation_history": observation_history,
             "projectiles": owned_projectiles,
             "selected_entity": selected,
             "action_catalog": action_catalog,
@@ -4016,6 +4038,14 @@ class GeneratedArenaSession:
             run_reason = "The native Run scheduler or resolver contract is unavailable."
         arena_rows = [{"name": "Run", "group": "Arena Actions", "status": run_status,
                        "reason": run_reason}]
+        arena_rows.extend((
+            {"name": "Search", "group": "Discovery Actions",
+             "status": "not_implemented",
+             "reason": "The adopted six-second Search check has no native transactional Action contract yet."},
+            {"name": "Listen", "group": "Discovery Actions",
+             "status": "not_implemented",
+             "reason": "The adopted six-second Listen check has no native transactional Action or authored audibility evidence contract yet."},
+        ))
         if evidence is not None and evidence.category == "being":
             bash_options = self._shield_bash_options(candidate, player, entity_id, evidence)
             catalog_rows.append({

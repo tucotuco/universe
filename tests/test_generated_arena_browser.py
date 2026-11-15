@@ -755,7 +755,10 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                 "'members':[(m.action.event_type,m.priority_penalty) for m in r.members],"
                 "'action_ids':list(r.view.action_ids),'pending':sorted(e.pending_action_list)}))")
             restored = subprocess.run([sys.executable, "-B", "-c", restore_code,
-                str(program_path)], cwd=ROOT, check=True, capture_output=True, text=True)
+                str(program_path)], cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "src") + os.pathsep
+                     + os.environ.get("PYTHONPATH", "")},
+                check=True, capture_output=True, text=True)
         restored_program = json.loads(restored.stdout)
         self.assertEqual(restored_program["time"], 2)
         self.assertEqual(restored_program["state"], "accepted")

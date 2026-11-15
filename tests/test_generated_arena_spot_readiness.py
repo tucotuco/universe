@@ -16,7 +16,6 @@ from arena_browser_session import GeneratedArenaSession
 from atomic_publication import RNGCursor
 from encounter import Encounter
 from generated_arena_spot_geometry import run_case
-from interval_staging import IntervalIntegrityError
 from library import Library
 
 
@@ -35,8 +34,34 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
             with self.subTest(race=race):
                 self.assertIsNotNone(definition)
                 self.assertEqual((definition.width, definition.height), (0, 0))
-                self.assertEqual(definition.body_parts, {})
+                # Current generated definitions carry empty hand slots, but
+                # still do not provide a physical shape or ray-intersection model.
+                self.assertTrue(set(definition.body_parts).issubset(
+                    {"left hand", "right hand"}))
+                self.assertTrue(all(value is None for value in definition.body_parts.values()))
                 self.assertFalse(hasattr(definition, "geometry"))
+
+    def test_browser_exposes_only_this_observers_current_view_and_history_handles(self):
+        session = self._session()
+        candidate = session.active_candidate
+        observer, other = (row.native.being for row in candidate.participants)
+        view = session.public_view()
+        self.assertEqual(len(view["entities"]), 1)
+        self.assertEqual(len(view["observation_history"]), 1)
+        current = view["entities"][0]
+        history = view["observation_history"][0]
+        self.assertEqual(history["handle"], current["handle"])
+        self.assertEqual(history["name"], current["name"])
+        self.assertEqual(history["time_seconds"], 0)
+        self.assertNotIn(observer.id, json.dumps(history))
+        self.assertNotIn(other.id, json.dumps(history))
+        catalog = {row["name"]: row for row in view["action_catalog"]["entries"]}
+        self.assertEqual(catalog["Search"]["status"], "not_implemented")
+        self.assertEqual(catalog["Listen"]["status"], "not_implemented")
+        self.assertEqual(catalog["Spot"]["status"], "unavailable")
+        from examples.arena_web import _GENERATED_PAGE
+        self.assertIn('id="observationHistorySection"', _GENERATED_PAGE)
+        self.assertIn("function renderObservationHistory(s)", _GENERATED_PAGE)
 
     def test_uninitiated_candidate_cannot_start_target_free_spot_and_refusal_is_atomic(self):
         session = self._session()
@@ -64,12 +89,10 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
         self.assertEqual(encounter.aware_beings(actor_id), [target_id])
         self.assertFalse(session.public_view()["spot_available"])
         self.assertFalse(encounter.initiated)
-        with self.assertRaisesRegex(IntervalIntegrityError, "initiated"):
-            encounter.enable_transactional_progression(
-                quiescent=True, rng_owner=RNGCursor(random.Random(5302).getstate()))
         action = SpotAction(candidate.universe, actor_id, target_id, start_time=0)
-        with self.assertRaisesRegex(RuntimeError, "Encounter must be initiated"):
-            encounter.schedule_action(action)
+        with self.assertRaisesRegex(ValueError, "first Arena Choice"):
+            encounter.activate_arena_for_player_action(actor_id, action,
+                rng_owner=RNGCursor(random.Random(5302).getstate()))
         after = (encounter.time, encounter.last_processed_boundary, encounter.initiated,
                  encounter.initiation, dict(encounter.awareness),
                  set(candidate.universe.event_history), tuple(encounter.pending_action_list),
