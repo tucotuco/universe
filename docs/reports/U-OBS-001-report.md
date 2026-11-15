@@ -7,8 +7,8 @@
 ## Execution interval
 
 - Start: **2026-11-14T22:34:58-08:00** (captured at first repository inspection)
-- End: pending immediate closeout capture
-- Elapsed: pending calculation from the captured timestamps
+- End: **2026-11-14T23:44:32-08:00** (captured from the execution clock immediately before closeout)
+- Elapsed: **PT1H9M34S**
 
 ## Criterion matrix
 
@@ -70,5 +70,6 @@ Earlier focused evidence retained from the prior execution:
 - `3bd338505af230be9d034bc3b0e39f326718e6d5` — persist observer-owned motion evidence.
 - `8ee46646b1217704b2292c5786c53055b9222df5` — authored opaque-geometry visibility transitions, generated-Arena Spot control, strict persistence support, and native/fresh-process regression coverage. The staged publication-safety audit passed with 17 files and 0 findings; commit used explicit `--only` scope, excluding five unrelated staged archive paths.
 - `e2099b7e231d0947069e359d2f851d22a0287041` — reconcile the sole ACTIVE task and this criterion/report status. Its staged publication-safety audit passed with 8 files and 0 findings; commit used explicit `--only` scope.
-- At the last status inspection, HEAD was `e2099b7e231d0947069e359d2f851d22a0287041`; only the pre-existing five staged archive paths and the protected untracked Arena save remained outside these commits. Final index check is recorded at closeout.
+- `54568af7978428d281e409f7549b243073b58ec5` — record verified commit evidence in this report; its staged publication-safety audit passed with 7 files and 0 findings.
+- At the last status inspection, HEAD was `54568af7978428d281e409f7549b243073b58ec5`; the only staged entries were the five pre-existing archive paths (four removals and one rename), and `docs/assignments/universe-arena.json` remained protected and untracked. The final staged audit passed with 7 paths and 0 findings.
 - No push or history rewrite was attempted.
