@@ -4,7 +4,9 @@
 
 **Implementation outcome met for U-CAP-008A; awaiting ChatGPT acceptance.** The assignment and report remain active until that review. No remaining independently implementable acceptance item is known. The generated Arena now has Player vs Arena and Arena vs Arena modes. Arena vs Arena selects attack_only or defense_only separately for Being A and Being B. Both use the existing native decision helpers, Choice scheduler, movement intents, and atomic Encounter publisher. A bounded spectator runner advances at most ten native seconds and can be paused between boundaries.
 
-Start: **2026-11-14T17:19:13-08:00** (recorded at execution start). End and elapsed are pending final closeout.
+- Start: **2026-11-14T17:19:13-08:00**
+- End: **2026-11-14T18:42:15-08:00**
+- Elapsed: **PT1H23M2S**
 
 ## Authority and repository state
 
@@ -71,7 +73,7 @@ All commands ran with the repository .venv, no user-site imports, and bytecode w
 
    **8 passed** in 18.526 s. A subsequent focused run after final controller tie-cost and legacy-fixture refinements ran Arena-vs-Arena, schema-migration, page, and shipped-JavaScript tests: **7 passed** in 14.560 s.
 
-4. Python compilation passed for examples/arena_web.py, src/arena_browser_session.py, src/arena_persistence.py, and changed Python tests. Markdown link check: **71 checked, 0 broken**. git diff --check passed. Staged publication-safety audit: **16 staged files, 0 findings**.
+4. Python compilation passed for examples/arena_web.py, src/arena_browser_session.py, src/arena_persistence.py, and changed Python tests. Markdown link check: **71 checked, 0 broken**. git diff --check passed. Publication-safety audits: **16 staged files / 0 findings** before the code commit; **14 / 0** before the documentation/archive commit; **6 / 0** for the preserved residual staged paths after that commit; **7 / 0** including the final report closeout.
 
 No full repository suite was run; the assignment calls for focused checks, and no unrelated subsystem was changed.
 
@@ -79,4 +81,8 @@ No full repository suite was run; the assignment calls for focused checks, and n
 
 - TASKS.md: U-CAP-008 → DONE (bounded), with archived links; U-CAP-008A → sole ACTIVE assignment; perception remains deferred under U-OBS-001; the established U-CAP-009 global-time ID is preserved.
 - No push, force operation, or history rewrite.
-- Local implementation commit: ef71e42514094d2372b976be5d64acf3ea077fa9 (Arena mode, scheduler, persistence and focused tests). Documentation/archive commit: pending.\n- No push. The pre-existing four U-CAP-002/U-CAP-003 staged removals and U-THROW-001 patch archive rename remain outside these commits. The untracked docs/assignments/universe-arena.json remains untouched.\n- Final HEAD, final staged/untracked inventory, documentation commit hash and actual End/Elapsed timestamps will be filled after the scoped documentation commit and last safety audit.
+- Implementation commit: ef71e42514094d2372b976be5d64acf3ea077fa9 (Arena mode, scheduler, persistence and focused tests).
+- Assignment/task/archive/report commit: d0a9ff077513ed7fc38106c47a569a71a4e5c000. U-CAP-008 is archived and U-CAP-008A remains the sole ACTIVE program pending ChatGPT acceptance.
+- Last verified HEAD before this final report-only correction: d0a9ff077513ed7fc38106c47a569a71a4e5c000. The report-only closeout commit's resulting HEAD is included in the final Codex response.
+- No push, force operation, or history rewrite. Four pre-existing U-CAP-002/U-CAP-003 staged removals and the U-THROW-001 patch archive rename remain outside these commits.
+- Final remaining staged paths are the four historical removals plus the U-THROW-001 archive rename (six index entries). The untracked docs/assignments/universe-arena.json remains untouched.
