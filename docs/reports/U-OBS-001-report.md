@@ -1,64 +1,73 @@
 # U-OBS-001 — Playable perception and observer-owned evidence
 
-## Current outcome
+## Current status
 
-**ACTIVE — acceptance criteria remain incomplete.** This execution adds truthful observer-history and committed-motion presentation, adopted discovery aptitude/modifier helpers, and verification repairs. It does not claim a complete playable discovery lifecycle. No new Encounter rules were adopted.
+**ACTIVE — acceptance criteria remain incomplete.** Observer-owned current and historical evidence, committed motion intervals, visibility transitions, and a bounded target-free Spot lifecycle are implemented. The explicit authored native Spot flow succeeds and survives fresh-process Save/Load. The served-browser route accepts Spot but the live exercise performed in this execution resolved `no_clear_path`; do not claim browser acceptance. Search/Listen execution, incidental event discovery, and Action/Event evidence remain open. No new Encounter rules were adopted.
 
-### Execution interval
+## Execution interval
 
 - Start: **2026-11-14T22:34:58-08:00** (captured at first repository inspection)
 - End: pending immediate closeout capture
 - Elapsed: pending calculation from the captured timestamps
 
-## Assignment and program state
+## Criterion matrix
 
-- U-PLAYTEST-001 was accepted DONE and consumed by ChatGPT. Its assignment/report were Git-moved to `docs/assignments/archive/U-PLAYTEST-001.md` and `docs/reports/archive/U-PLAYTEST-001-report.md`; maintained references and `TASKS.md` were repaired in commit `37b7c3590ba384558665c97637af2eee69983bf6`.
-- The frozen external release at `~/Projects/universe-arena-playtest/U-CAP-008A-2026-11-14/` was left unchanged. No other repository, backup, `.venv`, ignored `legacy/`, or local save was modified.
-- `TASKS.md` retains U-OBS-001 as the sole ACTIVE program. U-ACT-037 remains DONE (bounded), U-ACT-038 is corrected to OPEN, U-SPOT-002 remains OPEN, and U-ACT-039 remains VERIFY. No Search-specific stable ID was found, so none was invented or recycled.
-- The unrelated pre-existing staged archive deletions and U-THROW-001 rename remain staged and excluded from this work. `docs/assignments/universe-arena.json` remains untracked and untouched.
-
-## Criterion status
-
-| Area | Verified result | Remaining acceptance work |
+| Assignment area | Verified | Remaining |
 | --- | --- | --- |
-| A — native contract | Existing six-second native Spot, target-free `accept_spot_attention`, exact default/explicit DC, success/failure, no Spot XP, and fail-closed missing geometry are verified. Adopted Search/Spot/Listen racial bonuses and Hearing DC inputs now have closed helpers and tests. | Search/Listen transactional Actions, authored audibility/examination evidence, incidental event-triggered checks, and current native location/event receipt adapters. |
-| B — evidence/knowledge | Revision-65 Arena ledger stores observer-owned current evidence and immutable change history; interval publication derives from the same committed snapshot. It now retains exact native movement-segment intervals when present, without estimating velocity from positions. Generated UI separates current entities from that Being’s history and labels motion as an observed interval. Public history uses opaque handles and only rows in that observer’s ledger. | Supported loss-of-perception/stale-vs-current state, Action/Event observation, sound/occlusion models, and a browser demonstration of newly divergent evidence remain absent. Do not manufacture these facts. |
-| C — generated Arena/Chrome | Arena Action catalog now reports Search/Listen as `not_implemented` and Spot as `unavailable` with bounded reasons. Served Chrome generated seed 20261114: generated the ordinary Arena, opened the observer’s visible Being, and verified the history panel showed the initial observer-owned record while private fields remained `Unknown`. | A successful native discovery cannot be exercised through ordinary generated Arena: r65 already exposes the unobstructed opponent, and generated Beings have no represented geometry. Existing test-only prepublication geometry proves native Spot success/failure, not browser discovery. No browser Action/Event or stale-tracking sequence was claimed. |
-| D — privacy/persistence/regressions | AI privacy and initial Arena perception tests passed. Fresh-process generated-Arena Save/Load tests verify exact current/history projections and a native observed movement interval. The strict ledger adapter preserves the existing v2 evidence wire for rows without motion and uses a canonical v3 row for represented motion. A stale checkpoint assertion was corrected to match the actual fail-closed Encounter field-policy refusal. | Pending discovery receipts, failed/acquired Search/Listen receipts, last-known vs currently-visible Save/Load, observed opponent Action/Event continuation, and both-mode regression for those perception features. |
+| A — native discovery contract | Adopted discovery aptitudes and integer Hearing modifiers have closed helpers/tests. Native Spot is six seconds, target-free where the authored scenario permits; success and failure outcomes are exercised. Default/explicit DC and fail-closed unmodeled targets remain tested. | Native Search/Listen Actions, authored audibility/examination evidence, meaningful incidental opportunity processing, and Action/Event discovery receipts. |
+| B — observer evidence | Each Being owns a strict current/known evidence ledger. Authored opaque geometry suppresses initial perception; later visibility transitions preserve last-seen position/time. Committed movement-segment evidence is sourced from the native movement receipt, not inferred velocity. The generated Spot test proves one observer learns the other while the target observer does not learn the actor. | Apparent Action/Event evidence and broader independently divergent perception cases. Ordinary generated Beings still have no adopted geometry model. |
+| C — Arena and browser | The opt-in prepublication scenario authors an explicit target Sphere and opaque screen. The player projection omits the hidden target until native Spot succeeds and exposes no internal target ID. Browser control submits the native Choice. | The served Chrome run in this execution did not reach the successful native Spot outcome; see live verification below. Search/Listen controls remain unimplemented. |
+| D — persistence, privacy, regression | Strict checkpoint schema preserves visibility transitions and old no-motion/motion encodings. The native test saves after Spot and restores in a separate OS process, comparing observer ledgers, awareness, time/boundary, RNG cursor and Spot outcome. Both observers retain distinct knowledge. Existing combat-mode cohorts remain green from prior focused checks. | Pending/failed Search and Listen persistence, observed Action/Event continuation, and successful browser discovery continuation. |
 
-## Evidence and limits
+## Current implementation evidence
 
-- Native Spot fixture: `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B examples/generated_arena_spot_geometry.py` — DC 1 succeeds at t=6 with one observer gaining awareness and one location receipt; DC 100 fails at t=6 without awareness/evidence. Fixture uses explicit test-only Sphere geometry and an already initiated native Encounter; it is not production NPC geometry or a generated-Arena UI flow.
-- Generated Arena public history is projected from `player.native.being._arena_perception_ledger.history`; native Entity IDs are replaced by the session opaque handle. Current view remains from the same observer ledger. Search/Listen catalog entries disclose fixed implementation state, not hidden-target counts or identities.
-- Chrome served from this checkout at `http://127.0.0.1:50519/`: generated seed 20261114, opened the visible Being’s dialog; it showed its observed name/position and reported unobserved race, age, statistics, skills and condition as unknown. The dedicated observation-history panel displayed the time-zero record. This browser check was not a discovery action and is reported as such.
-- Persistence test `tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process` compares the current and historical observer projections before Save and after a separate `python -S` process loads the save. This is initial Arena evidence only, not pending or failed discovery receipts.
-- `tests.test_generated_arena_spot_readiness.TestGeneratedArenaSpotReadiness.test_observer_history_records_only_native_committed_motion_segments` confirms a second Being records the moving Being’s native committed motion interval without exposing its native ID. `tests.test_arena_persistence.TestArenaPersistence.test_observed_motion_interval_survives_fresh_process_save_load` and `tests.test_checkpoint_arena_perception.ArenaPerceptionCheckpointTests.test_motion_evidence_has_strict_versioned_checkpoint_encoding` verify fresh-process continuation and strict v3 encoding for that fact.
-- Baseline cohort findings: `tests.test_generated_arena_browser` initially ran 72 tests with one subprocess import-path error; that isolated child now receives explicit `src` PYTHONPATH and the exact failing test passes. The full 72-test cohort was not repeated. `tests.test_arena_opponent_attack` and `tests.test_arena_initialization` passed 19 tests together. A checkpoint closure test had expected an obsolete `bounded_run_spot_closure_verified` diagnostic; current strict field policy correctly refuses on uncovered `encounter.Encounter` fields. The test now asserts that precise refusal; no checkpoint acceptance/fingerprint rule was weakened.
-- No sound attenuation, hearing opportunity source, visual blocking, generated Being geometry, acceleration, uncertainty or event-observability model was added. Rules and source facts required for those demonstrations are not represented.
+- `src/arena_perception.py` separates currently observable evidence from latest known evidence and computes obstruction only from explicitly represented opaque shapes. The generated Arena defaults remain unobstructed unless a scenario authors opacity.
+- `src/atomic_publication.py` records loss/restoration of visibility at the committed boundary. Newly discovered Spot evidence is published only to the acting Being on successful native resolution.
+- `src/checkpoint_arena_perception.py` and `src/checkpoint_fields.py` encode visibility boundaries while retaining strict compatibility paths for prior evidence versions. Native snapshot allowlisting includes only the represented `VisualOcclusion` and `AwarenessEffect` types required by this scenario.
+- `src/arena_authored_spot_scenario.py` creates an opt-in, prepublication fixture: an explicitly placed opaque screen and a target Sphere with authored low DC. It does not infer generated Being anatomy. `GeneratedArenaSession`, persistence, and `examples/arena_web.py` expose this scenario and its target-free Spot control.
+- The browser projection shows only observer-authorized visible entities and history, with visible/last-known labels and opaque handles. It does not include the hidden target's native ID or name before discovery.
 
-## Exact verification commands
+## Native and persistence demonstration
 
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_spot_action tests.test_generated_arena_spot_readiness tests.test_checkpoint_arena_perception -q` — **20 tests passed** after the initial repair iteration.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_arena_initialization tests.test_arena_opponent_attack -q` — **19 tests passed** in 53.885 s.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process -q` — **1 test passed**.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_generated_arena_browser -q` — **72 tests, 1 subprocess import-path error**; corrected the test child environment. The exact failed case then passed:
-  `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_multiple_grapple_break_program_uses_native_choice_and_abort -q` — **1 test passed**. Full cohort not rerun.
-- Combined focused rerun before motion-evidence work: `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_spot_action tests.test_generated_arena_spot_readiness tests.test_checkpoint_arena_perception tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_generated_multiple_grapple_break_program_uses_native_choice_and_abort -q` — **22 tests passed** in 8.587 s.
-- Motion-evidence focused rerun: `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_spot_action tests.test_generated_arena_spot_readiness tests.test_checkpoint_arena_perception tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process tests.test_arena_persistence.TestArenaPersistence.test_observed_motion_interval_survives_fresh_process_save_load -q` — **24 tests passed** in 6.767 s.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B -m unittest tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance -q` — **1 shipped-JavaScript harness test passed** in 1.769 s.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B examples/generated_arena_spot_geometry.py` — both the explicit native Spot success and failure scenarios reproduced at boundary 6.
+`tests.test_generated_arena_spot_readiness.TestGeneratedArenaSpotReadiness.test_authored_spot_exercise_discovers_natively_and_restores_fresh_process` generates seed 73111, confirms the hidden target is omitted from initial current evidence and observer awareness, moves the observer to a clear modeled sightline, and accepts the target-free six-second Spot Choice. The action request/result omit target identity. At completion, only the acting observer gains awareness and a location receipt. The test saves the Encounter and compares a digest of exact time, boundary, observer awareness, encoded observer ledgers, RNG cursor and Spot outcome after a separate `python -S` process loads it. The digest matches.
 
-## Changes in this execution
+## Served Chrome verification
 
-- `src/discovery.py`: apply adopted Elf/Half-elf aptitude bonuses to Search, Spot and Listen; add Gnome/Halfling Listen +2; define closed Hearing DC conditions and impossible silence/deaf cases.
-- `src/arena_browser_session.py` and `examples/arena_web.py`: expose this observer’s known observation history separately from current evidence, include native committed motion samples, and report Search/Listen as not implemented in the generated-Arena Action catalog.
-- `src/arena_perception.py`, `src/atomic_publication.py`, and `src/checkpoint_arena_perception.py`: preserve native committed movement intervals in observer evidence with strict, backward-compatible v2/no-motion and v3/motion wire rows.
-- Tests: adopted discovery aptitude/Hearing table, generated UI privacy/status, native motion observation, strict checkpoint refusal, subprocess `PYTHONPATH` repairs, and fresh-process observer-evidence/motion Save/Load.
+- Served the current checkout at `http://127.0.0.1:50520/` and a fresh session at `http://127.0.0.1:50521/`; both used the actual generated Arena HTML/JavaScript and HTTP/session routes in Chrome.
+- Generated the explicit “Spot exercise · authored opaque screen” scenario at seed 73111 with no autonomous opponent strategy. Before Spot, the observer’s list omitted “Obscured Target”; it showed only its permitted evidence and the opaque screen.
+- A live route to hex `(2, 2)` committed native movement and the browser exposed the native Spot button without adding the target to the visible list. The Spot Choice was accepted and ran for six native seconds. That route remained obstructed, and the native result was `no_clear_path`; no hidden identity was disclosed.
+- A subsequent attempt to select the fixture test’s `(2, 0)` route was refused by native movement prerequisites in the browser; no time or position changed. This differs from the passing session-level test, where that route commits and clears the authored sightline. The discrepancy needs a focused browser-route investigation before a successful served-Chrome discovery can be claimed. The `no_clear_path` run is not presented as the successful acceptance scenario.
 
-## Commits and repository safety
+## Focused verification
 
-- Prior archival/resumption commit: `37b7c3590ba384558665c97637af2eee69983bf6`.
-- First scoped U-OBS implementation commit: `8af74cd325f59305d34f5160bc230c7d6df84abb`.
-- Motion-evidence implementation/documentation commit and audit result: pending.
-- No push was authorized or attempted.
-- Final status, staged path inventory, `git diff --cached --check`, publication-safety audit result, focused rerun, and final commit hash will be inserted immediately before closeout.
+Latest combined focused command:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=src:examples:tests:../npc-generator .venv/bin/python -B -m unittest tests.test_spot_action tests.test_generated_arena_spot_readiness tests.test_checkpoint_arena_perception tests.test_arena_persistence.TestArenaPersistence.test_observer_current_view_and_history_restore_in_fresh_process tests.test_arena_persistence.TestArenaPersistence.test_observed_motion_interval_survives_fresh_process_save_load tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_actual_shipped_javascript_handlers_order_sprint_update_before_immediate_advance -q
+```
+
+**28 tests passed in 11.857 seconds.** This includes Spot timing/privacy, authored occlusion, two-observer knowledge divergence, visibility checkpoint encoding, observer current/history and motion Save/Load, fresh-process native discovery, plus the shipped-JavaScript movement handler. No full repository suite was run.
+
+Earlier focused evidence retained from the prior execution:
+
+- `tests.test_arena_initialization tests.test_arena_opponent_attack` — 19 passed in 53.885 seconds.
+- Motion-evidence cohort (`test_spot_action`, `test_generated_arena_spot_readiness`, `test_checkpoint_arena_perception`, observer history Save/Load, and motion Save/Load) — 24 passed in 6.767 seconds before the authored live Spot integration was added.
+- `examples/generated_arena_spot_geometry.py` — explicit native Spot success at t=6 with observer-owned evidence, and DC 100 failure at t=6 without awareness/evidence.
+- The generated-browser cohort previously ran 72 tests with one subprocess import-path error; the exact failed test passed after adding explicit child `PYTHONPATH`. The full 72-test cohort was not repeated.
+
+## Limits and task state
+
+- Acoustic attenuation, audibility evidence, Search accessibility, ordinary generated Being geometry, acceleration, visual uncertainty, and generally applicable hiding rules are absent and were not invented.
+- Search and Listen remain `not_implemented`; Spot remains fail-closed without represented target geometry and clear line of sight.
+- U-OBS-001 is still the sole ACTIVE development program. U-ACT-037 remains DONE (bounded), U-ACT-038 OPEN, U-SPOT-002 OPEN, U-ACT-039 VERIFY. No Search-specific stable ID was identified or created. U-CAP-008A and U-PLAYTEST-001 remain archived and consumed.
+- The accepted frozen release under `~/Projects/universe-arena-playtest/U-CAP-008A-2026-11-14/` remains unchanged. This work did not alter other repositories, the `.venv`, ignored `legacy/`, backups, or user saves.
+- Unrelated staged U-CAP-002/U-CAP-003 archive deletions and the staged U-THROW-001 rename remain untouched and excluded. `docs/assignments/universe-arena.json` remains untracked and untouched.
+
+## Commits and safety
+
+- `37b7c3590ba384558665c97637af2eee69983bf6` — archive accepted U-PLAYTEST-001 and resume U-OBS-001.
+- `8af74cd325f59305d34f5160bc230c7d6df84abb` — observer history and discovery rule helpers.
+- `3bd338505af230be9d034bc3b0e39f326718e6d5` — persist observer-owned motion evidence.
+- `8ee46646b1217704b2292c5786c53055b9222df5` — authored opaque-geometry visibility transitions, generated-Arena Spot control, strict persistence support, and native/fresh-process regression coverage. The staged publication-safety audit passed with 17 files and 0 findings; commit used explicit `--only` scope, excluding five unrelated staged archive paths.
+- TASKS/report reconciliation and this report's commit evidence: pending scoped documentation commit.
+- No push or history rewrite was attempted. Before the pending commit, inspect the explicit staged paths, run cached diff checks and the publication-safety audit, and confirm unrelated staged files remain excluded.
