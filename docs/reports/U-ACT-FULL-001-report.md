@@ -5,8 +5,8 @@
 ## Execution interval
 
 - Start: **2026-11-15T10:54:27-08:00** (recorded when this execution began).
-- End: pending; capture immediately before closeout.
-- Elapsed: pending; calculate from the recorded timestamps.
+- End: **2026-11-15T12:03:02-08:00** (captured immediately before final report audit and closeout).
+- Elapsed: **PT1H8M35S** active execution time for this interval.
 
 ## Current outcome and source audit
 
@@ -62,6 +62,6 @@ No new rule question is required to complete the ordinary-shield Don/Remove slic
 ## Git, task register and publication safety
 
 - `TASKS.md` records U-ACT-FULL-001 as sole ACTIVE; U-ACT-GATE-001 remains FUTURE and U-NET-001 remains DEFERRED. U-ACT-016 now records the shield equipment result without upgrading the Action to FULL.
-- Prior in-scope documentation commits: `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` (activation and accepted U-OBS archival reconciliation), `5923020` (initial matrix audit), `9c4e8f4` (matrix/catalog reconciliation). Scoped implementation commit: `ab85638b489134d373a4ce6ec2cd6dbfd8601f89` (`Add native shield Don and Remove Actions`). Matrix/TASKS/report commit hashes are recorded after final audit below.
-- Preserved in the Git index and excluded from U-ACT-FULL commits: four U-CAP-002/U-CAP-003 active-path deletion entries and the `U-THROW-001-rule-sync-proposal.patch` archive rename. The untracked `docs/assignments/universe-arena.json` remains untouched. The frozen Playtest release and other repositories were not changed.
-- Final closeout will record actual HEAD, explicit intended paths, full status/index listing, `git diff --cached --check`, the staged publication-safety audit result, and local commit hashes. No push was authorized or performed.
+- Prior in-scope commits: `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` (activation and accepted U-OBS archival reconciliation), `5923020` (initial matrix audit), `9c4e8f4` (matrix/catalog reconciliation). This execution's scoped implementation commit is `ab85638b489134d373a4ce6ec2cd6dbfd8601f89` (`Add native shield Don and Remove Actions`); the matrix/TASKS/report commit is `bda0f1a0be328200b976b366604d3243ee0c97af` (`Record shield equipment outcome and coverage`).
+- Before the final report correction, HEAD was `bda0f1a0be328200b976b366604d3243ee0c97af`. Tracked worktree changes for this assignment were committed. The preserved unrelated Git index contains exactly four active-path deletions (`docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md`, `docs/reports/U-CAP-003-report.md`) and one archive rename (`docs/reports/U-THROW-001-rule-sync-proposal.patch` to `docs/reports/archive/U-THROW-001-rule-sync-proposal.patch`). The untracked `docs/assignments/universe-arena.json` remains untouched. The frozen Playtest release and other repositories were not changed.
+- `git diff --cached --check` passed. The staged publication-safety audit passed with **0 findings** (the complete staged index included the preserved archive paths and the previously reviewed scoped changes). Modified Markdown local links passed. No push was authorized or performed.
