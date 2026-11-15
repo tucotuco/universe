@@ -9,8 +9,8 @@ import math
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/6'
-_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
+SCHEMA = 'universe.generated-arena-save/7'
+_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
 MAX_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 
@@ -63,6 +63,11 @@ def _session_record(session, native_wire):
         raise ArenaSaveRejected('Generate an Arena before saving')
     if session._opponent_strategy not in ('none', 'attack_only', 'defense_only'):
         raise ArenaSaveRejected('Arena opponent strategy is unsupported')
+    if (session._encounter_mode not in ('player_vs_arena', 'arena_vs_arena')
+            or type(session._arena_strategies) is not list or len(session._arena_strategies) != 2
+            or any(value not in ('none', 'attack_only', 'defense_only')
+                   for value in session._arena_strategies)):
+        raise ArenaSaveRejected('Arena mode or controller strategies are unsupported')
     players=candidate.participants
     sources=[]
     for participant in players:
@@ -103,6 +108,8 @@ def _session_record(session, native_wire):
         'initial_equipment_provenance':list(candidate.initial_equipment_provenance),
         'equipment_mode':candidate.equipment_mode,
         'opponent_strategy':session._opponent_strategy,
+        'encounter_mode':session._encounter_mode,
+        'arena_strategies':list(session._arena_strategies),
         'authored_scenario_id':session._authored_scenario_id,
     }
 
@@ -148,6 +155,8 @@ def decode(wire):
         'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
         'initial_equipment_provenance','equipment_mode'}
     if data['schema'] == SCHEMA:
+        required.update(('opponent_strategy', 'authored_scenario_id', 'encounter_mode', 'arena_strategies'))
+    elif data['schema'] == 'universe.generated-arena-save/6':
         required.update(('opponent_strategy', 'authored_scenario_id'))
     elif data['schema'] == 'universe.generated-arena-save/5':
         required.add('opponent_strategy')
@@ -177,10 +186,19 @@ def decode(wire):
         raise ArenaSaveRejected('Arena starting equipment provenance is malformed')
     if data['schema'] in _PREVIOUS_SCHEMAS:
         s.setdefault('authored_scenario_id', None)
+        s.setdefault('encounter_mode', 'player_vs_arena')
+        s.setdefault('arena_strategies', ['none', s.get('opponent_strategy', 'none')])
     if data['schema'] == 'universe.generated-arena-save/4':
         s['opponent_strategy'] = 'none'
     if s['opponent_strategy'] not in ('none', 'attack_only', 'defense_only'):
         raise ArenaSaveRejected('Arena opponent strategy is unsupported')
+    if (s['encounter_mode'] not in ('player_vs_arena', 'arena_vs_arena')
+            or type(s['arena_strategies']) is not list or len(s['arena_strategies']) != 2
+            or any(value not in ('none', 'attack_only', 'defense_only')
+                   for value in s['arena_strategies'])):
+        raise ArenaSaveRejected('Arena mode or controller strategies are unsupported')
+    if s['encounter_mode'] == 'player_vs_arena' and s['arena_strategies'][0] != 'none':
+        raise ArenaSaveRejected('Player vs Arena save assigns an Arena controller to the player Being')
     if s['authored_scenario_id'] not in (None, 'ordinary-dagger-draw'):
         raise ArenaSaveRejected('Arena authored scenario provenance is unsupported')
     if s['movement_plan_base64'] is not None:

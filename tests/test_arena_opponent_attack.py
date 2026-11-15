@@ -655,15 +655,18 @@ class TestArenaOpponentAttack(unittest.TestCase):
 
     def test_old_arena_save_schema_loads_with_autonomous_strategy_disabled(self):
         import hashlib
-        from arena_persistence import _canonical, _PREVIOUS_SCHEMA
+        from arena_persistence import _canonical
 
         session, _candidate, _player, _opponent, _ = create_session()
         # A legacy file never selected an opponent strategy. Re-encode its
         # exact old closed field set and digest, then exercise normal loading.
         data = json.loads(session.save_encounter_bytes())
         data.pop("sha256")
-        data["schema"] = _PREVIOUS_SCHEMA
+        data["schema"] = "universe.generated-arena-save/4"
         data["session"].pop("opponent_strategy")
+        data["session"].pop("encounter_mode", None)
+        data["session"].pop("arena_strategies", None)
+        data["session"].pop("authored_scenario_id", None)
         data["sha256"] = hashlib.sha256(_canonical(data)).hexdigest()
         wire = _canonical(data)
         restored = GeneratedArenaSession()

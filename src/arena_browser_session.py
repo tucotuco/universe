@@ -168,6 +168,8 @@ class GeneratedArenaSession:
         self._ready_weapon_action_outcome = None
         self._ready_weapon_end_time = None
         self._opponent_strategy = "none"
+        self._encounter_mode = "player_vs_arena"
+        self._arena_strategies = ["none", "none"]
         self._opponent_attack_refusal = "strategy_disabled"
         self._movement_plan = None
         self._movement_sequence = 0
@@ -471,7 +473,7 @@ class GeneratedArenaSession:
             old=(self._active,self._authored_scenario_id,self._encounter_name,self._player_name,self._rng_cursor,
                  self._movement_plan,self._movement_sequence,self._display_names,
                  self._view_handles,self._selected_entity_handle,self._movement_outcome,
-                 self._opponent_strategy,self._opponent_attack_refusal,
+                self._opponent_strategy,self._encounter_mode,self._arena_strategies,self._opponent_attack_refusal,
                  self._player_action_id,self._player_action_outcome,self._pickup_action_id,
                  self._pickup_action_outcome,self._ready_weapon_action_id,
                  self._ready_weapon_action_outcome,self._ready_weapon_end_time)
@@ -479,6 +481,8 @@ class GeneratedArenaSession:
                 self._active=candidate;self._authored_scenario_id=meta.get('authored_scenario_id');self._encounter_name=meta['encounter_name']
                 self._player_name=meta['player_name'];self._rng_cursor=rng_owner
                 self._opponent_strategy=meta['opponent_strategy']
+                self._encounter_mode=meta.get('encounter_mode', 'player_vs_arena')
+                self._arena_strategies=list(meta.get('arena_strategies', ['none', meta['opponent_strategy']]))
                 self._opponent_attack_refusal="restored"
                 self._movement_plan=plan;self._movement_sequence=meta['movement_sequence']
                 self._display_names=dict(meta['display_names']);self._view_handles={}
@@ -526,7 +530,7 @@ class GeneratedArenaSession:
                 (self._active,self._authored_scenario_id,self._encounter_name,self._player_name,self._rng_cursor,
                  self._movement_plan,self._movement_sequence,self._display_names,
                  self._view_handles,self._selected_entity_handle,self._movement_outcome,
-                 self._opponent_strategy,self._opponent_attack_refusal,
+                 self._opponent_strategy,self._encounter_mode,self._arena_strategies,self._opponent_attack_refusal,
                  self._player_action_id,self._player_action_outcome,self._pickup_action_id,
                  self._pickup_action_outcome,self._ready_weapon_action_id,
                  self._ready_weapon_action_outcome,self._ready_weapon_end_time)=old
@@ -573,6 +577,8 @@ class GeneratedArenaSession:
         if self._active is None:
             return {
                 "state": "empty",
+                "encounter_mode": "player_vs_arena",
+                "arena_strategies": ["none", "none"],
                 "save_available": False,
                 "load_available": True,
                 "spot_available": False,
@@ -838,8 +844,45 @@ class GeneratedArenaSession:
                 "position_meters": None if p is None else
                     {"x": p.x, "y": p.y, "z": p.z},
             })
+        spectator_projection = None
+        if self._encounter_mode == "arena_vs_arena":
+            chronology = []
+            if candidate.encounter.progression_mode == "transactional":
+                from encounter_inspection import inspect_encounter
+                from action_evaluation import DamageEffect
+                inspection = inspect_encounter(candidate.encounter)
+                actions = (*self._all_melee_actions(candidate),
+                           *self._all_melee_defenses(candidate))
+                for spectator_action in sorted(actions, key=lambda row: (row.start_time, row.id)):
+                    result = inspection.actions.get(spectator_action.id)
+                    if result is None:
+                        continue
+                    actor_index = candidate.encounter.being_list.index(spectator_action.actor_id)
+                    target_index = (1-candidate.encounter.being_list.index(spectator_action.target_id)
+                                    if spectator_action.target_id in candidate.encounter.being_list else None)
+                    chronology.append({
+                        "actor": f"Being {'A' if actor_index == 0 else 'B'}",
+                        "target": (None if target_index is None else
+                                   f"Being {'A' if target_index == 0 else 'B'}"),
+                        "action": spectator_action.event_type.replace("_", " ").title(),
+                        "start_seconds": spectator_action.start_time,
+                        "end_seconds": spectator_action.end_time,
+                        "outcome": result.facts.outcome,
+                        "damage": sum(effect.amount for effect in result.facts.effects
+                                       if type(effect) is DamageEffect and effect.amount > 0),
+                    })
+            spectator_projection = {
+                "label": "Spectator / referee projection; separate from Being observations and never used by strategies",
+                "strategies": {"Being A": self._arena_strategies[0],
+                               "Being B": self._arena_strategies[1]},
+                "chronology": chronology,
+            }
         return {
             "state": "active",
+            "encounter_mode": self._encounter_mode,
+            "arena_strategies": list(self._arena_strategies),
+            "manual_controls_available": self._encounter_mode == "player_vs_arena",
+            "spectator_projection": spectator_projection,
             "authored_scenario_id": self._authored_scenario_id,
             "starter_ground_equipment_available": self._ground_loadout_profile is not None,
             "default_equipment_mode": candidate.equipment_mode,
@@ -895,7 +938,8 @@ class GeneratedArenaSession:
             "action_catalog": action_catalog,
             "action_programs": action_programs,
             "run_available": self._player_action_id is None and not candidate.encounter.initiated,
-            "advance_available": (disarm_landing_choice is None and ((self._player_action_id is not None
+            "advance_available": (self._encounter_mode == "arena_vs_arena" or
+                                   (disarm_landing_choice is None and ((self._player_action_id is not None
                                     and self._player_action_outcome is None)
                                    or (self._pickup_action_id is not None
                                        and self._pickup_action_outcome is None)
@@ -919,7 +963,7 @@ class GeneratedArenaSession:
                                    or (opponent_defense_action is not None
                                        and opponent_defense_action["status"] in ("accepted", "preparing", "committed"))
                                    or opponent_can_act
-                                   or movement_plan is not None)),
+                                   or movement_plan is not None))),
             "movement_available": movement_available,
             "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
             "movement_plan": movement_plan,
@@ -1567,6 +1611,16 @@ class GeneratedArenaSession:
                 "duration_seconds": end_time - action.start_time,
                 "seconds_remaining": 0, "preparation_ready_at": ready_at}
 
+    def _strategy_for_participant(self, index):
+        if type(index) is not int or index not in (0, 1):
+            raise ValueError("Arena participant index must be 0 or 1")
+        return self._arena_strategies[index]
+
+    def _autonomous_participant_indices(self):
+        if self._encounter_mode == "arena_vs_arena":
+            return (0, 1)
+        return (1,) if self._opponent_strategy != "none" else ()
+
     def _opponent_defense_action_view(self, candidate, opponent, player):
         action = self._latest_melee_defense(candidate, opponent)
         # A target-free retained defense is the opponent's private plan; the
@@ -1583,15 +1637,17 @@ class GeneratedArenaSession:
             return None
         return self._defense_action_view(candidate, opponent)
 
-    def _opponent_defense_decision(self, candidate):
-        if self._opponent_strategy != "defense_only":
+    def _opponent_defense_decision(self, candidate, actor_index=1):
+        actor = candidate.participants[actor_index].native.being
+        target = candidate.participants[1-actor_index].native.being
+        if self._strategy_for_participant(actor_index) != "defense_only":
             return {"kind": "none", "reason": "strategy_disabled"}
         encounter = candidate.encounter
         if (not encounter.initiated or encounter.progression_mode != "transactional"
                 or not encounter.arena_activation_enabled):
             return {"kind": "none", "reason": "encounter_not_activated"}
-        opponent = candidate.participants[1].native.being
-        player = candidate.participants[0].native.being
+        opponent = actor
+        player = target
         ledger = object.__getattribute__(opponent, "__dict__").get("_arena_perception_ledger")
         evidence = None if ledger is None else next(
             (row for row in ledger.current if row.entity_id == player.id), None)
@@ -1646,6 +1702,7 @@ class GeneratedArenaSession:
         return {"kind": "prepare", "reason": "target_free_native_dodge_preparation",
                 "strike": strike, "action": defense, "prepared": prepared}
 
+
     def _schedule_opponent_defense(self, candidate, decision):
         if decision["kind"] not in ("defend", "prepare"):
             return None
@@ -1665,16 +1722,16 @@ class GeneratedArenaSession:
             f"{dict(prepared.initialization)['ready_at']-prepared.start_time:g}s")
         return action
 
-    def _opponent_attack_preflight(self, candidate):
+    def _opponent_attack_preflight(self, candidate, actor_index=1):
         """Read-only attack-only eligibility from opponent-owned current state."""
-        if self._opponent_strategy != "attack_only":
+        if self._strategy_for_participant(actor_index) != "attack_only":
             return False, "strategy_disabled"
         encounter = candidate.encounter
         if (not encounter.initiated or encounter.progression_mode != "transactional"
                 or not encounter.arena_activation_enabled):
             return False, "encounter_not_activated"
-        opponent = candidate.participants[1].native.being
-        player = candidate.participants[0].native.being
+        opponent = candidate.participants[actor_index].native.being
+        player = candidate.participants[1-actor_index].native.being
         if self._opponent_melee_pending(candidate, opponent):
             return False, "opponent_melee_already_pending"
         if any(action.actor_id == opponent.id
@@ -1709,16 +1766,17 @@ class GeneratedArenaSession:
             return False, "native_melee_contract_unavailable"
         return True, "eligible"
 
-    def _opponent_decision(self, candidate):
+
+    def _opponent_decision(self, candidate, actor_index=1):
         """Derive one attack-only choice from the opponent's current evidence."""
-        if self._opponent_strategy == "defense_only":
-            return self._opponent_defense_decision(candidate)
-        eligible, reason = self._opponent_attack_preflight(candidate)
+        if self._strategy_for_participant(actor_index) == "defense_only":
+            return self._opponent_defense_decision(candidate, actor_index)
+        eligible, reason = self._opponent_attack_preflight(candidate, actor_index)
         if not eligible:
             return {"kind": "none", "reason": reason}
         encounter = candidate.encounter
-        opponent = candidate.participants[1].native.being
-        player = candidate.participants[0].native.being
+        opponent = candidate.participants[actor_index].native.being
+        player = candidate.participants[1-actor_index].native.being
         weapon_id = self._initial_ready_dagger_id(candidate, opponent)
         weapon = candidate.universe.get_object_by_id(weapon_id)
         reach = effective_melee_reach_meters(opponent.current, weapon.current)
@@ -1784,16 +1842,41 @@ class GeneratedArenaSession:
         # controller state and makes no collision or pathfinding claim.
         _, _, _, _, _, _, address, destination = min(options)
         return {"kind": "move", "reason": "native_turn_and_move_approach",
-                "address": address, "destination": destination}
+                "address": address, "destination": destination,
+                "alternatives": tuple(options)}
 
-    def _schedule_opponent_attack(self, candidate):
-        decision = self._opponent_decision(candidate)
+    @staticmethod
+    def _resolve_shared_movement_destinations(decisions):
+        """Resolve duplicate AI destinations from the common pre-movement snapshot."""
+        movers = [(index, row) for index, row in sorted(decisions.items())
+                  if row.get("kind") == "move"]
+        if len(movers) != 2 or movers[0][1]["address"] != movers[1][1]["address"]:
+            return
+        import itertools
+        options = [tuple(row.get("alternatives", ())) for _, row in movers]
+        compatible = [(left, right) for left, right in itertools.product(*options)
+                      if left[-2] != right[-2]]
+        if not compatible:
+            for _, row in movers:
+                row["kind"] = "none"
+                row["reason"] = "no_noncontending_common_snapshot_destination"
+            return
+        left, right = min(compatible, key=lambda pair: (
+            tuple(sum(item[position] for item in pair) for position in range(6)),
+            tuple(sorted((item[-2].column, item[-2].row) for item in pair)),
+            tuple((item[-2].column, item[-2].row) for item in pair)))
+        for (_, row), option in zip(movers, (left, right)):
+            row["address"], row["destination"] = option[-2], option[-1]
+
+
+    def _schedule_opponent_attack(self, candidate, actor_index=1, decision=None):
+        decision = self._opponent_decision(candidate, actor_index) if decision is None else decision
         self._opponent_attack_refusal = decision["reason"]
         if decision["kind"] != "attack":
             return None
         encounter = candidate.encounter
-        opponent = candidate.participants[1].native.being
-        player = candidate.participants[0].native.being
+        opponent = candidate.participants[actor_index].native.being
+        player = candidate.participants[1-actor_index].native.being
         weapon_id = self._initial_ready_dagger_id(candidate, opponent)
         weapon = candidate.universe.get_object_by_id(weapon_id)
         reach = effective_melee_reach_meters(opponent.current, weapon.current)
@@ -1803,7 +1886,7 @@ class GeneratedArenaSession:
         # name keeps a future AI declaration reproducible after save/restore.
         sequence = 1 + sum(action.actor_id == opponent.id
                            for action in self._all_melee_actions(candidate))
-        action.id = f"{encounter.id}/arena-opponent-thrust/{sequence}"
+        action.id = f"{encounter.id}/arena-controller-{actor_index}-thrust/{sequence}"
         try:
             encounter.prepare_action(action)
             encounter.schedule_action(action)
@@ -1815,6 +1898,7 @@ class GeneratedArenaSession:
         self._trace.native_advance(None, None,
             f"action=opponent_melee_strike motion=thrust duration={action.end_time-action.start_time:g}s")
         return action
+
 
     def _opponent_melee_action_view(self, candidate, opponent, player):
         action = self._opponent_melee_action(candidate, opponent)
@@ -4754,6 +4838,7 @@ class GeneratedArenaSession:
     def generate(self, payload):
         expected = {"starting_experience", "width_cells", "height_cells"}
         allowed_keys = expected | {"ground_equipment", "equipment_mode", "opponent_strategy",
+                                  "encounter_mode", "strategy_a", "strategy_b",
                                   "root_seed", "size_categories", "authored_scenario"}
         if (type(payload) is not dict or not expected <= set(payload)
                 or set(payload) - allowed_keys):
@@ -4761,6 +4846,16 @@ class GeneratedArenaSession:
         opponent_strategy = payload.get("opponent_strategy", "none")
         if opponent_strategy not in ("none", "attack_only", "defense_only"):
             raise ArenaBrowserRequestError("opponent_strategy must be none, attack_only, or defense_only")
+        encounter_mode = payload.get("encounter_mode", "player_vs_arena")
+        if encounter_mode not in ("player_vs_arena", "arena_vs_arena"):
+            raise ArenaBrowserRequestError("encounter_mode must be player_vs_arena or arena_vs_arena")
+        strategies = ["none", opponent_strategy]
+        if encounter_mode == "arena_vs_arena":
+            strategies = [payload.get("strategy_a"), payload.get("strategy_b")]
+            if any(value not in ("attack_only", "defense_only") for value in strategies):
+                raise ArenaBrowserRequestError("Arena vs Arena requires two supported independent strategies")
+            # The legacy one-sided selector has no assignment in spectator mode.
+            opponent_strategy = "none"
         starting_experience = _parse_decimal(payload, "starting_experience", 0)
         width_cells = _parse_decimal(payload, "width_cells", 5)
         height_cells = _parse_decimal(payload, "height_cells", 5)
@@ -4797,7 +4892,9 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("the authored Dagger Draw scenario requires unequipped protagonists")
         if scenario_id is not None and opponent_strategy != "none":
             raise ArenaBrowserRequestError("the authored Dagger Draw scenario requires no autonomous opponent strategy")
-        if opponent_strategy == "attack_only" and equipment_mode != "equipped":
+        if scenario_id is not None and encounter_mode != "player_vs_arena":
+            raise ArenaBrowserRequestError("the authored Dagger Draw scenario is available in Player vs Arena mode")
+        if "attack_only" in strategies and equipment_mode != "equipped":
             raise ArenaBrowserRequestError(
                 "Attack only requires the Arena's native equipped Being kit; choose equipped protagonists.")
 
@@ -4851,6 +4948,8 @@ class GeneratedArenaSession:
             self._ready_weapon_action_outcome = None
             self._ready_weapon_end_time = None
             self._opponent_strategy = opponent_strategy
+            self._encounter_mode = encounter_mode
+            self._arena_strategies = strategies
             self._opponent_attack_refusal = "strategy_disabled" if opponent_strategy == "none" else "not_yet_activated"
             self._movement_plan = None
             self._movement_sequence = 0
@@ -4875,6 +4974,8 @@ class GeneratedArenaSession:
             self._encounter_name = self._player_name = None
             self._rng_cursor = None
             self._opponent_strategy = "none"
+            self._encounter_mode = "player_vs_arena"
+            self._arena_strategies = ["none", "none"]
             self._opponent_attack_refusal = "strategy_disabled"
             self._player_action_id = self._player_action_outcome = None
             self._pickup_action_id = self._pickup_action_outcome = None
@@ -5183,6 +5284,18 @@ class GeneratedArenaSession:
             if self._active is None:
                 raise ArenaBrowserRequestError("Generate an Encounter before advancing")
             candidate = self._active
+            if self._encounter_mode == "arena_vs_arena" and not candidate.encounter.initiated:
+                from activities import RunAction
+                actor = candidate.participants[0].native.being
+                action = RunAction(candidate.universe, actor.id, candidate.encounter.time,
+                                   duration=1, minimum_distance=0.1, experience=0)
+                try:
+                    candidate.encounter.activate_arena_for_player_action(
+                        actor.id, action, rng_owner=self._rng_cursor)
+                    self._player_action_id = action.id
+                except Exception as exc:
+                    raise ArenaBrowserRequestError(
+                        "Arena controller could not activate the native Encounter; state is unchanged") from exc
             player = candidate.participants[0].native.being
             before_time = candidate.encounter.time
             before_position = player.get_position()
@@ -5225,8 +5338,18 @@ class GeneratedArenaSession:
                 for record in candidate.encounter._choice_book._choices.values())
             opponent = candidate.participants[1].native.being
             opponent_melee_pending = self._opponent_melee_pending(candidate, opponent)
-            opponent_decision = self._opponent_decision(candidate)
-            opponent_can_act = opponent_decision["kind"] in ("attack", "move", "defend", "prepare")
+            controller_decisions = {
+                index: self._opponent_decision(candidate, index)
+                for index in self._autonomous_participant_indices()
+                if candidate.encounter.initiated
+            }
+            if self._encounter_mode == "arena_vs_arena":
+                self._resolve_shared_movement_destinations(controller_decisions)
+            opponent_decision = controller_decisions.get(1, {"kind": "none", "reason": "strategy_disabled"})
+            if self._encounter_mode == "arena_vs_arena":
+                opponent_decision = controller_decisions.get(1, {"kind": "none", "reason": "strategy_disabled"})
+            opponent_can_act = any(row["kind"] in ("attack", "move", "defend", "prepare")
+                                   for row in controller_decisions.values())
             self._opponent_attack_refusal = opponent_decision["reason"]
             if (self._player_action_id is None and self._pickup_action_id is None
                     and self._ready_weapon_action_id is None and not melee_pending
@@ -5296,14 +5419,15 @@ class GeneratedArenaSession:
                     and not opponent_melee_pending and not opponent_can_act):
                 raise ArenaBrowserRequestError("the accepted Ready weapon Choice has already resolved")
             try:
-                if opponent_decision["kind"] == "attack":
-                    self._schedule_opponent_attack(candidate)
-                elif opponent_decision["kind"] in ("defend", "prepare"):
-                    self._schedule_opponent_defense(candidate, opponent_decision)
-                elif opponent_decision["kind"] == "move":
-                    self._trace.native_advance(
-                        trace_request_id, trace_client_sequence,
-                        f"opponent_decision=approach rate=sprint facing_policy=turn boundary={candidate.encounter.last_processed_boundary + 1}")
+                for actor_index, decision in controller_decisions.items():
+                    if decision["kind"] == "attack":
+                        self._schedule_opponent_attack(candidate, actor_index, decision)
+                    elif decision["kind"] in ("defend", "prepare"):
+                        self._schedule_opponent_defense(candidate, decision)
+                    elif decision["kind"] == "move":
+                        self._trace.native_advance(
+                            trace_request_id, trace_client_sequence,
+                            f"arena_controller={actor_index} decision=approach rate=sprint facing_policy=turn boundary={candidate.encounter.last_processed_boundary + 1}")
                 next_boundary = candidate.encounter.last_processed_boundary + 1
                 movement_intents = []
                 movement_conditions = {}
@@ -5316,11 +5440,13 @@ class GeneratedArenaSession:
                         facing_policy=plan.facing_policy))
                     movement_conditions[player_id] = self._movement_conditions(
                         candidate, player_id)
-                if opponent_decision["kind"] == "move":
-                    opponent_id = candidate.participants[1].native.being.id
+                for actor_index, decision in controller_decisions.items():
+                    if decision["kind"] != "move":
+                        continue
+                    opponent_id = candidate.participants[actor_index].native.being.id
                     movement_intents.append(MovementIntent(
-                        opponent_id, opponent_decision["destination"], "sprint",
-                        f"{candidate.encounter.id}/arena-opponent-approach/boundary:{next_boundary}",
+                        opponent_id, decision["destination"], "sprint",
+                        f"{candidate.encounter.id}/arena-controller-{actor_index}-approach/boundary:{next_boundary}",
                         next_boundary, facing_policy="turn"))
                     movement_conditions[opponent_id] = self._movement_conditions(
                         candidate, opponent_id)
