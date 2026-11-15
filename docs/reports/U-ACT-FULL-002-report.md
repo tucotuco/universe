@@ -5,8 +5,8 @@
 ## Current continuation interval
 
 - Start: **2026-11-15T15:14:37-08:00** (captured when this continuation began).
-- End: **PENDING FINAL CLOSEOUT**.
-- Elapsed: **PENDING FINAL CLOSEOUT**.
+- End: **2026-11-15T15:53:21-08:00** (captured immediately before the final report closeout).
+- Elapsed: **PT38M44S**.
 - Result: Corrected attack-only pursuit to consult live native ground custody, added a regression for pickup clearing stale placement obstruction, and completed the requested served-Chrome shielded/unshielded combat receipt walkthrough. U-ACT-FULL-002 remains ACTIVE for review; this execution does not pass the Action Completeness Gate.
 
 ## Prior execution intervals
@@ -146,7 +146,8 @@ Both are implemented for one actually held shield. The generated Arena issues op
 - Checkpoint schema follow-up: `dcc710eb4ccea79be4d44ff31d755ccdb7b847ef` (`Allow native strike persistence fields`). It admits only the already-native Feint-source and shield-hand fields; its two directly affected checkpoint regressions passed. The staged safety audit reported `files=7 findings=0 result=PASS` and the commit excluded preserved archive paths.
 - Scoped documentation closeout: `c8ad2450e40f139d63b30a4a98308a70dabe19f3` (`Document passive shield allocation closeout`) updates TASKS, the 52-row matrix, and this report. Its staged publication-safety audit reported `files=9 findings=0 result=PASS`; `git diff --cached --check` passed. `git commit --only` included exactly those three maintained documents, leaving the five historical archive paths staged.
 - Exact HEAD before this continuation: `efed43c3103527047e16cff0b8176325fd9a1795`.
-- Pursuit regression/code commit: `7c03a8d` (`Resume Arena pursuit after native pickup`). The only committed paths are `src/arena_browser_session.py` and `tests/test_generated_arena_browser.py`; staged audit `files=8 findings=0 result=PASS` included the pre-existing staged archive entries without adding them to this commit.
-- The current report, TASKS and coverage updates are being committed separately after their own scoped safety audit. Preserved staged archive entries and the untracked save are not part of either U-ACT-FULL-002 commit.
+- Pursuit regression/code commit: `7c03a8db469bb89266d34b07383b4c57f8c15e9d` (`Resume Arena pursuit after native pickup`). Only `src/arena_browser_session.py` and `tests/test_generated_arena_browser.py` were committed. The staged audit `files=8 findings=0 result=PASS` included preserved archive entries without adding them to the commit.
+- TASKS, 52-row coverage-matrix and report evidence commit: `b7b46574378c2168c5182f7381878c025a66bd43` (`Record served Chrome shield receipts`); staged audit `files=9 findings=0 result=PASS`; `git diff --cached --check` passed; `git commit --only` excluded all unrelated paths.
+- Verified HEAD immediately before this report-only closeout: `b7b46574378c2168c5182f7381878c025a66bd43`. The report-only closeout is the following local commit. Final Git HEAD and worktree state are recorded in the Codex closeout; no push occurred.
 - Preserved user index entries remain staged: deletions of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md`, `docs/reports/U-CAP-003-report.md`, and rename `docs/reports/U-THROW-001-rule-sync-proposal.patch` → `docs/reports/archive/U-THROW-001-rule-sync-proposal.patch`. Preserved untracked `docs/assignments/universe-arena.json` remains untouched. No unrelated task files are changed.
 - No push is authorized or planned. The final interval and exact repository state will be captured at audited closeout.
