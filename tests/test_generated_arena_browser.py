@@ -56,6 +56,38 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             body = json.loads(json.dumps(body) if type(body) is not str else body)
         return result["status"], body
 
+    def test_authored_spot_http_controls_match_native_seeded_route(self):
+        """Shipped HTTP choices preserve the native authored Spot outcome."""
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 73111)
+        self.assertEqual(self.request("/api/generated/profile", {"profile_id": "none"})[0], 200)
+        status, initial = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "5", "height_cells": "5",
+            "root_seed": "73111", "opponent_strategy": "none",
+            "authored_scenario": "arena-spot-demo"})
+        self.assertEqual(status, 200)
+        candidate = self.session.active_candidate
+        player, hidden = (row.native.being for row in candidate.participants)
+        self.assertNotIn(hidden.name, json.dumps(initial))
+
+        status, planned = self.request("/api/generated/destination", {
+            "column": 2, "row": 0, "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200)
+        self.assertNotIn(hidden.id, json.dumps(planned))
+        self.assertEqual(self.request("/api/generated/advance", {"seconds": 1})[0], 200)
+        self.assertEqual(self.request("/api/generated/stop", {})[0], 200)
+        status, accepted = self.request("/api/generated/spot", {})
+        self.assertEqual(status, 200)
+        self.assertNotIn(hidden.id, json.dumps(accepted))
+        self.assertNotIn(hidden.name, json.dumps(accepted))
+        for _ in range(6):
+            status, result = self.request("/api/generated/advance", {"seconds": 1})
+            self.assertEqual(status, 200, result)
+        self.assertEqual(result["spot_action"]["outcome"], "success")
+        self.assertIn(hidden.id, candidate.encounter.aware_beings(player.id))
+        self.assertNotIn(player.id, candidate.encounter.aware_beings(hidden.id))
+        self.assertNotIn(hidden.id, json.dumps(result["entities"]))
+        self.assertIn(hidden.name, json.dumps(result["entities"]))
+
     def raw_request(self, path, raw, content_type="application/octet-stream"):
         handler_type = make_handler(self.session)
         handler = object.__new__(handler_type)
