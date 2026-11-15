@@ -1,12 +1,19 @@
 # U-ACT-FULL-002 engineering report
 
-**Status:** ACTIVE — ChatGPT review and acceptance are still required. The passive-shield overload allocation edge below needs a narrow rule decision; the wider Action Completeness Gate remains FUTURE/unpassed.
+**Status:** ACTIVE — ChatGPT review and acceptance are still required. The visibility boundary for overload allocation is now adopted by the user; the Action-time/resource treatment of the allocation choice remains unresolved. The wider Action Completeness Gate remains FUTURE/unpassed.
 
 ## Execution interval
 
 - Start: **2026-11-15T13:06:40-08:00** (captured when this execution began).
 - End: **2026-11-15T14:17:59-08:00** (captured immediately before final closeout).
 - Elapsed: **PT1H11M19S**.
+
+### Follow-up execution interval
+
+- Start: **2026-11-15T14:20:54-08:00** (captured when the user supplied the prior-round-observable allocation ruling).
+- End: **2026-11-15T14:27:12-08:00** (captured immediately before this documentation closeout).
+- Elapsed: **PT6M18S**.
+- Result: Recorded the selected information boundary in TASKS and the variant matrix. Re-ran `test_action_evaluation.TestActionEvaluation.test_passive_shield_over_capacity_refuses_before_any_attack_roll` — **1 passed, 0.033s**. The cost question below remains the only allocation blocker; no code behavior is claimed from this follow-up.
 
 ## Scope and protected state
 
@@ -23,7 +30,7 @@
 | Passive interception and damage chain | MET for represented ordinary Shields | Native melee and targeted Throw use adopted `d10 ≤ shield size + 4`, stop at most shield size, pass the remainder to armor/Being, and apply only ordinary damage above size to shield HP. Miss, failed interception, and successful interception remain distinct. |
 | Critical ordinary/extra components | MET | Native critical regression checks the ordinary component through shield and armor, extra critical damage bypassing both, and no extra durability loss. |
 | Common-snapshot simultaneous protection and durability | MET | Two attacks share the pre-action shield; durability accumulates after both evaluations. A shield destroyed by the combined batch still protects in that boundary and is absent from later protection snapshots. |
-| Passive capacity and defender pre-outcome allocation | BLOCKED pending a rule decision | Same-boundary overload is rejected before rolls, RNG, time, or state mutation. The rule says the bearer selects excess attacks; the Action-information rule says same-second opponent Action choices are not knowable and defenses use only perceived information. No adopted text defines what attack identities can be presented to the defender or when this allocation occurs. Exact options are below. |
+| Passive capacity and defender pre-outcome allocation | BLOCKED pending a narrow Action-time/resource decision | User selected prior-round observable allocation: only attacks already perceived before the simultaneous resolution round may be selected; unseen same-round attacks remain unselectable and are not revealed. The remaining adopted-rule omission is whether entering that allocation is a zero-time/no-resource defensive choice or a timed/capacity-consuming Action. No current native persisted choice model represents the former; treating it as Block would import Block's distinct Action cost and timing into passive protection. Exact options are below. |
 | Active Block interaction | MET for represented native shield/timing cases | Focused native tests verify shield-size timing, attack penalty, adopted stopping bonus, and refusal for wrong timing or missing shield; existing Block and maneuver restrictions remain intact. |
 | Real served-Chrome Don → combat → Remove contrast | PARTIAL | Chrome used seed `20261115`, Player vs Arena, 10,000 starting XP, 5×5 map, `attack_only`, equipped loadout plus the authored one-Small-shield ground profile. Tobe reached shield hex `(2,4)` by native Walk, picked up the same named Small shield, and selected native Don for left hand at t=5. Don succeeded at t=31; an opposing native Thrust resolved normal at t=33. The player-owned Chrome sheet showed 15 HP at t=50 with the Small shield held in the left hand. Remove Shield was accepted at t=50 and succeeded at t=60; the next opposing Thrust resolved normal at t=61. At t=97 the own-Being sheet showed 0 HP and the same Small shield carried but not readied. The player-owned sheet exposes Being HP and hand/custody state, but the UI does not expose shield HP, native Object ID, interception roll, or event-effect receipt; therefore the browser path proves real actions and the contrast, while exact interception is separately verified by native generated-Arena tests. No hidden roll is inferred from the UI result label. |
 | Pending/completed strict fresh-process persistence and deterministic continuation | MET for supported states | Fresh OS-process regression restores a pending generated-Arena strike with the same shield identity and commits its hit/effect; a separate Don/Remove native generated-Arena test restores pending Don, completed Don, and pending Remove and verifies same Object custody/hand state at continuation. Allocation checkpoints remain inapplicable until the blocked Choice exists. |
@@ -75,12 +82,14 @@ Two adopted statements must be reconciled before implementing over-capacity bear
 - Shields (r61, p. 28): if attacks in a round exceed shield size, the bearer must decide which attacks the shield defends against.
 - Action clock/information (r61, p. 9) and simultaneous resolution: a combatant cannot know an opponent’s Action choice in the same second it is chosen, and defense Choices use only information that combatant can perceive; outcomes remain common-snapshot/simultaneous.
 
-The missing rule is specifically **which attacker/attack identities the bearer may see when choosing the shield-covered subset, and when that choice can be made**. This code refuses overload safely until this is adopted. Minimal alternatives:
+The original missing information-visibility rule has been decided. User instruction: **“Prior-round observable”** — for an overloaded simultaneous batch, the bearer may allocate protection only among attacks already perceived before the resolution round; same-round unseen actions are neither revealed nor selectable. This preserves the action-information rule. The implementation still refuses overload safely before rolls.
 
-1. **Prior-round observable allocation:** the bearer selects only among attacks already perceived before the simultaneous resolution round; unknown same-round attacks cannot be selected. This preserves information timing but can leave the simultaneous batch without a complete assignment.
-2. **Pre-outcome revealed allocation:** reveal the scheduled same-boundary incoming attack identities to the bearer and require a shield allocation before any attack/defense roll. This completes the choice and preserves simultaneous outcomes, but explicitly carves out an exception to same-second Action secrecy for only this defense Choice.
+The remaining exact omission is whether entering the adopted allocation choice has Action-time or Action-capacity cost. The Shields text requires the bearer to choose attacks but gives no duration or resource cost for this allocation; the separately named Block is explicitly an Action with shield-size timing. Minimal alternatives:
 
-No other work in this assignment depends on this choice; all independently supported mechanics and verification above are complete. Once selected, implement the typed persisted allocation/ownership path, observer-filtered UI and regression coverage without changing outcomes by declaration order.
+1. **Allocation is part of passive protection (recommended):** record a defender-owned, persisted selection from the allowed prior-round observations, with no additional Action duration or resource expenditure. This preserves the distinction between passive protection and the separately defined Block Action; implement an explicit native choice record and Arena control.
+2. **Allocation consumes Action time/capacity:** treat selection as a timed Action. This requires specifying its duration and how it competes with the bearer’s other Actions; reusing Block's shield-size timing would make passive allocation consume the timing of a distinct active defense.
+
+The user-selected visibility boundary is already recorded and is not being reopened. Once the remaining time/resource treatment is selected, implement the typed persisted allocation/ownership path, observer-filtered UI and regression coverage without changing outcomes by declaration order. Existing independent shield interception, durability, critical bypass, destruction, Block, Chrome and fresh-process work remains verified as recorded above.
 
 ## Repository and closeout
 
