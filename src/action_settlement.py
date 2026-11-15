@@ -98,7 +98,8 @@ _OUTCOMES = {
         'out_of_reach','not_facing','blocked','uncertain_path')),
     'defense': frozenset(('ready', 'unable_to_defend', 'no_threat', 'deflected', 'evaded', 'failed', 'blocked', 'yielded', 'no_space')),
     'run': frozenset(('unplaced', 'no_movement', 'success', 'partial')),
-    'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure')),
+    'spot': frozenset(('unplaced', 'unmodeled_target', 'no_clear_path', 'success', 'failure',
+                       'no_search_access', 'no_audible_evidence', 'impossible')),
     'throw': frozenset(('unplaced', 'unavailable', 'released')),
     'pickup': frozenset(('unplaced', 'unavailable', 'inaccessible', 'over_capacity',
                          'unknown_weight', 'unknown_capacity', 'unable_to_act',
@@ -114,6 +115,7 @@ _OUTCOMES = {
 }
 _METADATA = {'combat': ('distance',), 'melee': ('distance','relative_charge_speed_yd_s'), 'object_strike': ('distance',), 'disarm': ('distance','margin','maximum_landing_hexes'), 'defense': (), 'run': ('displacement',),
              'spot': ('path_status', 'roll', 'discovery_dc', 'spotting_dc_adjustment',
+                      'search_dc_adjustment', 'listen_dc_adjustment',
                       'racial_action_bonus', 'effective_dc', 'observation_id',
                       'objective_key', 'evidence_kind', 'visible_count'),
              'observe_group': ('skill_level_used', 'roll', 'observation_id', 'objective_key'),
@@ -882,16 +884,25 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             _require(proposal.outcome in _ATTACK_OUTCOMES | {'parried', 'dodged'}, 'inapplicable strike practice')
             _require(effect.skill == entities[action.instrument_id].data['original_type'], 'invalid strike practice skill')
         return effect.target_id, ('practice', action.id, effect.target_id, effect.skill)
-    _require(type(effect) is AwarenessEffect and ((action.family in ('spot', 'observe_group') and proposal.outcome == 'success')
+    discovery_success = (action.family == 'spot'
+        and action.data.get('event_type') in ('spot', 'search', 'listen')
+        and proposal.outcome == 'success')
+    _require(type(effect) is AwarenessEffect and ((discovery_success or
+        action.family == 'observe_group' and proposal.outcome == 'success')
         or (action.family == 'history_request' and proposal.outcome == 'heard')), 'unsupported awareness effect')
     _identity(effect.observed_id)
     _require(effect.observed_id == action.target_id and effect.observed_id in participants
         and effect.target_id in participants and effect.observed_id != effect.target_id, 'invalid awareness reference')
     _number(effect.distance, nonnegative=True)
-    basis = {'spot':'spot_check_geometric_path', 'observe_group':'sampled_group_observation', 'history_request':'heard_account_range_scaffold'}[action.family]
+    basis = ({'spot':'spot_check_geometric_path',
+              'search':'search_authored_access_evidence',
+              'listen':'listen_authored_audibility_evidence'}[action.data['event_type']]
+             if action.family == 'spot' else
+             {'observe_group':'sampled_group_observation',
+              'history_request':'heard_account_range_scaffold'}[action.family])
     if action.family == 'spot':
         _require(effect.max_distance is None and effect.basis == basis,
-                 'Spot has no adopted fixed distance threshold')
+                 'discovery has no adopted fixed distance threshold')
     else:
         _number(effect.max_distance, nonnegative=True)
         _require(effect.max_distance > 0 and effect.distance <= effect.max_distance and effect.basis == basis, 'invalid awareness evidence')
@@ -954,7 +965,8 @@ def _validate_complete_outcome(proposal, action, entities):
     if expected_practice is not None:
         _require((practice[0].skill, practice[0].experience) == expected_practice, 'practice differs from declared native award')
     awareness = [e for e in effects if type(e) is AwarenessEffect]
-    _require(len(awareness) == int((action.family in ('spot', 'observe_group') and proposal.outcome == 'success')
+    _require(len(awareness) == int((action.family == 'spot' and action.data.get('event_type') in ('spot','search','listen') and proposal.outcome == 'success')
+        or (action.family == 'observe_group' and proposal.outcome == 'success')
         or (action.family == 'history_request' and proposal.outcome == 'heard')), 'missing/extra Spot awareness')
     damage = [e for e in effects if type(e) is DamageEffect]
     stuns = [e for e in effects if type(e) is StunEffect]

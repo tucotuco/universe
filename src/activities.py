@@ -536,7 +536,7 @@ class RunAction(Action):
 
 
 class SpotAction(Action):
-    """Six-second deliberate Spot discovery Action (revision-60 rules).
+    """Six-second deliberate Search, Spot, or Listen discovery Action.
 
     The geometry gate remains a limited scaffold and does not model complete
     visibility, lighting, acuity, or terrain.
@@ -545,7 +545,7 @@ class SpotAction(Action):
     def __init__(self, universe, actor_id, target_id, start_time,
                  duration=6, die_roll=None, id=None, spotting_conditions=(), *,
                  ledger=None, group_fully_visible=False,
-                 location_ledger=None, object_ledger=None):
+                 location_ledger=None, object_ledger=None, sense='spot'):
         for name, value in (("start_time", start_time), ("duration", duration)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{name} must be a finite number")
@@ -553,8 +553,10 @@ class SpotAction(Action):
             raise ValueError("deliberate Spot takes exactly six seconds")
         if die_roll is not None and (type(die_roll) is not int or not 1 <= die_roll <= 20):
             raise ValueError("die_roll must be an integer between 1 and 20")
+        if sense not in ('search', 'spot', 'listen'):
+            raise ValueError('discovery sense must be Search, Spot, or Listen')
         if actor_id == target_id:
-            raise ValueError("a Being cannot spot itself")
+            raise ValueError("a Being cannot discover itself")
         if type(group_fully_visible) is not bool:
             raise TypeError("group_fully_visible must be a Boolean scenario premise")
         if ledger is not None:
@@ -577,14 +579,23 @@ class SpotAction(Action):
                 raise ValueError("Object evidence ledger must belong to the Spotter")
             if ledger is not None or location_ledger is not None or group_fully_visible:
                 raise ValueError("Object Spot evidence cannot be combined with Group/Being evidence")
-        from discovery import SpottingConditions
-        conditions = SpottingConditions(tuple(spotting_conditions))
-        super().__init__(universe, start_time, None, 'spot', actor_id,
+        from discovery import HearingConditions, SpottingConditions
+        if sense == 'search':
+            if tuple(spotting_conditions):
+                raise ValueError('Search has no additional named circumstance modifier table')
+            conditions = ()
+        else:
+            conditions = (HearingConditions(tuple(spotting_conditions)) if sense == 'listen'
+                          else SpottingConditions(tuple(spotting_conditions)))
+        if sense != 'spot' and (ledger is not None or group_fully_visible
+                                or location_ledger is not None or object_ledger is not None):
+            raise ValueError('Search and Listen use observer-owned Arena evidence only')
+        super().__init__(universe, start_time, None, sense, actor_id,
                          target_id, instrument_id=None, id=id)
         self.end_time = start_time + 6
         if not math.isfinite(self.end_time):
             raise ValueError("end_time must be finite")
-        self.spotting_conditions = conditions.values
+        self.spotting_conditions = (() if sense == 'search' else conditions.values)
         self.declared_roll = die_roll
         self.roll = None
         self.path_status = None
@@ -602,6 +613,14 @@ class SpotAction(Action):
             raise ValueError("spotting activity has already been scheduled")
         if self.start_time < encounter.time:
             raise ValueError("spotting activity cannot begin before scheduling time")
+        if self.event_type in ('search', 'listen'):
+            target = encounter.get_being(self.target_id)
+            if target is None:
+                raise ValueError(f'{self.event_type.title()} requires a participating Being target')
+            tags = target.current.tags
+            premise = 'arena_search_accessible' if self.event_type == 'search' else 'arena_audible'
+            if tags.get(premise) is not True:
+                raise ValueError(f'{self.event_type.title()} lacks its explicitly represented prerequisite')
         if self.group_fully_visible:
             from statistical_group import StatisticalGroup
             if type(encounter.get_entity(self.target_id)) is not StatisticalGroup:
@@ -640,9 +659,9 @@ class SpotAction(Action):
         observation = ()
         if distance is None:
             outcome = 'unplaced'
-        elif target.geometry is None:
+        elif self.event_type == 'spot' and target.geometry is None:
             outcome = 'unmodeled_target'
-        else:
+        elif self.event_type == 'spot':
             path = self._encounter.line_of_sight(self.actor_id, self.target_id)
             self.path_status = None if path is None else path.status
             if path is None or not path.clear:
@@ -658,6 +677,28 @@ class SpotAction(Action):
                 if passed:
                     observation = (Perception(self.actor_id, self.target_id,
                                               'spot_check_geometric_path',
+                                              distance, None),)
+        else:
+            from discovery import HearingConditions, SpottingConditions, discovery_dc, racial_discovery_bonus
+            tags = target.current.tags
+            premise = 'arena_search_accessible' if self.event_type == 'search' else 'arena_audible'
+            conditions = (HearingConditions(self.spotting_conditions)
+                          if self.event_type == 'listen' else None)
+            if tags.get(premise) is not True:
+                outcome = 'no_search_access' if self.event_type == 'search' else 'no_audible_evidence'
+            elif self.event_type == 'listen' and conditions.impossible:
+                outcome = 'impossible'
+            else:
+                self.roll = self.declared_roll if self.declared_roll is not None else random.randint(1, 20)
+                action = self.event_type
+                target_dc = discovery_dc(target.current.discovery_dc) + (
+                    0 if conditions is None else conditions.dc_adjustment)
+                race = getattr(actor.current, 'race', None)
+                passed = self.roll + racial_discovery_bonus(race, action) >= target_dc
+                outcome = 'success' if passed else 'failure'
+                if passed:
+                    observation = (Perception(self.actor_id, self.target_id,
+                                              f'{action}_authored_prerequisite',
                                               distance, None),)
         return ActionResolution(outcome, (), observation)
 

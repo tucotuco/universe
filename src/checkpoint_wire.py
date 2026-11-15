@@ -301,8 +301,10 @@ def _validate_choice(choice, universe_id, participants, all_action_ids):
         _need(f['id'] == ('action-id', action_id), 'Action logical ID disagrees with declaration')
         _need(f['universe'] == ('universe', universe_id),
               'Action declaration has an inconsistent Universe reference')
-        expected_event = 'run' if adapter == 'native.run-action/1' else 'spot'
-        _need(f['event_type'] == ('string', expected_event),
+        expected_event = 'run' if adapter == 'native.run-action/1' else None
+        _need((expected_event is not None and f['event_type'] == ('string', expected_event))
+              or (adapter == 'native.spot-action/1'
+                  and f['event_type'] in (('string', 'search'), ('string', 'spot'), ('string', 'listen'))),
               'Action family and event type disagree')
         actor = _logical_ref(f['actor_id'], 'entity', participants)
         target_data = f['target_id']
@@ -413,8 +415,9 @@ def _validate_receipt_chain(chain, universe_id, encounter_id, participants,
                   ('event_type', 'strategy', 'parameters', 'display_name', 'parent_encounter_id'),
                   'committed Action declaration fields are unknown or incomplete')
             declaration_map = dict(declaration)
-            event_type = 'run' if action[1] == 'native.run-action/1' else 'spot'
-            _need(declaration_map['event_type'] == event_type
+            event_type = declaration_map['event_type']
+            _need((event_type == 'run' if action[1] == 'native.run-action/1'
+                   else event_type in ('search', 'spot', 'listen'))
                   and declaration_map['parent_encounter_id'] == encounter_id,
                   'committed Action declaration has inconsistent roots or family')
             metadata = action[8]

@@ -851,7 +851,8 @@ def _rebuild_future_choices(graph, choices, world, encounter, native_objects):
                 _need(target_id in native_objects and target_id in encounter.being_list,
                       'accepted Spot target reference is not an Encounter Being')
                 action = SpotAction(world, actor_id, target_id, start, duration,
-                    field('declared_roll'), spotting_conditions=field('spotting_conditions'))
+                    field('declared_roll'), spotting_conditions=field('spotting_conditions'),
+                    sense=field('event_type'))
             Identifiable.__init__(action, field('display_name'), id=action_id)
             effort_data = values.get('strategy_effort')
             _need(type(effort_data) is tuple and len(effort_data) == 4,

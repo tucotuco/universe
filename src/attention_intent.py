@@ -22,7 +22,21 @@ def accept_spot_attention(encounter, actor_id, *, location_ledger=None):
     not create an Action. A unique target is captured while holding the native
     scheduling lock and is never retargeted during the Spot interval.
     """
+    return accept_discovery_attention(encounter, actor_id, 'spot',
+                                      location_ledger=location_ledger)
+
+
+def accept_discovery_attention(encounter, actor_id, sense, *, location_ledger=None):
+    """Accept a target-free authored Search, Spot, or Listen declaration.
+
+    Search/Listen candidates are admitted only by the explicit native source
+    facts carried in their tags; no location reach or sound propagation is
+    inferred by this adapter.
+    """
     from activities import SpotAction
+
+    if sense not in ('search', 'spot', 'listen'):
+        raise ValueError('unsupported discovery sense')
 
     if mode_of(encounter) != 'transactional':
         raise ValueError('attention intent requires a selected native transactional Encounter')
@@ -40,19 +54,14 @@ def accept_spot_attention(encounter, actor_id, *, location_ledger=None):
                     or location_ledger.observer_id != actor_id):
                 return AttentionIntentResult(False, 'not_accepted')
 
-        known = set(encounter.aware_beings(actor_id))
-        candidates = tuple(dict.fromkeys(
-            being_id for being_id in encounter.being_list
-            if being_id != actor_id
-            and being_id not in known
-            and encounter.get_being(being_id) is not None
-        ))
+        candidates = eligible_discovery_targets(encounter, actor_id, sense)
         if len(candidates) != 1:
             return AttentionIntentResult(False, 'not_accepted')
 
         target_id = candidates[0]
         action = SpotAction(encounter.universe, actor_id, target_id,
-                            encounter.time, location_ledger=location_ledger)
+                            encounter.time, location_ledger=location_ledger,
+                            sense=sense)
         book = encounter._choice_book
         prior_drafts = set(book._drafts)
         try:
@@ -65,3 +74,21 @@ def accept_spot_attention(encounter, actor_id, *, location_ledger=None):
                 book._drafts.pop(draft_id, None)
             return AttentionIntentResult(False, 'not_accepted')
         return AttentionIntentResult(True, 'accepted')
+
+
+def eligible_discovery_targets(encounter, actor_id, sense):
+    """Return native eligible candidates without publishing their identities."""
+    if sense not in ('search', 'spot', 'listen'):
+        raise ValueError('unsupported discovery sense')
+    known = set(encounter.aware_beings(actor_id))
+    candidates = []
+    for being_id in encounter.being_list:
+        target = encounter.get_being(being_id)
+        if being_id == actor_id or being_id in known or target is None:
+            continue
+        if sense == 'search' and target.current.tags.get('arena_search_accessible') is not True:
+            continue
+        if sense == 'listen' and target.current.tags.get('arena_audible') is not True:
+            continue
+        candidates.append(being_id)
+    return tuple(dict.fromkeys(candidates))

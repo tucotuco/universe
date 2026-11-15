@@ -1097,21 +1097,15 @@ def _make_plan(encounter,candidate,rng_owner):
             plan.contents('observers',handle._observations,
                           _preserve_known(handle._observations,projection.observations))
         else:raise UnsupportedEvaluation('unsupported authoritative recipient publication')
-    for key,target in supported.boundary.targets.items():
-        if target.category!='being':continue
-        if key in encounter.awareness:plan.contents('observers',encounter.awareness[key],target.aware_of)
-
-    new_awareness={key:set(target.aware_of) for key,target in supported.boundary.targets.items()
-        if target.category=='being' and key not in encounter.awareness}
-    for key,value in new_awareness.items():
-        data=encounter.awareness
-        plan._add('observers',('attribute',id(data),key),_AttributeWrite(data,key,value,False,None,tuple(data)))
+    awareness_updates={key:set(target.aware_of) for key,target in supported.boundary.targets.items()
+        if target.category=='being'}
     # Revision-65 Arena perception is refreshed from the same detached shared
     # post-movement snapshot. The ledger update is part of this publication,
     # after movement and custody writes have been prepared and before readers
     # can observe the committed boundary.
     from arena_perception import (ArenaPerceptionEvidence, ArenaPerceptionLedger,
         BASIS, modeled_sightline_blocked)
+    from action_evaluation import AwarenessEffect
     pickup_owners = {row.effect.object_id: row.effect.target_id
                      for row in supported.boundary.effects.values()
                      if type(row.effect) is PickupEffect}
@@ -1123,6 +1117,9 @@ def _make_plan(encounter,candidate,rng_owner):
     weapon_draws = {row.effect.object_id: (row.effect.target_id,row.effect.hand)
                     for row in supported.boundary.effects.values()
                     if type(row.effect) is ReadyWeaponEffect}
+    discovery_evidence = {(row.effect.target_id, row.effect.observed_id): row.effect.basis
+        for row in supported.boundary.effects.values()
+        if type(row.effect) is AwarenessEffect}
     observed_motion = {}
     for segment in candidate.movement:
         for entity_id, velocity in segment.velocities.items():
@@ -1140,9 +1137,7 @@ def _make_plan(encounter,candidate,rng_owner):
             raise PublicationRejected('Arena observer perception ledger is missing or misowned')
         current = dict(ledger._current)
         history = list(ledger._history)
-        visible_by_awareness = supported.boundary.targets.get(observer_id)
-        aware_ids = (set() if visible_by_awareness is None
-                     else set(visible_by_awareness.aware_of))
+        aware_ids = set(awareness_updates.get(observer_id, ()))
         for entity_id, prior in tuple(current.items()):
             view = candidate.pre_action_snapshot.entities.get(entity_id)
             if view is None:
@@ -1199,18 +1194,54 @@ def _make_plan(encounter,candidate,rng_owner):
             view = candidate.pre_action_snapshot.entities.get(entity_id)
             if view is None or view.category != 'being':
                 continue
-            if modeled_sightline_blocked(encounter, observer_id, entity_id,
-                    changes['positions']):
-                continue
-            position = changes['positions'].get(entity_id, view.position)
+            basis = discovery_evidence.get((observer_id, entity_id))
+            if basis in ('search_authored_access_evidence',
+                         'listen_authored_audibility_evidence'):
+                # Authored Search/Listen evidence identifies the Being but
+                # supplies no unmodeled bearing or location.
+                position = None
+            else:
+                if modeled_sightline_blocked(encounter, observer_id, entity_id,
+                        changes['positions']):
+                    continue
+                position = changes['positions'].get(entity_id, view.position)
             updated = ArenaPerceptionEvidence(observer_id, entity_id, 'being',
                 view.data.get('name') or view.obj_type, 'Being', position,
                 'present', candidate.boundary, float(candidate.boundary), BASIS,
                 currently_observable=True, visibility_boundary=candidate.boundary)
             current[entity_id] = updated
             history.append(updated)
+        # In the initial Arena, unobstructed Beings are passively observable.
+        # A committed movement that removes an explicitly represented screen
+        # creates one meaningful visual discovery opportunity. Do not poll or
+        # retry hidden Entities on ordinary stationary seconds.
+        if candidate.movement:
+            for entity_id in encounter.being_list:
+                if entity_id == observer_id or entity_id in current:
+                    continue
+                view = candidate.pre_action_snapshot.entities.get(entity_id)
+                if (view is None or view.category != 'being'
+                        or not modeled_sightline_blocked(encounter, observer_id, entity_id)):
+                    continue
+                if modeled_sightline_blocked(encounter, observer_id, entity_id,
+                        changes['positions']):
+                    continue
+                position = changes['positions'].get(entity_id, view.position)
+                updated = ArenaPerceptionEvidence(observer_id, entity_id, 'being',
+                    view.data.get('name') or view.obj_type, 'Being', position,
+                    'present', candidate.boundary, float(candidate.boundary), BASIS,
+                    currently_observable=True, visibility_boundary=candidate.boundary)
+                current[entity_id] = updated
+                history.append(updated)
+                awareness_updates.setdefault(observer_id, set()).add(entity_id)
         plan.contents('observers', ledger._current, current)
         plan.contents('observers', ledger._history, history)
+    for key,value in awareness_updates.items():
+        if key in encounter.awareness:
+            plan.contents('observers',encounter.awareness[key],value)
+        else:
+            data=encounter.awareness
+            plan._add('observers',('attribute',id(data),key),_AttributeWrite(data,key,value,False,None,tuple(data)))
     for aid,proposal in supported.boundary.actions.items():
         action=events[aid]
         plan.attr('lifecycle',action,'resolution',proposal)

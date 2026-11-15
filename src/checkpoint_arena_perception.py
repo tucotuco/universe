@@ -32,6 +32,22 @@ class ArenaPerceptionCheckpointRejected(ValueError):
     """Arena observer evidence is outside the reviewed versioned subset."""
 
 
+def _has_nonpositional_discovery_receipt(encounter, observer_id, entity_id, boundary):
+    """Prove a current no-location Being record came from Search or Listen."""
+    from activities import SpotAction
+    for event in encounter.universe.event_history.values():
+        if type(event) is not SpotAction:
+            continue
+        if (event.actor_id != observer_id or event.target_id != entity_id
+                or event.event_type not in ('search', 'listen')
+                or event.end_time > boundary or event.id not in encounter.finished_action_list):
+            continue
+        resolution = event.resolution
+        if resolution is not None and resolution.outcome == 'success':
+            return True
+    return False
+
+
 def _need(value, message):
     if not value:
         raise ArenaPerceptionCheckpointRejected(message)
@@ -412,8 +428,12 @@ def encode_arena_perception_ledger(ledger, *, observer, encounter, registry):
                 slots = [slot for slot, held in owner.current.body_parts.items() if held == entity_id]
                 expected_equipment = f"held in {slots[0]}" if slots else "carried"
         if row.currently_observable:
+            position_matches = row.position == expected_position
+            if (category == 'being' and row.position is None and position is not None):
+                position_matches = _has_nonpositional_discovery_receipt(
+                    encounter, observer.id, entity_id, row.boundary)
             _need(row.name == expected_name and row.present_state == expected_state
-                  and row.position == expected_position and row.owner_id == expected_owner
+                  and position_matches and row.owner_id == expected_owner
                   and row.equipment_status == expected_equipment,
                   "current Arena evidence disagrees with committed Entity name, custody, or position")
     for row in ledger._history:

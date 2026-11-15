@@ -266,7 +266,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             ad = dict(ad, **_stage.initialization.get(aid, {}))
         if type(ad['id']) is not str or ad['id'] != aid:
             raise EvaluationIntegrityError('Action identity mismatch')
-        if ad['event_type'] not in (('swing', 'thrust', 'stun', 'subdue', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','bull rush','overrun','end-run', 'parry', 'dodge', 'block', 'yield', 'run', 'spot', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
+        if ad['event_type'] not in (('swing', 'thrust', 'stun', 'subdue', 'touch', 'feint', 'coup de grace', 'strike object', 'break weapon', 'disarm', 'grab', 'grab object', 'wrest', 'hold', 'break hold', 'release grip', 'grapple', 'grapple escape', 'takedown','reverse','pin','trip','bull rush','overrun','end-run', 'parry', 'dodge', 'block', 'yield', 'run', 'search', 'spot', 'listen', 'throw', 'pick up', 'ready weapon', 'ready object', 'delay') + (('observe_group', 'ask_about_past') if _objective else ())):
             raise UnsupportedEvaluation('unsupported base Action activity')
         if aid in ed['cancelled_action_list'] and ad.get('_atomic_acknowledged_boundary') is not None:
             ack = ad['_atomic_acknowledged_boundary']
@@ -517,7 +517,8 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         data = {'hardness': freeze(cd['hardness']), 'weight': freeze(cd.get('weight')),
                 'parent_container_id': freeze(od.get('parent_container_id')),
                 'discovery_dc': freeze(cd.get('discovery_dc')),
-                'name': freeze(od.get('name'))}
+                'name': freeze(od.get('name')),
+                'tags': freeze(cd.get('tags', {}))}
         category = 'object'
         if type(obj) is BeingInstance:
             category = 'being'
@@ -2692,9 +2693,9 @@ def _activity(snapshot, action, rng):
         distance = snapshot.distance(actor.id, target.id)
         if distance is None:
             outcome = 'unplaced'
-        elif target.geometry is None:
+        elif action.data['event_type'] == 'spot' and target.geometry is None:
             outcome = 'unmodeled_target'
-        else:
+        elif action.data['event_type'] == 'spot':
             path = snapshot.path(actor.id, target.id)
             metadata.append(('path_status', None if path is None else path.status))
             if path is None or not path.clear:
@@ -2715,6 +2716,37 @@ def _activity(snapshot, action, rng):
                 outcome = 'success' if roll + racial >= dc else 'failure'
                 if outcome == 'success':
                     effects.append(AwarenessEffect(action.id, actor.id, target.id, distance, None))
+        else:
+            from discovery import HearingConditions, SpottingConditions, discovery_dc, racial_discovery_bonus
+            sense = action.data['event_type']
+            premise = 'arena_search_accessible' if sense == 'search' else 'arena_audible'
+            if sense == 'search' and action.data['spotting_conditions'] != ():
+                raise UnsupportedEvaluation('Search has no additional authored modifier table')
+            if target.data.get('tags', {}).get(premise) is not True:
+                outcome = 'no_search_access' if sense == 'search' else 'no_audible_evidence'
+            else:
+                conditions = (HearingConditions(action.data['spotting_conditions'])
+                              if sense == 'listen' else None)
+                if sense == 'listen' and conditions.impossible:
+                    outcome = 'impossible'
+                else:
+                    roll = action.data['declared_roll']
+                    if roll is None:
+                        roll = rng.roll('1d20')
+                    metadata.append(('roll', roll))
+                    base_dc = discovery_dc(target.data['discovery_dc'])
+                    adjustment = 0 if conditions is None else conditions.dc_adjustment
+                    racial = racial_discovery_bonus(actor.data['race'], sense)
+                    dc = base_dc + adjustment
+                    metadata.extend((('discovery_dc', base_dc),
+                        (f'{sense}_dc_adjustment', adjustment),
+                        ('racial_action_bonus', racial), ('effective_dc', dc)))
+                    outcome = 'success' if roll + racial >= dc else 'failure'
+                    if outcome == 'success':
+                        basis = ('search_authored_access_evidence' if sense == 'search'
+                                 else 'listen_authored_audibility_evidence')
+                        effects.append(AwarenessEffect(action.id, actor.id, target.id,
+                                                       distance, None, basis))
     affected = (() if action.target_id is None else (action.target_id,))
     if action.family == 'throw':
         affected = tuple(dict.fromkeys(affected + tuple(effect.target_id for effect in effects)))

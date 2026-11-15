@@ -84,15 +84,17 @@ def _has_native_transactional_action_contract(action_type):
         return False
 
 
-def _native_spot_actions(candidate, actor_id):
-    """Return exact native Spot Actions, including accepted Choice members."""
+def _native_spot_actions(candidate, actor_id, sense=None):
+    """Return exact native discovery Actions, including accepted Choice members."""
     from activities import SpotAction
     actions = {item.id: item for item in candidate.universe.event_history.values()
-               if type(item) is SpotAction and item.actor_id == actor_id}
+               if type(item) is SpotAction and item.actor_id == actor_id
+               and (sense is None or item.event_type == sense)}
     for record in candidate.encounter._choice_book._choices.values():
         for member in record.members:
             item = member.action
-            if type(item) is SpotAction and item.actor_id == actor_id:
+            if (type(item) is SpotAction and item.actor_id == actor_id
+                    and (sense is None or item.event_type == sense)):
                 actions[item.id] = item
     return tuple(actions[key] for key in sorted(actions))
 
@@ -619,10 +621,17 @@ class GeneratedArenaSession:
             action = {"name": "Run", "status": "completed" if self._player_action_outcome else "executing",
                       "outcome": self._player_action_outcome}
         spot_action = None
+        discovery_actions = {}
         if self._authored_scenario_id == "arena-spot-demo":
-            spot_candidates = _native_spot_actions(candidate, player.native.being.id)
-            if spot_candidates:
-                native_spot = max(spot_candidates, key=lambda item: (item.start_time, item.end_time, item.id))
+            for sense in ('spot', 'search', 'listen'):
+                spot_candidates = _native_spot_actions(candidate, player.native.being.id, sense)
+                native_spot = (max(spot_candidates, key=lambda item: (item.start_time, item.end_time, item.id))
+                               if spot_candidates else None)
+                if native_spot is None:
+                    discovery_actions[sense] = {"name": sense.title(), "status": "available",
+                                                "outcome": None, "duration_seconds": 6,
+                                                "seconds_remaining": 0}
+                    continue
                 accepted_choice = any(native_spot.id in record.view.action_ids
                     and record.view.state in ("accepted", "executing")
                     for record in candidate.encounter._choice_book._choices.values())
@@ -636,9 +645,10 @@ class GeneratedArenaSession:
                     spot_status, spot_outcome = ("executing" if accepted_choice
                                                   or native_spot.id in candidate.encounter.pending_action_list
                                                   else "accepted"), None
-                spot_action = {"name": "Spot", "status": spot_status,
+                discovery_actions[sense] = {"name": sense.title(), "status": spot_status,
                     "outcome": spot_outcome, "duration_seconds": 6,
                     "seconds_remaining": max(0, math.ceil(native_spot.end_time-candidate.encounter.time))}
+            spot_action = discovery_actions.get('spot')
         pickup_action = None
         if self._pickup_action_id is not None:
             pickup_action = {"name": "Pick up", "status": "completed" if self._pickup_action_outcome else "executing",
@@ -880,10 +890,17 @@ class GeneratedArenaSession:
                           if selected is not None and selected["category"] == "being" else None)
         character = self._player_character_sheet_unlocked(
             candidate, player, position, cell, movement_plan)
+        from attention_intent import eligible_discovery_targets
+        discovery_candidate_available = {
+            sense: len(eligible_discovery_targets(candidate.encounter,
+                player.native.being.id, sense)) == 1
+            for sense in ('search', 'spot', 'listen')}
         action_catalog = self._action_catalog_unlocked(
             candidate, player.native.being, selected, supported_actions)
         action_programs = self._action_program_views(
             candidate, player.native.being, ledger)
+        discovery_action_pending = any(row.get('status') in ('accepted', 'executing')
+                                       for row in discovery_actions.values())
         owned_projectiles = []
         from object import ObjectInstance
         from throwing import ProjectileFlight
@@ -969,6 +986,7 @@ class GeneratedArenaSession:
             "selected_being": selected_being,
             "player_action": action,
             "spot_action": spot_action,
+            "discovery_actions": discovery_actions,
             "pickup_action": pickup_action,
             "ready_weapon_action": ready_weapon_action,
             "ready_preparation_action": ready_preparation_action,
@@ -1014,8 +1032,7 @@ class GeneratedArenaSession:
                                        and ready_preparation_action["status"] == "executing")
                                    or (delay_action is not None
                                        and delay_action["status"] == "executing")
-                                   or (spot_action is not None
-                                       and spot_action["status"] in ("accepted", "executing"))
+                                   or discovery_action_pending
                                    or melee_pending
                                    or touch_pending
                                    or grappling_pending
@@ -1037,10 +1054,16 @@ class GeneratedArenaSession:
             "movement_outcome": self._movement_outcome,
             "spot_available": (self._authored_scenario_id == "arena-spot-demo"
                 and candidate.encounter.initiated and self._encounter_mode == "player_vs_arena"
-                and (spot_action is None or spot_action["status"] not in ("accepted", "executing"))),
+                and discovery_candidate_available['spot'] and not discovery_action_pending),
             "spot_reason": ("Native target-free Spot is a six-second Action; it does not disclose a target identity."
                 if self._authored_scenario_id == "arena-spot-demo" and candidate.encounter.initiated
                 else _SPOT_DISABLED),
+            "search_available": (self._authored_scenario_id == "arena-spot-demo"
+                and candidate.encounter.initiated and self._encounter_mode == "player_vs_arena"
+                and discovery_candidate_available['search'] and not discovery_action_pending),
+            "listen_available": (self._authored_scenario_id == "arena-spot-demo"
+                and candidate.encounter.initiated and self._encounter_mode == "player_vs_arena"
+                and discovery_candidate_available['listen'] and not discovery_action_pending),
         }
 
     @staticmethod
@@ -3514,6 +3537,7 @@ class GeneratedArenaSession:
 
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction, ReadyPreparationAction, DelayAction
+        from attention_intent import eligible_discovery_targets
 
         handle = None if selected is None else selected.get("handle")
         entity_id = (None if type(handle) is not str else
@@ -4087,14 +4111,19 @@ class GeneratedArenaSession:
             run_reason = "The native Run scheduler or resolver contract is unavailable."
         arena_rows = [{"name": "Run", "group": "Arena Actions", "status": run_status,
                        "reason": run_reason}]
-        arena_rows.extend((
-            {"name": "Search", "group": "Discovery Actions",
-             "status": "not_implemented",
-             "reason": "The adopted six-second Search check has no native transactional Action contract yet."},
-            {"name": "Listen", "group": "Discovery Actions",
-             "status": "not_implemented",
-             "reason": "The adopted six-second Listen check has no native transactional Action or authored audibility evidence contract yet."},
-        ))
+        for sense in ('search', 'listen'):
+            sense_eligible = len(eligible_discovery_targets(
+                candidate.encounter, player.id, sense)) == 1
+            enabled = (self._authored_scenario_id == "arena-spot-demo"
+                       and candidate.encounter.initiated
+                       and self._encounter_mode == "player_vs_arena"
+                       and sense_eligible)
+            arena_rows.append({"name": sense.title(), "group": "Discovery Actions",
+                "status": "available" if enabled else "unavailable",
+                "reason": ("Native six-second target-free Action; eligibility uses the authored "
+                    + ("search-access" if sense == 'search' else "audibility")
+                    + " source fact and does not disclose a target identity." if enabled else
+                    "No unfamiliar participant has a supported source fact for this discovery Action.")})
         if evidence is not None and evidence.category == "being":
             bash_options = self._shield_bash_options(candidate, player, entity_id, evidence)
             catalog_rows.append({
@@ -4116,6 +4145,8 @@ class GeneratedArenaSession:
             spot_reason = "The native Spot scheduler or resolver contract is unavailable."
         elif (self._authored_scenario_id == "arena-spot-demo"
                 and candidate.encounter.initiated and self._encounter_mode == "player_vs_arena"
+                and len(eligible_discovery_targets(candidate.encounter,
+                    player.id, 'spot')) == 1
                 and not any(item.id in candidate.encounter.pending_action_list
                     or any(item.id in record.view.action_ids
                            and record.view.state in ("accepted", "executing")
@@ -4124,7 +4155,10 @@ class GeneratedArenaSession:
             spot_status = "available"
             spot_reason = "Native target-free Spot is a six-second Action; it does not disclose a target identity."
         else:
-            spot_status, spot_reason = "unavailable", _SPOT_DISABLED
+            spot_status, spot_reason = "unavailable", (
+                "No unfamiliar participant is eligible for target-free Spot." if
+                self._authored_scenario_id == "arena-spot-demo" and candidate.encounter.initiated
+                else _SPOT_DISABLED)
         arena_rows.append({"name": "Spot", "group": "Arena Actions",
                            "status": spot_status, "reason": spot_reason})
 
@@ -5350,6 +5384,15 @@ class GeneratedArenaSession:
         """Accept a native target-free Spot without returning hidden target IDs."""
         if type(payload) is not dict or payload:
             raise ArenaBrowserRequestError("Spot accepts an empty request")
+        return self.choose_discovery({'sense': 'spot'})
+
+    def choose_discovery(self, payload):
+        """Accept one native target-free discovery Action."""
+        if type(payload) is not dict or set(payload) != {'sense'}:
+            raise ArenaBrowserRequestError("Discovery accepts only a Search, Spot, or Listen choice")
+        sense = payload['sense']
+        if sense not in ('search', 'spot', 'listen'):
+            raise ArenaBrowserRequestError("Unsupported discovery Action")
         from activities import SpotAction
         with self._lock:
             candidate = self._active
@@ -5357,23 +5400,29 @@ class GeneratedArenaSession:
                     or self._encounter_mode != "player_vs_arena"
                     or not candidate.encounter.initiated
                     or not _has_native_transactional_action_contract(SpotAction)):
-                raise ArenaBrowserRequestError("Native target-free Spot is unavailable in this scenario state.")
+                raise ArenaBrowserRequestError("Native target-free discovery is unavailable in this scenario state.")
             player = candidate.participants[0].native.being
             if any(item.id in candidate.encounter.pending_action_list
                    or any(item.id in record.view.action_ids
                           and record.view.state in ("accepted", "executing")
                           for record in candidate.encounter._choice_book._choices.values())
+                   for item in _native_spot_actions(candidate, player.id, sense)):
+                raise ArenaBrowserRequestError(f"A native {sense.title()} Action is already underway.")
+            if any(item.id in candidate.encounter.pending_action_list
+                   or any(item.id in record.view.action_ids
+                          and record.view.state in ("accepted", "executing")
+                          for record in candidate.encounter._choice_book._choices.values())
                    for item in _native_spot_actions(candidate, player.id)):
-                raise ArenaBrowserRequestError("A native Spot Action is already underway.")
+                raise ArenaBrowserRequestError("A native discovery Action is already underway.")
             try:
-                from attention_intent import accept_spot_attention
-                result = accept_spot_attention(candidate.encounter, player.id)
+                from attention_intent import accept_discovery_attention
+                result = accept_discovery_attention(candidate.encounter, player.id, sense)
             except (TypeError, ValueError, RuntimeError) as exc:
                 raise ArenaBrowserRequestError(
-                    "Native Spot Choice was not accepted; hidden target details are unavailable.") from exc
+                    "Native discovery Choice was not accepted; hidden target details are unavailable.") from exc
             if not result.accepted:
                 raise ArenaBrowserRequestError(
-                    "Native Spot Choice was not accepted; hidden target details are unavailable.")
+                    "Native discovery Choice was not accepted; hidden target details are unavailable.")
             return self._view_unlocked()
 
     def choose_pause_action(self, payload):

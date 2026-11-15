@@ -165,7 +165,8 @@ def _action_descriptor(action, world, encounter):
                      for key,event in world.event_history.items()),
              'Action ID collides with an existing Universe Event')
     _require(data.get('universe') is world, 'Action belongs to a different Universe')
-    _require(data.get('event_type') == ('run' if adapter.startswith('native.run') else 'spot'),
+    _require(data.get('event_type') == ('run' if adapter.startswith('native.run') else
+              data.get('event_type') if data.get('event_type') in ('search', 'spot', 'listen') else None),
              'Action event type does not match its reviewed adapter')
     _require(data.get('type') == type(action).__name__,
              'native Action type field is inconsistent')
@@ -201,9 +202,14 @@ def _action_descriptor(action, world, encounter):
                  and data.get('path_status') is None,
                  'SpotAction contains sampled outcome state')
         specific = ('spotting_conditions','declared_roll')
-        from discovery import SpottingConditions
+        from discovery import HearingConditions, SpottingConditions
         try:
-            SpottingConditions(data.get('spotting_conditions'))
+            (HearingConditions(data.get('spotting_conditions'))
+             if data.get('event_type') == 'listen'
+             else SpottingConditions(data.get('spotting_conditions')))
+            if data.get('event_type') == 'search':
+                _require(data.get('spotting_conditions') == (),
+                         'Search cannot carry unadopted circumstance modifiers')
         except (TypeError, ValueError) as exc:
             raise ChoiceDescriptorRejected(str(exc)) from exc
     _require(_registry_ref(world, encounter, data.get('actor_id'), 'actor') != ('null',),

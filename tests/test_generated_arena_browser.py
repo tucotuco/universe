@@ -56,8 +56,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             body = json.loads(json.dumps(body) if type(body) is not str else body)
         return result["status"], body
 
-    def test_authored_spot_http_controls_match_native_seeded_route(self):
-        """Browser-default equipped movement preserves the authored Spot route."""
+    def test_authored_movement_http_route_triggers_incidental_visual_discovery(self):
+        """Committed movement to clear sight updates both native observers."""
         self.session = GeneratedArenaSession(root_seed_factory=lambda: 73111,
                                              default_equipment_mode="equipped")
         self.assertEqual(self.request("/api/generated/profile", {"profile_id": "none"})[0], 200)
@@ -79,19 +79,79 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertEqual(player.get_position().as_tuple(), (2.2, 0.5, 0.0))
         path = candidate.encounter.line_of_sight(player.id, hidden.id)
         self.assertEqual(path.status, "clear", path.unmodeled_entity_ids)
-        self.assertEqual(self.request("/api/generated/stop", {})[0], 200)
-        status, accepted = self.request("/api/generated/spot", {})
-        self.assertEqual(status, 200)
-        self.assertNotIn(hidden.id, json.dumps(accepted))
-        self.assertNotIn(hidden.name, json.dumps(accepted))
-        for _ in range(6):
-            status, result = self.request("/api/generated/advance", {"seconds": 1})
-            self.assertEqual(status, 200, result)
-        self.assertEqual(result["spot_action"]["outcome"], "success")
+        revealed = self.session.public_view()
+        self.assertIn(hidden.name, json.dumps(revealed["entities"]))
         self.assertIn(hidden.id, candidate.encounter.aware_beings(player.id))
-        self.assertNotIn(player.id, candidate.encounter.aware_beings(hidden.id))
-        self.assertNotIn(hidden.id, json.dumps(result["entities"]))
-        self.assertIn(hidden.name, json.dumps(result["entities"]))
+        self.assertIn(player.id, candidate.encounter.aware_beings(hidden.id))
+        self.assertEqual(self.request("/api/generated/stop", {})[0], 200)
+        self.assertFalse(revealed["spot_available"])
+        self.assertFalse(any(getattr(event, "event_type", None) in ("spot", "search", "listen")
+            for event in candidate.universe.event_history.values()))
+
+    def test_authored_search_and_listen_http_controls_preserve_target_privacy(self):
+        for sense, authored_fact in (('search', 'arena_search_accessible'),
+                                     ('listen', 'arena_audible')):
+            with self.subTest(sense=sense):
+                self.session = GeneratedArenaSession(root_seed_factory=lambda: 73111,
+                    default_equipment_mode='equipped')
+                self.request('/api/generated/profile', {'profile_id': 'none'})
+                status, initial = self.request('/api/generated/generate', {
+                    'starting_experience': '10000', 'width_cells': '5', 'height_cells': '5',
+                    'root_seed': '73111', 'opponent_strategy': 'none',
+                    'authored_scenario': 'arena-spot-demo'})
+                self.assertEqual(status, 200)
+                candidate = self.session.active_candidate
+                actor, target = (row.native.being for row in candidate.participants)
+                self.assertTrue(target.current.tags[authored_fact])
+                self.assertNotIn(target.id, json.dumps(initial))
+                self.assertNotIn(target.name, json.dumps(initial))
+                self.request('/api/generated/run', {})
+                self.request('/api/generated/advance', {'seconds': 1})
+                before = json.dumps(self.session.public_view())
+                self.assertNotIn(target.id, before)
+                self.assertNotIn(target.name, before)
+                status, accepted = self.request('/api/generated/' + sense, {'sense': sense})
+                self.assertEqual(status, 200)
+                self.assertEqual(accepted['discovery_actions'][sense]['status'], 'executing')
+                self.assertNotIn(target.id, json.dumps(accepted))
+                self.assertNotIn(target.name, json.dumps(accepted))
+                for _ in range(6):
+                    status, result = self.request('/api/generated/advance', {'seconds': 1})
+                    self.assertEqual(status, 200, result)
+                self.assertEqual(result['discovery_actions'][sense]['outcome'], 'success')
+                self.assertIn(target.name, json.dumps(result['entities']))
+                self.assertIn(target.id, candidate.encounter.aware_beings(actor.id))
+                self.assertNotIn(actor.id, candidate.encounter.aware_beings(target.id))
+                self.assertFalse(result['spot_available'])
+                self.assertFalse(result['search_available'])
+                self.assertFalse(result['listen_available'])
+
+    def test_search_and_listen_require_authored_source_facts_without_identity_leaks(self):
+        for sense, premise in (('search', 'arena_search_accessible'),
+                               ('listen', 'arena_audible')):
+            with self.subTest(sense=sense):
+                self.session = GeneratedArenaSession(root_seed_factory=lambda: 73111,
+                    default_equipment_mode='equipped')
+                self.request('/api/generated/profile', {'profile_id': 'none'})
+                status, initial = self.request('/api/generated/generate', {
+                    'starting_experience': '10000', 'width_cells': '5', 'height_cells': '5',
+                    'root_seed': '73111', 'opponent_strategy': 'none',
+                    'authored_scenario': 'arena-spot-demo'})
+                self.assertEqual(status, 200)
+                candidate = self.session.active_candidate
+                actor, target = (row.native.being for row in candidate.participants)
+                target.current.tags[premise] = False
+                self.request('/api/generated/run', {})
+                self.request('/api/generated/advance', {'seconds': 1})
+                before = (candidate.encounter.time, set(candidate.universe.event_history),
+                          self.session._rng_cursor.state)
+                status, refused = self.request('/api/generated/' + sense, {'sense': sense})
+                self.assertEqual(status, 409)
+                self.assertNotIn(target.id, json.dumps(refused))
+                self.assertNotIn(target.name, json.dumps(refused))
+                self.assertEqual(before, (candidate.encounter.time,
+                    set(candidate.universe.event_history), self.session._rng_cursor.state))
+                self.assertNotIn(target.id, candidate.encounter.aware_beings(actor.id))
 
     def raw_request(self, path, raw, content_type="application/octet-stream"):
         handler_type = make_handler(self.session)

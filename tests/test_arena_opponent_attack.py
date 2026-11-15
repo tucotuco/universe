@@ -426,6 +426,16 @@ class TestArenaOpponentAttack(unittest.TestCase):
         self.assertNotIn(opponent.id, json.dumps(view))
         self.assertNotIn(weapon_id, json.dumps(view))
 
+        # The visible Action projection is evidence-gated. A native scheduled
+        # Action alone is not enough to publish it to this observer.
+        player_ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        opponent_evidence = player_ledger._current.pop(opponent.id)
+        candidate.encounter.awareness[player.id].discard(opponent.id)
+        self.assertIsNone(source.public_view()["opponent_melee_action"])
+        player_ledger._current[opponent.id] = opponent_evidence
+        candidate.encounter.awareness[player.id].add(opponent.id)
+        self.assertEqual(source.public_view()["opponent_melee_action"]["status"], "executing")
+
         pending_wire = source.save_encounter_bytes()
         restored = GeneratedArenaSession()
         with mock.patch("npcgen.api.arena_ready_being",

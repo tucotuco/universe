@@ -59,12 +59,46 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
         self.assertNotIn(observer.id, json.dumps(history))
         self.assertNotIn(other.id, json.dumps(history))
         catalog = {row["name"]: row for row in view["action_catalog"]["entries"]}
-        self.assertEqual(catalog["Search"]["status"], "not_implemented")
-        self.assertEqual(catalog["Listen"]["status"], "not_implemented")
+        self.assertEqual(catalog["Search"]["status"], "unavailable")
+        self.assertEqual(catalog["Listen"]["status"], "unavailable")
         self.assertEqual(catalog["Spot"]["status"], "unavailable")
         from examples.arena_web import _GENERATED_PAGE
         self.assertIn('id="observationHistorySection"', _GENERATED_PAGE)
         self.assertIn("function renderObservationHistory(s)", _GENERATED_PAGE)
+
+    def test_committed_movement_opens_one_incidental_visual_discovery_opportunity(self):
+        session = GeneratedArenaSession(root_seed_factory=lambda: 73111,
+            default_equipment_mode="equipped")
+        session.generate({"starting_experience": "10000", "width_cells": "5",
+            "height_cells": "5", "root_seed": "73111", "opponent_strategy": "none",
+            "authored_scenario": "arena-spot-demo"})
+        candidate = session.active_candidate
+        observer, target = (row.native.being for row in candidate.participants)
+        self.assertNotIn(target.id, candidate.encounter.aware_beings(observer.id))
+        self.assertFalse(any(row.entity_id == target.id
+            for row in observer._arena_perception_ledger.history))
+
+        # This committed movement clears the fixture's explicitly authored
+        # opaque screen. Initial-Arena passive perception supplies the
+        # incidental evidence at the movement boundary; no Spot retry runs.
+        session.choose_destination({"column": 2, "row": 0, "rate": "walk",
+                                    "facing_policy": "turn"})
+        result = session.advance_one_second()
+        self.assertIn(target.id, candidate.encounter.aware_beings(observer.id))
+        self.assertIn(observer.id, candidate.encounter.aware_beings(target.id))
+        evidence = next(row for row in observer._arena_perception_ledger.history
+                        if row.entity_id == target.id)
+        self.assertEqual((evidence.boundary, evidence.time, evidence.currently_observable),
+                         (1, 1.0, True))
+        self.assertIn(target.name, json.dumps(result))
+        self.assertFalse(any(getattr(event, "event_type", None) in ("spot", "search", "listen")
+            for event in candidate.universe.event_history.values()))
+        self.assertEqual(len([event for event in candidate.universe.event_history.values()
+            if getattr(event, "event_type", None) in ("spot", "search", "listen")]), 0)
+        session.advance_one_second()
+        self.assertIn(target.id, candidate.encounter.aware_beings(observer.id))
+        self.assertEqual(len([event for event in candidate.universe.event_history.values()
+            if getattr(event, "event_type", None) in ("spot", "search", "listen")]), 0)
 
     def test_observer_history_records_only_native_committed_motion_segments(self):
         session = self._session()
@@ -114,7 +148,7 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
             for row in observer._arena_perception_ledger.history])
         self.assertNotIn(observer.id, target._arena_perception_ledger._current)
 
-    def test_authored_spot_exercise_discovers_natively_and_restores_fresh_process(self):
+    def test_authored_spot_refuses_blocked_path_and_restores_fresh_process(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 73111)
         initial = session.generate({
             "starting_experience": "10000", "width_cells": "5", "height_cells": "5",
@@ -127,14 +161,11 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
         self.assertEqual(len(initial["entities"]), 1)
         self.assertFalse(initial["spot_available"])
 
-        session.choose_destination({"column": 2, "row": 0,
-                                    "rate": "walk", "facing_policy": "turn"})
-        after_move = session.advance_one_second()
+        session.choose_run()
+        session.advance_one_second()
         from arena_perception import modeled_sightline_blocked
-        self.assertFalse(modeled_sightline_blocked(candidate.encounter, player.id, hidden.id))
+        self.assertTrue(modeled_sightline_blocked(candidate.encounter, player.id, hidden.id))
         self.assertNotIn(hidden.id, candidate.encounter.aware_beings(player.id))
-        self.assertNotIn(hidden.name, json.dumps(after_move))
-        session.stop_movement({})
         self.assertTrue(session.public_view()["spot_available"])
 
         accepted = session.choose_spot({})
@@ -143,13 +174,10 @@ class TestGeneratedArenaSpotReadiness(unittest.TestCase):
         self.assertNotIn(hidden.name, json.dumps(accepted))
         for _ in range(6):
             result = session.advance_one_second()
-        self.assertEqual(result["spot_action"]["outcome"], "success")
-        self.assertIn(hidden.id, candidate.encounter.aware_beings(player.id))
+        self.assertEqual(result["spot_action"]["outcome"], "no_clear_path")
+        self.assertNotIn(hidden.id, candidate.encounter.aware_beings(player.id))
         self.assertNotIn(player.id, candidate.encounter.aware_beings(hidden.id))
-        found = next(row for row in player._arena_perception_ledger.current
-                     if row.entity_id == hidden.id)
-        self.assertEqual(found.position, hidden.get_position())
-        self.assertIn(hidden.name, json.dumps(result["entities"]))
+        self.assertNotIn(hidden.name, json.dumps(result["entities"]))
         self.assertNotIn(hidden.id, json.dumps(result))
 
         from checkpoint_arena_perception import encode_arena_perception_ledger
@@ -189,6 +217,95 @@ print(hashlib.sha256(repr(value).encode()).hexdigest())'''
                 cwd=ROOT, env=env, capture_output=True, text=True, check=False)
         self.assertEqual(child.returncode, 0, child.stderr)
         self.assertEqual(child.stdout.strip(), before_digest)
+
+    def test_authored_search_and_listen_continue_pending_in_fresh_process(self):
+        from checkpoint_arena_perception import encode_arena_perception_ledger
+        from activities import SpotAction
+
+        def prepare(sense, dc):
+            session = GeneratedArenaSession(root_seed_factory=lambda: 73111,
+                                            default_equipment_mode='equipped')
+            session.generate({'starting_experience': '10000', 'width_cells': '5',
+                'height_cells': '5', 'root_seed': '73111', 'opponent_strategy': 'none',
+                'authored_scenario': 'arena-spot-demo'})
+            candidate = session.active_candidate
+            actor, target = (row.native.being for row in candidate.participants)
+            target.current.discovery_dc = dc
+            # A target-free Run Choice starts the Encounter without moving
+            # through the authored screen, keeping the Search/Listen target
+            # legitimately unknown until the Action resolves.
+            session.choose_run()
+            session.advance_one_second()
+            hidden = json.dumps(session.public_view())
+            self.assertNotIn(target.id, hidden)
+            self.assertNotIn(target.name, hidden)
+            accepted = session.choose_discovery({'sense': sense})
+            self.assertNotIn(target.id, json.dumps(accepted))
+            self.assertNotIn(target.name, json.dumps(accepted))
+            session.advance_one_second()
+            self.assertEqual(candidate.encounter.time, 2)
+            return session, actor, target
+
+        def digest(session, sense):
+            candidate = session.active_candidate
+            ledgers = tuple(encode_arena_perception_ledger(
+                row.native.being._arena_perception_ledger,
+                observer=row.native.being, encounter=candidate.encounter,
+                registry=candidate.universe.object_registry.object_instances)
+                for row in candidate.participants)
+            action = next(row for row in candidate.universe.event_history.values()
+                          if type(row) is SpotAction and row.event_type == sense)
+            return __import__('hashlib').sha256(repr((candidate.encounter.time,
+                candidate.encounter.last_processed_boundary,
+                tuple((key, tuple(sorted(value))) for key, value in
+                      sorted(candidate.encounter.awareness.items())), ledgers,
+                session._rng_cursor.state, action.resolution.outcome,
+                session.public_view()['discovery_actions'][sense])).encode()).hexdigest()
+
+        code = r'''import hashlib,sys
+from arena_browser_session import GeneratedArenaSession
+from checkpoint_arena_perception import encode_arena_perception_ledger
+from activities import SpotAction
+s=GeneratedArenaSession();s.load_encounter_bytes(open(sys.argv[1],'rb').read());sense=sys.argv[2]
+for _ in range(5):s.advance_one_second()
+c=s.active_candidate
+ledgers=tuple(encode_arena_perception_ledger(p.native.being._arena_perception_ledger,
+ observer=p.native.being,encounter=c.encounter,
+ registry=c.universe.object_registry.object_instances) for p in c.participants)
+a=next(x for x in c.universe.event_history.values() if type(x) is SpotAction and x.event_type==sense)
+value=(c.encounter.time,c.encounter.last_processed_boundary,
+ tuple((k,tuple(sorted(v))) for k,v in sorted(c.encounter.awareness.items())),ledgers,
+ s._rng_cursor.state,a.resolution.outcome,s.public_view()['discovery_actions'][sense])
+print(hashlib.sha256(repr(value).encode()).hexdigest())'''
+        env = dict(os.environ)
+        env['PYTHONPATH'] = os.pathsep.join((str(ROOT / 'src'), str(ROOT / 'examples'),
+            str(ROOT / 'tests'), str(ROOT.parent / 'npc-generator'), env.get('PYTHONPATH', '')))
+        for sense in ('search', 'listen'):
+            for dc, expected in ((1, 'success'), (100, 'failure')):
+                with self.subTest(sense=sense, dc=dc):
+                    source, actor, target = prepare(sense, dc)
+                    pending_bytes = source.save_encounter_bytes()
+                    for _ in range(5):
+                        result = source.advance_one_second()
+                    self.assertEqual(result['discovery_actions'][sense]['outcome'], expected)
+                    self.assertNotIn(actor.id,
+                        source.active_candidate.encounter.aware_beings(target.id))
+                    if expected == 'failure':
+                        self.assertNotIn(target.id, json.dumps(result))
+                        self.assertNotIn(target.name, json.dumps(result))
+                    before_digest = digest(source, sense)
+                    with tempfile.TemporaryDirectory() as tmp:
+                        save_path = Path(tmp) / f'{sense}-{dc}.arena'
+                        save_path.write_bytes(pending_bytes)
+                        child = subprocess.run([sys.executable, '-S', '-B', '-c', code,
+                            str(save_path), sense], cwd=ROOT, env=env, capture_output=True,
+                            text=True, check=False, timeout=120)
+                    self.assertEqual(child.returncode, 0, child.stderr)
+                    self.assertEqual(child.stdout.strip(), before_digest)
+                    if expected == 'success':
+                        self.assertIn(target.id, source.active_candidate.encounter.aware_beings(actor.id))
+                    else:
+                        self.assertNotIn(target.id, source.active_candidate.encounter.aware_beings(actor.id))
 
     def test_uninitiated_candidate_cannot_start_target_free_spot_and_refusal_is_atomic(self):
         session = self._session()
