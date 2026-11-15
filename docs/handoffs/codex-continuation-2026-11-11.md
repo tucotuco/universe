@@ -2,7 +2,7 @@
 
 ## Current reconciliation — 2026-11-14
 
-ChatGPT accepted U-CAP-006 as DONE (bounded) and consumed its report; both are preserved in the assignment and report archives. Revision 70 remains the controlling Encounter package. Current `TASKS.md` identifies U-CAP-007 as the sole ACTIVE program, targeting actual generated-Arena browser Action availability, observer-safe projection, consequential play, and fresh-process Save/Load. The remainder below records an earlier snapshot; use the live register and current assignment as authority.
+ChatGPT accepted U-CAP-007 as DONE (bounded), reviewed and consumed its report, and both files are archived. U-CAP-006 is also accepted and archived; revision 70 remains controlling. Current `TASKS.md` identifies U-CAP-008 as the sole ACTIVE program: a reproducible two-sided Arena combat exchange with an actual native hit, lawful opponent Action, observer-safe results, and exact fresh-process continuation. The duplicate historical U-CAP-007/U-CAP-008 open capability labels were re-keyed to U-CAP-015/U-CAP-016 without changing their scope. The remainder below records earlier snapshots; use live `TASKS.md` and the active U-CAP-008 assignment as authority.
 
 ## Archive update — 2026-11-13
 
