@@ -73,3 +73,16 @@ Earlier focused evidence retained from the prior execution:
 - `54568af7978428d281e409f7549b243073b58ec5` — record verified commit evidence in this report; its staged publication-safety audit passed with 7 files and 0 findings.
 - At the last status inspection, HEAD was `54568af7978428d281e409f7549b243073b58ec5`; the only staged entries were the five pre-existing archive paths (four removals and one rename), and `docs/assignments/universe-arena.json` remained protected and untracked. The final staged audit passed with 7 paths and 0 findings.
 - No push or history rewrite was attempted.
+
+## Task-register reconciliation — 2026-11-15
+
+- Installed the supplied gate at its requested canonical path, `docs/process/ENCOUNTER-ACTION-COMPLETENESS-GATE.md`. The live file had been supplied as the untracked `docs/assignments/ENCOUNTER-ACTION-COMPLETENESS-GATE.md`; it was moved intact, and the original path is now absent.
+- Searched the live repository for `U-ACT-GATE-001` before registration. Its only prior occurrences were the proposal's own proposed ID and integration instructions; no existing TASKS entry or assignment owned it. `U-NET-001` also had no prior TASKS entry. Both identifiers are now registered without changing existing IDs.
+- TASKS now records U-ACT-GATE-001 as a FUTURE milestone after acceptance of U-OBS-001, links the full acceptance criteria, and defers untimed two-human U-NET-001 until that gate passes. U-OBS-001 remains the sole ACTIVE implementation program. No Action was marked FULL.
+- `c4363be97eba26231341f5af08e8f80480ae8e39` — scoped TASKS and gate-document commit. `git diff --cached --check` passed; staged publication-safety audit reported 8 paths and 0 findings. `git commit --only` included only those two paths. Documentation-only change; no tests were run.
+- Preserved the five unrelated staged archive paths and untracked `docs/assignments/universe-arena.json`; no push was attempted.
+
+### Execution interval
+
+- Initial gate/status review and first edit: **Start timestamp was not recorded**; no estimate is supplied.
+- Timed final verification and commit phase: Start **2026-11-15T00:01:34-08:00**; End **2026-11-15T00:02:54-08:00**; Elapsed **PT1M20S**.
