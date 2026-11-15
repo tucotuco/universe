@@ -1,0 +1,10 @@
+{
+  "format": "universe-arena-ground-loadout-profile",
+  "schema_version": 1,
+  "profile_id": "uact-full-002-one-shield",
+  "title": "U-ACT-FULL-002 ordinary shield demonstration",
+  "mode": "explicit_items",
+  "items": [
+    {"category": "shield", "native_type_key": "Small shield"}
+  ]
+}

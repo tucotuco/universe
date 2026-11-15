@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from action import Action
+from action_choice import ChoiceMember
 from action_evaluation import (ActionProposal, DamageEffect, FatalEffect, ProtectionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, EffectIdentity, IdentifiedEffect,
     bind_evaluation_result, capture_snapshot, evaluate_snapshot, UnsupportedEvaluation,
@@ -103,10 +104,14 @@ class TestActionSettlement(unittest.TestCase):
     def test_passive_shield_impacts_accumulate_below_zero(self):
         shield_id=self.world.make_weapon_for_being(self.b.id,'Small shield','Shield')
         self.world.arm_being(self.b.id,shield_id,'shield hand')
+        self.a.set_skill_level(self.world.get_skill_dictionary(),'multi-action',1)
         shield=self.world.get_object_by_id(shield_id);shield.current.hit_points=6
-        s=self.snapshot(self.attack(),self.attack(self.w2));result=self.evaluate(s,[15,4,1,15,4,1]);c=self.build(s,result)
-        self.assertEqual(c.target(shield_id).projected_hp,-2)
-        self.assertEqual([r.effect.amount for r in c.target(shield_id).incoming if type(r.effect) is DamageEffect],[4,4])
+        one,two=self.attack(),self.attack(self.w2)
+        self.enc.schedule_choice((ChoiceMember('one',one,priority_penalty=0),
+                                  ChoiceMember('two',two,priority_penalty=3)))
+        s=self.snapshot();result=self.evaluate(s,[15,4,1,15,4,1]);c=self.build(s,result)
+        self.assertEqual(c.target(shield_id).projected_hp,2)
+        self.assertEqual([r.effect.amount for r in c.target(shield_id).incoming if type(r.effect) is DamageEffect],[2,2])
         self.assertEqual(c.target(self.b.id).projected_hp,100-2*(4-int(shield.get_weapon_size())) )
         self.assertNotIn(shield_id,{r.object_id for r in self.enc.active_reservations})
 
@@ -357,12 +362,17 @@ class TestActionSettlement(unittest.TestCase):
         self.assertEqual((c.target(self.b.id).projected_hp,c.target(self.b.id).actual_damage),(-16,6))
         self.assertEqual(len(c.target(self.b.id).fatal_effect_ids),2)
 
-    def test_already_negative_equipment_takes_real_damage(self):
+    def test_zero_hp_shield_is_useless_and_not_degraded(self):
         shield_id=self.world.make_weapon_for_being(self.b.id,'Small shield','Shield')
         self.world.arm_being(self.b.id,shield_id,'shield hand')
-        self.world.get_object_by_id(shield_id).current.hit_points=-12
+        self.world.get_object_by_id(shield_id).current.hit_points=0
         s=self.snapshot(self.attack(extra=2));r=self.evaluate(s,[15,4,1])
-        self.assertEqual(self.build(s,r).target(shield_id).projected_hp,-18)
+        # At zero HP a shield is useless and beyond repair: it cannot
+        # intercept or accrue later passive durability loss.
+        self.assertFalse(any(type(effect) is ProtectionEffect
+            and effect.layer == 'shield' for proposal in r.proposals
+            for effect in proposal.effects))
+        self.assertEqual(self.build(s,r).target(shield_id).projected_hp,0)
 
     def test_float_overflow_rejects_whole_candidate(self):
         s=self.snapshot(self.attack(),self.attack(self.w2));r=self.evaluate(s,[15,4,15,4])

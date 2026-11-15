@@ -582,12 +582,24 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
             attached_bucklers = []
             attached_buckler_arms = []
             from weapon import native_forearm_buckler_attachment
+            def usable_shield(shield_id):
+                shield = objects.get(shield_id)
+                if (type(shield) is not WeaponInstance
+                        or object_types.get(shield_id) not in shields):
+                    return False
+                shield_data = native_data(shield, object_classes)
+                shield_current = native_data(shield_data['current'], (WeaponDefinition,))
+                # Adopted Shields text: at zero HP a shield is useless and
+                # beyond repair. A broken but still held Object must not stay
+                # in the passive-protection eligibility set at later seconds.
+                return shield_current['hit_points'] > 0
             for shield_id in od.get('weapons', ()):
                 shield = objects.get(shield_id)
                 if type(shield) is not WeaponInstance:
                     continue
                 attachment = native_forearm_buckler_attachment(shield)
-                if (attachment is not None and attachment['owner_id'] == obj.id
+                if (usable_shield(shield_id) and attachment is not None
+                        and attachment['owner_id'] == obj.id
                         and object_types.get(shield_id) in shields
                         and shield.parent_container_id == obj.id
                         and shield_id in od.get('possessions', ())
@@ -598,7 +610,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 v in objects and object_types[v] in weapon_names)
             data['shields'] = tuple(dict.fromkeys(
                 [v for v in data['body_parts'].values() if v is not None and
-                 v in objects and object_types[v] in shields] + attached_bucklers))
+                 v in objects and usable_shield(v)] + attached_bucklers))
             data['attached_bucklers'] = tuple(attached_bucklers)
             data['buckler_arms'] = tuple(attached_buckler_arms)
             freeze(native_data(od['physical_fatigue'], (PhysicalFatigueState,)))
@@ -1174,7 +1186,10 @@ def resolve_targeted_throw_arrival(snapshot, flight, projectile_id, rng):
         effects.append(ProtectionEffect(flight.source_action_id, shield_id, 'shield',
             protected, through, intercepted))
         if intercepted:
-            effects.append(DamageEffect(flight.source_action_id, shield_id, protected, 'shield'))
+            shield_hp_loss = max(0, protected - int(shield.data['size']))
+            if shield_hp_loss:
+                effects.append(DamageEffect(flight.source_action_id, shield_id,
+                                            shield_hp_loss, 'shield'))
         protected = through
     armor_id = target.data.get('armor_id')
     if armor_id is not None:
@@ -1604,7 +1619,13 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                     through = max(0, damage - shield_size - 2)
                 effects.append(ProtectionEffect(action.id, sid, 'shield', damage, through, intercepted))
                 if intercepted:
-                    effects.append(DamageEffect(action.id, sid, damage, 'shield'))
+                    # ES-003 selects the Shields section: shield durability
+                    # loses only ordinary incoming damage in excess of the
+                    # shield's actual size. Block's temporary stopping bonus
+                    # does not redefine the Shield table size for durability.
+                    shield_hp_loss = max(0, damage - int(item.data['size']))
+                    if shield_hp_loss:
+                        effects.append(DamageEffect(action.id, sid, shield_hp_loss, 'shield'))
                 return through
             def armor(damage):
                 aid = recipient.data.get('armor_id')
@@ -2833,6 +2854,31 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
+    # The adopted Shields rule limits passive protection to shield-size
+    # attacks and requires the bearer to assign protection before outcomes are
+    # known. The native Arena currently has no persisted defender-owned
+    # allocation Choice. Refuse an over-capacity same-boundary batch before
+    # allocating any attack, damage, or interception rolls; never infer an
+    # allocation from declaration order or hidden outcomes.
+    due_attacks = tuple(action for action in snapshot.actions.values()
+        if action.boundary == snapshot.boundary and action.lifecycle == 'pending'
+        and action.family in ('melee', 'combat')
+        and action.data.get('event_type') in ('swing', 'thrust', 'stun', 'subdue'))
+    for target_id in {action.target_id for action in due_attacks}:
+        target = snapshot.entities.get(target_id)
+        if target is None:
+            continue
+        shields = tuple(target.data.get('shields', ()))
+        incoming = tuple(action for action in due_attacks
+            if action.target_id == target_id and action.actor_id != target_id
+            and ('reach' not in action.data
+                 or snapshot.melee_status(action)[0] == 'in_reach'))
+        for shield_id in shields:
+            shield = snapshot.entities.get(shield_id)
+            if shield is not None and len(incoming) > int(shield.data['size']):
+                raise UnsupportedEvaluation(
+                    'passive shield capacity exceeded; a persisted defender-owned '
+                    'pre-outcome attack allocation is not yet represented')
     if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'shield_equipment', 'ready_preparation', 'delay') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     pickup_status = {action.id: pickup_eligibility(snapshot, action)

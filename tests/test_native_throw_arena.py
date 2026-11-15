@@ -132,12 +132,29 @@ class NativeThrowTests(unittest.TestCase):
             world.get_object_by_id(shield_id), action.id)
         armor_effects = atomic_publication.target_effects_from(
             world.get_object_by_id(armor_id), action.id)
-        self.assertTrue(any(row.effect.__class__.__name__ == 'ProtectionEffect'
-            and row.effect.layer == 'shield' for row in shield_effects))
+        shield_protection = [row.effect for row in shield_effects
+            if row.effect.__class__.__name__ == 'ProtectionEffect'
+            and row.effect.layer == 'shield']
+        self.assertEqual(len(shield_protection), 1)
+        protection = shield_protection[0]
+        self.assertTrue(protection.intercepted)
+        shield = world.get_object_by_id(shield_id)
+        shield_size = int(shield.get_weapon_size())
+        self.assertEqual(protection.passed,
+                         protection.incoming - shield_size)
         self.assertTrue(any(row.effect.__class__.__name__ == 'ProtectionEffect'
             and row.effect.layer == 'armor' for row in armor_effects))
-        self.assertTrue(any(row.effect.__class__.__name__ == 'DamageEffect'
-            and row.effect.component == 'shield' for row in shield_effects))
+        durability = [row.effect.amount for row in shield_effects
+            if row.effect.__class__.__name__ == 'DamageEffect'
+            and row.effect.component == 'shield']
+        self.assertEqual((protection.incoming, protection.passed, durability),
+                         (3, 1, [1]))
+        armor_protection = next(row.effect for row in armor_effects
+            if row.effect.__class__.__name__ == 'ProtectionEffect'
+            and row.effect.layer == 'armor')
+        self.assertEqual((armor_protection.incoming, armor_protection.passed), (1, 0))
+        self.assertEqual(durability,
+            [max(0, protection.incoming - shield_size)])
 
     def test_targeted_throw_aims_at_explicit_being_point_without_body_geometry(self):
         world, enc, actor, projectile, _rng, original = build_native_scene()

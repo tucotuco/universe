@@ -1030,12 +1030,18 @@ def _validate_complete_outcome(proposal, action, entities):
             _require(shields[0].passed == actual_body, 'shield through-damage contradicts body contribution')
     for protection in (e for e in effects if type(e) is ProtectionEffect):
         impacts = [e for e in damage if e.target_id == protection.target_id and e.component == protection.layer]
-        _require(len(impacts) == int(protection.intercepted), 'missing/extra actual protection impact')
         if protection.layer == 'shield':
             if protection.intercepted:
-                _require(impacts[0].amount == protection.incoming, 'shield impact contradicts incoming damage')
+                expected_hp_loss = max(0, protection.incoming
+                    - int(entities[protection.target_id].data['size']))
+                _require(len(impacts) == int(expected_hp_loss > 0)
+                         and (not impacts or impacts[0].amount == expected_hp_loss),
+                         'shield durability loss differs from ordinary damage in excess of shield size')
             else:
+                _require(not impacts, 'an unintercepted attack damages shield durability')
                 _require(protection.passed == protection.incoming, 'unintercepted shield changes damage')
+        else:
+            _require(len(impacts) == int(protection.intercepted), 'missing/extra actual protection impact')
     for impact in (e for e in damage if e.component in ('armor', 'shield')):
         _require(any(type(e) is ProtectionEffect and e.target_id == impact.target_id and e.layer == impact.component for e in effects), 'equipment damage lacks protection provenance')
 

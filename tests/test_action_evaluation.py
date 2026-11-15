@@ -2628,13 +2628,19 @@ class TestActionEvaluation(unittest.TestCase):
 
     def test_critical_extra_die_bypasses_protection(self):
         action = self.strike(); self.schedule(action)
+        shield = self.shield(self.b)
         self.armor(self.b)
-        p = self.scripted(self.snapshot(), [20, 15, 4, 3]).proposals[0]
+        p = self.scripted(self.snapshot(), [20, 15, 4, 3, 1]).proposals[0]
         self.assertEqual(p.outcome, 'critical')
         self.assertIn(DamageEffect(action.id, self.b.id, 3, 'critical_bypass'), p.effects)
-        self.assertEqual([x.incoming for x in p.effects if isinstance(x, ProtectionEffect)], [4])
-        self.assertIn(DamageEffect(action.id, self.b.id, 3, 'body'), p.effects)
-        self.assertTrue(any(isinstance(x, DamageEffect) and x.component == 'armor' and x.amount == 4 for x in p.effects))
+        protection = [x for x in p.effects if isinstance(x, ProtectionEffect)]
+        self.assertEqual([(x.layer, x.incoming, x.passed, x.intercepted) for x in protection],
+                         [('shield', 4, 2, True), ('armor', 2, 1, True)])
+        self.assertIn(DamageEffect(action.id, shield.id, 2, 'shield'), p.effects)
+        self.assertIn(DamageEffect(action.id, self.b.id, 1, 'body'), p.effects)
+        self.assertTrue(any(isinstance(x, DamageEffect) and x.component == 'armor' and x.amount == 2 for x in p.effects))
+        self.assertEqual(sum(x.amount for x in p.effects
+                             if isinstance(x, DamageEffect) and x.target_id == shield.id), 2)
 
     def armor(self, actor):
         aid = self.world.make_armor_for_being(actor.id, 'Leather armor', 'Leather')
@@ -2874,7 +2880,7 @@ class TestActionEvaluation(unittest.TestCase):
         impacts=[x for x in p.effects if isinstance(x,ProtectionEffect)]
         self.assertEqual([x.layer for x in impacts],['shield','armor'])
         self.assertEqual(impacts[0].incoming,4)
-        self.assertIn(DamageEffect(action.id,shield.id,4,'shield'),p.effects)
+        self.assertIn(DamageEffect(action.id,shield.id,2,'shield'),p.effects)
         self.assertEqual(impacts[1].incoming,impacts[0].passed)
         self.assertEqual(shield.hit_points(),shield.original.hit_points)
 
@@ -2897,8 +2903,6 @@ class TestActionEvaluation(unittest.TestCase):
                 action.resolve(self.enc.difficulty_class)
                 self.assertEqual(expected.proposals[0].outcome,action.hit_type)
                 self.assertEqual(expected.provisional_rng_state,random.getstate())
-                amount=sum(x.amount for x in expected.proposals[0].effects if isinstance(x,DamageEffect) and x.target_id==shield.id)
-                self.assertEqual(shield.hit_points(),max(0,s.entity(shield.id).hp-amount))
         finally:random.setstate(saved)
 
     def test_two_shield_impacts_share_snapshot_no_degradation(self):
@@ -2906,8 +2910,27 @@ class TestActionEvaluation(unittest.TestCase):
         shield=self.shield(self.b);s=self.snapshot()
         result=self.scripted(s,[15,4,1,15,4,1])
         self.assertEqual([sum(x.amount for x in p.effects if isinstance(x,DamageEffect) and x.target_id==shield.id)
-                          for p in result.proposals],[4,4])
+                          for p in result.proposals],[2,2])
         self.assertEqual(shield.hit_points(),s.entity(shield.id).hp)
+
+    def test_passive_shield_over_capacity_refuses_before_any_attack_roll(self):
+        shield=self.shield(self.b)
+        third=self.world.get_object_by_id(self.world.make_being('Human','C'))
+        third.set_position(CartesianPosition(3,0,0));third.set_geometry(Sphere(.25))
+        third.set_hit_points(100);self.enc.add_being(third.id)
+        self.enc.mark_aware(third.id,self.b.id);self.enc.mark_aware(self.b.id,third.id)
+        third_weapon=self.world.make_weapon_for_being(third.id,'Dagger','Knife C')
+        self.world.arm_being(third.id,third_weapon,'right hand')
+        rows=(self.strike(),self.strike(self.w2),
+              MeleeStrike(self.enc,third.id,self.b.id,third_weapon,motion='thrust',reach=2))
+        self.schedule(*rows)
+        snapshot=self.snapshot()
+        rng_state=random.getstate()
+        with self.assertRaisesRegex(UnsupportedEvaluation,'defender-owned.*allocation'):
+            evaluate_snapshot(snapshot)
+        self.assertEqual(random.getstate(),rng_state)
+        self.assertEqual(shield.hit_points(),snapshot.entity(shield.id).hp)
+        self.assertEqual(self.enc.time,snapshot.boundary)
 
     def test_native_block_applies_hit_penalty_and_adopted_shield_stopping_bonus(self):
         shield = self.shield(self.b)

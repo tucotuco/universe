@@ -2381,6 +2381,77 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         self.assertGreater(restored["player_damage"], 0)
         self.assertGreaterEqual(restored["opponent_action_count"], 2)
 
+    def test_pending_passive_shield_hit_restores_and_commits_in_fresh_process(self):
+        """A generated-Arena pending strike keeps shield identity across OS processes."""
+        from action_evaluation import DamageEffect, ProtectionEffect
+        from melee_combat import MeleeStrike
+
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 14)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "attack_only", "root_seed": "14"})
+        self.assertEqual(status, 200, generated)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, defender = (row.native.being for row in candidate.participants)
+        shield_id = candidate.universe.make_weapon_for_being(
+            defender.id, "Small shield", "Authored passive shield")
+        candidate.universe.arm_being(defender.id, shield_id, "shield hand")
+
+        status, moved = self.request("/api/generated/destination", {
+            "column": 8, "row": 1, "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200, moved)
+        status, moved = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200, moved)
+        handle = self.session._view_handles[defender.id]
+        status, accepted = self.request("/api/generated/action-program", {
+            "components": [{"kind": "melee", "handle": handle, "motion": "thrust"}]})
+        self.assertEqual(status, 200, accepted)
+        strike = next(member.action for record in encounter._choice_book._choices.values()
+            for member in record.members
+            if type(member.action) is MeleeStrike and member.action.actor_id == player.id)
+        pending = self.session.save_encounter_bytes()
+        shield_hp_before = candidate.universe.get_object_by_id(shield_id).hit_points()
+        with tempfile.TemporaryDirectory(prefix="arena-passive-shield-fresh-process-") as temp:
+            pending_path = Path(temp) / "pending-shield-strike.json"
+            pending_path.write_bytes(pending)
+            child_env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1",
+                PYTHONPATH=os.pathsep.join((str(ROOT / "tests"), str(ROOT / "src"),
+                                            str(ROOT / "examples"))))
+            code = """import json,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+from action_evaluation import DamageEffect,ProtectionEffect
+s=GeneratedArenaSession();s.load_encounter_bytes(Path(sys.argv[1]).read_bytes())
+c=s.active_candidate; strike_id,shield_id=sys.argv[2:4]
+assert c.encounter.time==1 and c.universe.get_object_by_id(shield_id).hit_points()>0
+assert any(a.id==strike_id and a.end_time==5 for a in s._all_melee_actions(c))
+for _ in range(4): s.advance_one_second()
+facts=c.encounter.inspect_committed(5).action(strike_id).facts
+assert facts.outcome=='normal', (facts.outcome, facts.effects)
+protection=next(x for x in facts.effects if type(x) is ProtectionEffect
+                and x.layer=='shield' and x.target_id==shield_id)
+damage=sum(x.amount for x in facts.effects if type(x) is DamageEffect
+           and x.target_id==shield_id and x.component=='shield')
+shield=c.universe.get_object_by_id(shield_id)
+assert damage==(max(0,protection.incoming-int(shield.get_weapon_size()))
+                if protection.intercepted else 0)
+assert shield.hit_points()==int(sys.argv[4])-damage
+print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':shield.id,
+                  'damage':damage,'shield_hp':shield.hit_points(),'intercepted':protection.intercepted,
+                  'incoming':protection.incoming,'passed':protection.passed}))"""
+            process = subprocess.run([sys.executable, "-B", "-c", code,
+                str(pending_path), strike.id, shield_id, str(shield_hp_before)], cwd=ROOT,
+                env=child_env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            restored = json.loads(process.stdout)
+        self.assertEqual(restored["time"], 5)
+        self.assertEqual(restored["outcome"], "normal")
+        self.assertEqual(restored["shield_id"], shield_id)
+        self.assertTrue(restored["intercepted"])
+        self.assertEqual((restored["incoming"], restored["passed"], restored["damage"]),
+                         (2, 0, 0))
+
     def enable_trace(self):
         import io
         stream = io.StringIO()

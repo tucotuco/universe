@@ -18,7 +18,7 @@ from atomic_publication import (PHASES, publication_boundary, coordinated_access
     RollbackIntegrityFailure, PublicationRejected, PublicationOwnershipError,
     RNGCursor, target_interval_history, target_effects_from)
 from interval_staging import StaleInterval
-from action_evaluation import _ProvisionalRandom,RandomDraw,UnsupportedEvaluation
+from action_evaluation import _ProvisionalRandom,RandomDraw,UnsupportedEvaluation,ProtectionEffect
 from action_choice import ChoiceMember, _requires_multiple_action_capacity
 from activities import RunAction,SpotAction
 from field_observation import BeliefLedger
@@ -667,8 +667,23 @@ class TestAtomicCombatPublication(unittest.TestCase):
         shield=self.world.get_object_by_id(sid);shield.current.hit_points=1;current=shield.current
         one=self.f.attack(self.f.w1);two=self.f.attack(self.f.w2)
         candidate=self.stage((one,two),(15,4,1,15,4,1));self.publish(candidate)
-        self.assertIs(shield.current,current);self.assertEqual(current.hit_points,-7)
-        self.assertEqual(target_interval_history(shield)[-1].state.actual_damage,8)
+        self.assertIs(shield.current,current);self.assertEqual(current.hit_points,-3)
+        same_boundary=target_interval_history(shield)[-1].state
+        self.assertEqual(same_boundary.actual_damage,4)
+        self.assertEqual(sum(type(row.effect) is ProtectionEffect
+                             and row.effect.layer=='shield' for row in same_boundary.incoming),2)
+        # The broken shield shared its pre-action protection with both
+        # assigned attacks, but cannot protect an attack at a later boundary.
+        later=self.f.attack(self.f.w1)
+        later.start_time=self.enc.time
+        later.end_time+=self.enc.time
+        self.enc.schedule_choice((later,))
+        later_boundary=math.ceil(later.end_time)
+        self.enc.time=later_boundary
+        later_snapshot=combat.capture_snapshot(self.enc,later_boundary)
+        later_proposal=self.f.evaluate(later_snapshot,[15,4]).proposals[0]
+        self.assertFalse(any(type(effect) is ProtectionEffect and effect.layer=='shield'
+                             for effect in later_proposal.effects))
 
     def test_hp_armor_shield_and_rank_writes_restore_at_late_fault(self):
         saved=random.getstate()
