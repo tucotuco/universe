@@ -1110,7 +1110,8 @@ def _make_plan(encounter,candidate,rng_owner):
     # post-movement snapshot. The ledger update is part of this publication,
     # after movement and custody writes have been prepared and before readers
     # can observe the committed boundary.
-    from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger, BASIS
+    from arena_perception import (ArenaPerceptionEvidence, ArenaPerceptionLedger,
+        BASIS, modeled_sightline_blocked)
     pickup_owners = {row.effect.object_id: row.effect.target_id
                      for row in supported.boundary.effects.values()
                      if type(row.effect) is PickupEffect}
@@ -1139,10 +1140,22 @@ def _make_plan(encounter,candidate,rng_owner):
             raise PublicationRejected('Arena observer perception ledger is missing or misowned')
         current = dict(ledger._current)
         history = list(ledger._history)
+        visible_by_awareness = supported.boundary.targets.get(observer_id)
+        aware_ids = (set() if visible_by_awareness is None
+                     else set(visible_by_awareness.aware_of))
         for entity_id, prior in tuple(current.items()):
             view = candidate.pre_action_snapshot.entities.get(entity_id)
-            if view is None or view.geometry is not None or view.visual_occlusion is not None:
-                raise PublicationRejected('Arena passive perception lacks an unobstructed native snapshot')
+            if view is None:
+                raise PublicationRejected('Arena passive perception entity disappeared from the native snapshot')
+            blocked = modeled_sightline_blocked(encounter, observer_id, entity_id,
+                changes['positions'])
+            if blocked:
+                updated = replace(prior, currently_observable=False,
+                                  visibility_boundary=candidate.boundary)
+                current[entity_id] = updated
+                if prior.currently_observable:
+                    history.append(updated)
+                continue
             position = changes['positions'].get(entity_id, view.position)
             owner_id = pickup_owners.get(entity_id, view.data.get('parent_container_id'))
             carried = owner_id is not None
@@ -1169,13 +1182,33 @@ def _make_plan(encounter,candidate,rng_owner):
                 prior.type_key if prior.category == 'being' else view.obj_type,
                 None if carried else position, state, candidate.boundary,
                 float(candidate.boundary), BASIS, owner_id, equipment_status,
-                observed_motion.get(entity_id))
+                observed_motion.get(entity_id), True, candidate.boundary)
             current[entity_id] = updated
             if (updated.name, updated.type_key, updated.position, updated.present_state,
-                    updated.owner_id, updated.equipment_status, updated.motion_interval) != (
+                    updated.owner_id, updated.equipment_status, updated.motion_interval,
+                    updated.currently_observable) != (
                     prior.name, prior.type_key, prior.position, prior.present_state,
-                    prior.owner_id, prior.equipment_status, prior.motion_interval):
+                    prior.owner_id, prior.equipment_status, prior.motion_interval,
+                    prior.currently_observable):
                 history.append(updated)
+        # A successful native Spot may add a previously unknown Being to the
+        # observer's actual Awareness in this same atomic boundary. Publish its
+        # evidence only when the post-movement segment is not blocked by
+        # represented opaque geometry.
+        for entity_id in sorted(aware_ids - set(current)):
+            view = candidate.pre_action_snapshot.entities.get(entity_id)
+            if view is None or view.category != 'being':
+                continue
+            if modeled_sightline_blocked(encounter, observer_id, entity_id,
+                    changes['positions']):
+                continue
+            position = changes['positions'].get(entity_id, view.position)
+            updated = ArenaPerceptionEvidence(observer_id, entity_id, 'being',
+                view.data.get('name') or view.obj_type, 'Being', position,
+                'present', candidate.boundary, float(candidate.boundary), BASIS,
+                currently_observable=True, visibility_boundary=candidate.boundary)
+            current[entity_id] = updated
+            history.append(updated)
         plan.contents('observers', ledger._current, current)
         plan.contents('observers', ledger._history, history)
     for aid,proposal in supported.boundary.actions.items():

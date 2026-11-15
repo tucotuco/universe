@@ -199,7 +199,7 @@ def decode(wire):
         raise ArenaSaveRejected('Arena mode or controller strategies are unsupported')
     if s['encounter_mode'] == 'player_vs_arena' and s['arena_strategies'][0] != 'none':
         raise ArenaSaveRejected('Player vs Arena save assigns an Arena controller to the player Being')
-    if s['authored_scenario_id'] not in (None, 'ordinary-dagger-draw'):
+    if s['authored_scenario_id'] not in (None, 'ordinary-dagger-draw', 'arena-spot-demo'):
         raise ArenaSaveRejected('Arena authored scenario provenance is unsupported')
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)

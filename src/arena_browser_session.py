@@ -84,6 +84,19 @@ def _has_native_transactional_action_contract(action_type):
         return False
 
 
+def _native_spot_actions(candidate, actor_id):
+    """Return exact native Spot Actions, including accepted Choice members."""
+    from activities import SpotAction
+    actions = {item.id: item for item in candidate.universe.event_history.values()
+               if type(item) is SpotAction and item.actor_id == actor_id}
+    for record in candidate.encounter._choice_book._choices.values():
+        for member in record.members:
+            item = member.action
+            if type(item) is SpotAction and item.actor_id == actor_id:
+                actions[item.id] = item
+    return tuple(actions[key] for key in sorted(actions))
+
+
 @dataclass(frozen=True)
 class _MovementPlan:
     decision_id: str
@@ -589,7 +602,7 @@ class GeneratedArenaSession:
                 "movement_reason": _MOVEMENT_DISABLED,
                 "starter_ground_equipment_available": self._ground_loadout_profile is not None,
                 "default_equipment_mode": self._default_equipment_mode,
-                "playable_scenario_available": self._authored_draw_scenario is not None,
+                "playable_scenario_available": True,
             }
         candidate = self._active
         from activities import PickUpAction, RunAction, SpotAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
@@ -605,6 +618,27 @@ class GeneratedArenaSession:
         if self._player_action_id is not None:
             action = {"name": "Run", "status": "completed" if self._player_action_outcome else "executing",
                       "outcome": self._player_action_outcome}
+        spot_action = None
+        if self._authored_scenario_id == "arena-spot-demo":
+            spot_candidates = _native_spot_actions(candidate, player.native.being.id)
+            if spot_candidates:
+                native_spot = max(spot_candidates, key=lambda item: (item.start_time, item.end_time, item.id))
+                accepted_choice = any(native_spot.id in record.view.action_ids
+                    and record.view.state in ("accepted", "executing")
+                    for record in candidate.encounter._choice_book._choices.values())
+                if native_spot.id in candidate.encounter.cancelled_action_list:
+                    spot_status, spot_outcome = "cancelled", None
+                elif native_spot.id in candidate.encounter.finished_action_list:
+                    spot_status = "completed"
+                    spot_outcome = (None if native_spot.resolution is None
+                                    else native_spot.resolution.outcome)
+                else:
+                    spot_status, spot_outcome = ("executing" if accepted_choice
+                                                  or native_spot.id in candidate.encounter.pending_action_list
+                                                  else "accepted"), None
+                spot_action = {"name": "Spot", "status": spot_status,
+                    "outcome": spot_outcome, "duration_seconds": 6,
+                    "seconds_remaining": max(0, math.ceil(native_spot.end_time-candidate.encounter.time))}
         pickup_action = None
         if self._pickup_action_id is not None:
             pickup_action = {"name": "Pick up", "status": "completed" if self._pickup_action_outcome else "executing",
@@ -779,6 +813,8 @@ class GeneratedArenaSession:
                 "position_meters": None if p is None else {"x": p.x, "y": p.y, "z": p.z},
                 "observed_motion_interval": (None if evidence.motion_interval is None
                     else list(evidence.motion_interval)),
+                "currently_observable": evidence.currently_observable,
+                "visibility_boundary": evidence.visibility_boundary,
                 "cell": None if address is None else {"column": address.column, "row": address.row},
                 "pickup_available": pickup_available,
                 "pickup_unavailable_reason": pickup_unavailable_reason,
@@ -804,6 +840,8 @@ class GeneratedArenaSession:
                     {"x": p.x, "y": p.y, "z": p.z},
                 "observed_motion_interval": (None if evidence.motion_interval is None
                     else list(evidence.motion_interval)),
+                "currently_observable": evidence.currently_observable,
+                "visibility_boundary": evidence.visibility_boundary,
                 "boundary": evidence.boundary,
                 "time_seconds": evidence.time,
             })
@@ -930,6 +968,7 @@ class GeneratedArenaSession:
             "character": character,
             "selected_being": selected_being,
             "player_action": action,
+            "spot_action": spot_action,
             "pickup_action": pickup_action,
             "ready_weapon_action": ready_weapon_action,
             "ready_preparation_action": ready_preparation_action,
@@ -975,6 +1014,8 @@ class GeneratedArenaSession:
                                        and ready_preparation_action["status"] == "executing")
                                    or (delay_action is not None
                                        and delay_action["status"] == "executing")
+                                   or (spot_action is not None
+                                       and spot_action["status"] in ("accepted", "executing"))
                                    or melee_pending
                                    or touch_pending
                                    or grappling_pending
@@ -994,8 +1035,12 @@ class GeneratedArenaSession:
             "movement_reason": None if movement_available else _MOVEMENT_DISABLED,
             "movement_plan": movement_plan,
             "movement_outcome": self._movement_outcome,
-            "spot_available": False,
-            "spot_reason": _SPOT_DISABLED,
+            "spot_available": (self._authored_scenario_id == "arena-spot-demo"
+                and candidate.encounter.initiated and self._encounter_mode == "player_vs_arena"
+                and (spot_action is None or spot_action["status"] not in ("accepted", "executing"))),
+            "spot_reason": ("Native target-free Spot is a six-second Action; it does not disclose a target identity."
+                if self._authored_scenario_id == "arena-spot-demo" and candidate.encounter.initiated
+                else _SPOT_DISABLED),
         }
 
     @staticmethod
@@ -4066,11 +4111,20 @@ class GeneratedArenaSession:
                 "weapon_options": bash_options,
             })
 
-        if supported_actions.get(SpotAction):
-            spot_status, spot_reason = "unavailable", _SPOT_DISABLED
-        else:
+        if not supported_actions.get(SpotAction):
             spot_status = "not_implemented"
             spot_reason = "The native Spot scheduler or resolver contract is unavailable."
+        elif (self._authored_scenario_id == "arena-spot-demo"
+                and candidate.encounter.initiated and self._encounter_mode == "player_vs_arena"
+                and not any(item.id in candidate.encounter.pending_action_list
+                    or any(item.id in record.view.action_ids
+                           and record.view.state in ("accepted", "executing")
+                           for record in candidate.encounter._choice_book._choices.values())
+                    for item in _native_spot_actions(candidate, player.id))):
+            spot_status = "available"
+            spot_reason = "Native target-free Spot is a six-second Action; it does not disclose a target identity."
+        else:
+            spot_status, spot_reason = "unavailable", _SPOT_DISABLED
         arena_rows.append({"name": "Spot", "group": "Arena Actions",
                            "status": spot_status, "reason": spot_reason})
 
@@ -4918,16 +4972,20 @@ class GeneratedArenaSession:
             raise ArenaBrowserRequestError("equipment_mode must be equipped or unequipped")
         scenario_id = payload.get("authored_scenario", self._authored_draw_scenario.get("scenario_id")
                                   if self._authored_draw_scenario is not None else None)
-        if scenario_id not in (None, "ordinary-dagger-draw"):
+        if scenario_id not in (None, "ordinary-dagger-draw", "arena-spot-demo"):
             raise ArenaBrowserRequestError("authored_scenario is not an available opt-in scenario")
-        if scenario_id is not None and self._authored_draw_scenario is None:
+        if scenario_id == "ordinary-dagger-draw" and self._authored_draw_scenario is None:
             raise ArenaBrowserRequestError("the selected authored scenario is unavailable in this Arena server")
-        if scenario_id is not None and equipment_mode != "unequipped":
+        if scenario_id == "ordinary-dagger-draw" and equipment_mode != "unequipped":
             raise ArenaBrowserRequestError("the authored Dagger Draw scenario requires unequipped protagonists")
-        if scenario_id is not None and opponent_strategy != "none":
+        if scenario_id == "ordinary-dagger-draw" and opponent_strategy != "none":
             raise ArenaBrowserRequestError("the authored Dagger Draw scenario requires no autonomous opponent strategy")
-        if scenario_id is not None and encounter_mode != "player_vs_arena":
+        if scenario_id == "ordinary-dagger-draw" and encounter_mode != "player_vs_arena":
             raise ArenaBrowserRequestError("the authored Dagger Draw scenario is available in Player vs Arena mode")
+        if scenario_id == "arena-spot-demo" and (opponent_strategy != "none"
+                or encounter_mode != "player_vs_arena"):
+            raise ArenaBrowserRequestError(
+                "The authored Spot exercise requires Player vs Arena mode with no autonomous opponent strategy")
         if "attack_only" in strategies and equipment_mode != "equipped":
             raise ArenaBrowserRequestError(
                 "Attack only requires the Arena's native equipped Being kit; choose equipped protagonists.")
@@ -4948,8 +5006,16 @@ class GeneratedArenaSession:
                 candidate.participants[1].native.being.size_category=size_categories["opponent"]
                 self._validate_initial_equipment_provenance(candidate)
                 if scenario_id is not None:
-                    from arena_authored_draw_scenario import author_scenario
-                    author_scenario(candidate, self._authored_draw_scenario)
+                    if scenario_id == "ordinary-dagger-draw":
+                        from arena_authored_draw_scenario import author_scenario
+                        author_scenario(candidate, self._authored_draw_scenario)
+                    else:
+                        from arena_authored_spot_scenario import author_scenario
+                        author_scenario(candidate)
+                        # Apply authored optics before this candidate is
+                        # published to the browser or its player projection.
+                        from arena_perception import initialize_arena_perception
+                        initialize_arena_perception(candidate.encounter)
                 encounter = candidate.encounter
                 encounter.set_name("Encounter")
                 candidate.participants[0].native.being.set_name(
@@ -5278,6 +5344,36 @@ class GeneratedArenaSession:
             except Exception as exc:
                 raise ArenaBrowserRequestError(
                     "native Delay Choice was not accepted; Arena state is unchanged") from exc
+            return self._view_unlocked()
+
+    def choose_spot(self, payload):
+        """Accept a native target-free Spot without returning hidden target IDs."""
+        if type(payload) is not dict or payload:
+            raise ArenaBrowserRequestError("Spot accepts an empty request")
+        from activities import SpotAction
+        with self._lock:
+            candidate = self._active
+            if (candidate is None or self._authored_scenario_id != "arena-spot-demo"
+                    or self._encounter_mode != "player_vs_arena"
+                    or not candidate.encounter.initiated
+                    or not _has_native_transactional_action_contract(SpotAction)):
+                raise ArenaBrowserRequestError("Native target-free Spot is unavailable in this scenario state.")
+            player = candidate.participants[0].native.being
+            if any(item.id in candidate.encounter.pending_action_list
+                   or any(item.id in record.view.action_ids
+                          and record.view.state in ("accepted", "executing")
+                          for record in candidate.encounter._choice_book._choices.values())
+                   for item in _native_spot_actions(candidate, player.id)):
+                raise ArenaBrowserRequestError("A native Spot Action is already underway.")
+            try:
+                from attention_intent import accept_spot_attention
+                result = accept_spot_attention(candidate.encounter, player.id)
+            except (TypeError, ValueError, RuntimeError) as exc:
+                raise ArenaBrowserRequestError(
+                    "Native Spot Choice was not accepted; hidden target details are unavailable.") from exc
+            if not result.accepted:
+                raise ArenaBrowserRequestError(
+                    "Native Spot Choice was not accepted; hidden target details are unavailable.")
             return self._view_unlocked()
 
     def choose_pause_action(self, payload):

@@ -141,6 +141,36 @@ print(repr(roundtrip))
             encounter=candidate.encounter,
             registry=candidate.universe.object_registry.object_instances), data)
 
+    def test_last_known_evidence_has_strict_visibility_transition_encoding(self):
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
+        session.generate({"starting_experience": "10000",
+                          "width_cells": "5", "height_cells": "5"})
+        candidate = session.active_candidate
+        observer = candidate.participants[0].native.being
+        target = candidate.participants[1].native.being
+        ledger = observer._arena_perception_ledger
+        prior = ledger._current[target.id]
+        stale = replace(prior, currently_observable=False, visibility_boundary=1)
+        ledger._current[target.id] = stale
+        ledger._history.append(stale)
+        entity_ids, visible_ids = _bindings(candidate, observer)
+        data = encode_detached_arena_perception_ledger(ledger,
+            observer_id=observer.id, entity_ids=entity_ids,
+            visible_entity_ids=visible_ids, boundary=1, time=1.0)
+        row = next(value for key, value in data[3] if key == target.id)
+        self.assertEqual(row[0], "universe.arena-perception-evidence/4")
+        decoded = decode_arena_perception_ledger(data, observer_id=observer.id,
+            entity_ids=entity_ids, visible_entity_ids=visible_ids,
+            boundary=1, time=1.0)
+        self.assertNotIn(target.id, {item.entity_id for item in decoded.current})
+        observed = next(item for item in decoded.known if item.entity_id == target.id)
+        self.assertFalse(observed.currently_observable)
+        self.assertEqual(observed.position, prior.position)
+        self.assertEqual(observed.time, prior.time)
+        self.assertEqual(encode_detached_arena_perception_ledger(decoded,
+            observer_id=observer.id, entity_ids=entity_ids,
+            visible_entity_ids=visible_ids, boundary=1, time=1.0), data)
+
     def test_current_position_and_ground_to_carried_history_are_preserved(self):
         session, _, candidate, player, placement, item = ground_fixture(seed=20261107)
         address = HexAddress(placement.column, placement.row)

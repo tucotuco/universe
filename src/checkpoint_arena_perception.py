@@ -15,6 +15,7 @@ from arena_perception import (
 LEDGER_SCHEMA = "universe.arena-perception-ledger/2"
 EVIDENCE_SCHEMA = "universe.arena-perception-evidence/2"
 MOTION_EVIDENCE_SCHEMA = "universe.arena-perception-evidence/3"
+VISIBILITY_EVIDENCE_SCHEMA = "universe.arena-perception-evidence/4"
 POSITION_SCHEMA = "universe.cartesian-position-binary64/1"
 MAX_LEDGER_ENTITIES = 3002  # Two Beings plus the adopted 3,000-object Arena ceiling.
 MAX_HISTORY_ROWS = 16_384
@@ -23,7 +24,7 @@ _LEDGER_FIELDS = frozenset(("_current", "_history", "environment", "observer_id"
 _EVIDENCE_FIELDS = frozenset((
     "basis", "boundary", "category", "entity_id", "name", "observer_id",
     "position", "present_state", "time", "type_key", "owner_id", "equipment_status",
-    "motion_interval",
+    "motion_interval", "currently_observable", "visibility_boundary",
 ))
 
 
@@ -139,6 +140,10 @@ def _evidence_data(row):
     _need(fields["category"] == "object" or owner_id is None,
           "Being evidence cannot contain an Object owner")
     motion = fields["motion_interval"]
+    _need(type(fields["currently_observable"]) is bool
+          and type(fields["visibility_boundary"]) is int
+          and fields["visibility_boundary"] >= fields["boundary"],
+          "Arena visibility state has invalid boundary or Boolean")
     if motion is None:
         motion_data = None
     else:
@@ -151,6 +156,10 @@ def _evidence_data(row):
             fields["category"], fields["name"], fields["type_key"], position,
             state, fields["boundary"], _time_data(fields["time"]), fields["basis"],
             owner_id, equipment_status)
+    if (not fields["currently_observable"]
+            or fields["visibility_boundary"] != fields["boundary"]):
+        return (VISIBILITY_EVIDENCE_SCHEMA, *base, motion_data,
+                fields["currently_observable"], fields["visibility_boundary"])
     if motion_data is None:
         return (EVIDENCE_SCHEMA, *base)
     return (MOTION_EVIDENCE_SCHEMA, *base, motion_data)
@@ -159,13 +168,15 @@ def _evidence_data(row):
 def _evidence_from_data(data):
     _need(type(data) is tuple and type(data[0]) is str
           and ((data[0] == EVIDENCE_SCHEMA and len(data) == 13)
-               or (data[0] == MOTION_EVIDENCE_SCHEMA and len(data) == 14)),
+               or (data[0] == MOTION_EVIDENCE_SCHEMA and len(data) == 14)
+               or (data[0] == VISIBILITY_EVIDENCE_SCHEMA and len(data) == 16)),
           "malformed Arena perception evidence record")
+    currently_observable, visibility_boundary = True, None
     if data[0] == EVIDENCE_SCHEMA:
         (_, observer_id, entity_id, category, name, type_key, position, state,
          boundary, time_data, basis, owner_id, equipment_status) = data
         motion_interval = None
-    else:
+    elif data[0] == MOTION_EVIDENCE_SCHEMA:
         (_, observer_id, entity_id, category, name, type_key, position, state,
          boundary, time_data, basis, owner_id, equipment_status, motion_data) = data
         _need(type(motion_data) is tuple and len(motion_data) == 5
@@ -182,6 +193,30 @@ def _evidence_from_data(data):
                   "observed motion is not canonical finite binary64")
             values.append(value)
         motion_interval = tuple(values)
+    else:
+        (_, observer_id, entity_id, category, name, type_key, position, state,
+         boundary, time_data, basis, owner_id, equipment_status, motion_data,
+         currently_observable, visibility_boundary) = data
+        _need(type(currently_observable) is bool
+              and type(visibility_boundary) is int,
+              "malformed Arena visibility evidence state")
+        if motion_data is None:
+            motion_interval = None
+        else:
+            _need(type(motion_data) is tuple and len(motion_data) == 5
+                  and all(type(value) is str for value in motion_data),
+                  "malformed observed motion interval")
+            values = []
+            for text in motion_data:
+                try:
+                    value = float.fromhex(text)
+                except ValueError as exc:
+                    raise ArenaPerceptionCheckpointRejected(
+                        "observed motion is not hexadecimal") from exc
+                _need(math.isfinite(value) and value.hex() == text,
+                      "observed motion is not canonical finite binary64")
+                values.append(value)
+            motion_interval = tuple(values)
     values = (observer_id, entity_id, category, name, type_key, state, basis)
     _need(all(type(value) is str and value for value in values),
           "Arena evidence identity and label values must be nonempty text")
@@ -191,7 +226,8 @@ def _evidence_from_data(data):
     try:
         return ArenaPerceptionEvidence(observer_id, entity_id, category, name, type_key,
             _decode_position(position), state, boundary, _decode_time(time_data), basis,
-            owner_id, equipment_status, motion_interval)
+            owner_id, equipment_status, motion_interval, currently_observable,
+            visibility_boundary)
     except (TypeError, ValueError) as exc:
         raise ArenaPerceptionCheckpointRejected(
             f"malformed Arena perception evidence value: {exc}") from exc
@@ -256,13 +292,14 @@ def _validate_wire(data, *, observer_id, entity_ids, visible_entity_ids, boundar
     _need(type(boundary) is int and boundary >= 0 and type(time) in (int, float)
           and math.isfinite(time) and time >= 0, "invalid committed Arena evidence boundary")
     for row in current_by_id.values():
-        _need(row.boundary == boundary and row.time == time,
-              "current Arena evidence is stale relative to the committed boundary")
+        _need(row.visibility_boundary == boundary
+              and (not row.currently_observable
+                   or row.boundary == boundary and row.time == time),
+              "current Arena evidence visibility state is stale relative to the committed boundary")
         _need(row.owner_id is None or row.owner_id in entity_ids,
               "current visible Object owner is outside the native Entity binding set")
 
     last_boundary = -1
-    last_time = -1.0
     seen_entity_boundaries = set()
     per_entity = {}
     rows = []
@@ -274,17 +311,18 @@ def _validate_wire(data, *, observer_id, entity_ids, visible_entity_ids, boundar
               "history Object owner is outside the native Entity binding set")
         _need(row.boundary <= boundary and row.time <= time,
               "history evidence lies beyond the committed boundary")
-        _need(row.boundary >= last_boundary and row.time >= last_time,
+        _need(row.visibility_boundary >= last_boundary,
               "Arena evidence history chronology regressed")
-        marker = (row.entity_id, row.boundary)
+        marker = (row.entity_id, row.visibility_boundary)
         _need(marker not in seen_entity_boundaries,
               "duplicate Entity evidence at one committed boundary")
         seen_entity_boundaries.add(marker)
         prior = per_entity.get(row.entity_id)
-        _need(prior is None or (row.boundary > prior.boundary and row.time > prior.time),
+        _need(prior is None or (row.visibility_boundary > prior.visibility_boundary
+                                and row.time >= prior.time),
               "per-Entity Arena evidence history is not strictly chronological")
         per_entity[row.entity_id] = row
-        last_boundary, last_time = row.boundary, row.time
+        last_boundary = row.visibility_boundary
         rows.append(row)
     _need(set(per_entity) == set(visible_entity_ids),
           "Arena evidence history differs from the observer-owned visible Entity set")
@@ -373,10 +411,11 @@ def encode_arena_perception_ledger(ledger, *, observer, encounter, registry):
             else:
                 slots = [slot for slot, held in owner.current.body_parts.items() if held == entity_id]
                 expected_equipment = f"held in {slots[0]}" if slots else "carried"
-        _need(row.name == expected_name and row.present_state == expected_state
-              and row.position == expected_position and row.owner_id == expected_owner
-              and row.equipment_status == expected_equipment,
-              "current Arena evidence disagrees with committed Entity name, custody, or position")
+        if row.currently_observable:
+            _need(row.name == expected_name and row.present_state == expected_state
+                  and row.position == expected_position and row.owner_id == expected_owner
+                  and row.equipment_status == expected_equipment,
+                  "current Arena evidence disagrees with committed Entity name, custody, or position")
     for row in ledger._history:
         _evidence_data(row)
         entity = registry.get(row.entity_id)

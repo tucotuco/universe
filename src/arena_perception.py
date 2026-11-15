@@ -30,6 +30,8 @@ class ArenaPerceptionEvidence:
     owner_id: str | None = None
     equipment_status: str | None = None
     motion_interval: tuple | None = None
+    currently_observable: bool = True
+    visibility_boundary: int | None = None
 
     def __post_init__(self):
         if any(type(value) is not str or not value for value in
@@ -62,6 +64,13 @@ class ArenaPerceptionEvidence:
                 raise ValueError("observed motion requires a finite increasing interval and velocity")
         if type(self.boundary) is not int or self.boundary < 0:
             raise ValueError("Arena evidence boundary must be a nonnegative integer")
+        if type(self.currently_observable) is not bool:
+            raise ValueError("Arena current-observation state must be Boolean")
+        if self.visibility_boundary is None:
+            object.__setattr__(self, "visibility_boundary", self.boundary)
+        if (type(self.visibility_boundary) is not int
+                or self.visibility_boundary < self.boundary):
+            raise ValueError("Arena visibility boundary must not precede its evidence")
         if type(self.time) not in (int, float) or not math.isfinite(self.time) or self.time < 0:
             raise ValueError("Arena evidence time must be finite and nonnegative")
         if self.basis != BASIS:
@@ -81,6 +90,13 @@ class ArenaPerceptionLedger:
 
     @property
     def current(self):
+        """Facts observable at the current boundary, excluding last-known facts."""
+        return tuple(self._current[key] for key in sorted(self._current)
+                     if self._current[key].currently_observable)
+
+    @property
+    def known(self):
+        """Latest acquired evidence, including facts no longer observable."""
         return tuple(self._current[key] for key in sorted(self._current))
 
     @property
@@ -105,8 +121,6 @@ def _category(obj):
 def _initial_evidence(encounter, observer_id, entity_id, *, boundary=0):
     obj = encounter.universe.get_object_by_id(entity_id)
     category = _category(obj)
-    if obj.geometry is not None or obj.visual_occlusion is not None:
-        raise ValueError("initial passive perception requires the authored unobstructed Arena premise")
     position = obj.get_position()
     parent = obj.parent_container_id
     state = ("present" if category == "being" else
@@ -149,12 +163,60 @@ def initialize_arena_perception(encounter):
         for entity_id in entities:
             if entity_id == observer_id:
                 continue
+            if modeled_sightline_blocked(encounter, observer_id, entity_id):
+                continue
             evidence = _initial_evidence(encounter, observer_id, entity_id)
             ledger._current[entity_id] = evidence
             ledger._history.append(evidence)
         observer._arena_perception_ledger = ledger
         encounter.awareness[observer_id] = set(ledger._current)
     return tuple(encounter.get_being(key)._arena_perception_ledger for key in observers)
+
+
+def modeled_sightline_blocked(encounter, observer_id, target_id, positions=None):
+    """Return true only when represented opaque geometry blocks the segment.
+
+    Unknown geometry does not become transparency, but the initial Arena's
+    established unobstructed default is retained. A represented opaque
+    intersection is a source-authorized loss of visual perceptibility.
+    ``positions`` may supply the candidate's post-movement coordinates.
+    """
+    from spatial.visibility import trace_sightline
+
+    def position(entity_id, entity):
+        if positions is not None and entity_id in positions:
+            return positions[entity_id]
+        return entity.get_position()
+
+    observer = encounter.get_entity(observer_id)
+    target = encounter.get_entity(target_id)
+    if observer is None or target is None:
+        return False
+    start, end = position(observer_id, observer), position(target_id, target)
+    if start is None or end is None or start == end:
+        return False
+
+    class Candidate:
+        __slots__ = ("geometry", "visual_occlusion", "_position")
+        def __init__(self, entity, at):
+            self.geometry = entity.geometry
+            self.visual_occlusion = entity.visual_occlusion
+            self._position = at
+        def get_position(self):
+            return self._position
+        def segment_intersection(self, a, b):
+            if self.geometry is None or self._position is None:
+                return None
+            return self.geometry.segment_interval(a, b, self._position)
+
+    candidates = []
+    for entity_id in encounter.entity_ids():
+        entity = encounter.get_entity(entity_id)
+        if entity is not None:
+            candidates.append((entity_id, Candidate(entity, position(entity_id, entity))))
+    path = trace_sightline(start, end, candidates,
+                           exclude_ids=(observer_id, target_id))
+    return path.status == "blocked"
 
 
 def refresh_candidate_names(encounter):
@@ -176,7 +238,9 @@ def refresh_candidate_names(encounter):
                 previous.category, obj.name or obj.current.obj_type, previous.type_key,
                 previous.position, previous.present_state, 0, 0.0,
                 owner_id=previous.owner_id, equipment_status=previous.equipment_status,
-                motion_interval=previous.motion_interval)
+                motion_interval=previous.motion_interval,
+                currently_observable=previous.currently_observable,
+                visibility_boundary=previous.visibility_boundary)
             ledger._current[entity_id] = updated
             for index, row in enumerate(ledger._history):
                 if row.entity_id == entity_id:
