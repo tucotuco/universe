@@ -120,11 +120,18 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
                     self.assertEqual(status, 200, result)
                 self.assertEqual(result['discovery_actions'][sense]['outcome'], 'success')
                 self.assertIn(target.name, json.dumps(result['entities']))
+                learned = next(row for row in result['entities'] if row['name'] == target.name)
+                self.assertIsNone(learned['position_meters'])
+                self.assertTrue(learned['currently_observable'])
                 self.assertIn(target.id, candidate.encounter.aware_beings(actor.id))
                 self.assertNotIn(actor.id, candidate.encounter.aware_beings(target.id))
                 self.assertFalse(result['spot_available'])
                 self.assertFalse(result['search_available'])
                 self.assertFalse(result['listen_available'])
+                from examples.arena_web import _GENERATED_PAGE
+                self.assertIn("e.currently_observable?' · currently evidenced':' · last known'",
+                              _GENERATED_PAGE)
+                self.assertNotIn("e.currently_observable?' · visible now'", _GENERATED_PAGE)
 
     def test_search_and_listen_require_authored_source_facts_without_identity_leaks(self):
         for sense, premise in (('search', 'arena_search_accessible'),
