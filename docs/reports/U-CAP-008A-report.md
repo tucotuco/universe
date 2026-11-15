@@ -5,8 +5,8 @@
 **Implementation outcome met for U-CAP-008A; awaiting ChatGPT acceptance.** The assignment and report remain active until that review. No remaining independently implementable acceptance item is known. The generated Arena now has Player vs Arena and Arena vs Arena modes. Arena vs Arena selects attack_only or defense_only separately for Being A and Being B. Both use the existing native decision helpers, Choice scheduler, movement intents, and atomic Encounter publisher. A bounded spectator runner advances at most ten native seconds and can be paused between boundaries.
 
 - Start: **2026-11-14T17:19:13-08:00**
-- End: **2026-11-14T18:42:15-08:00**
-- Elapsed: **PT1H23M2S**
+- End: **2026-11-14T18:43:29-08:00**
+- Elapsed: **PT1H24M16S**
 
 ## Authority and repository state
 
@@ -82,7 +82,7 @@ No full repository suite was run; the assignment calls for focused checks, and n
 - TASKS.md: U-CAP-008 → DONE (bounded), with archived links; U-CAP-008A → sole ACTIVE assignment; perception remains deferred under U-OBS-001; the established U-CAP-009 global-time ID is preserved.
 - No push, force operation, or history rewrite.
 - Implementation commit: ef71e42514094d2372b976be5d64acf3ea077fa9 (Arena mode, scheduler, persistence and focused tests).
-- Assignment/task/archive/report commit: d0a9ff077513ed7fc38106c47a569a71a4e5c000. U-CAP-008 is archived and U-CAP-008A remains the sole ACTIVE program pending ChatGPT acceptance.
-- Last verified HEAD before this final report-only correction: d0a9ff077513ed7fc38106c47a569a71a4e5c000. The report-only closeout commit's resulting HEAD is included in the final Codex response.
+- Assignment/task/archive/report commit: d0a9ff077513ed7fc38106c47a569a71a4e5c000. Prior report closeout commit: 61c862dffe50cd3e1ae67dadca6d027ea3b64dc6. U-CAP-008 is archived and U-CAP-008A remains the sole ACTIVE program pending ChatGPT acceptance.
+- Last verified HEAD before the final timestamp correction: 61c862dffe50cd3e1ae67dadca6d027ea3b64dc6. The report-only closeout commit's resulting HEAD is included in the final Codex response.
 - No push, force operation, or history rewrite. Four pre-existing U-CAP-002/U-CAP-003 staged removals and the U-THROW-001 patch archive rename remain outside these commits.
 - Final remaining staged paths are the four historical removals plus the U-THROW-001 archive rename (six index entries). The untracked docs/assignments/universe-arena.json remains untouched.
