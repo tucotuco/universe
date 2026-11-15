@@ -126,6 +126,7 @@ class EvaluationSnapshot:
     moving_ids: tuple = ()
     motion_velocities_m_s: object = field(default_factory=lambda: MappingProxyType({}))
     pole_weapon_names: frozenset = frozenset()
+    shield_allocations: tuple = ()
 
     def entity(self, identity):
         try:
@@ -761,6 +762,7 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
         pole_weapon_names=frozenset(
             tuple(weapon_dictionary['object_categories'].get('Spears', ()))
             + tuple(weapon_dictionary['object_categories'].get('Lances', ()))))
+    snapshot = replace(snapshot, shield_allocations=freeze(ed.get('_shield_allocation_choices', ())))
     # Validate identities/defense graph before any provisional draw.
     for a in actions.values():
         if a.family in ('combat', 'melee') and snapshot.entity(a.target_id).category != 'being':
@@ -1608,7 +1610,29 @@ def _combat(snapshot, action, rng, dependencies, *, pole_set_charge=False,
                 blocks = [d for d in dependencies if d.kind == 'block'
                           and d.eligible and d.success]
                 sid = (snapshot.actions[blocks[0].source_action_id].instrument_id
-                       if blocks else rng.choose_shield(recipient.data.get('shields', ())))
+                       if blocks else None)
+                shields = tuple(recipient.data.get('shields', ()))
+                if not blocks and shields:
+                    simultaneous = tuple(row for row in snapshot.actions.values()
+                        if row.boundary == snapshot.boundary and row.lifecycle == 'pending'
+                        and row.family in ('melee', 'combat')
+                        and row.data.get('event_type') in ('swing', 'thrust', 'stun', 'subdue')
+                        and row.target_id == recipient.id and row.actor_id != recipient.id
+                        and ('reach' not in row.data
+                             or snapshot.melee_status(row)[0] == 'in_reach'))
+                    if any(len(simultaneous) > int(snapshot.entity(shield_id).data['size'])
+                           for shield_id in shields):
+                        # The overload validator has already required one
+                        # shield and a valid persisted allocation.
+                        sid = shields[0]
+                        allocation = next((row for row in snapshot.shield_allocations
+                            if type(row) is tuple and len(row) == 4
+                            and row[0] == snapshot.boundary and row[1] == recipient.id
+                            and row[2] == sid), None)
+                        if allocation is None or action.id not in allocation[3]:
+                            return damage
+                    else:
+                        sid = rng.choose_shield(shields)
                 if sid is None:
                     return damage
                 item = snapshot.entity(sid)
@@ -2854,12 +2878,9 @@ def evaluate_snapshot(snapshot, action_ids=None):
                 and d.data['target_action_id'] == action.id}
             if not required.issubset(ids):
                 raise EvaluationIntegrityError('missing explicit designated defense dependency')
-    # The adopted Shields rule limits passive protection to shield-size
-    # attacks and requires the bearer to assign protection before outcomes are
-    # known. The native Arena currently has no persisted defender-owned
-    # allocation Choice. Refuse an over-capacity same-boundary batch before
-    # allocating any attack, damage, or interception rolls; never infer an
-    # allocation from declaration order or hidden outcomes.
+    # Assignment is a persisted, no-cost bearer choice, limited at declaration
+    # time to attacks known from the preceding round. Unselected or unseen
+    # simultaneous attacks receive no passive shield coverage.
     due_attacks = tuple(action for action in snapshot.actions.values()
         if action.boundary == snapshot.boundary and action.lifecycle == 'pending'
         and action.family in ('melee', 'combat')
@@ -2875,10 +2896,22 @@ def evaluate_snapshot(snapshot, action_ids=None):
                  or snapshot.melee_status(action)[0] == 'in_reach'))
         for shield_id in shields:
             shield = snapshot.entities.get(shield_id)
-            if shield is not None and len(incoming) > int(shield.data['size']):
+            if shield is None or len(incoming) <= int(shield.data['size']):
+                continue
+            if len(shields) != 1:
+                raise UnsupportedEvaluation('over-capacity allocation with multiple shields is not represented')
+            rows = [row for row in snapshot.shield_allocations
+                    if type(row) is tuple and len(row) == 4
+                    and row[0] == snapshot.boundary and row[1] == target_id
+                    and row[2] == shield_id]
+            if len(rows) != 1:
                 raise UnsupportedEvaluation(
-                    'passive shield capacity exceeded; a persisted defender-owned '
-                    'pre-outcome attack allocation is not yet represented')
+                    'passive shield capacity exceeded without one persisted bearer allocation')
+            allocated = rows[0][3]
+            incoming_ids = {item.id for item in incoming}
+            if (type(allocated) is not tuple or len(allocated) > int(shield.data['size'])
+                    or not set(allocated).issubset(incoming_ids)):
+                raise EvaluationIntegrityError('passive shield allocation exceeds capacity or names an ineligible attack')
     if any(a.family not in ('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'shield_equipment', 'ready_preparation', 'delay') for a in selected):
         raise UnsupportedEvaluation('objective-only declarations require their separate inactive context; complete Action effects remain unsupported')
     pickup_status = {action.id: pickup_eligibility(snapshot, action)

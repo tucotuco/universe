@@ -216,6 +216,7 @@ class GeneratedArenaSession:
         self._default_equipment_mode = (
             "unequipped" if authored_draw_scenario is not None else default_equipment_mode)
         self._view_handles = {}
+        self._shield_attack_handles = {}
         self._selected_entity_handle = None
         self._display_names = {}
 
@@ -3485,6 +3486,33 @@ class GeneratedArenaSession:
                 f"impact={strike.end_time:g}s")
             return self._view_unlocked()
 
+    def choose_shield_allocation(self, payload):
+        """Accept only the player's opaque, prior-round-observed attack handles."""
+        if (type(payload) is not dict or set(payload) != {"shield_handle", "attack_handles"}
+                or type(payload.get("shield_handle")) is not str
+                or type(payload.get("attack_handles")) is not list
+                or any(type(value) is not str for value in payload["attack_handles"])):
+            raise ArenaBrowserRequestError("Passive shield allocation requires a shield and observed attack selections")
+        with self._lock:
+            candidate = self._active
+            if candidate is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before allocating shield coverage")
+            player = candidate.participants[0].native.being
+            shield_id = next((key for key, value in self._view_handles.items()
+                              if value == payload["shield_handle"]), None)
+            attack_ids = tuple(self._shield_attack_handles.get(value)
+                               for value in payload["attack_handles"])
+            if shield_id is None or not attack_ids or any(value is None for value in attack_ids):
+                raise ArenaBrowserRequestError("Selection contains stale or unobserved Arena evidence")
+            try:
+                candidate.encounter.allocate_passive_shield_coverage(
+                    player.id, shield_id, attack_ids)
+            except (ValueError, TypeError, RuntimeError) as exc:
+                raise ArenaBrowserRequestError(str(exc)) from exc
+            self._trace.native_advance(None, None,
+                f"passive_shield_allocation count={len(attack_ids)}")
+            return self._view_unlocked()
+
     def _player_yield_preflight(self, candidate, player, entity_id, evidence):
         if evidence is None or evidence.category != "being" or evidence.present_state != "present":
             raise ArenaBrowserRequestError("Select a currently perceived attacking Being first.")
@@ -4345,12 +4373,46 @@ class GeneratedArenaSession:
         shield_options = []
         block_status, block_reason = "unavailable", "No native shield is equipped in a functioning arm."
         shields = player.shielded_with(candidate.universe)
+        self._shield_attack_handles = {}
+        known_incoming = {}
+        if ledger is not None and ledger.observer_id == player.id:
+            for incoming in self._all_melee_actions(candidate):
+                if (type(incoming) is not MeleeStrike
+                        or incoming.id not in candidate.encounter.pending_action_list
+                        or incoming.target_id != player.id
+                        or incoming.start_time >= candidate.encounter.time
+                        or incoming.start_time + 1 > candidate.encounter.time
+                        or incoming.end_time <= candidate.encounter.time
+                        or not candidate.encounter.is_aware(player.id, incoming.actor_id)):
+                    continue
+                observed = next((row for row in ledger.current
+                                 if row.entity_id == incoming.actor_id
+                                 and row.category == "being"
+                                 and row.present_state == "present"
+                                 and row.time == candidate.encounter.time), None)
+                if observed is not None:
+                    known_incoming.setdefault(incoming.end_time, []).append(incoming)
         for _slot, shield_id in sorted(shields.items()):
             shield_handle = self._view_handles.get(shield_id)
             shield = candidate.universe.get_object_by_id(shield_id)
             if shield_handle is not None and shield is not None:
                 shield_options.append({"handle": shield_handle, "name": shield.name,
                                        "size": shield.get_weapon_size()})
+                for boundary, attacks in sorted(known_incoming.items()):
+                    attack_options = []
+                    for attack in attacks:
+                        opaque = secrets.token_urlsafe(18)
+                        self._shield_attack_handles[opaque] = attack.id
+                        attack_options.append({"handle": opaque,
+                            "attacker_handle": self._view_handles.get(attack.actor_id),
+                            "name": attack.event_type.title(),
+                            "boundary": boundary})
+                    arena_rows.append({"name": "Allocate passive shield coverage",
+                        "group": "Attack responses", "status": "available",
+                        "reason": (f"Choose up to {int(shield.get_weapon_size())} already observed attacks resolving at second {boundary:g}. This zero-time choice uses no Action capacity; same-second hidden attacks are not shown."),
+                        "shield_handle": shield_handle, "shield_name": shield.name,
+                        "shield_size": int(shield.get_weapon_size()),
+                        "attack_options": attack_options})
                 if entity_id is not None and evidence is not None:
                     try:
                         self._player_block_preflight(candidate, player, entity_id,

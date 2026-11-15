@@ -2926,11 +2926,47 @@ class TestActionEvaluation(unittest.TestCase):
         self.schedule(*rows)
         snapshot=self.snapshot()
         rng_state=random.getstate()
-        with self.assertRaisesRegex(UnsupportedEvaluation,'defender-owned.*allocation'):
+        with self.assertRaisesRegex(UnsupportedEvaluation,'persisted bearer allocation'):
             evaluate_snapshot(snapshot)
         self.assertEqual(random.getstate(),rng_state)
         self.assertEqual(shield.hit_points(),snapshot.entity(shield.id).hp)
         self.assertEqual(self.enc.time,snapshot.boundary)
+
+    def test_prior_round_shield_allocation_covers_only_selected_simultaneous_attacks(self):
+        shield = self.shield(self.b)
+        third = self.world.get_object_by_id(self.world.make_being('Human', 'C'))
+        third.set_position(CartesianPosition(3, 0, 0)); third.set_geometry(Sphere(.25))
+        third.set_hit_points(100); self.enc.add_being(third.id)
+        self.enc.mark_aware(third.id, self.b.id); self.enc.mark_aware(self.b.id, third.id)
+        third_weapon = self.world.make_weapon_for_being(third.id, 'Dagger', 'Knife C')
+        self.world.arm_being(third.id, third_weapon, 'right hand')
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+        first = MeleeStrike(self.enc, self.a.id, self.b.id, self.w1,
+                            motion='swing', reach=2)
+        second = MeleeStrike(self.enc, self.a.id, self.b.id, self.w2,
+                             motion='swing', reach=2)
+        third_attack = MeleeStrike(self.enc, third.id, self.b.id, third_weapon,
+                                   motion='swing', reach=2)
+        self.schedule(first, second, third_attack)
+        self.enc.time = 1
+        before_choices = tuple(self.enc._shield_allocation_choices)
+        with self.assertRaisesRegex(ValueError, 'within shield-size capacity'):
+            self.enc.allocate_passive_shield_coverage(
+                self.b.id, shield.id, (first.id, second.id, third_attack.id))
+        self.assertEqual(tuple(self.enc._shield_allocation_choices), before_choices)
+        self.enc.allocate_passive_shield_coverage(
+            self.b.id, shield.id, (first.id, third_attack.id))
+        snapshot = self.snapshot()
+        result = self.scripted(snapshot, [20] * 30)
+        covered = {effect.source_action_id for proposal in result.proposals
+                   for effect in proposal.effects if isinstance(effect, ProtectionEffect)
+                   and effect.layer == 'shield'}
+        self.assertEqual(covered, {first.id, third_attack.id},
+            [(p.action_id, p.outcome, [type(e).__name__ for e in p.effects])
+             for p in result.proposals])
+        self.assertNotIn(second.id, covered)
+        baseline = evaluate_snapshot(snapshot)
+        self.assertEqual(baseline, evaluate_snapshot(snapshot))
 
     def test_native_block_applies_hit_penalty_and_adopted_shield_stopping_bonus(self):
         shield = self.shield(self.b)

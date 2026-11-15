@@ -184,6 +184,9 @@ class Encounter(Event):
         self._boundary_context = None
         self._choice_book = ChoiceBook(self)
         self._disarm_landing_receipts = []
+        # Passive shield coverage is a defender-owned, no-time allocation
+        # input. Each immutable row is (boundary, bearer, shield, attack_ids).
+        self._shield_allocation_choices = []
         if being_list is None:
             self.being_list = [] # A list of ids of Beings involved in the Encounter
         else:
@@ -954,6 +957,61 @@ class Encounter(Event):
         planning_entry(self)
         validate_choice_actions(self, actions)
         return self._choice_book.schedule_complete(actions)
+
+    def allocate_passive_shield_coverage(self, bearer_id, shield_id, attack_ids):
+        """Persist a no-cost shield allocation from prior-round-known attacks.
+
+        This is the choice required by the adopted passive Shields rule, not a
+        scheduled Action and not the separately timed Block Action.
+        """
+        from being import BeingInstance
+        from melee_combat import MeleeStrike
+        from weapon import WeaponInstance
+        if self._advancing or self.active_boundary is not None or self.boundary_fault is not None:
+            raise RuntimeError('shield coverage cannot be changed during boundary resolution')
+        if bearer_id not in self.being_list or not self.initiated:
+            raise ValueError('shield bearer must be a participating Being in an active Encounter')
+        bearer = self.get_being(bearer_id)
+        shield = self.universe.get_object_by_id(shield_id)
+        if type(bearer) is not BeingInstance or type(shield) is not WeaponInstance:
+            raise ValueError('shield allocation requires native Being and shield identities')
+        if shield.current.hit_points <= 0:
+            raise ValueError('a destroyed shield cannot receive passive coverage allocation')
+        held = shield_id in bearer.shielded_with(self.universe).values()
+        if not held:
+            raise ValueError('passive allocation requires the bearer’s actually held shield')
+        raw_size = shield.get_weapon_size()
+        if type(raw_size) not in (int, str) or str(raw_size).strip() not in {'1', '2', '3', '4'}:
+            raise ValueError('shield has no supported positive native size')
+        size = int(raw_size)
+        if type(attack_ids) not in (list, tuple) or any(type(value) is not str for value in attack_ids):
+            raise TypeError('attack_ids must be an ordered sequence of native strike identities')
+        selected = tuple(dict.fromkeys(attack_ids))
+        if len(selected) != len(attack_ids) or len(selected) > size:
+            raise ValueError('selected attacks must be unique and within shield-size capacity')
+        boundary = None
+        for action_id in selected:
+            strike = self.universe.get_event_by_id(action_id)
+            if (type(strike) is not MeleeStrike or action_id not in self.pending_action_list
+                    or strike.target_id != bearer_id or strike.end_time <= self.time
+                    or strike.start_time >= self.time or strike.start_time + 1 > self.time
+                    or not self.is_aware(bearer_id, strike.actor_id)):
+                raise ValueError('allocation accepts only prior-round-observable pending attacks resolving next boundary')
+            if boundary is None:
+                boundary = strike.end_time
+            elif strike.end_time != boundary:
+                raise ValueError('one shield allocation can cover only one resolution boundary')
+        if boundary is None:
+            raise ValueError('shield allocation must select at least one perceived pending attack')
+        row = (boundary, bearer_id, shield_id, selected)
+        choices = [old for old in self._shield_allocation_choices
+                   if not (old[0] == boundary and old[1] == bearer_id and old[2] == shield_id)]
+        claimed = {attack for old in choices if old[0] == boundary and old[1] == bearer_id
+                   for attack in old[3]}
+        if claimed.intersection(selected):
+            raise ValueError('one incoming attack cannot be assigned to multiple passive shields')
+        self._shield_allocation_choices = choices + [row]
+        return row
 
     def _assert_no_pending_disarm_landing(self):
         from weapon import WeaponInstance, native_pending_disarm_landing

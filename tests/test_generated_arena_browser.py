@@ -2410,6 +2410,8 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
         strike = next(member.action for record in encounter._choice_book._choices.values()
             for member in record.members
             if type(member.action) is MeleeStrike and member.action.actor_id == player.id)
+        self.session.advance_one_second()
+        encounter.allocate_passive_shield_coverage(defender.id, shield_id, (strike.id,))
         pending = self.session.save_encounter_bytes()
         shield_hp_before = candidate.universe.get_object_by_id(shield_id).hit_points()
         with tempfile.TemporaryDirectory(prefix="arena-passive-shield-fresh-process-") as temp:
@@ -2423,10 +2425,12 @@ from pathlib import Path
 from arena_browser_session import GeneratedArenaSession
 from action_evaluation import DamageEffect,ProtectionEffect
 s=GeneratedArenaSession();s.load_encounter_bytes(Path(sys.argv[1]).read_bytes())
-c=s.active_candidate; strike_id,shield_id=sys.argv[2:4]
-assert c.encounter.time==1 and c.universe.get_object_by_id(shield_id).hit_points()>0
+c=s.active_candidate; strike_id,shield_id,defender_id=sys.argv[2:5]
+assert c.encounter.time==2 and c.universe.get_object_by_id(shield_id).hit_points()>0
+assert any(row==(5,defender_id,shield_id,(strike_id,))
+           for row in c.encounter._shield_allocation_choices), c.encounter._shield_allocation_choices
 assert any(a.id==strike_id and a.end_time==5 for a in s._all_melee_actions(c))
-for _ in range(4): s.advance_one_second()
+for _ in range(3): s.advance_one_second()
 facts=c.encounter.inspect_committed(5).action(strike_id).facts
 assert facts.outcome=='normal', (facts.outcome, facts.effects)
 protection=next(x for x in facts.effects if type(x) is ProtectionEffect
@@ -2436,12 +2440,13 @@ damage=sum(x.amount for x in facts.effects if type(x) is DamageEffect
 shield=c.universe.get_object_by_id(shield_id)
 assert damage==(max(0,protection.incoming-int(shield.get_weapon_size()))
                 if protection.intercepted else 0)
-assert shield.hit_points()==int(sys.argv[4])-damage
+assert shield.hit_points()==int(sys.argv[5])-damage
 print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':shield.id,
                   'damage':damage,'shield_hp':shield.hit_points(),'intercepted':protection.intercepted,
                   'incoming':protection.incoming,'passed':protection.passed}))"""
             process = subprocess.run([sys.executable, "-B", "-c", code,
-                str(pending_path), strike.id, shield_id, str(shield_hp_before)], cwd=ROOT,
+                str(pending_path), strike.id, shield_id, defender.id,
+                str(shield_hp_before)], cwd=ROOT,
                 env=child_env, capture_output=True, text=True, timeout=60)
             self.assertEqual(process.returncode, 0, process.stderr)
             restored = json.loads(process.stdout)
@@ -2451,6 +2456,44 @@ print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':sh
         self.assertTrue(restored["intercepted"])
         self.assertEqual((restored["incoming"], restored["passed"], restored["damage"]),
                          (2, 0, 0))
+
+    def test_observer_safe_zero_cost_shield_allocation_control(self):
+        from melee_combat import MeleeStrike
+        self.session = GeneratedArenaSession(root_seed_factory=lambda: 14)
+        status, generated = self.request("/api/generated/generate", {
+            "starting_experience": "10000", "width_cells": "10", "height_cells": "5",
+            "equipment_mode": "equipped", "opponent_strategy": "none", "root_seed": "14"})
+        self.assertEqual(status, 200, generated)
+        candidate = self.session.active_candidate
+        encounter = candidate.encounter
+        player, opponent = (row.native.being for row in candidate.participants)
+        shield_id = candidate.universe.make_weapon_for_being(player.id,
+            "Small shield", "Player allocation shield")
+        candidate.universe.arm_being(player.id, shield_id, "shield hand")
+        status, _ = self.request("/api/generated/destination", {
+            "column": 8, "row": 1, "rate": "walk", "facing_policy": "turn"})
+        self.assertEqual(status, 200)
+        status, _ = self.request("/api/generated/advance", {"seconds": 1})
+        self.assertEqual(status, 200)
+        weapon_id = next(iter(opponent.armed_with(candidate.universe).values()))
+        strike = MeleeStrike(encounter, opponent.id, player.id, weapon_id,
+                             motion="swing", reach=20)
+        encounter.schedule_action(strike)
+        self.session.advance_one_second()
+        state = self.session._view_unlocked()
+        entry = next(row for row in state["action_catalog"]["entries"]
+                     if row["name"] == "Allocate passive shield coverage")
+        self.assertEqual(len(entry["attack_options"]), 1)
+        before_time = encounter.time
+        before_reservations = encounter.active_reservations
+        status, accepted = self.request("/api/generated/shield-allocation", {
+            "shield_handle": entry["shield_handle"],
+            "attack_handles": [entry["attack_options"][0]["handle"]]})
+        self.assertEqual(status, 200, accepted)
+        self.assertEqual(encounter.time, before_time)
+        self.assertEqual(encounter.active_reservations, before_reservations)
+        self.assertEqual(encounter._shield_allocation_choices[-1],
+            (strike.end_time, player.id, shield_id, (strike.id,)))
 
     def enable_trace(self):
         import io

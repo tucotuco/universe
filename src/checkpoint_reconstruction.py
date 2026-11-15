@@ -658,7 +658,7 @@ def reconstruct_initial_run_spot(decoded):
           graph.raw_ref(graph.fields(source_choice_book)[1]['encounter']) == encounter_ref,
           'ChoiceBook/Encounter ownership references are inconsistent')
     for field in ('being_list', 'non_being_object_list', 'awareness',
-                  'arena_activation_enabled'):
+                  'arena_activation_enabled', '_shield_allocation_choices'):
         setattr(encounter, field, graph.data(enc_fields[field]))
     for field in ('arena_activation','arena_movement_activation','initiation'):
         setattr(encounter, field, graph.value(enc_fields[field]))
