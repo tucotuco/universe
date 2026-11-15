@@ -1,7 +1,7 @@
 # U-CAP-008 — Two-sided generated Arena combat closeout
 
 **Status:** Implementation acceptance criteria demonstrated; assignment remains ACTIVE pending ChatGPT review and acceptance.
-**Assignment:** [`U-CAP-008`](../assignments/U-CAP-008.md)
+**Assignment:** [`U-CAP-008`](../../assignments/archive/U-CAP-008.md)
 **Repository:** Universe `main`; no push.
 **Controlling Encounter rules:** adopted through revision 70 and applicable adopted supplements.
 

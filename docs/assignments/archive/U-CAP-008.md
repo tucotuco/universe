@@ -1,9 +1,9 @@
 # U-CAP-008 — A playable, consequential two-sided Arena combat encounter
 
 **Repository:** active `~/Projects/universe` only
-**Install:** `docs/assignments/U-CAP-008.md`
-**Report:** `docs/reports/U-CAP-008-report.md`
-**Invoke:** `Execute docs/assignments/U-CAP-008.md.`
+**Install:** `docs/assignments/archive/U-CAP-008.md`
+**Report:** `docs/reports/archive/U-CAP-008-report.md`
+**Invoke:** `Execute docs/assignments/archive/U-CAP-008.md.`
 **Authority:** Encounter adopted rules through revision 70 and later actually adopted supplements, the live `TASKS.md`, and `docs/process/DEVELOPMENT-PROCESS.md`. An assignment does not adopt new rules.
 **Authorization:** in-scope native/Arena code, tests, documentation, actual browser work and small audited **local** commits. **No push, history rewrite, destructive cleanup, staging unrelated files, changes to user saves, `.venv`, ignored `legacy/`, backups, `npc-generator`, or `universe-geology`.**
 
@@ -46,6 +46,6 @@ ChatGPT has reviewed and **accepted U-CAP-007 as DONE (bounded)** and consumed i
 
 - Update `TASKS.md` for U-CAP-007 DONE/archive, U-CAP-008 ACTIVE → DONE when acceptance truly met, and affected U-ACT/UI entries. Distinguish a catalog's possible entries from implemented Actions and from current eligibility. Retain as separate tasks: unsupported Shoot/Deflect, broader Throw and Pull force mapping; general shield Don/Remove and quick-draw timing; unverified Search/Listen and `src/location.py` baseline syntax defect. Do not claim an additional Action implementation by making its UI available.
 - Do not create a new rules supplement for ordinary facing behavior unless a *genuine* rule contradiction arises. If essential adopted semantics are truly underspecified, isolate the exact question and continue independent supported work; do not arbitrarily choose a new world rule.
-- Retain the report as `docs/reports/U-CAP-008-report.md` and assignment as active until ChatGPT explicitly accepts them. Report acceptance matrix, Chrome steps/results, observed hit and opponent response, comparison to U-CAP-007, exact test evidence, limitations, task state, audited commit hashes and final worktree/index status.
+- Retain the report as `docs/reports/archive/U-CAP-008-report.md` and assignment as active until ChatGPT explicitly accepts them. Report acceptance matrix, Chrome steps/results, observed hit and opponent response, comparison to U-CAP-007, exact test evidence, limitations, task state, audited commit hashes and final worktree/index status.
 - Record actual timezone-qualified ISO 8601 Start/End and computed elapsed duration for each Codex execution interval. Finish a substantial coherent implementation in 1–3 small audited local commits where practical, not micro-assignments. Inspect staged paths, run `git diff --cached --check` and `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B tools/check_publication_safety.py --staged`; use `git commit --only` or equivalent explicit path scope. No push or history rewrite.
 - **Stop condition:** a real served-browser seeded encounter with an observed valid hit/committed consequence, a lawful opponent Action, exact fresh-process continuation, useful Action feedback, and passing focused regressions. If this cannot be met because of a genuinely external or adopted-rule blocker, report precisely which requirement is not met; **do not mark DONE** merely because tests of the backend pass.
