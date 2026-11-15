@@ -5,8 +5,8 @@
 ## Execution interval
 
 - Start: **2026-11-15T13:06:40-08:00** (captured when this execution began).
-- End: pending; capture immediately before closeout.
-- Elapsed: pending; calculate from the captured interval.
+- End: **2026-11-15T14:16:13-08:00** (captured immediately before report closeout).
+- Elapsed: **PT1H9M33S**.
 
 ## Scope and protected state
 
@@ -88,4 +88,7 @@ No other work in this assignment depends on this choice; all independently suppo
 - `docs/encounters/action-implementation-coverage.md` holds the variant-level evidence and explicit allocation blocker; `TASKS.md` retains the sole ACTIVE program and remaining rows.
 - Implementation commit: `037e03914753ab5e42d53da8278e7dc33d2cba01` (`Implement passive shield protection effects`). The commit contains only the two native implementation files, six focused test files, and the authored shield profile. It left the five unrelated staged historical archive paths and user save unchanged.
 - Before that commit, `git diff --cached --check` passed and `tools/check_publication_safety.py --staged` reported `files=14 findings=0 result=PASS`; `git commit --only` kept the unrelated archive paths out of the commit. The documentation closeout commit and final exact HEAD/status are pending.
-- No push is authorized or planned. Final HEAD, complete staged/worktree inventory, documentation whitespace/publication-safety results, and final execution interval will be recorded immediately before closeout.
+- Documentation commit: `50373ef992b199897faf81ec7073d198dfae329f` (`Document passive shield implementation and limits`). Final **HEAD** is that hash.
+- Before the documentation commit, `git diff --cached --check` passed and `tools/check_publication_safety.py --staged` reported `files=9 findings=0 result=PASS`. Markdown link check over TASKS.md, the 52-row matrix, and this report found zero broken links. `git diff --check` passed.
+- Final status: no task-owned modified tracked files. Preserved user index entries remain staged: deletions of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md`, `docs/reports/U-CAP-003-report.md`, and rename `docs/reports/U-THROW-001-rule-sync-proposal.patch` → `docs/reports/archive/U-THROW-001-rule-sync-proposal.patch`. Preserved untracked `docs/assignments/universe-arena.json` remains untouched.
+- No push is authorized or planned. The execution interval above was captured immediately before this audited closeout.
