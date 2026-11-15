@@ -5,8 +5,8 @@
 ## Execution interval
 
 - Start: **2026-11-15T13:06:40-08:00** (captured when this execution began).
-- End: **2026-11-15T14:16:13-08:00** (captured immediately before report closeout).
-- Elapsed: **PT1H9M33S**.
+- End: **2026-11-15T14:17:59-08:00** (captured immediately before final closeout).
+- Elapsed: **PT1H11M19S**.
 
 ## Scope and protected state
 
@@ -91,5 +91,5 @@ No other work in this assignment depends on this choice; all independently suppo
 - Documentation content commit: `50373ef992b199897faf81ec7073d198dfae329f` (`Document passive shield implementation and limits`). It is the repository HEAD immediately before the final report-only closeout.
 - Before the documentation commit, `git diff --cached --check` passed and `tools/check_publication_safety.py --staged` reported `files=9 findings=0 result=PASS`. Markdown link check over TASKS.md, the 52-row matrix, and this report found zero broken links. `git diff --check` passed.
 - Final status: no task-owned modified tracked files. Preserved user index entries remain staged: deletions of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md`, `docs/reports/U-CAP-003-report.md`, and rename `docs/reports/U-THROW-001-rule-sync-proposal.patch` → `docs/reports/archive/U-THROW-001-rule-sync-proposal.patch`. Preserved untracked `docs/assignments/universe-arena.json` remains untouched.
-- Report closeout commit `7ebc25058361cf531c64f56e15992059bfe14be6` was verified as HEAD after recording the final execution interval. This final report correction clarifies the sequence only.
+- Report closeout commit `7ebc25058361cf531c64f56e15992059bfe14be6` was verified as HEAD before this final timestamp correction. The final timestamp correction is separately committed; its resulting HEAD is recorded in the final chat.
 - No push is authorized or planned. The execution interval above was captured immediately before this audited closeout.
