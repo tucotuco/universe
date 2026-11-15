@@ -13,7 +13,7 @@ from spatial.state import CartesianPosition
 from action_evaluation import (EvaluationSnapshot, EvaluationResult, ActionView,
     EntityView, ActionProposal, DamageEffect, FatalEffect, ProtectionEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect,
     PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, EffectIdentity, IdentifiedEffect,
-    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, ObjectGripEffect, StunEffect, SubdualEffect, UnsupportedEvaluation,
+    RandomDraw, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ShieldEquipmentEffect, ReadyPreparationEffect, ReadyConsumptionEffect, ObjectGripEffect, StunEffect, SubdualEffect, UnsupportedEvaluation,
     EvaluationIntegrityError, freeze, position, pickup_eligibility)
 
 
@@ -80,8 +80,8 @@ class BoundaryCandidate:
         return tuple(row for row in self.effects.values() if row.identity.source_action_id == action_id)
 
 
-_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect)
-_FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
+_EFFECTS = (DamageEffect, FatalEffect, ProtectionEffect, PracticeEffect, AwarenessEffect, DefenseEffect, DelayDefenseEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ShieldEquipmentEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect)
+_FAMILIES = frozenset(('combat', 'melee', 'object_strike', 'disarm', 'grappling', 'end_run', 'defense', 'run', 'spot', 'throw', 'pickup', 'ready_weapon', 'shield_equipment', 'ready_preparation', 'delay', 'observe_group', 'history_request'))
 _ATTACK_OUTCOMES = frozenset(('normal', 'critical', 'stunned', 'stunned_critical', 'stun_failed', 'fatal', 'hit self', 'miss', 'spectacular miss', 'drop weapon'))
 _OUTCOMES = {
     'observe_group': frozenset(('unplaced', 'out_of_range', 'success', 'failure')),
@@ -106,6 +106,9 @@ _OUTCOMES = {
                          'unsupported_contents', 'contested', 'success')),
     'ready_weapon': frozenset(('unavailable', 'unable_to_act', 'unsupported_weapon',
                                'hand_unavailable', 'already_ready', 'contested', 'success')),
+    'shield_equipment': frozenset(('unavailable', 'unable_to_act', 'unsupported_shield_timing',
+        'unsupported_tower_shield',
+        'hand_unavailable', 'already_equipped', 'contested', 'success')),
     'ready_preparation': frozenset(('unavailable', 'unable_to_act', 'unsupported_motion', 'unsupported_pole_set',
                                     'unsupported_timing', 'already_ready', 'contested', 'success')),
     'delay': frozenset(('success',)),
@@ -120,7 +123,7 @@ _METADATA = {'combat': ('distance',), 'melee': ('distance','relative_charge_spee
                       'objective_key', 'evidence_kind', 'visible_count'),
              'observe_group': ('skill_level_used', 'roll', 'observation_id', 'objective_key'),
              'history_request': ('account_id', 'objective_key', 'newly_constructed'),
-             'pickup': (), 'ready_weapon': (), 'ready_preparation': (), 'delay': (), 'grappling': ('contact_kind',)}
+             'pickup': (), 'ready_weapon': (), 'shield_equipment': (), 'ready_preparation': (), 'delay': (), 'grappling': ('contact_kind',)}
 _METADATA['throw'] = ('release_speed_yd_s', 'impact_time')
 _METADATA['end_run'] = ('rolls','initiator_total','occupant_total','reason','exit_distance_m')
 
@@ -164,6 +167,11 @@ def _effect(effect):
     if type(effect) is ReadyWeaponEffect:
         _identity(values['object_id'])
         _require(values['hand'] in ('left hand', 'right hand'), 'unsupported native Ready weapon hand')
+    if type(effect) is ShieldEquipmentEffect:
+        _identity(values['object_id'])
+        _require(values['hand'] in ('left hand', 'right hand')
+                 and values['operation'] in ('don', 'remove'),
+                 'unsupported native shield equipment transition')
     if type(effect) in (ReadyPreparationEffect, ReadyConsumptionEffect):
         _identity(values['object_id'])
     if type(effect) is ReadyPreparationEffect:
@@ -412,7 +420,7 @@ def _copy_proposal(proposal, actions, entities):
         expected_targets.update(e.target_id for e in effects)
     if action.family == 'pickup':
         expected_targets.update(e.target_id for e in effects)
-    if action.family in ('ready_weapon', 'ready_preparation', 'delay'):
+    if action.family in ('ready_weapon', 'shield_equipment', 'ready_preparation', 'delay'):
         expected_targets.update(e.target_id for e in effects)
     expected_targets.update(e.target_id for e in effects if type(e) is ReadyConsumptionEffect)
     _require(set(targets) == expected_targets, 'affected Target references do not match causal records')
@@ -681,6 +689,19 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
         _require(ready_weapon_eligibility(snapshot, action) is None,
                  'Ready weapon effect is ineligible in the common snapshot')
         return effect.target_id, ('ready_weapon', action.id, effect.object_id, effect.hand)
+    if type(effect) is ShieldEquipmentEffect:
+        _identity(effect.object_id)
+        _require(action.family == 'shield_equipment' and proposal.outcome == 'success'
+                 and effect.target_id == action.actor_id and effect.object_id == action.target_id
+                 and effect.hand == action.data.get('hand')
+                 and effect.operation == action.data.get('shield_operation')
+                 and recipient.category == 'being' and entities[effect.object_id].category == 'weapon',
+                 'Shield equipment effect differs from its declared Object, hand, or operation')
+        from action_evaluation import shield_equipment_eligibility
+        _require(shield_equipment_eligibility(snapshot, action) is None,
+                 'Shield equipment effect is ineligible in the common snapshot')
+        return effect.target_id, ('shield_equipment', action.id, effect.object_id,
+                                  effect.hand, effect.operation)
     if type(effect) is ReadyPreparationEffect:
         _identity(effect.object_id)
         _require(action.family == 'ready_preparation' and proposal.outcome == 'success'
@@ -919,6 +940,9 @@ def _validate_complete_outcome(proposal, action, entities):
     ready = [e for e in effects if type(e) is ReadyWeaponEffect]
     _require(len(ready) == int(action.family == 'ready_weapon' and proposal.outcome == 'success'),
              'missing/extra native Ready weapon equipment effect')
+    shield_equipment = [e for e in effects if type(e) is ShieldEquipmentEffect]
+    _require(len(shield_equipment) == int(action.family == 'shield_equipment' and proposal.outcome == 'success'),
+             'missing/extra native shield Don/Remove equipment effect')
     preparations = [e for e in effects if type(e) is ReadyPreparationEffect]
     _require(len(preparations) == int(action.family == 'ready_preparation' and proposal.outcome == 'success'),
              'missing/extra native Ready preparation effect')
@@ -1147,6 +1171,25 @@ def reconcile_boundary(snapshot, result):
                     else 'success')
         _require(proposals[aid].outcome == expected,
                  'Ready weapon outcome contradicts same-snapshot eligibility/contention')
+    from action_evaluation import shield_equipment_eligibility
+    shield_claims = {}
+    for aid in due:
+        action = actions[aid]
+        if action.family == 'shield_equipment' and action.lifecycle == 'pending':
+            if shield_equipment_eligibility(snapshot, action) is None:
+                shield_claims.setdefault((action.actor_id, action.data['hand']), []).append(aid)
+                shield_claims.setdefault(('shield', action.target_id), []).append(aid)
+    for aid in due:
+        action = actions[aid]
+        if action.family != 'shield_equipment' or action.lifecycle != 'pending':
+            continue
+        status = shield_equipment_eligibility(snapshot, action)
+        expected = (status if status is not None else
+                    'contested' if any(len(shield_claims[key]) > 1 for key in (
+                        (action.actor_id, action.data['hand']), ('shield', action.target_id)))
+                    else 'success')
+        _require(proposals[aid].outcome == expected,
+                 'Shield Don/Remove contradicts common-snapshot hand/Object eligibility')
     from action_evaluation import ready_preparation_eligibility
     preparation_claims = {}
     for aid in due:

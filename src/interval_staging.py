@@ -24,7 +24,7 @@ from universe import Universe
 from action_choice import ChoiceBook, ChoiceView, ChoiceMember, Reservation, _Accepted, declaration
 from scheduling import PreparedSchedule
 from action import Action
-from activities import RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
+from activities import RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ShieldEquipmentAction, ReadyPreparationAction, DelayAction
 from melee_combat import MeleeStrike
 from melee_defense import MeleeDefense
 from group_observation import ObserveGroupAction, SampledGroupObservation
@@ -63,7 +63,7 @@ def _require(test, reason):
         raise IntervalIntegrityError(reason)
 
 
-_ACTIONS = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense,
+_ACTIONS = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ShieldEquipmentAction, ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense,
             ObserveGroupAction, AskAboutPastAction)
 _OBJECTS = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance, StatisticalGroup)
 # Pin methods at import, before any user-provided extension is inspected. This

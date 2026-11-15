@@ -34,6 +34,8 @@ pin from above	being	none	False
 pin from below	being	none	False
 ready object	object	none	False
 ready weapon	weapon	none	False
+don shield	weapon	none	False
+remove shield	weapon	none	False
 reverse	being	none	False
 shoot being	being	none	True
 shoot object	object	none	False

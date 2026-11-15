@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from action import Action
 from action_choice import ChoiceMember, ChoiceRejected
-from activities import ReadyPreparationAction, ReadyWeaponAction, RunAction, SpotAction
+from activities import ReadyPreparationAction, ReadyWeaponAction, ShieldEquipmentAction, RunAction, SpotAction
 from ai_duel import AgentDuel
 from encounter import Encounter, BoundaryInvariantError
 from event import Event
@@ -311,6 +311,43 @@ class TestActionChoices(unittest.TestCase):
         self.assertTrue(any('right hand' in row.reason for row in conflicts),
                         validation.diagnostics)
         self.assertNotIn(self.a.id, ' '.join(row.reason for row in conflicts))
+
+    def test_shield_equipment_reserves_both_selected_hand_and_same_shield_object(self):
+        self.enc.enable_transactional_progression(quiescent=True)
+        self.enc.arena_activation_enabled = True
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
+        self.a.current.body_parts['left hand'] = None
+        self.a.current.body_parts['right hand'] = None
+        self.a.weapons.clear()
+        shields = []
+        for label in ('first shield', 'second shield'):
+            shield_id = self.enc.make_weapon('Medium shield', label)
+            shield = self.world.get_object_by_id(shield_id)
+            self.a.possessions.append(shield_id)
+            shield.parent_container_id = self.a.id
+            shields.append(shield_id)
+        duration = self.world.get_object_by_id(shields[0]).St() * 5
+
+        same_shield = (ShieldEquipmentAction(self.enc, self.a.id, shields[0],
+            'left hand', 'don', 0), ShieldEquipmentAction(self.enc, self.a.id,
+            shields[0], 'right hand', 'don', 0))
+        conflict = self.enc.validate_choice(self.enc.propose_choice(
+            self.multiple_action_members(same_shield, (0, 3))))
+        self.assertFalse(conflict.valid)
+        self.assertTrue(any(row.code == 'active_object_conflict'
+                            and row.object_id == shields[0] for row in conflict.diagnostics),
+                        conflict.diagnostics)
+
+        same_hand = (ShieldEquipmentAction(self.enc, self.a.id, shields[0],
+            'left hand', 'don', 0), ShieldEquipmentAction(self.enc, self.a.id,
+            shields[1], 'left hand', 'don', 0))
+        conflict = self.enc.validate_choice(self.enc.propose_choice(
+            self.multiple_action_members(same_hand, (0, 3))))
+        self.assertFalse(conflict.valid)
+        self.assertTrue(any(row.code == 'active_hand_conflict'
+                            and 'left hand' in row.reason for row in conflict.diagnostics),
+                        conflict.diagnostics)
+        self.assertEqual(duration, same_hand[0].end_time)
 
     def test_one_retained_dodge_cannot_be_assigned_twice_in_one_choice(self):
         preparation = MeleeDefense(self.enc, self.a.id, kind='dodge',

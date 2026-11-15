@@ -18,7 +18,7 @@ from pathlib import Path
 
 from action import Action
 from arena_initialization import ArenaInitializationRefusal, initialize_two_being_arena
-from activities import RunAction, ReadyWeaponAction, ThrowAction
+from activities import RunAction, ReadyWeaponAction, ShieldEquipmentAction, ThrowAction
 from melee_combat import MeleeStrike, effective_melee_reach_meters
 from atomic_publication import RNGCursor
 from arena_hex_map import HexAddress
@@ -506,7 +506,7 @@ class GeneratedArenaSession:
                 self._pickup_action_id=None;self._pickup_action_outcome=None
                 self._ready_weapon_action_id=None;self._ready_weapon_action_outcome=None
                 self._ready_weapon_end_time=None
-                from activities import RunAction, PickUpAction, ReadyWeaponAction
+                from activities import RunAction, PickUpAction, ReadyWeaponAction, ShieldEquipmentAction
                 from encounter_inspection import inspect_encounter
                 by_id={event_id:event for event_id,event in universe.event_history.items()}
                 # A newly accepted Choice is not necessarily in event_history:
@@ -516,10 +516,10 @@ class GeneratedArenaSession:
                 for accepted in encounter._choice_book._choices.values():
                     for member in accepted.members:
                         action=member.action
-                        if type(action) in (RunAction,PickUpAction,ReadyWeaponAction):
+                        if type(action) in (RunAction,PickUpAction,ReadyWeaponAction,ShieldEquipmentAction):
                             by_id[action.id]=action
                 native_actions=[event for event in by_id.values()
-                    if type(event) in (RunAction,PickUpAction,ReadyWeaponAction)
+                    if type(event) in (RunAction,PickUpAction,ReadyWeaponAction,ShieldEquipmentAction)
                     and event.actor_id==meta['player_id']]
                 completed={}
                 if encounter._atomic_interval_history:
@@ -530,7 +530,7 @@ class GeneratedArenaSession:
                         self._player_action_id=event.id;self._player_action_outcome=outcome
                     elif type(event) is PickUpAction:
                         self._pickup_action_id=event.id;self._pickup_action_outcome=outcome
-                    elif type(event) is ReadyWeaponAction:
+                    elif type(event) in (ReadyWeaponAction, ShieldEquipmentAction):
                         self._ready_weapon_action_id=event.id;self._ready_weapon_action_outcome=outcome
                         self._ready_weapon_end_time=event.end_time
                 result=self._view_unlocked()
@@ -655,10 +655,14 @@ class GeneratedArenaSession:
                              "outcome": self._pickup_action_outcome}
         ready_weapon_action = None
         if self._ready_weapon_action_id is not None:
-            duration = ReadyWeaponAction.DRAW_DURATION_SECONDS
+            native_event = candidate.universe.get_event_by_id(self._ready_weapon_action_id)
+            is_shield_equipment = type(native_event) is ShieldEquipmentAction
+            duration = (native_event.end_time-native_event.start_time if is_shield_equipment
+                        else ReadyWeaponAction.DRAW_DURATION_SECONDS)
             remaining = (None if self._ready_weapon_end_time is None else
                          max(0, int(self._ready_weapon_end_time - candidate.encounter.time)))
-            ready_weapon_action = {"name": "Draw",
+            ready_weapon_action = {"name": (("Don Shield" if native_event.operation == "don" else "Remove Shield")
+                if is_shield_equipment else "Draw"),
                 "status": "completed" if self._ready_weapon_action_outcome is not None else "executing",
                 "outcome": self._ready_weapon_action_outcome,
                 "duration_seconds": duration, "seconds_remaining": remaining}
@@ -789,6 +793,7 @@ class GeneratedArenaSession:
         supported_actions = {
             action_type: _has_native_transactional_action_contract(action_type)
             for action_type in (Action, RunAction, SpotAction, PickUpAction, ReadyWeaponAction,
+                                ShieldEquipmentAction,
                                 ReadyPreparationAction, DelayAction, ThrowAction,
                                 MeleeStrike, MeleeDefense)
         }
@@ -3537,6 +3542,7 @@ class GeneratedArenaSession:
 
     def _action_catalog_unlocked(self, candidate, player, selected, supported_actions):
         from activities import PickUpAction, RunAction, SpotAction, ReadyPreparationAction, DelayAction
+        from weapon import WeaponInstance
         from attention_intent import eligible_discovery_targets
 
         handle = None if selected is None else selected.get("handle")
@@ -3935,6 +3941,58 @@ class GeneratedArenaSession:
                         "present_state": selected["present_state"]}),
                     "hands": list(ready_hands),
                 })
+                continue
+            elif name.casefold() in ("don shield", "remove shield"):
+                operation = "don" if name.casefold() == "don shield" else "remove"
+                hands = []
+                duration = None
+                status = "unavailable"
+                reason = "Select a currently perceived carried Shield."
+                target_view = (None if selected is None else {"handle": handle,
+                    "name": selected["name"], "type": selected["type"],
+                    "present_state": selected["present_state"]})
+                if (evidence is not None and evidence.category == "object"
+                        and evidence.present_state == "carried"):
+                    try:
+                        shield = candidate.universe.get_object_by_id(entity_id)
+                        category = set(candidate.universe.library.weapon_dictionary
+                            .get_objects_in_category("Shields"))
+                        if type(shield) is not WeaponInstance or shield.current.obj_type not in category:
+                            raise ArenaBrowserRequestError("The selected carried Object is not an adopted native Shield.")
+                        if (operation == "don" and "tower" in shield.current.obj_type.casefold()):
+                            raise ArenaBrowserRequestError(
+                                "Revision 61 does not allow a Tower shield to be wielded as an ordinary shield; its ground-cover placement is not modeled.")
+                        if (entity_id not in player.possessions or player.possessions.count(entity_id) != 1
+                                or shield.parent_container_id != player.id or shield.get_position() is not None):
+                            raise ArenaBrowserRequestError("The selected Shield is not in exclusive native carried custody.")
+                        if operation == "don":
+                            if entity_id in player.weapons or entity_id in player.current.body_parts.values():
+                                raise ArenaBrowserRequestError("This Shield is already borne.")
+                            hands = [part for part in ShieldEquipmentAction.HANDS
+                                     if part in player.current.body_parts and player.current.body_parts[part] is None]
+                        else:
+                            hands = [part for part in ShieldEquipmentAction.HANDS
+                                     if player.current.body_parts.get(part) == entity_id
+                                     and entity_id in player.weapons]
+                        if not hands:
+                            raise ArenaBrowserRequestError("No eligible represented hand is available for this Shield transition.")
+                        duration = shield.St() * (5 if operation == "don" else 2)
+                        if duration <= 0:
+                            raise ArenaBrowserRequestError("The Shield has no adopted positive swing timing.")
+                        if not _has_native_transactional_action_contract(ShieldEquipmentAction):
+                            raise ArenaBrowserRequestError("The native Shield Don/Remove resolver contract is unavailable.")
+                        status = "available"
+                        reason = (f"Native {operation.title()} Shield; resolves after {duration} seconds "
+                                  "using the adopted shield swing-timing multiple and one selected hand.")
+                    except (ArenaBrowserRequestError, TypeError, ValueError) as exc:
+                        reason = str(exc)
+                catalog_rows.append({"name": name, "group": "Equipment",
+                    "target_type": "weapon", "required_skill": source_row["required_skill"],
+                    "is_melee": source_row["is_melee"], "status": status,
+                    "display_name": ("Don Shield" if operation == "don" else "Remove Shield")
+                        + (f" ({duration:g} s)" if duration is not None else ""),
+                    "reason": reason, "target": target_view, "hands": hands,
+                    "duration_seconds": duration, "operation": operation})
                 continue
             elif name.casefold() == "ready object":
                 options, reason = self._ready_preparation_options_unlocked(
@@ -5316,6 +5374,51 @@ class GeneratedArenaSession:
             self._selected_entity_handle = handle
             return self._view_unlocked()
 
+    def choose_shield_equipment(self, payload):
+        from activities import ShieldEquipmentAction
+        from arena_perception import ArenaPerceptionLedger
+        from weapon import WeaponInstance
+        if (type(payload) is not dict or set(payload) != {"handle", "hand", "operation"}
+                or payload.get("operation") not in ("don", "remove")):
+            raise ArenaBrowserRequestError("Shield equipment requires a visible Shield, selected hand, and Don/Remove operation")
+        handle, hand, operation = payload["handle"], payload["hand"], payload["operation"]
+        with self._lock:
+            if self._active is None or type(handle) is not str or type(hand) is not str:
+                raise ArenaBrowserRequestError("Shield target or hand is unavailable")
+            if not _has_native_transactional_action_contract(ShieldEquipmentAction):
+                raise ArenaBrowserRequestError("The native Shield Don/Remove Choice contract is unavailable")
+            if self._ready_weapon_action_id is not None and self._ready_weapon_action_outcome is None:
+                raise ArenaBrowserRequestError("A native equipment Action is already resolving.")
+            entity_id = next((key for key, value in self._view_handles.items() if value == handle), None)
+            player = self._active.participants[0].native.being
+            ledger = object.__getattribute__(player, "__dict__").get("_arena_perception_ledger")
+            if type(ledger) is not ArenaPerceptionLedger or ledger.observer_id != player.id:
+                raise ArenaBrowserRequestError("player perception evidence is unavailable")
+            evidence = None if entity_id is None else next(
+                (row for row in ledger.current if row.entity_id == entity_id), None)
+            if evidence is None or evidence.category != "object" or evidence.present_state != "carried":
+                raise ArenaBrowserRequestError("Choose a currently perceived carried Shield.")
+            obj = self._active.universe.get_object_by_id(entity_id)
+            category = set(self._active.universe.library.weapon_dictionary.get_objects_in_category("Shields"))
+            if type(obj) is not WeaponInstance or obj.current.obj_type not in category:
+                raise ArenaBrowserRequestError("The selected carried Object is not an adopted native Shield.")
+            action = ShieldEquipmentAction(self._active.encounter, player.id, entity_id,
+                hand, operation, self._active.encounter.time)
+            try:
+                if not self._active.encounter.initiated:
+                    self._active.encounter.activate_arena_for_player_action(
+                        player.id, action, rng_owner=self._rng_cursor)
+                else:
+                    self._active.encounter.schedule_action(action)
+            except Exception as exc:
+                raise ArenaBrowserRequestError(
+                    "native Shield Don/Remove Choice was not accepted; Arena state is unchanged") from exc
+            self._ready_weapon_action_id = action.id
+            self._ready_weapon_action_outcome = None
+            self._ready_weapon_end_time = action.end_time
+            self._selected_entity_handle = handle
+            return self._view_unlocked()
+
     def choose_ready_preparation(self, payload):
         from activities import ReadyPreparationAction
         from arena_perception import ArenaPerceptionLedger
@@ -5664,8 +5767,10 @@ class GeneratedArenaSession:
                         result = candidate.encounter.inspect_committed(
                             int(candidate.encounter.time)).action(self._ready_weapon_action_id)
                         self._ready_weapon_action_outcome = result.facts.outcome
+                        ready_action_name = (ready_event.name if ready_event is not None
+                            else 'Draw')
                         self._trace.native_advance(trace_request_id, trace_client_sequence,
-                            f"action=ready_weapon outcome={self._ready_weapon_action_outcome}")
+                            f"action={ready_action_name} outcome={self._ready_weapon_action_outcome}")
                 if touch_action is not None and touch_action.end_time <= candidate.encounter.time:
                     touch_result = candidate.encounter.inspect_committed(
                         int(candidate.encounter.time)).action(touch_action.id)

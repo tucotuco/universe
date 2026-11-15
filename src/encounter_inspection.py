@@ -9,7 +9,7 @@ from types import MappingProxyType
 import importlib
 import math
 
-from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect, freeze, native_data,
+from action_evaluation import (DamageEffect, FatalEffect, ProtectionEffect, ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ShieldEquipmentEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect, freeze, native_data,
                                EvaluationIntegrityError, UnsupportedEvaluation, subdual_recovery_state, stun_active_at)
 from spatial.state import CartesianPosition
 
@@ -197,6 +197,8 @@ def _expected_body_parts(meta, target_id, initial, disarm_landings=()):
         effect = row.effect
         if type(effect) is ReadyWeaponEffect and effect.target_id == target_id:
             expected[effect.hand] = effect.object_id
+        elif type(effect) is ShieldEquipmentEffect and effect.target_id == target_id:
+            expected[effect.hand] = effect.object_id if effect.operation == 'don' else None
         elif type(effect) is DropObjectEffect and effect.owner_id == target_id:
             for slot,value in tuple(expected.items()):
                 if value==effect.target_id:expected[slot]=None
@@ -231,7 +233,7 @@ def detached(value):
     if _ALLOWED is None:
         # Deliberately named data adapters, not all dataclasses in a namespace.
         catalog = {
-            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect DisarmLandingPendingEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
+            'action_evaluation': 'ActionProposal ActionView AwarenessEffect DamageEffect DefenseEffect DelayDefenseEffect EffectIdentity FatalEffect IdentifiedEffect PickupEffect ReadyWeaponEffect ShieldEquipmentEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect DisarmLandingPendingEffect GrappleStateEffect PositionEffect ObjectGripEffect PracticeEffect ProtectionEffect ProjectileReleaseEffect StunEffect SubdualEffect',
             'action_settlement': 'TargetCandidate',
             'frozen_practice': 'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
             'observer_proposals': 'ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence FrozenObjectEvidence RecipientIdentity ObjectiveUse',

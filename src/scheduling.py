@@ -30,7 +30,7 @@ class PreparedSchedule:
         instrument = data.get('instrument_id')
         active = ((instrument,) if instrument is not None and
                   data['event_type'] in ('swing', 'thrust', 'subdue', 'parry', 'block', 'throw') else ())
-        if data['event_type'] in ('grab object','wrest') and data.get('target_id') is not None:
+        if data['event_type'] in ('grab object','wrest','don shield','remove shield') and data.get('target_id') is not None:
             active += (data['target_id'],)
         return cls(data['id'], data['start_time'],
                    data['end_time'] if end_time is None else end_time,
@@ -46,7 +46,7 @@ def native_preparer(action):
     merely naming a callback prepare_schedule does not make it safe.
     """
     from action import Action
-    from activities import RunAction, SpotAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
+    from activities import RunAction, SpotAction, PickUpAction, ReadyWeaponAction, ShieldEquipmentAction, ReadyPreparationAction, DelayAction
     from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
@@ -54,7 +54,7 @@ def native_preparer(action):
     from history_conversation import AskAboutPastAction
 
     cls = type(action)
-    native = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense,
+    native = (Action, RunAction, SpotAction, ThrowAction, PickUpAction, ReadyWeaponAction, ShieldEquipmentAction, ReadyPreparationAction, DelayAction, MeleeStrike, MeleeDefense,
               ObserveGroupAction, AskAboutPastAction)
     if not issubclass(cls, Action):
         raise UnsupportedScheduleExtension(

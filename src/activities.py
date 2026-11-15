@@ -449,6 +449,85 @@ class ReadyWeaponAction(Action):
         raise RuntimeError('ReadyWeaponAction resolves only through native transactional publication')
 
 
+class ShieldEquipmentAction(Action):
+    """Timed Don/Remove for a carried shield with an explicit hand transition.
+
+    The shield's adopted swing timing supplies the Don/Remove duration. A
+    removed shield stays in the owner's carried possessions; this changes only
+    its borne/weapon state and does not invent a ground destination.
+    """
+
+    HANDS = ReadyWeaponAction.HANDS
+
+    def __init__(self, encounter, actor_id, shield_id, hand, operation,
+                 start_time, *, id=None):
+        from weapon import WeaponInstance
+        if (type(operation) is not str or operation not in ('don', 'remove')
+                or type(actor_id) is not str or not actor_id
+                or type(shield_id) is not str or not shield_id
+                or actor_id == shield_id or type(hand) is not str or hand not in self.HANDS):
+            raise ValueError('Shield equipment requires a Being, Shield, hand, and Don/Remove operation')
+        if (type(start_time) not in (int, float) or not math.isfinite(start_time)
+                or start_time < 0 or not float(start_time).is_integer()):
+            raise ValueError('Shield equipment must begin at an integer Encounter second')
+        actor = encounter.get_being(actor_id)
+        shield = encounter.universe.get_object_by_id(shield_id)
+        category = set(encounter.universe.library.weapon_dictionary
+                       .get_objects_in_category('Shields'))
+        if type(shield) is not WeaponInstance or shield.current.obj_type not in category:
+            raise ValueError('Don/Remove requires an exact native Shield Weapon')
+        swing_time = shield.St()
+        if type(swing_time) is not int or swing_time < 1:
+            raise ValueError('Shield lacks an adopted positive swing timing for Don/Remove')
+        seconds = swing_time * (5 if operation == 'don' else 2)
+        event_type = 'don shield' if operation == 'don' else 'remove shield'
+        super().__init__(encounter.universe, start_time, start_time + seconds,
+            event_type, actor_id, shield_id, instrument_id=None,
+            parent_event_id=encounter.id, id=id)
+        self.encounter = encounter
+        self.hand = hand
+        self.operation = operation
+        self.end_time = start_time + seconds
+
+    def prepare_schedule(self, encounter):
+        from being import BeingInstance
+        from weapon import WeaponInstance
+        if (encounter is not self.encounter or not encounter.arena_activation_enabled
+                or encounter.progression_mode != 'transactional'):
+            raise ValueError('Shield Don/Remove requires the native transactional Encounter')
+        actor = encounter.get_being(self.actor_id)
+        shield = encounter.universe.get_object_by_id(self.target_id)
+        if type(actor) is not BeingInstance or type(shield) is not WeaponInstance:
+            raise ValueError('Shield Don/Remove requires a participating Being and Shield')
+        if self.start_time < encounter.time:
+            raise ValueError('Shield Don/Remove cannot begin before current Encounter time')
+        if (self.target_id not in actor.possessions or actor.possessions.count(self.target_id) != 1
+                or shield.parent_container_id != actor.id or shield.get_position() is not None):
+            raise ValueError('Shield Don/Remove requires exclusive native carried custody')
+        body_parts = actor.current.body_parts
+        if self.hand not in body_parts:
+            raise ValueError('Shield Don/Remove requires the selected represented hand')
+        if self.operation == 'don':
+            if 'tower' in shield.current.obj_type.casefold():
+                raise ValueError('Tower shields cannot be borne as ordinary shields')
+            if (body_parts[self.hand] is not None or self.target_id in actor.weapons
+                    or self.target_id in body_parts.values()):
+                raise ValueError('Don Shield requires an unborne shield and free selected hand')
+            expected = shield.St() * 5
+        else:
+            if (body_parts[self.hand] != self.target_id or self.target_id not in actor.weapons
+                    or actor.shielded_with(encounter.universe).get(self.hand) != self.target_id):
+                raise ValueError('Remove Shield requires that shield borne in the selected hand')
+            expected = shield.St() * 2
+        if self.end_time - self.start_time != expected:
+            raise ValueError('Don/Remove duration must match the adopted shield swing-timing multiple')
+        return PreparedSchedule.from_action(self)
+
+    def resolve(self, difficulty_class):
+        guard_legacy_action(self, effect=True)
+        raise RuntimeError('ShieldEquipmentAction resolves only through native transactional publication')
+
+
 class RunAction(Action):
     """Attempt to cover a configured straight-line distance while running.
 

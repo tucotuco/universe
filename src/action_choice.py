@@ -180,7 +180,7 @@ def _equipment_hand_resource_keys(encounter, action):
         hand = data.get('shield_hand')
         if hand in represented:
             used.add(hand)
-    elif data.get('event_type') == 'ready weapon':
+    elif data.get('event_type') in ('ready weapon', 'don shield', 'remove shield'):
         hand = data.get('hand')
         if hand in represented:
             used.add(hand)
@@ -218,7 +218,7 @@ def declaration(action, *, _initialization=None):
     names += ('heavy_load_reference_lb','elevation_degrees','azimuth_degrees','landing_elevation_m')
     names += ('group_fully_visible', 'location_ledger', 'object_ledger')
     names += ('map_width_cells', 'map_height_cells')
-    names += ('hand',)
+    names += ('hand', 'operation')
     names += ('ready_motion', 'readying_seconds')
     names += ('charge_continuation_source_id',)
     names += ('end_run_exit_position','end_run_movement_conditions',

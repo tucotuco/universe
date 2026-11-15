@@ -17,7 +17,7 @@ from action_evaluation import UnsupportedEvaluation, EvaluationIntegrityError, f
 from interval_staging import (IntervalCandidate, AuthorityReference, _ISSUED_CANDIDATES,
     validate_interval_candidate, _read_set, _rng_input, _native_lock, _preflight, _semantic, _validate_closure, _digest, _guard_methods)
 from action_choice import declaration
-from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
+from action_evaluation import ProjectileReleaseEffect, PickupEffect, ReadyWeaponEffect, ShieldEquipmentEffect, ReadyPreparationEffect, ReadyConsumptionEffect, DelayDefenseEffect, DropObjectEffect, DisarmTakeEffect, DisarmLandingPendingEffect, GrappleStateEffect, PositionEffect, ObjectGripEffect, StunEffect, SubdualEffect
 from throwing import ProjectileFlight, ProjectileBoundaryState
 from encounter import Encounter
 from experience import BatchSkillUse
@@ -743,6 +743,43 @@ def _make_plan(encounter,candidate,rng_owner):
         updated_tags=dict(obj.current.tags)
         updated_tags.pop(NATIVE_DRAW_LOCATION_TAG, None)
         plan.contents('targets',obj.current.tags,updated_tags)
+    shield_transitions=[]
+    for row in supported.boundary.effects.values():
+        effect=row.effect
+        if type(effect) is not ShieldEquipmentEffect:continue
+        source=events.get(effect.source_action_id)
+        actor=objects.get(effect.target_id)
+        obj=objects.get(effect.object_id)
+        if (source is None or source.actor_id!=effect.target_id
+                or source.target_id!=effect.object_id
+                or type(actor) is not BeingInstance or type(obj) is not WeaponInstance
+                or effect.hand not in ('left hand','right hand')
+                or effect.operation not in ('don','remove')
+                or effect.object_id not in actor.possessions
+                or obj.parent_container_id!=actor.id or obj.spatial_state is not None):
+            raise PublicationRejected('Shield transition identity or carried custody changed before publication')
+        category=set(world.library.weapon_dictionary.get_objects_in_category('Shields'))
+        if obj.current.obj_type not in category:
+            raise PublicationRejected('Shield transition target is not a configured shield')
+        if effect.operation=='don':
+            if (actor.current.body_parts.get(effect.hand) is not None
+                    or effect.object_id in actor.weapons
+                    or effect.object_id in actor.current.body_parts.values()):
+                raise PublicationRejected('Don Shield hand/Object eligibility changed before publication')
+        elif (actor.current.body_parts.get(effect.hand)!=effect.object_id
+                or actor.weapons.count(effect.object_id)!=1):
+            raise PublicationRejected('Remove Shield hand/Object eligibility changed before publication')
+        shield_transitions.append((actor,obj,effect))
+    for actor,obj,effect in shield_transitions:
+        body=dict(actor.current.body_parts)
+        if effect.operation=='don':
+            plan.contents('targets',actor.weapons,actor.weapons+[effect.object_id])
+            body[effect.hand]=effect.object_id
+        else:
+            weapons=list(actor.weapons);weapons.remove(effect.object_id)
+            plan.contents('targets',actor.weapons,weapons)
+            body[effect.hand]=None
+        plan.contents('targets',actor.current.body_parts,body)
     from weapon import NATIVE_READY_PREPARATION_TAG, native_ready_preparation
     ready_preparations=[]
     for row in supported.boundary.effects.values():
@@ -1373,6 +1410,19 @@ def _committed_consistency(encounter,candidate,plan):
                            for key,other in objects.items() if type(other) is BeingInstance
                            and other is not actor for name in ('possessions','weapons','body_parts','armor'))):
                 raise PublicationRejected('Ready weapon identity/custody post-write consistency failed')
+        elif type(effect) is ShieldEquipmentEffect:
+            obj=objects[effect.object_id]
+            actor=objects[effect.target_id]
+            if (actor.possessions.count(effect.object_id)!=1
+                    or obj.parent_container_id!=actor.id or obj.spatial_state is not None):
+                raise PublicationRejected('Shield custody post-write consistency failed')
+            if effect.operation=='don':
+                if (actor.weapons.count(effect.object_id)!=1
+                        or actor.current.body_parts.get(effect.hand)!=effect.object_id):
+                    raise PublicationRejected('Don Shield equipment post-write consistency failed')
+            elif (effect.object_id in actor.weapons
+                    or actor.current.body_parts.get(effect.hand) is not None):
+                raise PublicationRejected('Remove Shield equipment post-write consistency failed')
         elif type(effect) is ReadyPreparationEffect:
             from weapon import native_ready_preparation
             preparation=native_ready_preparation(objects[effect.object_id])

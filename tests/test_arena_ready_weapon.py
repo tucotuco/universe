@@ -10,7 +10,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from activities import DelayAction, ReadyPreparationAction, ReadyWeaponAction
+from activities import DelayAction, ReadyPreparationAction, ReadyWeaponAction, ShieldEquipmentAction
 from activities import SpotAction
 from arena_browser_session import ArenaBrowserRequestError, GeneratedArenaSession
 from arena_hex_map import HexAddress
@@ -76,6 +76,148 @@ def draw_scenario():
 
 
 class TestArenaReadyWeapon(unittest.TestCase):
+    def test_shield_don_remove_native_browser_choices_and_pending_fresh_process_restore(self):
+        session, candidate, player = arena(seed=20261159)
+        shield_id = candidate.encounter.make_weapon("Medium shield", "Authored carried shield")
+        shield = candidate.universe.get_object_by_id(shield_id)
+        player.possessions.append(shield_id)
+        shield.parent_container_id = player.id
+        player.current.body_parts["right hand"] = None
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, shield.id, "object", shield.name,
+            "Medium shield", None, "carried", 0, 0.0)
+        ledger._current[shield.id] = evidence
+        ledger._history.append(evidence)
+        activate(session)
+        entity = next(row for row in session.public_view()["entities"]
+                      if row["name"] == shield.name)
+        catalog = session.inspect_entity({"handle": entity["handle"]})["action_catalog"]
+        don = next(row for row in catalog["entries"] if row["name"] == "don shield")
+        self.assertEqual(don["status"], "available", don["reason"])
+        duration = shield.St() * 5
+        accepted = session.choose_shield_equipment({"handle": entity["handle"],
+            "hand": "right hand", "operation": "don"})
+        action = next(member.action for choice in candidate.encounter._choice_book._choices.values()
+            for member in choice.members if type(member.action) is ShieldEquipmentAction)
+        self.assertEqual(action.end_time - action.start_time, duration)
+        self.assertEqual(player.current.body_parts["right hand"], None)
+        pending = session.save_encounter_bytes()
+        script = """import sys
+from arena_browser_session import GeneratedArenaSession
+from activities import ShieldEquipmentAction
+s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read())
+c=s.active_candidate;p=c.participants[0].native.being
+a=next(m.action for r in c.encounter._choice_book._choices.values()
+ for m in r.members if type(m.action) is ShieldEquipmentAction)
+assert a.id==sys.argv[1] and a.operation=='don'
+assert p.current.body_parts['right hand'] is None
+assert p.possessions.count(sys.argv[2])==1 and sys.argv[2] not in p.weapons
+for _ in range(int(sys.argv[3])):s.advance_one_second()
+c=s.active_candidate;p=c.participants[0].native.being
+o=c.universe.get_object_by_id(sys.argv[2])
+assert p.current.body_parts['right hand']==o.id and p.weapons.count(o.id)==1
+assert p.possessions.count(o.id)==1 and o.parent_container_id==p.id and o.get_position() is None
+assert c.encounter.inspect_committed(int(c.encounter.time)).action(sys.argv[1]).facts.outcome=='success'
+print('restored-and-committed-same-shield')"""
+        restored = subprocess.run([sys.executable, "-B", "-c", script, action.id,
+            shield_id, str(duration)], input=pending, cwd=ROOT, capture_output=True,
+            check=False, timeout=60)
+        self.assertEqual(restored.returncode, 0, restored.stderr.decode("utf-8", "replace"))
+        self.assertEqual(restored.stdout.decode().strip(), "restored-and-committed-same-shield")
+        # Continue in the parent session after the pending state has completed.
+        session.load_encounter_bytes(pending)
+        for _ in range(duration):
+            session.advance_one_second()
+        candidate = session.active_candidate
+        player = candidate.participants[0].native.being
+        view = session.public_view()
+        self.assertEqual(player.shielded_with(candidate.universe).get("right hand"), shield_id)
+        block = next(row for row in view["action_catalog"]["entries"] if row["name"] == "Block")
+        self.assertNotIn("No native shield is equipped", block["reason"])
+        completed_don = session.save_encounter_bytes()
+        completed_script = """import sys
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read())
+c=s.active_candidate;p=c.participants[0].native.being;o=c.universe.get_object_by_id(sys.argv[1])
+assert c.encounter.time==int(sys.argv[2]) and o.id==sys.argv[1]
+assert p.current.body_parts['right hand']==o.id and p.weapons.count(o.id)==1
+assert p.possessions.count(o.id)==1 and o.parent_container_id==p.id and o.get_position() is None
+print('fresh-completed-don-same-shield')"""
+        completed = subprocess.run([sys.executable, "-B", "-c", completed_script,
+            shield_id, str(session.active_candidate.encounter.time)], input=completed_don,
+            cwd=ROOT, capture_output=True, check=False, timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", "replace"))
+        self.assertEqual(completed.stdout.decode().strip(), "fresh-completed-don-same-shield")
+        entity = next(row for row in view["entities"] if row["name"] == shield.name)
+        catalog = session.inspect_entity({"handle": entity["handle"]})["action_catalog"]
+        remove = next(row for row in catalog["entries"] if row["name"] == "remove shield")
+        self.assertEqual(remove["status"], "available", remove["reason"])
+        duration = shield.St() * 2
+        session.choose_shield_equipment({"handle": entity["handle"],
+            "hand": "right hand", "operation": "remove"})
+        remove_action = next(member.action for choice in session.active_candidate.encounter._choice_book._choices.values()
+            for member in choice.members if type(member.action) is ShieldEquipmentAction
+            and member.action.operation == 'remove')
+        pending_remove = session.save_encounter_bytes()
+        remove_script = """import sys
+from arena_browser_session import GeneratedArenaSession
+from activities import ShieldEquipmentAction
+s=GeneratedArenaSession();s.load_encounter_bytes(sys.stdin.buffer.read())
+c=s.active_candidate;p=c.participants[0].native.being;o=c.universe.get_object_by_id(sys.argv[1])
+a=next(m.action for r in c.encounter._choice_book._choices.values()
+ for m in r.members if type(m.action) is ShieldEquipmentAction and m.action.id==sys.argv[2])
+assert (a.id, a.operation, p.current.body_parts['right hand'], o.id)==(sys.argv[2], 'remove', o.id, o.id), (a.id, a.operation, p.current.body_parts['right hand'], o.id, sys.argv[2])
+for _ in range(int(sys.argv[3])):s.advance_one_second()
+c=s.active_candidate;p=c.participants[0].native.being;o=c.universe.get_object_by_id(sys.argv[1])
+assert p.current.body_parts['right hand'] is None and sys.argv[1] not in p.weapons
+assert p.possessions.count(sys.argv[1])==1 and o.parent_container_id==p.id and o.get_position() is None
+assert c.encounter.inspect_committed(int(c.encounter.time)).action(sys.argv[2]).facts.outcome=='success'
+print('fresh-pending-remove-same-shield-carried')"""
+        restored_remove = subprocess.run([sys.executable, "-B", "-c", remove_script,
+            shield_id, remove_action.id, str(duration)], input=pending_remove, cwd=ROOT,
+            capture_output=True, check=False, timeout=60)
+        self.assertEqual(restored_remove.returncode, 0,
+            restored_remove.stderr.decode("utf-8", "replace"))
+        self.assertEqual(restored_remove.stdout.decode().strip(),
+            "fresh-pending-remove-same-shield-carried")
+        for _ in range(duration):
+            session.advance_one_second()
+        player = session.active_candidate.participants[0].native.being
+        self.assertIsNone(player.current.body_parts["right hand"])
+        self.assertIsNone(player.shielded_with(session.active_candidate.universe).get("right hand"))
+        self.assertNotIn(shield_id, player.weapons)
+        self.assertEqual(player.possessions.count(shield_id), 1)
+        self.assertEqual(session.active_candidate.universe.get_object_by_id(shield_id).parent_container_id,
+                         player.id)
+        self.assertEqual(session.active_candidate.encounter.inspect_committed(
+            int(session.active_candidate.encounter.time)).action(remove_action.id).facts.outcome,
+            "success")
+        view = session.public_view()
+        block = next(row for row in view["action_catalog"]["entries"] if row["name"] == "Block")
+        self.assertIn("No native shield is equipped", block["reason"])
+
+    def test_tower_shield_don_is_refused_by_adopted_wielding_rule(self):
+        session, candidate, player = arena(seed=20261160)
+        shield_id = candidate.encounter.make_weapon("Tower shield", "Authored tower shield")
+        shield = candidate.universe.get_object_by_id(shield_id)
+        player.possessions.append(shield_id)
+        shield.parent_container_id = player.id
+        player.current.body_parts["right hand"] = None
+        ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+        evidence = ArenaPerceptionEvidence(player.id, shield.id, "object", shield.name,
+            "Tower shield", None, "carried", 0, 0.0)
+        ledger._current[shield.id] = evidence
+        ledger._history.append(evidence)
+        activate(session)
+        entity = next(row for row in session.public_view()["entities"]
+                      if row["name"] == shield.name)
+        catalog = session.inspect_entity({"handle": entity["handle"]})["action_catalog"]
+        don = next(row for row in catalog["entries"] if row["name"] == "don shield")
+        self.assertEqual(don["status"], "unavailable")
+        self.assertIn("tower", don["reason"].casefold())
+        self.assertIsNone(player.current.body_parts["right hand"])
+        self.assertNotIn(shield_id, player.weapons)
+
     def test_generated_forearm_buckler_shows_free_hand_and_restores_bash_choice(self):
         session, candidate, player = arena(seed=20261148)
         buckler_id = candidate.encounter.make_weapon("Buckler", "Authored forearm buckler")

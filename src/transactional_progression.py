@@ -495,6 +495,21 @@ def validate_action_contract(encounter,action,*,_force=False):
                 or action.end_time - action.start_time != ReadyWeaponAction.DRAW_DURATION_SECONDS
                 or action.hand not in ReadyWeaponAction.HANDS):
             raise TransactionalProgressionError('weapon draw must retain its two-second native hand declaration')
+    from activities import ShieldEquipmentAction
+    if type(action) is ShieldEquipmentAction:
+        from weapon import WeaponInstance
+        shield = encounter.universe.get_object_by_id(action.target_id)
+        category = set(encounter.universe.library.weapon_dictionary.get_objects_in_category('Shields'))
+        swing = None if type(shield) is not WeaponInstance else shield.St()
+        expected = None if type(swing) is not int else swing * (5 if action.operation == 'don' else 2)
+        if (type(action.start_time) not in (int, float)
+                or type(action.end_time) not in (int, float)
+                or not math.isfinite(action.start_time) or not math.isfinite(action.end_time)
+                or action.event_type != ('don shield' if action.operation == 'don' else 'remove shield')
+                or type(shield) is not WeaponInstance or shield.current.obj_type not in category
+                or expected is None or action.end_time - action.start_time != expected
+                or action.hand not in ('left hand', 'right hand')):
+            raise TransactionalProgressionError('Shield Don/Remove must retain its native shield, hand, and adopted swing-timing multiple')
     from activities import ReadyPreparationAction, DelayAction
     if type(action) is ReadyPreparationAction:
         if (type(action.start_time) not in (int, float)
@@ -518,7 +533,7 @@ def validate_action_contract(encounter,action,*,_force=False):
     _guard_methods()
     import inspect
     from action import Action
-    from activities import RunAction,SpotAction,PickUpAction,ReadyWeaponAction,ReadyPreparationAction,DelayAction
+    from activities import RunAction,SpotAction,PickUpAction,ReadyWeaponAction,ShieldEquipmentAction,ReadyPreparationAction,DelayAction
     from activities import ThrowAction
     from melee_combat import MeleeStrike
     from melee_defense import MeleeDefense
@@ -527,14 +542,14 @@ def validate_action_contract(encounter,action,*,_force=False):
     from observer_proposals import _NATIVE_RESOLVERS,_NATIVE_HOOKS,_capture_belief,frozen_value
     from objective_reality import objective_action_data
     from action_evaluation import UnsupportedEvaluation
-    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,ReadyPreparationAction,DelayAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
+    if type(action) not in (Action,RunAction,SpotAction,ThrowAction,PickUpAction,ReadyWeaponAction,ShieldEquipmentAction,ReadyPreparationAction,DelayAction,MeleeStrike,MeleeDefense,ObserveGroupAction,AskAboutPastAction):
         raise UnsupportedEvaluation('transactional progression requires a reviewed exact native Action family')
     data=object.__getattribute__(action,'__dict__')
     if (inspect.getattr_static(type(action),'resolve') is not _NATIVE_RESOLVERS[type(action)]
             or 'on_completed' in data or inspect.getattr_static(type(action),'on_completed',None) is not _NATIVE_HOOKS.get(type(action))
             or any(callable(value) for key,value in data.items() if key!='generate')):
         raise UnsupportedEvaluation('transactional Action callback/override requires a reviewed proposal adapter')
-    if type(action) is Action and data['event_type'] not in ('swing','thrust','stun','subdue','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','bull rush','overrun','end-run','delay'):
+    if type(action) is Action and data['event_type'] not in ('swing','thrust','stun','subdue','touch','feint','coup de grace','strike object','break weapon','disarm','grab','grab object','wrest','hold','break hold','release grip','grapple','grapple escape','takedown','reverse','pin','trip','bull rush','overrun','end-run','don shield','remove shield','delay'):
         raise UnsupportedEvaluation('unsupported transactional base Action activity')
     if type(action) is Action and data['event_type'] == 'touch' and (
             data.get('instrument_id') is not None
