@@ -1,61 +1,67 @@
 # U-ACT-FULL-001 engineering report
 
-**Status:** ACTIVE; closeout criteria are not yet met. This report remains in the active reports directory until ChatGPT review and acceptance.
+**Status:** ACTIVE; only a bounded equipment cluster has been implemented and the Action Completeness criteria remain open. Keep this report active pending ChatGPT review.
 
-## Execution intervals
+## Execution interval
 
-- Start: **2026-11-15T10:54:27-08:00** (recorded at execution start).
+- Start: **2026-11-15T10:54:27-08:00** (recorded when this execution began).
 - End: pending; capture immediately before closeout.
-- Elapsed: pending; calculate from recorded timestamps, not estimate.
+- Elapsed: pending; calculate from the recorded timestamps.
 
-## Assignment reconciliation and repository safety
+## Current outcome and source audit
 
-- U-OBS-001 was accepted DONE (bounded). Its assignment and consumed report are in `docs/assignments/archive/U-OBS-001.md` and `docs/reports/archive/U-OBS-001-report.md`; its original perception limitations remain in TASKS and are preserved as future gate work.
-- Verified U-ACT-FULL-001 unused before activation. It is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed; U-NET-001 remains DEFERRED. Both Arena modes, observer-specific knowledge and the frozen Playtest Edition remain protected.
-- HEAD at the start: `33b11f7c4514d6d764e6baed6e4aac8c09b43df6`; assignment activation: `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` (`Activate Action coverage assignment`); coverage milestone: `5923020` (`Audit adopted Encounter action variants`).
-- The pre-existing index entries for U-CAP-002/U-CAP-003/U-OBS-001 active-path deletions and the U-THROW-001 patch rename are preserved and excluded from our commits. The untracked `docs/assignments/universe-arena.json` save remains untouched. No push.
+- U-OBS-001 was accepted DONE (bounded). Its assignment and consumed report remain at `docs/assignments/archive/U-OBS-001.md` and `docs/reports/archive/U-OBS-001-report.md`. Its observer-owned evidence, native Search/Spot/Listen and persistence remain bounded. The documented gaps—general acoustic propagation, multiple-candidate and general Object/Event discovery, generated Being geometry, arbitrary Event perception and rolled incidental Spot/Listen—remain future Action Gate work.
+- U-ACT-FULL-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed and U-NET-001 remains DEFERRED. Both Arena modes, observer-specific knowledge and the frozen Playtest Edition are unchanged.
+- The source-linked matrix is [action-implementation-coverage.md](../encounters/action-implementation-coverage.md). It has **52 Action/variant rows: 42 PARTIAL, 3 OPEN, 5 BLOCKED, 1 VERIFY, 1 NOT AN INDEPENDENT ACTION, 0 FULL**. The stable inventory distinguishes bounded prior DONE assignments from rule-complete Actions; no row was upgraded to FULL. The matrix records exact source links, model prerequisites, implementation paths and focused tests. U-ACT-040 and U-ACT-041 were checked before use.
+- Revision 61 defines shield Don and Remove time from the Shield's swing timing: `ST × 5` and `ST × 2`. A newly added native `ShieldEquipmentAction` implements those transitions for ordinary configured shields. Don requires exclusive carried custody and a free represented hand; Remove requires the shield borne in that hand. Both reserve the same Object and hand, evaluate from the common boundary snapshot, and publish the equipment/hand transition atomically. Don adds the existing Shield Object to the same Being's equipped weapon list and represented hand. Remove clears those states but retains the Object in that Being's carried possessions. The adopted text directs no drop on Remove, so the transition does not invent a ground destination.
+- The shield's held-state feeds the existing `shielded_with` and shield-dependent Action validation. The regression verifies that after Don the native Action catalog no longer says Block is unavailable because there is no equipped shield, and after Remove it again refuses Block on that precise prerequisite. Existing shield Bash and two-handed resource regressions continue to pass. An unborne carried shield is not protective. A tower shield is refused for ordinary Don under r61; planting one for cover remains unavailable because native ground cover geometry is not represented.
+- This new equipment cluster is **PARTIAL**, not FULL. We have not implemented passive shield-size attack allocation; shield strap/source transitions and tower set-down/cover remain unavailable; generic armor Don/Remove lacks armor-part composition, fit and partial-don hit-die state. Exceptional Quick-draw is blocked by r69's essentially no-time result without adopted integer-boundary scheduling semantics. Generic Ready Object remains referee-timed. These are independent limitations, not reasons to invent a physical transition.
 
-## Acceptance matrix progress
+## Served Chrome walkthrough
 
-The source-linked matrix is [action-implementation-coverage.md](../encounters/action-implementation-coverage.md). It enumerates 51 source-linked Action/variant rows: **40 PARTIAL, 4 OPEN, 5 BLOCKED, 1 NOT AN INDEPENDENT ACTION, 1 VERIFY, 0 FULL**. This is deliberately not a gate pass; prior DONE (bounded) implementations remain bounded. The matrix identifies implementation paths and focused tests per row, and gives the ordered remaining-cluster plan.
+Actual served browser: `http://127.0.0.1:51864/`, generated seed **20261159**. This encounter used the served Arena and a represented Small shield at hex `(3,3)`; no browser-side hand/custody edit was made.
 
-The inventory audit verified `U-ACT-040` and `U-ACT-041` unused, then registered mounted Dismount and Armor Don/Remove in the sole canonical `TASKS.md` register. Their exact missing mount/rider and armor-part state is recorded in the matrix. No other stable ID was recycled.
+1. Submitted a movement destination to `(3,3)` in the served map and advanced the native movement boundary. The shield remained a ground Object with its own opaque handle.
+2. Selected that shield and submitted the native Pick up choice; the receipt reported `Pick up resolved: success.` at native time **2 seconds**.
+3. Opened Tobe's native equipment controls, selected the left hand and submitted `Don Shield (25 s)`. At native time **27 seconds**, the receipt reported `Don Shield resolved: success.` The visible character sheet listed `left hand: Small shield`, and the carried-equipment view showed the same shield as held equipment. The Block catalog no longer failed for absence of an equipped shield.
+4. Selected that same Small shield, chose the represented left hand and submitted `Remove Shield (10 s)`. At native time **37 seconds**, the receipt reported `Remove Shield resolved: success.` The sheet showed `left hand: empty`, `right hand: Dagger`, and the same shield still carried; Block then failed closed with `No native shield is equipped in a functioning arm.`
 
-### Equipment/weapon findings
+The result was inspected after the final boundary in the actual Chrome tab. The native receipts and character/equipment view agree; the Object was not duplicated, released or renamed. Player-authorized opaque handles were used. No opponent Action was enabled by this equipment-only encounter; opponent contention was not part of this shield transition.
 
-- Revision 61 does define shield `ST`: the Shields Table legend calls it the timing for swing attacks with that shield. Don Shield and Remove Shield use `ST × 5` and `ST × 2`, respectively. The earlier U-CAP-003 report statement that the `ST` input itself was absent was inaccurate; this report corrects that conclusion.
-- A generic shield Don/Remove transition is still not implemented. Existing native state can express a carried shield, selected free hand, and a shield borne in a hand; the native evaluation, atomic custody projection, interrupt handling, browser contract, history and fresh-process test do not yet connect those states through the adopted timed Actions. The existing per-instance forearm buckler fact remains a separate representation and must not be generalized to other shields.
-- A removed shield's destination (retained in carried possession versus released to the ground) is not specified by the adopted Action text. I have not silently chosen a physical transition. This question must be isolated if either outcome is necessary to finish the shield variant; donning a carried shield can be evaluated independently.
-- Passive shield capacity is not compliant today: r61 limits passive defense to shield-size attacks in a round and requires the bearer to select which attacks receive protection when more attacks arrive. The evaluator currently samples shield identity randomly per attack. The common-snapshot rule additionally requires assignments before outcomes. This needs native allocation, a player choice surface and a persisted decision; randomized selection is not evidence of adopted allocation.
-- Revision 69 adopts ordinary Draw at two seconds and Quick-draw with advanced weapon skill as essentially no-time. It expressly does not authorize inventing a zero-duration integer scheduler event. The current Draw adapter correctly fails closed for this exceptional branch. General Ready Object timing is referee-adjudicated and remains blocked without a supplied case-specific duration.
+## Persistence, conflicts and regression results
 
-## Verification performed
+- A pending Don checkpoint was loaded in a fresh OS process, advanced through the adopted duration, and verified against the exact shield ID, exact actor possession, `parent_container_id`, no ground position, hand reference, equipment-list reference and committed success receipt. A completed Don checkpoint was separately loaded in a fresh process with the same identity and custody assertions.
+- A pending Remove checkpoint was separately loaded in a fresh process, advanced to its boundary, and verified to clear the represented hand and equipment reference while retaining the exact Object identity and carried custody, with a committed success receipt.
+- A focused Choice regression schedules two overlapping Don candidates. It proves the native validator reserves the same shield Object across different hands and independently rejects two shields claiming one hand. This leaves simultaneous resource allocation and RNG behavior to native Choice validation, not the browser.
+- Focused shield/weapon plus compatibility command:
 
-Focused three-test check (the selected tests verify the prior bounded equipment loop, not new U-ACT-FULL closure):
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_shield_don_remove_native_browser_choices_and_pending_fresh_process_restore tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_tower_shield_don_is_refused_by_adopted_wielding_rule tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_generated_arena_exposes_native_shield_bash_and_persists_pending_choice tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_generated_medium_shield_bash_resolves_after_fresh_process_restore tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_generated_long_sword_draw_ready_with_shield_blocks_two_handed_use tests.test_action_choices.TestActionChoices.test_shield_equipment_reserves_both_selected_hand_and_same_shield_object`
 
-`PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_generated_medium_shield_bash_resolves_after_fresh_process_restore tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_ground_pickup_remains_carried_unreadied_and_does_not_create_draw_location tests.test_arena_ready_weapon.TestArenaReadyWeapon.test_revision_61_re_ready_timing_uses_weapon_and_motion_table_values`
+- Result after adding exact completed-Don and pending-Remove fresh-process checks: in the consolidated command below, the six shield/weapon tests passed alongside five protected Arena/perception regressions.
+- Two early failures occurred while extending the test harness, not in production behavior: the test first tried to identify the player's private Action catalog through an observer-visible entity handle (the player is intentionally not exposed as another public entity); it was corrected to read the player's own authorized catalog. A later fresh-process assertion selected the earlier completed Don from Action history instead of matching the pending Remove Action ID; the assertion was corrected to require that exact ID. The final combined test run below passed.
+- Seed-14 regression command:
 
-Result: **3 passed in 4.775 s**.
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_arena_vs_arena.TestArenaVsArena.test_two_controllers_native_consequence_and_fresh_process_continuation tests.test_arena_vs_arena.TestArenaVsArena.test_player_vs_arena_remains_default_and_server_rejects_manual_action_in_spectator_mode tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_seeded_two_sided_browser_combat_hit_and_fresh_process_continuation tests.test_generated_arena_browser.TestGeneratedArenaBrowser.test_authored_search_and_listen_http_controls_preserve_target_privacy tests.test_observer_lifecycle_proposals.TestObserverLifecycleProposals.test_two_observers_one_truth_distinct_evidence_belief_and_practice`
 
-A broader local diagnostic run was also attempted:
+- Result in the final combined regression command below: all five passed. This preserves Player-vs-Arena default behavior and verifies seed-14 spectator mode, two independently acting Arena strategies with a native consequence/fresh-process continuation, a real seed-14 Player-vs-Arena hit plus opponent Action with fresh-process continuation, and Search/Listen privacy plus distinct observer knowledge.
+- Final combined command was the shield/weapon command above followed by the five seed-14/observer tests below. **11 passed in 83.050 s.** No test was skipped within that command.
+- Python syntax check of all affected native modules and `examples/arena_web.py` passed using `python3 -m py_compile` (no diagnostics).
+- Earlier broad diagnostic (211 tests, 158.372 s) had one stale physical-contact adjacency fixture and 15 legacy overlapping-Action fixtures rejected because they lack adopted Multiple-action declarations. These were recorded before this equipment change and were not weakened or altered. The repository-wide suite was not rerun.
 
-`PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest tests.test_arena_ready_weapon tests.test_action_evaluation tests.test_action_settlement`
+## Remaining independently tracked clusters
 
-It ran 211 tests in 158.372 s and failed: one physical-contact fixture now places the third Being at a stale nonadjacent coordinate after introducing a hex map (`test_native_touch_grab_hold_break_grapple_and_escape_use_separate_receipt_state`), and 15 legacy `test_action_settlement` fixtures are rejected at Choice validation because they schedule overlapping Actions without an acquired Multi-action declaration. No source or test code was changed in this diagnostic interval, so these are not regressions from U-ACT-FULL-001. They are not resolved by weakening the Multiple-action or path rules. The targeted selected equipment tests above passed.
+1. Passive shield-size allocation and target selection before attack outcomes; shield durability/parallel-impact integration where adopted; tower shield set-down/cover geometry. Do not assign attacks at random or derive missing geometry.
+2. Armor Don/Remove requires represented armor-part composition, wearer fit and the adopted partial-don hit-die state. Exceptional Quick-draw requires an adopted integer-boundary rule; generic Ready Object still requires a case-specific referee duration.
+3. Ranged Shoot, generic Throw and Deflect: adopted projectile velocity/ammunition/release facts and representable impact or deflection paths are missing in the blocked scopes.
+4. Pull, forced movement and later Charge/Bull-Rush/Overrun continuations remain bounded by actual force/displacement and geometry facts.
+5. Contested custody/grappling, including unspecified subsequent contests among simultaneous co-holders, remains bounded.
+6. Advanced weapon, armor/Object, magical-save, general discovery/acoustics and Action Gate audits remain at their matrix statuses.
 
-The actual served Chrome tab is present at `http://127.0.0.1:51863/`. Its current generated encounter is a live user browser state and has no shield among its evidenced carried objects; it was inspected read-only and not mutated. No new Chrome gameplay claim is made in this report.
+No new rule question is required to complete the ordinary-shield Don/Remove slice. The omitted outcomes are precisely listed with the missing adopted rule or data in the matrix; independently supported work above has been delivered. The broader assignment remains ACTIVE.
 
-## Still required before acceptance
+## Git, task register and publication safety
 
-1. Implement and test the independently supported shield Don transition, shield Remove custody outcome once its destination is determined, interruption, shield/hand/Block/Bash constraints, native receipts and strict fresh-process persistence.
-2. Implement adopted passive shield-size allocation and a pre-outcome player selection route, or keep the variant explicitly incomplete if its allocation interval is not established.
-3. Audit other independently feasible equipment/weapon variants in the matrix, and deliver a genuinely new consequential native variant through shipped controls and actual served Chrome with exact Save/Load continuation.
-4. Reconcile two-sided Arena, observer privacy, movement, checkpoint and Action-composition regressions for each new path. Repair stale fixtures only where source rules establish their intended semantics; do not relax Multiple-action or physical-path rules.
-5. Update matrix counts, TASKS, exact command timings/results, Chrome walkthrough, persistence identity evidence, remaining clusters, final HEAD and worktree/index inventory. Commit only reviewed in-scope paths after staged whitespace and publication-safety audits.
-
-## Commits and status changes
-
-- `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` — activation, U-OBS archival reference reconciliation and assignment installation. This commit preserved unrelated staged archive entries.
-- `5923020` — committed the source-linked variant audit and removed the duplicated active-path U-OBS assignment/report copies while preserving their accepted archived copies. The matrix has since been expanded with newly reconciled catalog variants; those follow-up docs are uncommitted at this report revision.
-- No new implementation variant has yet been committed. U-ACT-FULL-001 remains the only ACTIVE program; no Action Completeness gate status was changed.
-- Publication was not authorized; nothing was pushed.
+- `TASKS.md` records U-ACT-FULL-001 as sole ACTIVE; U-ACT-GATE-001 remains FUTURE and U-NET-001 remains DEFERRED. U-ACT-016 now records the shield equipment result without upgrading the Action to FULL.
+- Prior in-scope documentation commits: `6ffa4cdcad342539c0831db8f7df4b2af9dce66d` (activation and accepted U-OBS archival reconciliation), `5923020` (initial matrix audit), `9c4e8f4` (matrix/catalog reconciliation). Scoped implementation commit: `ab85638b489134d373a4ce6ec2cd6dbfd8601f89` (`Add native shield Don and Remove Actions`). Matrix/TASKS/report commit hashes are recorded after final audit below.
+- Preserved in the Git index and excluded from U-ACT-FULL commits: four U-CAP-002/U-CAP-003 active-path deletion entries and the `U-THROW-001-rule-sync-proposal.patch` archive rename. The untracked `docs/assignments/universe-arena.json` remains untouched. The frozen Playtest release and other repositories were not changed.
+- Final closeout will record actual HEAD, explicit intended paths, full status/index listing, `git diff --cached --check`, the staged publication-safety audit result, and local commit hashes. No push was authorized or performed.
