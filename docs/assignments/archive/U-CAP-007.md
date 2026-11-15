@@ -1,9 +1,9 @@
 # U-CAP-007 — Make generated Arena combat genuinely playable
 
 **Repository:** active `~/Projects/universe` only
-**Install:** `docs/assignments/U-CAP-007.md`
-**Report:** `docs/reports/U-CAP-007-report.md`
-**Invocation:** `Execute docs/assignments/U-CAP-007.md.`
+**Archived assignment:** `docs/assignments/archive/U-CAP-007.md`
+**Consumed report:** `docs/reports/archive/U-CAP-007-report.md`
+**Original invocation:** `Execute U-CAP-007.`
 **Authorization:** routine in-scope implementation, tests, browser checks, documentation, and small audited **local** commits. **No push, history rewrite, reset/clean, destructive removal, alterations to user saves, ignored `legacy/`, `.venv`, backups, `npc-generator`, or `universe-geology`.** Preserve unrelated staged index entries.
 
 ## Objective and definition of done
@@ -16,7 +16,7 @@ The immediate problem is persistent in U-CAP-001 through U-CAP-006 live Chrome c
 
 ## First: accepted U-CAP-006 closeout and index reconciliation
 
-ChatGPT has **accepted U-CAP-006 as DONE (bounded)** and consumed [its archived report](../reports/archive/U-CAP-006-report.md). Its assignment and report were moved via Git-aware moves to the respective archive directories; `TASKS.md` records DONE (bounded) and preserves narrower open Action variants. Revision 70 remains the controlling Disarm landing supplement; do not revert the adopted post-roll choice or the zero-distance sole-occupant exception.
+ChatGPT has **accepted U-CAP-006 as DONE (bounded)** and consumed [its archived report](../../reports/archive/U-CAP-006-report.md). Its assignment and report were moved via Git-aware moves to the respective archive directories; `TASKS.md` records DONE (bounded) and preserves narrower open Action variants. Revision 70 remains the controlling Disarm landing supplement; do not revert the adopted post-roll choice or the zero-distance sole-occupant exception.
 
 **Pre-existing index:** prior reports repeatedly identify five user-staged historical paths: the U-CAP-002/U-CAP-003 assignment/report archive entries and U-THROW-001 proposal patch archive rename. Inventory `git status --porcelain=v1` and staged paths before any commit. Do not silently sweep these into a gameplay commit, undo the user's archive moves, or commit unreviewed content. Keep such changes separate and report their precise final disposition. The unrelated staged paths' presence does not authorize deleting/replacing them. Reconcile duplicated `TASKS.md` links without rewriting the content of consumed reports.
 
@@ -43,7 +43,7 @@ ChatGPT has **accepted U-CAP-006 as DONE (bounded)** and consumed [its archived 
 ## D. State, reporting and finish policy
 
 - Update `TASKS.md` with U-CAP-006 accepted/archive and U-CAP-007 ACTIVE → DONE **only once the actual supported browser outcome has been demonstrated**; keep remaining Shoot/Deflect, broader Throw, Pull physical force, general Shield Don/Remove, exceptional Quick-draw, Listen/Search uncertainty and other separately open Action variants honest. Reconcile the Action inventory status with U-CAP-001–006 evidence; distinguish runnable native Actions from UI-enabled ones and labels that are merely catalog entries. Don't scope-expand into completing every deferred combat Action.
-- Use `docs/reports/U-CAP-007-report.md`: acceptance matrix, actual manual-browser steps and evidence level, before/after playability diagnosis, exact fixture/source provenance, tested Save/Load continuation, passing/failing test names/counts, bounded gaps, scoped commit hashes and final Git/index state.
+- Use `docs/reports/archive/U-CAP-007-report.md`: acceptance matrix, actual manual-browser steps and evidence level, before/after playability diagnosis, exact fixture/source provenance, tested Save/Load continuation, passing/failing test names/counts, bounded gaps, scoped commit hashes and final Git/index state.
 - Record actual timezone-qualified ISO 8601 Start, End and elapsed duration for each execution interval. Keep Codex's final chat response brief (approximately six lines); use the durable report for detail.
 - Make 1–3 independently green small local commits per substantial coherent slice, auditing `git diff --cached --check` and `PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 .venv/bin/python -B tools/check_publication_safety.py --staged` before commit. Stage only inspected paths, use `git commit --only` or equivalent scoped staging that does not sweep historical index entries, and do not push.
 - Do not stop at a native test pass or declare DONE if the real user still cannot take the demonstrated Actions in the served browser. Continue through feasible implementation without unnecessary questions. A genuinely unresolved rule choice should be isolated and presented precisely rather than solved by inventing mechanics.

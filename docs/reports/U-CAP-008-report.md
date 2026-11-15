@@ -20,7 +20,7 @@ The player's generated Being and the independently generated opponent each had a
 
 At time 5 the native committed strike outcome was `normal` and its receipt contained a nonzero `DamageEffect` of 1. The opponent's HP changed from 17 to 16. The shipped browser displayed: **“Thrust · Dagger hit; native damage committed after 4 seconds.”** The independent `attack_only` opponent Thrust also resolved at that boundary; its native consequence reduced the player's HP from 25 to 23. Target inspection did not reveal the opponent's HP, XP, skill ranks, or native Being ID. At time 6 a subsequent opponent Thrust remained pending. The browser Save action produced the portable Encounter payload; the exact 2,362,407-byte response payload was read by a separate Python OS process without regeneration. That process verified seed 14, the time-6 checkpoint, the committed player hit and both HP results, then legally advanced to time 9 and verified that the pending opponent Action completed. This demonstrates both committed and pending combat restoration in the same exact fresh-process continuation.
 
-The live Chrome encounter then continued from time 6. The player composed and submitted native **Ready Object · thrust** on the same held Dagger; it was accepted for time 6–7 and completed at time 7. The selected Dagger Thrust's displayed timing then changed from four to three seconds. The player submitted that target-specific Thrust at time 7; at time 10 the UI showed **“Thrust · Dagger hit; native damage committed after 3 seconds.”** The opponent's strategy continued independently with another Thrust underway. Thus the same browser-played encounter included a real preparation Action followed by use of its prepared motion, as well as the initial committed hit and independent opponent response. No hit or state was injected.
+The live Chrome encounter then continued from time 6. The player composed and submitted native **Ready Object · thrust** on the same held Dagger; it was accepted for time 6–7 and completed at time 7. While this ordered program was accepted, a second standalone Ready submission was correctly refused with “native Ready Choice was not accepted; Arena state is unchanged”; it did not replace or mutate the accepted program. The selected Dagger Thrust's displayed timing changed from four to three seconds. The player submitted that target-specific Thrust at time 7; at time 10 the UI showed **“Thrust · Dagger hit; native damage committed after 3 seconds.”** The opponent's strategy continued independently with another Thrust underway. Thus the same browser-played encounter included a real preparation Action followed by use of its prepared motion, as well as the initial committed hit and independent opponent response. No hit or state was injected.
 
 ## Acceptance matrix
 
@@ -36,7 +36,7 @@ The live Chrome encounter then continued from time 6. The player composed and su
 | B4 — Preserve atomicity, interruption, defense, resource and privacy rules | **Met for this bounded exchange** | Both same-boundary Actions were resolved by the unchanged native common-snapshot Encounter. The implementation only projects committed native result facts. Existing focused melee, movement, Action-composition, observer privacy and persistence tests passed; no unrelated combat family was expanded. |
 | C1 — Exact browser-created payload, fresh process, continuation | **Met** | Saved the exact payload served by the live Chrome Arena Save route (2,362,407 bytes); a separate Python OS process restored the same Encounter at time 6 and continued it to time 9. No NPC regeneration. Completed and pending Actions, identities, seed and HP were checked. |
 | C2 — Shipped route, stale/forged handles, target selection and safe displays | **Met** | Shipped-JavaScript ordering and HTTP/session Action route passed. Focused regressions verified forged/stale handle refusal, valid opaque-handle selection, observer-safe inspection, and unavailable Action displays. The actual Chrome hit was initiated through the shipped controls. |
-| C3 — Focused regression coverage | **Met for the changed path** | Fifteen distinct focused tests passed in four groups below, including seeded hit/fresh-process test, movement, Ready timing, Action composition, JavaScript control ordering, HTTP Save/Load, failed/stale Choice handling and observer privacy. No full repository suite was run. |
+| C3 — Focused regression coverage | **Met for the changed path** | Seventeen distinct focused tests passed in five groups below, including seeded hit/fresh-process test, movement, Ready timing, Action composition, JavaScript control ordering, HTTP Save/Load, scenario selection/validation, failed/stale Choice handling and observer privacy. No full repository suite was run. |
 | C4 — Reproducible human walkthrough | **Met** | Exact launch settings, browser interaction, boundary results and fresh-process continuation are documented below. |
 | D — Task state, scope, safety and closeout | **Met, pending review** | U-CAP-007's accepted files were moved to archive and maintained references corrected. `TASKS.md` keeps U-CAP-008 ACTIVE pending review and does not close broader open Actions. Implementation is locally committed; scoped documentation closeout and required audits are recorded in Git. Unrelated staged paths and the untracked Arena save are preserved. No push. |
 
@@ -109,7 +109,17 @@ PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m un
 
 Result: **Ran 3 tests in 1.500s — OK.**
 
-Total: **15 distinct focused tests passed.** The first attempt to run the native-melee pair from the repository root failed because those older fixtures resolve `../src/config/*.tsv` relative to `tests/`; rerunning the identical pair from the test directory loaded fixtures and all tests passed. This was a test working-directory issue, not an implementation failure. The complete repository test suite was not run.
+**Authored-scenario/ordinary-generation control group — 2 passed** (run from `tests/`):
+
+```sh
+PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest \
+  test_generated_arena_browser.TestGeneratedArenaBrowser.test_opt_in_scenario_selection_and_exact_fresh_process_continuation \
+  test_generated_arena_browser.TestGeneratedArenaBrowser.test_actual_shipped_javascript_runs_fresh_authored_draw_scenario -v
+```
+
+Result: **Ran 2 tests in 3.465s — OK.**
+
+Total: **17 distinct focused tests passed.** The first attempt to run the native-melee pair from the repository root failed because those older fixtures resolve `../src/config/*.tsv` relative to `tests/`; rerunning the identical pair from the test directory loaded fixtures and all tests passed. This was a test working-directory issue, not an implementation failure. The complete repository test suite was not run.
 
 ## Implementation, scope and limitations
 
@@ -119,14 +129,19 @@ Bounded limitation: a manual browser file-picker Load was not demonstrated becau
 
 ## Task state, Git and safety
 
-- U-CAP-007 is accepted DONE (bounded); its assignment and consumed report were moved with Git-aware renames to `docs/assignments/archive/` and `docs/reports/archive/`. `TASKS.md`, this assignment and the maintained continuation handoff point to the archived paths. Historical report/assignment contents were preserved.
+- U-CAP-007 is accepted DONE (bounded); its assignment and consumed report are archived under `docs/assignments/archive/` and `docs/reports/archive/`. `git mv` was used, and content is preserved. The explicit scoped commit recorded archived-path additions in `f9989536b994593f5d5890f993220f1cc12a94b4` and active-path removals in `958843c55586f2f3a92a1b5045a9e5837c387877`, rather than one rename-detection commit; original source-path history remains reachable, but Git does not infer path continuity across those commits. No history rewrite was authorized or performed. `TASKS.md`, this assignment, the maintained continuation handoff, and the archived assignment's own links point to the archived paths.
 - `TASKS.md` records the verified U-CAP-008 result but leaves it **ACTIVE pending ChatGPT acceptance**. No broader Action or active program was marked DONE.
 - Implementation commit: `56d00a4596d2a5d159e60c1f116d961b2e07155f` (`Show native melee consequences in generated Arena`).
-- Documentation/archive commit and final HEAD: to be recorded after the scoped closeout commit.
+- Documentation/archive commits: `f9989536b994593f5d5890f993220f1cc12a94b4` (TASKS, handoff, active assignment/report and archived copies) and `958843c55586f2f3a92a1b5045a9e5837c387877` (active source-path removals).
 - Five pre-existing user-staged historical archive paths remain untouched by the scoped implementation commit: four U-CAP-002/U-CAP-003 active-path deletions and the U-THROW-001 patch archive rename. The untracked, structurally valid but incompatible `docs/assignments/universe-arena.json` save remains unmodified and unstaged.
 - Before the documentation commit, `git diff --cached --check` passed and `tools/check_publication_safety.py --staged` reported `staged-audit files=13 findings=0 result=PASS`. The implementation commit was scoped to the three reviewed code/test paths. Final documentation audit and worktree/index evidence will be recorded below.
 - No push, force operation, save mutation, environment replacement, or unrelated repository modification occurred.
 
 ### Final closeout evidence
 
-To be completed immediately before closeout with the documentation commit hash, exact final HEAD, `git status --short`, staged audit and final End/Elapsed timestamps.
+- Maintained-link check covered `TASKS.md`, the continuation handoff, active U-CAP-008 assignment, archived U-CAP-007 assignment, and this report: **5 files checked, 0 missing links**. `git diff --check` passed.
+- Final staged publication-safety audit before the report closeout commit: **`staged-audit files=10 findings=0 result=PASS`**; `git diff --cached --check` passed. The audit included the four reviewed documentation updates and preserved the five pre-existing historical archive paths.
+- HEAD before this final report correction: `958843c55586f2f3a92a1b5045a9e5837c387877`. Substantive commits: `56d00a4596d2a5d159e60c1f116d961b2e07155f` (native receipt projection, shipped UI result and seeded subprocess regression), `f9989536b994593f5d5890f993220f1cc12a94b4` (accepted U-CAP-007 archived copies, U-CAP-008 assignment/report, TASKS and handoff), and `958843c55586f2f3a92a1b5045a9e5837c387877` (U-CAP-007 active source removals). The final report correction is a separate scoped documentation commit; its resulting HEAD is supplied in the Codex closeout.
+- After the scoped commit, the index is expected to retain only the five pre-existing staged archive paths: deletions of the U-CAP-002/U-CAP-003 assignments and reports, plus the U-THROW-001 patch archive rename. `docs/assignments/universe-arena.json` remains untracked and untouched. No U-CAP-008 implementation or report files remain unstaged.
+- **End time:** 2026-11-14T16:44:49-08:00 (America/Los_Angeles; captured immediately before final report closeout).
+- **Elapsed time:** PT39M31S, calculated from the recorded Start and End timestamps.
