@@ -69,5 +69,6 @@ Earlier focused evidence retained from the prior execution:
 - `8af74cd325f59305d34f5160bc230c7d6df84abb` — observer history and discovery rule helpers.
 - `3bd338505af230be9d034bc3b0e39f326718e6d5` — persist observer-owned motion evidence.
 - `8ee46646b1217704b2292c5786c53055b9222df5` — authored opaque-geometry visibility transitions, generated-Arena Spot control, strict persistence support, and native/fresh-process regression coverage. The staged publication-safety audit passed with 17 files and 0 findings; commit used explicit `--only` scope, excluding five unrelated staged archive paths.
-- TASKS/report reconciliation and this report's commit evidence: pending scoped documentation commit.
-- No push or history rewrite was attempted. Before the pending commit, inspect the explicit staged paths, run cached diff checks and the publication-safety audit, and confirm unrelated staged files remain excluded.
+- `e2099b7e231d0947069e359d2f851d22a0287041` — reconcile the sole ACTIVE task and this criterion/report status. Its staged publication-safety audit passed with 8 files and 0 findings; commit used explicit `--only` scope.
+- At the last status inspection, HEAD was `e2099b7e231d0947069e359d2f851d22a0287041`; only the pre-existing five staged archive paths and the protected untracked Arena save remained outside these commits. Final index check is recorded at closeout.
+- No push or history rewrite was attempted.
