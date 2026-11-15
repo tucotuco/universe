@@ -23,9 +23,11 @@
 
 ## Browser and route discrepancy investigation
 
-The earlier Chrome route and exact-seed native/session route initially disagreed because carried inventory had a parent Being but no world-space extent. The sightline code correctly failed closed for unmodeled world blockers but incorrectly treated carried inventory as an independently located blocker. `62a074d` corrected `src/spatial/visibility.py` to ignore carried inventory for world-space obstruction while retaining fail-closed behavior for independently located unknown entities. The regression asserts the exact committed movement position `(2.2, 0.5, 0.0)`, a clear native sightline, and authorized discovery. After that fix, movement to clear the screen causes the adopted passive-visibility rule to acquire the Being, so the old Spot-after-movement browser sequence is no longer an equivalent experiment. The actual browser verification now keeps the Being hidden and uses target-free Search/Listen instead.
+The original comparison had two distinct divergences. First, it was not the same complete route: the passing fresh-session test submitted `(2, 0)` at native time 0 with rate `walk` and facing policy `turn`, committed `(2.2, 0.5, 0)` at t=1, then attempted Spot against a clear path. The failed Chrome sequence first submitted `(2, 2)`, advanced native time and ran Spot for six seconds; only afterward did it submit `(2, 0)` from the changed position/time. That later browser plan was accepted as a plan but its next movement boundary was refused, leaving time/position unchanged. Its state immediately before Spot was therefore not the session test's initial state or its `(2, 0)` route state. Both UI and HTTP route used Walk/Turn; the discrepancy was not a facing-policy mismatch.
 
-The two execution paths now agree on the supported facts: exact submitted destinations and native committed position are verified by the HTTP/session regression; the live browser’s accepted Action and native clock are visible in Chrome; no apparent Search/Listen result appears before the six-second native completion. No movement or facing rule was weakened to achieve parity.
+Second, inspection exposed a real sightline defect: carried inventory had a parent Being but no world-space extent. The sightline code correctly failed closed for unmodeled world blockers but incorrectly treated carried inventory as an independently located blocker. `62a074d` corrected `src/spatial/visibility.py` to ignore carried inventory for world-space obstruction while retaining fail-closed behavior for independently located unknown entities. The exact-route regression now submits `(2, 0)` at t=0, commits native position `(2.2, 0.5, 0)` at t=1, asserts a clear native sightline and resulting observer evidence, and stops the completed movement plan. No Search/Spot Action is scheduled in this incidental-visual route. After the fix, movement clearing the screen triggers adopted passive perception, so the old Spot-after-movement browser sequence is no longer equivalent. The served Chrome acceptance uses a still-hidden target and target-free Search/Listen instead. No movement/facing rule or native scheduling semantics were weakened.
+
+In the current browser flows, Run is accepted at t=0; Listen is submitted only after the Run boundary commits at t=1. Listen then occupies the native interval t=1–7, and the Being is absent before completion and shown as currently evidenced afterward, with no position. Search and Listen outcome presentation is derived from the native receipt; neither advances merely because the page was rendered.
 
 The live Listen run exposed one presentation ambiguity: the shared evidence UI labeled a Being “visible now” even when the only source was a successful target-free sensory Action and no position was known. The generated page now says “currently evidenced” for current evidence and “last known” for historical evidence. The focused Search/Listen HTTP regression checks that label and asserts the acquired Being has no position. This copy-only correction was made after the Chrome interaction; the Chrome result above records the pre-correction wording, while the final code is covered by the updated regression.
 
@@ -39,6 +41,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=..:../src:../examples:..
 
 **41 tests passed in 52.342 seconds.** After adding the explicit Action-evidence privacy regression, `tests.test_arena_opponent_attack.TestArenaOpponentAttack.test_attack_only_native_thrust_pending_restore_and_completed_restore` passed separately (**1 test in 4.073 seconds**). After the neutral evidence-label correction, the Search/Listen privacy and missing-source-fact tests plus incidental-visual-discovery test passed (**3 tests in 5.750 seconds**). `git diff --cached --check` passed before each commit. The staged publication-safety audits passed: implementation commit, **21 staged paths and 0 findings**; UI correction commit, **8 staged paths and 0 findings**. In each case `git commit --only` excluded the five pre-existing unrelated staged archival paths. No full repository test suite was run.
 
+Final documentation validation parsed all 15 modified Python files with `ast.parse`, passed `git diff --check`, and checked 68 local Markdown links in `TASKS.md` and this report; all targets exist.
+
 ## Task state, limits and preserved work
 
 - U-OBS-001 remains **ACTIVE** pending ChatGPT’s acceptance review. Its supported authored discovery, observer privacy, current/history, Action projection and persistence lifecycle has now been demonstrated end-to-end.
@@ -51,7 +55,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH=..:../src:../examples:..
 - `62a074d3b9a86b1cf7a42e8737d654f34dfb4cf1` — `Fix equipped Arena sightline discovery`; carried equipment no longer acts as a world blocker; HTTP/browser regression verifies the committed route.
 - `67de49b819e38eea09caa0219562a4f56db9b7e1` — `Add native Search and Listen to Arena perception`; native scheduling, resolver, atomic evidence, strict checkpoint reconstruction, Arena controls, privacy/persistence regressions and Action evidence gate.
 - `69031fb6e4d20722168767a831aee104cc1086ad` — `Clarify observer evidence in Arena UI`; modality-neutral current evidence wording and focused regression. No perception state or native rule changes are included in that correction.
-- This report and `TASKS.md` are being reconciled in the documentation commit following implementation commit `67de49b819e38eea09caa0219562a4f56db9b7e1`. The unrelated index entries and user save remain preserved.
+- `12da277d287138f17f57d47a4995d12c6b3b6e42` — `Record U-OBS discovery acceptance evidence`; updates `TASKS.md` and this acceptance report. The unrelated index entries and user save remain preserved.
 
 ## Execution intervals
 
@@ -64,5 +68,5 @@ Earlier intervals recorded by prior continuation reports:
 Current execution interval:
 
 - Start: **2026-11-15T01:20:30-08:00** (captured at execution start).
-- End: **to be captured immediately before closeout**.
-- Elapsed: **to be calculated from the captured Start and End**.
+- End: **2026-11-15T02:26:01-08:00** (captured immediately before closeout).
+- Elapsed: **PT1H5M31S**.
