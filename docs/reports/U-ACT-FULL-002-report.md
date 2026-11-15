@@ -18,8 +18,8 @@
 ### Allocation implementation interval
 
 - Start: **2026-11-15T14:28:02-08:00** (captured at the start of implementation after the no-cost ruling).
-- End: **2026-11-15T14:56:06-08:00** (captured immediately before this closeout).
-- Elapsed: **PT28M04S**.
+- End: **2026-11-15T14:57:26-08:00** (captured immediately before final report-only commit).
+- Elapsed: **PT29M24S**.
 - Result: Added persisted defender allocation, observer-filtered Arena controls, strict restoration, focused simultaneous coverage, and report/task reconciliation. See exact tests and commits below.
 
 ## Scope and protected state
@@ -113,6 +113,7 @@ Both are implemented for one actually held shield. The generated Arena issues op
 - Allocation ruling/status documentation commit: `6599c0b2314f29b1d2fbeb4d0b9200ad0cac16d3` (`Record shield allocation visibility ruling`).
 - Implementation commit: `d285ac34fa56bda4f2c9ccfd73c9818ebe438b24` (`Implement persisted passive shield allocation`). It contains only the native allocation/evaluation/snapshot/checkpoint code, generated Arena route/UI, and focused tests. `git diff --cached --check` passed and the staged publication-safety audit reported `files=14 findings=0 result=PASS`; `git commit --only` excluded preserved historical archive paths.
 - Checkpoint schema follow-up: `dcc710eb4ccea79be4d44ff31d755ccdb7b847ef` (`Allow native strike persistence fields`). It admits only the already-native Feint-source and shield-hand fields; its two directly affected checkpoint regressions passed. The staged safety audit reported `files=7 findings=0 result=PASS` and the commit excluded preserved archive paths.
-- The final report closeout records the documentation commit, exact final HEAD and execution interval. The scoped documentation commit is preceded by `git diff --cached --check` and the staged publication-safety audit.
+- Scoped documentation closeout: `c8ad2450e40f139d63b30a4a98308a70dabe19f3` (`Document passive shield allocation closeout`) updates TASKS, the 52-row matrix, and this report. Its staged publication-safety audit reported `files=9 findings=0 result=PASS`; `git diff --cached --check` passed. `git commit --only` included exactly those three maintained documents, leaving the five historical archive paths staged.
+- Exact HEAD before this report-only closeout: `c8ad2450e40f139d63b30a4a98308a70dabe19f3`. The report-only commit follows; final HEAD is captured in the Codex closeout. Preserved staged archive entries and the untracked save are not part of either U-ACT-FULL-002 documentation commit.
 - Preserved user index entries remain staged: deletions of `docs/assignments/U-CAP-002.md`, `docs/assignments/U-CAP-003.md`, `docs/reports/U-CAP-002-report.md`, `docs/reports/U-CAP-003-report.md`, and rename `docs/reports/U-THROW-001-rule-sync-proposal.patch` → `docs/reports/archive/U-THROW-001-rule-sync-proposal.patch`. Preserved untracked `docs/assignments/universe-arena.json` remains untouched. No unrelated task files are changed.
 - No push is authorized or planned. The final interval and exact repository state will be captured at audited closeout.
