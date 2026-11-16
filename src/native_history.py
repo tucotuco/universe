@@ -12,7 +12,9 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from threading import RLock
 from types import MappingProxyType
+from weakref import WeakKeyDictionary, ref as weakref
 
 from checkpoint_fields import FIELD_ADAPTERS
 
@@ -25,6 +27,10 @@ MAX_DEPTH = 128
 
 class NativeHistoryRejected(ValueError):
     """Native history is malformed, unsupported, or inconsistent."""
+
+
+_RECORDERS = WeakKeyDictionary()
+_RECORDER_LOCK = RLock()
 
 
 def _canonical(value):
@@ -432,6 +438,73 @@ def append_committed(log, encounter):
     result = _seal(body)
     validate(result)
     return result
+
+
+class NativeHistoryRecorder:
+    """Opt-in in-memory recorder fed only after successful native publication."""
+
+    def __init__(self, encounter, log):
+        self._encounter_ref = weakref(encounter)
+        self._log = log
+        self.failure = None
+
+    @property
+    def encounter(self):
+        encounter = self._encounter_ref()
+        if encounter is None:
+            raise NativeHistoryRejected("recorded Encounter no longer exists")
+        return encounter
+
+    @classmethod
+    def attach(cls, encounter):
+        """Attach to an already committed Encounter boundary for later steps."""
+        with _RECORDER_LOCK:
+            if encounter in _RECORDERS:
+                raise NativeHistoryRejected("a native history recorder is already attached")
+            recorder = cls(encounter, capture(encounter))
+            _RECORDERS[encounter] = recorder
+            return recorder
+
+    @property
+    def latest_boundary(self):
+        return self._log["latest_boundary"]
+
+    def export(self):
+        with _RECORDER_LOCK:
+            if self.failure is not None:
+                raise NativeHistoryRejected("native history recorder failed: " + self.failure)
+            if self.encounter.last_processed_boundary != self.latest_boundary:
+                raise NativeHistoryRejected("native history recorder is behind the Encounter")
+            return decode(encode(self._log))
+
+
+def has_recorder(encounter):
+    with _RECORDER_LOCK:
+        return encounter in _RECORDERS
+
+
+def current_recording(encounter):
+    with _RECORDER_LOCK:
+        recorder = _RECORDERS.get(encounter)
+    return None if recorder is None else recorder.export()
+
+
+def record_committed_boundary(encounter):
+    """Append the latest commit after native publication has fully returned."""
+    with _RECORDER_LOCK:
+        recorder = _RECORDERS.get(encounter)
+    if recorder is None:
+        return
+    try:
+        updated = append_committed(recorder._log, encounter)
+        with _RECORDER_LOCK:
+            recorder._log = updated
+    except Exception as exc:
+        # The Encounter publication is already authoritative and committed.
+        # Preserve ordinary progression; make later Save fail closed until the
+        # recorder is recovered from the authenticated native receipt chain.
+        with _RECORDER_LOCK:
+            recorder.failure = f"{type(exc).__name__}: {exc}"
 
 
 def validate(log):

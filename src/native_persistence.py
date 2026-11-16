@@ -48,7 +48,9 @@ def export_save(encounter):
         from arena_native_snapshot import capture as capture_graph, encode as encode_graph
         graph = encode_graph(capture_graph(encounter.universe, encounter,
                                            _native_rng_owner(encounter)))
-        history = native_history.capture(encounter)
+        history = native_history.current_recording(encounter)
+        if history is None:
+            history = native_history.capture(encounter)
         body = {"schema": SCHEMA, "graph_b64": base64.b64encode(graph).decode("ascii"),
                 "history": history}
         body["sha256"] = hashlib.sha256(_canonical(body)).hexdigest()

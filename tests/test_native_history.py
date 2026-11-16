@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 import encounter_delta_headless
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
-                            write, _plain)
+                            NativeHistoryRecorder, write, _plain)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -146,7 +146,8 @@ class NativeHistoryTests(unittest.TestCase):
     def test_rolled_back_publication_has_no_appendable_history_receipt(self):
         demo = encounter_delta_headless.build_demo(until=4)
         encounter = demo["encounter"]
-        log = capture(encounter)
+        recorder = NativeHistoryRecorder.attach(encounter)
+        log = recorder.export()
         from activities import DelayAction
         action = DelayAction(encounter, encounter.being_list[1], defense=0,
                              start_time=4, id="rolled-back-delay")
@@ -163,10 +164,26 @@ class NativeHistoryTests(unittest.TestCase):
             with self.assertRaises(atomic_publication.PublicationFailure):
                 encounter.step(1)
         self.assertEqual(encounter.time, 4)
+        self.assertEqual(recorder.latest_boundary, 4)
+        self.assertIsNone(recorder.failure)
         self.assertEqual(log["latest_boundary"], 4)
         with self.assertRaisesRegex(NativeHistoryRejected,
                                     "no next committed boundary"):
             append_committed(log, encounter)
+
+    def test_attached_recorder_appends_only_after_native_commit_returns(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo["encounter"]
+        recorder = NativeHistoryRecorder.attach(encounter)
+        from activities import DelayAction
+        action = DelayAction(encounter, encounter.being_list[1], defense=0,
+                             start_time=4, id="automatic-history-delay")
+        encounter.schedule_action(action)
+        encounter.step(1)
+        log = recorder.export()
+        self.assertEqual(recorder.latest_boundary, 5)
+        self.assertEqual(events_at(log, 5)["action_ids"], [action.id])
+        self.assertEqual(log, capture(encounter))
 
 
 if __name__ == "__main__":

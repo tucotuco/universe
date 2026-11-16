@@ -999,6 +999,11 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                 finally:_ROUTED_OWNERSHIP.pop(id(encounter),None)
         result=EncounterStep(start,end,tuple(motion),tuple(completed),tuple(movement_decision_ids))
     finally:binding.running.release()
+    # Optional native history recording observes only receipts that survived
+    # the full publisher and rollback boundary. It runs after the progression
+    # lock is released because the inspector refuses reads during a step.
+    from native_history import record_committed_boundary
+    record_committed_boundary(encounter)
     encounter._choice_book._repeat_completed_programs(encounter.last_processed_boundary)
     return result
 

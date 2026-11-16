@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -14,6 +15,8 @@ sys.path.insert(0, str(ROOT / "examples"))
 
 import encounter_delta_headless
 import native_history
+import test_encounter_inspection as inspection_fixtures
+from native_history import NativeHistoryRecorder
 from activities import DelayAction
 from atomic_publication import RNGCursor
 from encounter import Encounter
@@ -53,10 +56,13 @@ class NativePersistenceTests(unittest.TestCase):
         demo = encounter_delta_headless.build_demo(until=4)
         encounter = demo["encounter"]
         actor_id = encounter.being_list[1]
+        recorder = NativeHistoryRecorder.attach(encounter)
         action = DelayAction(encounter, actor_id, defense=0, start_time=4,
                              id="native-save-pending-delay")
         encounter.schedule_action(action)
-        save = export_save(encounter)
+        with patch.object(native_history, "capture",
+                          side_effect=AssertionError("recorder history was recaptured")):
+            save = export_save(encounter)
         before_ids = {
             "world": encounter.universe.id,
             "encounter": encounter.id,
@@ -73,6 +79,7 @@ class NativePersistenceTests(unittest.TestCase):
                 write_save(encounter, path)
             self.assertEqual(path.read_bytes(), saved_bytes)
             encounter.step(1)
+            self.assertEqual(recorder.latest_boundary, 5)
             expected = {
                 "time": encounter.time,
                 "rng": demo["rng_owner"].state,
@@ -132,11 +139,13 @@ print(json.dumps({'world':world.id,'encounter':encounter.id,'time':encounter.tim
         self.assertEqual(facts.outcome, "normal")
         self.assertLess(defender.get_hit_points(), 100)
 
+        recorder = NativeHistoryRecorder.attach(encounter)
         second = MeleeStrike(encounter, attacker.id, defender.id, weapon_id,
                              motion="thrust", reach=2, strategy=Strategy())
         encounter.schedule_action(second)
         save = export_save(encounter)
         encounter.step(4)
+        self.assertEqual(recorder.latest_boundary, 8)
         expected = {
             "time": encounter.time,
             "rng": json.loads(json.dumps(rng.state)),
@@ -164,6 +173,43 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                 text=True, capture_output=True, check=False, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
+
+    def test_unadapted_group_and_observer_closures_fail_closed_without_mutation(self):
+        group_fixture = inspection_fixtures.InspectionFixture()
+        group_fixture.setUp()
+        group_fixture.f.f.f.group()
+        group_fixture.commit()
+        before = group_fixture.raw()
+        with self.assertRaisesRegex(NativeSaveRejected,
+                                    "conditional_attribute_adapter_missing") as refused:
+            export_save(group_fixture.enc)
+        self.assertIn("validator_rehydration_required", str(refused.exception))
+        self.assertEqual(group_fixture.raw(), before)
+
+        observer_fixture = inspection_fixtures.InspectionFixture()
+        observer_fixture.setUp()
+        group = observer_fixture.f.f.f.group()
+        history = observer_fixture.f.f.f.history()
+        from field_observation import BeliefLedger
+        from history_conversation import AskAboutPastAction
+        observer_fixture.enable()
+        first = observer_fixture.f.f.observe(observer_fixture.a, group,
+            ledger=BeliefLedger(observer_fixture.a.id))
+        second = observer_fixture.f.f.observe(observer_fixture.b, group,
+            ledger=BeliefLedger(observer_fixture.b.id))
+        accounts = []
+        ask = AskAboutPastAction(observer_fixture.world, observer_fixture.c.id,
+            observer_fixture.a.id, 0, episode_time=0, topic="lessons",
+            generate=observer_fixture.f.f.f.recipe(history),
+            received_accounts=accounts)
+        observer_fixture.enc.schedule_choice((first, second, ask))
+        observer_fixture.enc.step(1)
+        before = observer_fixture.raw()
+        with self.assertRaisesRegex(NativeSaveRejected,
+                                    "unbound_external_recipient") as refused:
+            export_save(observer_fixture.enc)
+        self.assertIn("validator_rehydration_required", str(refused.exception))
+        self.assertEqual(observer_fixture.raw(), before)
 
 
 if __name__ == "__main__":
