@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
+from action_choice import ChoiceMember
 import test_shared_objective_reality as fixtures
 from observer_proposals import (capture_observer_context, build_supported_candidate,
     ObservationEffect, InterpretationEffect, BeliefAcquisitionEffect, AccountDeliveryEffect,
@@ -40,7 +41,9 @@ class TestObserverLifecycleProposals(unittest.TestCase):
             observation={'coarse_range_m':100,'detailed_range_m':50},ledger=ledger,experience=xp)
 
     def context(self,*actions):
-        self.enc.schedule_choice(actions);self.enc.time=max(__import__('math').ceil(a.end_time) for a in actions)
+        self.enc.schedule_choice(actions);self.enc.time=max(
+            __import__('math').ceil((a.action if type(a) is ChoiceMember else a).end_time)
+            for a in actions)
         # RunAction measures displacement produced while its interval is live.
         for action in actions:
             if isinstance(action,RunAction):
@@ -215,9 +218,11 @@ class TestObserverLifecycleProposals(unittest.TestCase):
         self.assertEqual(ledger.evidence,())
 
     def test_shared_ledger_multiple_actions_keeps_native_acquisition_order(self):
+        self.a.set_skill_level(self.world.get_skill_dictionary(), 'multi-action', 1)
         group=self.f.group();ledger=BeliefLedger(self.a.id)
         one,two=self.observe(self.a,group,ledger=ledger),self.observe(self.a,group,ledger=ledger)
-        c=self.build(self.context(one,two));view=next(iter(c.recipients.values()));reference=BeliefLedger(self.a.id)
+        c=self.build(self.context(ChoiceMember('first',one,None,0),
+                                  ChoiceMember('second',two,None,3)));view=next(iter(c.recipients.values()));reference=BeliefLedger(self.a.id)
         obs=c.target(self.a.id).observer_state
         for action in (one,two):reference.learn(obs.observations[action.id],interpretation=obs.interpretations[action.id])
         self.assertEqual(view.belief_history,reference.belief_history)
@@ -396,10 +401,12 @@ class TestObserverLifecycleProposals(unittest.TestCase):
             self.build(ctx)
         unsafe.assert_not_called()
 
-    def test_unsupported_action_family_is_not_skipped_or_run_live(self):
+    def test_supported_delay_action_is_captured_without_live_resolution(self):
         from action import Action
         action=Action(self.world,0,None,'delay',self.a.id,self.b.id,None);self.enc.schedule_choice((action,));self.enc.time=1
-        with self.assertRaises(UnsupportedEvaluation):capture_observer_context(self.enc,1)
+        context=capture_observer_context(self.enc,1)
+        self.assertEqual(context.snapshot.actions[action.id].family,'delay')
+        self.assertIsNone(action.resolution)
 
     def test_complete_defense_strike_and_history_practice_reuse_native_dependencies(self):
         wid=self.world.make_weapon_for_being(self.a.id,'Dagger','Knife');self.world.arm_being(self.a.id,wid,'right hand')
