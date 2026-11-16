@@ -134,6 +134,10 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         decoded = decode_combined_being_checkpoint(encoded)
         old = retag(encoded, lambda envelope: (
             envelope.update(version=1),
+            envelope.update(being_contract="authored-pristine-being-instance/1"),
+            envelope["being"]["state"].pop("size_category"),
+            envelope["being"]["state"].update(
+                state_contract="authored-pristine-being-instance/1"),
             envelope.update(reproduction_checkpoint=legacy_v1_reproduction(decoded.reproduction_checkpoint)),
         ))
         target = world("legacy V6 V1 target")
@@ -157,6 +161,9 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
         )
         envelope = json.loads(encode_combined_being_checkpoint(source))
         envelope["version"] = 2
+        envelope["being_contract"] = "authored-pristine-being-instance/1"
+        envelope["being"]["state"].pop("size_category")
+        envelope["being"]["state"]["state_contract"] = "authored-pristine-being-instance/1"
         envelope["reproduction_checkpoint"] = legacy_v2_reproduction(envelope["reproduction_checkpoint"])
         old = retag(json.dumps(envelope), lambda value: None)
         target = world("V11 combined V2 target")
@@ -280,7 +287,7 @@ class ReproductionBeingCheckpointTests(unittest.TestCase):
     def test_corrupt_version_unknown_identity_definition_and_state_refuse(self):
         _source, _child, _being, encoded = ready()
         with self.assertRaisesRegex(CombinedBeingCheckpointError, "unsupported.*version"):
-            decode_combined_being_checkpoint(encoded.replace('"version": 3', '"version": 99', 1))
+            decode_combined_being_checkpoint(encoded.replace('"version": 4', '"version": 99', 1))
         bad_digest = json.loads(encoded)
         bad_digest["sha256"] = "0" * 64
         with self.assertRaisesRegex(CombinedBeingCheckpointError, "digest mismatch"):

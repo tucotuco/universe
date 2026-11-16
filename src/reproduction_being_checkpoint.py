@@ -34,10 +34,12 @@ from reproduction_checkpoint import (
 
 
 COMBINED_SCHEMA = "universe-reproduction-native-being-checkpoint"
-COMBINED_VERSION = 3
+COMBINED_VERSION = 4
 LEGACY_COMBINED_VERSION = 1
-PREVIOUS_COMBINED_VERSION = 2
-BEING_CONTRACT = "authored-pristine-being-instance/1"
+PREVIOUS_COMBINED_VERSION = 3
+OLDER_COMBINED_VERSION = 2
+LEGACY_BEING_CONTRACT = "authored-pristine-being-instance/1"
+BEING_CONTRACT = "authored-pristine-being-instance/2"
 _RESTORE_PHASES = (
     "reproduction_groups", "reproduction_indexes", "reproduction_aliases", "reproduction_authored_requests",
     "reproduction_v1_records", "reproduction_v2_records", "reproduction_revision",
@@ -171,6 +173,7 @@ def _instance_signature(being):
         "possessions", "weapons", "strategy", "physical_fatigue", "physiology_id",
         "fatigue_level", "effective_fitness", "exertion", "skill_experience",
         "skill_use_history", "_skill_practice_baselines", "personal_history", "_posture",
+        "size_category",
     }
     if set(being.__dict__) != expected_fields:
         _fail("Being has unknown or missing instance state")
@@ -186,6 +189,7 @@ def _instance_signature(being):
             or type(being.top_facing) is not int or being.top_facing != 0
             or type(being.front_facing) is not int or being.front_facing != 1
             or being.hex_facing is not None
+            or being.size_category is not None
             or being.get_posture() is not None
             or being.parent_container_id is not None or being.spatial_state is not None
             or being.geometry is not None or being.visual_occlusion is not None
@@ -213,6 +217,7 @@ def _instance_signature(being):
     return {
         "id": being.id, "name": being.name, "type": being.type,
         "original_definition": original, "current_definition": current,
+        "size_category": being.size_category,
         "state_contract": BEING_CONTRACT,
     }
 
@@ -304,9 +309,12 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
     _strict(envelope, {"schema", "version", "being_contract", "reproduction_checkpoint", "being", "sha256"},
             "combined envelope")
     if (envelope["schema"] != COMBINED_SCHEMA or type(envelope["version"]) is not int
-            or envelope["version"] not in (LEGACY_COMBINED_VERSION, PREVIOUS_COMBINED_VERSION, COMBINED_VERSION)):
+            or envelope["version"] not in (LEGACY_COMBINED_VERSION, OLDER_COMBINED_VERSION,
+                                             PREVIOUS_COMBINED_VERSION, COMBINED_VERSION)):
         _fail("unsupported combined checkpoint schema or version")
-    if envelope["being_contract"] != BEING_CONTRACT:
+    expected_contract = (BEING_CONTRACT if envelope["version"] == COMBINED_VERSION
+                         else LEGACY_BEING_CONTRACT)
+    if envelope["being_contract"] != expected_contract:
         _fail("unsupported native Being reconstruction contract")
     unsigned = {key: value for key, value in envelope.items() if key != "sha256"}
     digest = hashlib.sha256(_canonical(unsigned).encode("ascii")).hexdigest()
@@ -318,7 +326,7 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
         reproductive = decode_reproduction_checkpoint(envelope["reproduction_checkpoint"])
     except ReproductionCheckpointValidationError as exc:
         raise CombinedBeingCheckpointError(f"embedded reproduction checkpoint refused: {exc}") from exc
-    expected_reproduction_version = envelope["version"]
+    expected_reproduction_version = min(envelope["version"], 3)
     if reproductive.wire_version != expected_reproduction_version:
         _fail("combined and embedded reproduction checkpoint versions are incompatible")
     row = _strict(envelope["being"], {"person_id", "name", "request_key", "definition", "state"}, "Being record")
@@ -339,9 +347,14 @@ def decode_combined_being_checkpoint(text) -> DetachedCombinedBeingCheckpoint:
         "id": row["person_id"], "name": row["name"], "type": "BeingInstance",
         "original_definition": _definition_data(definition),
         "current_definition": _definition_data(definition),
-        "state_contract": BEING_CONTRACT,
     }
-    if _canonical(row["state"]) != _canonical(expected):
+    if envelope["version"] == COMBINED_VERSION:
+        expected.update({"size_category": None, "state_contract": BEING_CONTRACT})
+        state_matches = _canonical(row["state"]) == _canonical(expected)
+    else:
+        expected["state_contract"] = LEGACY_BEING_CONTRACT
+        state_matches = _canonical(row["state"]) == _canonical(expected)
+    if not state_matches:
         _fail("Being state is not the supported pristine authored state")
     if not row["person_id"] or not row["name"]:
         _fail("Being identity and name are required")
@@ -364,11 +377,15 @@ def restore_combined_being_checkpoint(world, checkpoint, *, _fail_after=None):
             state = {
                 "id": checkpoint.person_id, "name": checkpoint.name, "type": "BeingInstance",
                 "original_definition": definition_data, "current_definition": definition_data,
-                "state_contract": BEING_CONTRACT,
             }
+            contract = (BEING_CONTRACT if checkpoint.wire_version == COMBINED_VERSION
+                        else LEGACY_BEING_CONTRACT)
+            if checkpoint.wire_version == COMBINED_VERSION:
+                state["size_category"] = None
+            state["state_contract"] = contract
             envelope = {
                 "schema": COMBINED_SCHEMA, "version": checkpoint.wire_version,
-                "being_contract": BEING_CONTRACT,
+                "being_contract": contract,
                 "reproduction_checkpoint": checkpoint.reproduction_checkpoint,
                 "being": {"person_id": checkpoint.person_id, "name": checkpoint.name,
                           "request_key": checkpoint.request_key,
@@ -389,7 +406,8 @@ def restore_combined_being_checkpoint(world, checkpoint, *, _fail_after=None):
     if _canonical(_instance_signature(being)) != _canonical({
             "id": candidate.person_id, "name": candidate.name, "type": "BeingInstance",
             "original_definition": _definition_data(definition),
-            "current_definition": _definition_data(definition), "state_contract": BEING_CONTRACT}):
+            "current_definition": _definition_data(definition), "size_category": None,
+            "state_contract": BEING_CONTRACT}):
         _fail("native Being constructor does not reproduce the supported checkpoint state")
 
     from reproduction_checkpoint import _compatible_context

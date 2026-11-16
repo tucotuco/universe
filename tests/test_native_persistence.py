@@ -32,6 +32,8 @@ from native_persistence import (NativeSaveRejected, export_save, load_path,
                                 load_save, write_save)
 from checkpoint_adapters import RecipientBinding
 from reproduction_group import ReproductionGroupProposal, prepare_reproduction_group
+from being import BeingDefinition
+from reproduction_being_bridge import materialize_reproductive_offspring
 
 
 class NativePersistenceTests(unittest.TestCase):
@@ -513,6 +515,58 @@ print(json.dumps({'revision':world.reproduction_group_snapshot().revision,
         self.assertEqual(restored['parents'], ['P1', 'P2'])
         self.assertEqual(restored['offspring'], ['C1'])
         self.assertEqual(restored['time'], 2)
+
+    def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
+        world = Universe('native-reproduction-binding', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        world.publish_reproduction_group(prepare_reproduction_group(
+            ReproductionGroupProposal('RG-BINDING', ('P1', 'P2'), ('C1',),
+                                      'native-save:binding')),
+            request_key='native-binding-create', expected_revision=0)
+        definition = BeingDefinition(
+            obj_type='Native reproduction fixture', length=1.8, weight=70,
+            hit_points=12, hit_dice='1d8', alignment='Neutral',
+            armor_class=10, challenge_rating=0)
+        being = materialize_reproductive_offspring(
+            world, 'C1', being_definition=definition, name='Child',
+            request_key='native-binding-materialize', expected_revision=1)
+        from encounter import Encounter
+        encounter = Encounter(world, 10, 0, initiated=True,
+                              id='native-reproduction-binding-encounter')
+        encounter.add_being(being.id)
+        world.add_event(encounter)
+        rng = RNGCursor(__import__('random').Random(92).getstate())
+        encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
+        initial = DelayAction(encounter, being.id, defense=0, start_time=0,
+                              id='native-reproduction-binding-initial')
+        encounter.schedule_action(initial)
+        encounter.step(1)
+        wire = export_save(encounter)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-reproduction-binding-save.json'
+            path.write_bytes(wire)
+            child = r'''import json,sys
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+registry=world._reproduction_group_registry
+being=world.get_object_by_id('C1')
+record=registry._native_being_requests['native-binding-materialize']
+assert registry._native_beings_by_person_id['C1'] is being
+assert record.being is being and record.person_id == 'C1'
+assert world.get_reproduction_group('RG-BINDING').offspring_ids == ('C1',)
+print(json.dumps({'being_id':being.id,'name':being.name,'request':record.request_key,
+ 'time':enc.time,'rng':rng.state},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        restored = json.loads(result.stdout)
+        self.assertEqual(restored['being_id'], 'C1')
+        self.assertEqual(restored['name'], 'Child')
+        self.assertEqual(restored['request'], 'native-binding-materialize')
 
 
 if __name__ == "__main__":
