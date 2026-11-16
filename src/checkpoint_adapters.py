@@ -6,6 +6,7 @@ Complete checkpoint readiness remains refused by checkpoint_inventory.
 """
 from dataclasses import dataclass
 from types import FunctionType, MethodType, CodeType
+import hashlib
 import math
 
 from checkpoint_inventory import _Inventory, _TYPES, _require, CheckpointRejected
@@ -29,6 +30,13 @@ _NATIVE_ATTRIBUTE_LAMBDA = statistical_group._formation_attribute_rng_provider._
     next(i for i, value in enumerate(
         statistical_group._formation_attribute_rng_provider.__code__.co_consts)
          if type(value) is CodeType and value.co_name == '<lambda>')]
+
+
+def _portable_recipient_token(binding):
+    """Stable, hashable temporary key for a bound recipient during restore."""
+    identity = f'{binding.role}\0{binding.namespace}\0{binding.name}'
+    return -1 - int.from_bytes(hashlib.sha256(identity.encode('utf-8')).digest()[:16],
+                               'big')
 
 
 @dataclass(frozen=True)
@@ -255,6 +263,29 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if self.full_native and tag=='history_conversation.AskAboutPastAction' and field in (
+                'generate','received_accounts'):
+            _require(self.full_native,
+                     'AskAboutPast callback/recipient requires the native adapter')
+            owner=self._objects_by_identity.get(self._owner_identity(ref))
+            from history_conversation import AskAboutPastAction
+            _require(type(owner) is AskAboutPastAction,
+                     'AskAboutPast field has no exact native Action owner')
+            if field=='generate':
+                from objective_reality import EpisodeFacts
+                _require(type(item) is EpisodeFacts,
+                         'AskAboutPast requires its adopted literal EpisodeFacts recipe')
+                return super().field(tag,field,item,ref,path,depth)
+            if item is None:
+                return super().field(tag,field,item,ref,path,depth)
+            binding=self.recipient_by_id.get(id(item))
+            _require(binding is not None
+                     and binding.role=='in_world_received_accounts'
+                     and type(item) is list,
+                     'AskAboutPast account list requires its explicit durable binding')
+            return ('native-recipe', ADAPTER_VERSION,
+                    'history_conversation.received_accounts_binding',
+                    ('object',owner.id), binding.namespace, binding.name)
         if tag=='universe.Universe' and field=='_reproduction_group_registry':
             from reproduction_group import ReproductionGroupRegistry
             _require(type(item) is ReproductionGroupRegistry and item._world is self.world,
@@ -394,6 +425,8 @@ class NativeInventory(_Inventory):
             _require(b is not None,'missing durable committed recipient binding')
             owner=self._objects_by_identity[self._owner_identity(ref)]
             _require(owner.role==b.role,'committed recipient role mismatch')
+            if self.full_native:
+                return ('integer',str(_portable_recipient_token(b)))
             return ('reference',('host-recipient',self.world.id,b.namespace,b.name))
         if field in ('ledger','received_accounts') and tag in ('group_observation.ObserveGroupAction','history_conversation.AskAboutPastAction','activities.SpotAction') and item is not None:
             b=self.recipient_by_id.get(id(item));action=self._objects_by_identity[self._owner_identity(ref)]

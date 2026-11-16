@@ -34,6 +34,7 @@ from checkpoint_adapters import RecipientBinding
 from reproduction_group import ReproductionGroupProposal, prepare_reproduction_group
 from being import BeingDefinition
 from reproduction_being_bridge import materialize_reproductive_offspring
+from history_conversation import AskAboutPastAction
 
 
 class NativePersistenceTests(unittest.TestCase):
@@ -567,6 +568,71 @@ print(json.dumps({'being_id':being.id,'name':being.name,'request':record.request
         self.assertEqual(restored['being_id'], 'C1')
         self.assertEqual(restored['name'], 'Child')
         self.assertEqual(restored['request'], 'native-binding-materialize')
+
+    def test_completed_ask_about_past_and_listener_accounts_resume_with_binding(self):
+        world, encounter, rng, listener, speaker, _weapon_id = self._combat_encounter()
+        from personal_history import PersonalHistory
+        from realization import Fact
+        from objective_reality import EpisodeFacts
+        speaker.personal_history = PersonalHistory(
+            speaker, earliest=-10, known_through=0, nondeclining_skills=())
+        accounts = []
+        key = speaker.personal_history.episode_key(-1, 'native-test')
+        inquiry = AskAboutPastAction(
+            world, listener.id, speaker.id, 0, episode_time=-1,
+            topic='native-test', duration=1,
+            generate=EpisodeFacts((Fact(
+                key, {'description': 'practiced a native test'},
+                origin='native-test'),)),
+            received_accounts=accounts)
+        encounter.schedule_action(inquiry)
+        encounter.step(1)
+        self.assertEqual(len(accounts), 1)
+        self.assertEqual(accounts[0].words, 'practiced a native test')
+        binding = RecipientBinding(
+            world, 'history', 'listener-accounts', 'in_world_received_accounts',
+            (listener.id,), accounts)
+        wire = export_save(encounter, recipient_bindings=(binding,))
+        next_action = DelayAction(encounter, listener.id, defense=0,
+                                  start_time=1, id='native-inquiry-continuation')
+        encounter.schedule_action(next_action)
+        encounter.step(1)
+        history_digest = hashlib.sha256(native_history.encode(
+            native_history.capture(encounter))).hexdigest()
+        expected = {'time': encounter.time, 'rng': rng.state,
+                    'history': history_digest,
+                    'account': accounts[0].to_dict()}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-ask-about-past-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+inquiry=next(a for a in world.event_history.values()
+ if type(a).__name__=='AskAboutPastAction')
+assert inquiry.generate is not None and len(inquiry.received_accounts)==1
+account=inquiry.received_accounts[0].to_dict()
+action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
+ id='native-inquiry-continuation')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'account':account},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['time'], expected['time'])
+        self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
+        self.assertEqual(actual['history'], expected['history'])
+        self.assertEqual(actual['account'], expected['account'])
 
 
 if __name__ == "__main__":

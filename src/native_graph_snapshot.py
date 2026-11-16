@@ -903,6 +903,7 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     from objective_reality import SubjectRealityCandidate
     from field_observation import BeliefLedger
     from history_conversation import HeardAccount
+    from history_conversation import AskAboutPastAction
     from checkpoint_adapters import NativeInventory
     from statistical_group import validate_composition_records
 
@@ -919,6 +920,8 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
                             'reproduction_group.logical_registry']
     ledgers = [value for value in cache.values()
                if type(value) is RealityLedger]
+    inquiries = [value for value in cache.values()
+                 if type(value) is AskAboutPastAction]
     expected_recipes = [
         ('native-recipe', 'native-closure-recipes/1',
          'reproduction_group.logical_registry', ('object', world.id),
@@ -947,6 +950,17 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
             'personal_history.validate_history_constraints',
             ('object', history.being.id),
             'earliest,known_through,nondeclining_skills,reality,skill_use_history'))
+    account_recipes = [recipe for recipe in recipes
+                       if len(recipe) >= 3 and recipe[2] ==
+                       'history_conversation.received_accounts_binding']
+    _need(all(len(recipe) == 6 and recipe[1] == 'native-closure-recipes/1'
+              and recipe[3][0] == 'object'
+              and type(recipe[3][1]) is str
+              and type(recipe[4]) is str and type(recipe[5]) is str
+              for recipe in account_recipes)
+          and len({recipe[3][1] for recipe in account_recipes}) == len(account_recipes),
+          'native received-account bindings are malformed or duplicated')
+    expected_recipes.extend(account_recipes)
     owned_ledgers = {id(group._composition_reality) for group in groups}
     owned_ledgers.update(id(history.reality) for history in histories)
     expected_recipes.extend(
@@ -955,6 +969,25 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
         for ledger in ledgers if id(ledger) not in owned_ledgers)
     _need(sorted(recipes, key=repr) == sorted(expected_recipes, key=repr),
           'native Save callback recipes do not match restored owners')
+    recipient_by_name = {}
+    for namespace, name, role, observer_ids, reference in bindings:
+        if role != 'in_world_received_accounts':
+            continue
+        recipient = cache.get(reference[1])
+        _need(type(recipient) is list and (namespace, name) not in recipient_by_name,
+              'native received-account recipient binding is missing or duplicated')
+        recipient_by_name[(namespace, name)] = (recipient, observer_ids)
+    for recipe in account_recipes:
+        inquiry = next((value for value in inquiries if value.id == recipe[3][1]), None)
+        bound = recipient_by_name.get((recipe[4], recipe[5]))
+        _need(inquiry is not None and bound is not None
+              and bound[1] and inquiry.actor_id in bound[1],
+              'AskAboutPast recipient binding has no matching listener owner')
+        account_list = bound[0]
+        _need(all(type(row) is HeardAccount and row.listener_id == inquiry.actor_id
+                  for row in account_list),
+              'AskAboutPast recipient contains an account for another listener')
+        inquiry.received_accounts = account_list
     from reproduction_checkpoint import (
         restore_portable_native_reproduction_registry,
         ReproductionCheckpointError,
@@ -987,6 +1020,7 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
             ledger._validators = ()
     recipients = {}
     names = set()
+    recipient_tokens = {}
     for namespace, name, role, observer_ids, reference in bindings:
         key = reference[1]
         recipient = cache.get(key)
@@ -1004,21 +1038,45 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
                           for account in recipient),
                   'native received-accounts binding is invalid')
         recipients[id(recipient)] = role
+        from checkpoint_adapters import RecipientBinding, _portable_recipient_token
+        token = _portable_recipient_token(RecipientBinding(
+            world, namespace, name, role, observer_ids, recipient))
+        _need(token not in recipient_tokens,
+              'native recipient identity token collision')
+        recipient_tokens[token] = (role, recipient)
+    hash_containers = []
+    for value in cache.values():
+        if type(value) is dict:
+            hash_containers.append((value, list(value.items())))
+        elif type(value) is set:
+            hash_containers.append((value, list(value)))
     for identity in (value for value in cache.values()
                      if type(value) is RecipientIdentity):
-        recipient = identity.__dict__.get('object_identity')
-        _need(type(identity.role) is str and recipient is not None
-              and recipients.get(id(recipient)) == identity.role,
+        token = identity.__dict__.get('object_identity')
+        bound = recipient_tokens.get(token)
+        _need(type(identity.role) is str and bound is not None
+              and bound[0] == identity.role,
               'native observer identity has no restored recipient')
+        recipient = bound[1]
         object.__setattr__(identity, 'object_identity', id(recipient))
-    group_by_id = {group.id: group for group in groups}
+    # RecipientIdentity participates in immutable-map keys. Rebuild every
+    # restored hash container after replacing its portable integer token with
+    # the current-process recipient address.
+    for container, contents in hash_containers:
+        container.clear()
+        if type(container) is dict:
+            container.update(contents)
+        else:
+            container.update(contents)
+    reality_by_subject = {group.id: group._composition_reality for group in groups}
+    reality_by_subject.update({history.being.id: history.reality for history in histories})
     for candidate in (value for value in cache.values()
                       if type(value) is SubjectRealityCandidate):
-        group = group_by_id.get(candidate.subject_id)
-        _need(group is not None,
+        reality = reality_by_subject.get(candidate.subject_id)
+        _need(reality is not None,
               'native objective candidate has no restored Reality owner')
         object.__setattr__(candidate, 'ledger_identity',
-                           id(group._composition_reality))
+                           id(reality))
     _need(all(type(ledger._validators) is tuple for ledger in ledgers),
           'native Reality validator rehydration failed')
 
