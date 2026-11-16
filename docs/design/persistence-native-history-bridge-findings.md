@@ -29,8 +29,8 @@
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_inventory.py'` — 30 passed.
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` — 48 passed.
 - The combined attempt to run these by package module name plus `test_arena_persistence.py` was interrupted after early test markers, so it is not counted.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_arena_persistence.py'` was deliberately interrupted while serializing the 64-Feint scale fixture at `arena_history_segments.py:470`. No result count is claimed. This reproduces a long serialization cost, not a functional regression; the exact suite remains to be run after the production architecture work.
-- No production code or saved artifact was modified in this audit phase. `/12`, old accepted saves, unrelated staged archive operations, and the untracked local Arena save remain intact.
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest test_arena_persistence.TestArenaPersistence.test_64_lawful_native_feint_resolutions_segment_history_and_resume` — 1 passed in 272.770s. This confirms the current `/12` path retains and resumes 64 lawful Actions, but the test spends over four minutes at export/fresh-process work and its graph-history storage remains the architecture being replaced. This is measured baseline, not acceptable completion of the new native history requirement.
+- `/12` production Save/Load has not been modified by this continuation. The new `src/native_history.py` and `tests/test_native_history.py` provide an Arena-session-independent history-only record/read component; current snapshot, append-at-publication, native rehydration/continuation, old format integration, and historical consumer cutover are still missing. `/12`, old accepted saves, unrelated staged archive operations, and the untracked local Arena save remain intact.
 
 ## Engineering conclusion
 
