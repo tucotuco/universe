@@ -79,6 +79,9 @@ class TestNativeHeadlessResume(unittest.TestCase):
         unknown = copy.deepcopy(self.body)
         unknown["unmodeled"] = True
         cases.append(unknown)
+        missing = copy.deepcopy(self.body)
+        del missing["compatibility"]
+        cases.append(missing)
         bad_compat = copy.deepcopy(self.body)
         bad_compat["compatibility"]["source_and_rules_sha256"] = "0" * 64
         bad_compat["integrity_sha256"] = resume._seal(
