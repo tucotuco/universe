@@ -18,7 +18,7 @@
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
-| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:28-08:00 | PT38M38S |
+| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:58-08:00 | PT39M8S |
 
 ## Latest continuation — faithful native replay
 
