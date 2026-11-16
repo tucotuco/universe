@@ -580,8 +580,12 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         payload = json.loads(source.save_encounter_bytes())
         native_wire = base64.b64decode(payload["native_state_base64"], validate=True)
         native = json.loads(native_wire)
-        self.assertEqual(native["schema"], "universe.generated-arena-native-state/4")
-        nodes = native["inventory"][1][2][1]
+        self.assertEqual(native["schema"], "universe.generated-arena-native-state/5")
+        compact = native["inventory"][1]
+        self.assertEqual(compact[0], "universe.generated-arena-compact-inventory/1")
+        symbols = compact[1]
+        body = compact[2]
+        nodes = body[2][1]
         self.assertTrue(any(row[0][0] == "owned-node" for row in nodes))
 
         def reseal(mutator):
@@ -592,8 +596,8 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             return _canonical(value)
 
         cases = []
-        cases.append(lambda value: value["inventory"][1][2][1][1].__setitem__(
-            0, value["inventory"][1][2][1][0][0]))
+        cases.append(lambda value: value["inventory"][1][2][2][1][1].__setitem__(
+            0, value["inventory"][1][2][2][1][0][0]))
 
         def make_dangling(value):
             def visit(row):
@@ -610,14 +614,75 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             if not visit(value["inventory"]):
                 raise AssertionError("compact native reference fixture was not found")
         cases.append(make_dangling)
-        cases.append(lambda value: value["inventory"][1][2][1][1][0].__setitem__(
+        cases.append(lambda value: value["inventory"][1][2][2][1][1][0].__setitem__(
             1, "z" * 64))
-        cases.append(lambda value: value["inventory"][1][2][1][1].__setitem__(
+        cases.append(lambda value: value["inventory"][1][2][2][1][1].__setitem__(
             1, "unreviewed.Process"))
+        cases.append(lambda value: value["inventory"][1][1].__setitem__(
+            0, value["inventory"][1][1][1]))
+
+        def make_dangling_symbol(value):
+            table = value["inventory"][1][1]
+            limit = len(table)
+            def visit(row):
+                if type(row) is list:
+                    for index, child in enumerate(row):
+                        if type(child) is int and child < 0:
+                            row[index] = -(limit + 1)
+                            return True
+                        if visit(child):
+                            return True
+                return False
+            if not visit(value["inventory"][1][2]):
+                raise AssertionError("compact scalar string reference was not found")
+        cases.append(make_dangling_symbol)
+
+        def make_odd_pair_table(value):
+            rows = value["inventory"][1][2][2][1]
+            row = next(item for item in rows
+                       if item[1] == "ordered-map" and item[2])
+            row[2].pop()
+        cases.append(make_odd_pair_table)
         for mutate in cases:
             with self.subTest(corruption=cases.index(mutate)):
                 with self.assertRaises(ArenaNativeSnapshotRejected):
                     decode_native(reseal(mutate))
+
+
+    def test_pinned_native_v4_schema_migrates_to_current_compact_wire(self):
+        import base64
+        import hashlib
+        from arena_native_snapshot import (_LEGACY_V4_COMPATIBILITY,
+            _canonical as native_canonical, decode as decode_native)
+        from arena_persistence import _canonical as save_canonical
+
+        source = GeneratedArenaSession(root_seed_factory=lambda: 20261115)
+        source.generate({"starting_experience": "10000", "width_cells": "5",
+                         "height_cells": "5"})
+        current_outer = json.loads(source.save_encounter_bytes())
+        current_wire = base64.b64decode(current_outer["native_state_base64"], validate=True)
+        current_inventory = decode_native(current_wire)
+        legacy_inventory = (_LEGACY_V4_COMPATIBILITY, current_inventory[1])
+        legacy_payload = {"schema": "universe.generated-arena-native-state/4",
+                          "compatibility": _LEGACY_V4_COMPATIBILITY,
+                          "inventory": legacy_inventory}
+        legacy_wire = native_canonical(dict(legacy_payload,
+            sha256=hashlib.sha256(native_canonical(legacy_payload)).hexdigest()))
+        outer_payload = {"schema": "universe.generated-arena-save/8",
+            "native_state_base64": base64.b64encode(legacy_wire).decode("ascii"),
+            "session": current_outer["session"]}
+        legacy_save = save_canonical(dict(outer_payload,
+            sha256=hashlib.sha256(save_canonical(outer_payload)).hexdigest()))
+
+        restored = GeneratedArenaSession()
+        restored.load_encounter_bytes(legacy_save)
+        migrated = json.loads(restored.save_encounter_bytes())
+        migrated_native = json.loads(base64.b64decode(
+            migrated["native_state_base64"], validate=True))
+        self.assertEqual(migrated["schema"], "universe.generated-arena-save/9")
+        self.assertEqual(migrated_native["schema"],
+                         "universe.generated-arena-native-state/5")
+        self.assertEqual(restored.active_candidate.encounter.time, 0)
 
 
     def test_extended_seed14_combat_checkpoint_stays_strict_and_continues_exactly(self):
@@ -638,8 +703,22 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             wire = source.save_encounter_bytes()
             native = base64.b64decode(json.loads(wire)["native_state_base64"], validate=True)
             count = [0]
-            _tree(json.loads(native), count=count)
-            return {"wire": wire, "native_bytes": len(native), "nodes": count[0]}
+            decoded = json.loads(native)
+            _tree(decoded, count=count)
+            def max_depth(value, depth=0):
+                if type(value) is list:
+                    return max([depth] + [max_depth(item, depth + 1) for item in value])
+                if type(value) is dict:
+                    return max([depth] + [max_depth(item, depth + 1)
+                                          for item in value.values()])
+                return depth
+            return {"wire": wire, "outer_bytes": len(wire),
+                    "native_bytes": len(native), "nodes": count[0],
+                    "depth": max_depth(decoded),
+                    "receipts": len(getattr(encounter, "_atomic_interval_history", ())),
+                    "actions": len(source._all_melee_actions(candidate)),
+                    "pending_actions": len(encounter.pending_action_list),
+                    "completed_actions": len(encounter.finished_action_list)}
 
         checkpoints = {0: checkpoint()}
         placement = candidate.ground_objects[0]
@@ -721,6 +800,65 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
         self.assertEqual(encounter.time, 91)
         self.assertEqual(len(source._all_melee_actions(candidate)), 22)
         self.assertEqual((player.get_hit_points(), opponent.get_hit_points()), (-2, 17))
+        checkpoints[91] = checkpoint()
+        self.assertLess(checkpoints[91]["nodes"], 1_000_000)
+
+        def fresh_process_roundtrip(boundary, steps):
+            with tempfile.TemporaryDirectory(prefix=f"arena-checkpoint-t{boundary}-") as directory:
+                input_path = Path(directory) / "checkpoint.json"
+                restored_path = Path(directory) / "restored.json"
+                continued_path = Path(directory) / "continued.json"
+                input_path.write_bytes(checkpoints[boundary]["wire"])
+                script = """
+import json,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();s.load_encounter_bytes(Path(sys.argv[1]).read_bytes())
+c=s.active_candidate;e=c.encounter
+assert e.time==int(sys.argv[3])
+Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
+for _ in range(int(sys.argv[4])):s.advance_one_second()
+Path(sys.argv[5]).write_bytes(s.save_encounter_bytes())
+print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
+ 'ids':[p.native.being.id for p in c.participants],
+ 'hp':[p.native.being.get_hit_points() for p in c.participants],
+ 'actions':len(s._all_melee_actions(c)),
+ 'observer_histories':[len(p.native.being._arena_perception_ledger.history)
+                       for p in c.participants]},sort_keys=True))
+"""
+                environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                    PYTHONNOUSERSITE="1", PYTHONPATH=os.pathsep.join(
+                        (str(ROOT / "tests"), str(ROOT / "src"), str(ROOT / "examples"))))
+                result = subprocess.run([sys.executable, "-B", "-c", script,
+                    str(input_path), str(restored_path), str(boundary), str(steps),
+                    str(continued_path)], cwd=ROOT, env=environment,
+                    capture_output=True, text=True, timeout=240, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(restored_path.read_bytes(), input_path.read_bytes())
+                return continued_path.read_bytes(), json.loads(result.stdout)
+
+        # Strict reload at the former terminal failure boundary, then continue
+        # one ordinary second and compare the complete canonical checkpoint.
+        continued, terminal_view = fresh_process_roundtrip(91, 1)
+        self.assertEqual(terminal_view["time"], 92)
+        source.advance_one_second()
+        self.assertEqual(continued, source.save_encounter_bytes())
+        checkpoints[92] = checkpoint()
+
+        while encounter.time < 100:
+            source.advance_one_second()
+        checkpoints[100] = checkpoint()
+        continued, later_view = fresh_process_roundtrip(100, 1)
+        self.assertEqual(later_view["time"], 101)
+        source.advance_one_second()
+        self.assertEqual(continued, source.save_encounter_bytes())
+        self.assertEqual(later_view["receipts"], 101)
+        self.assertEqual(later_view["ids"], [player.id, opponent.id])
+        if os.environ.get("UNIVERSE_PER_SCALE_METRICS"):
+            print("U-PER-SCALE-METRICS " + json.dumps({
+                str(boundary): {key: value for key, value in row.items()
+                                if key != "wire"}
+                for boundary, row in checkpoints.items()}, sort_keys=True))
 
 
 if __name__ == "__main__":

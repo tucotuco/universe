@@ -13,8 +13,10 @@ import math
 import threading
 from types import MappingProxyType
 
-SCHEMA = 'universe.generated-arena-native-state/4'
-_LEGACY_SCHEMA = 'universe.generated-arena-native-state/3'
+SCHEMA = 'universe.generated-arena-native-state/5'
+_LEGACY_SCHEMAS = ('universe.generated-arena-native-state/4',
+                   'universe.generated-arena-native-state/3')
+_COMPACT_INVENTORY = 'universe.generated-arena-compact-inventory/1'
 _FIELDS = frozenset(('schema', 'compatibility', 'inventory', 'sha256'))
 MAX_BYTES = 64 * 1024 * 1024
 
@@ -25,6 +27,16 @@ _LEGACY_COMPATIBILITY = (
     'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
     ('implementation-source', '7f0fc28b8e1d1599c5340a81208f06d70c2ac883f3d3cc1071ea03c4ce0b194f'),
     ('rule-kernel-source', 'bb6cfd2f532748094488f220397f9ad4f7f277af787dcf551ec5de83443ec8c1'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
+_LEGACY_V4_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', '0703a58dfb83b19878fd9eeac219458071e854a5bfb1a94b1d40d7e899fc06cd'),
+    ('rule-kernel-source', 'f2a68e71424fb3642bdd609701718082f34959e795b104bec817a1099ecc6685'),
     ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
     ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
     ('numeric', 'IEEE754-binary64-hex'),
@@ -155,9 +167,12 @@ def capture(world, encounter, rng_owner):
 def encode(inventory):
     from checkpoint_inventory import _compatibility
     payload = {'schema': SCHEMA, 'compatibility': _compatibility(),
-               'inventory': inventory}
+               'inventory': _compact_inventory(inventory)}
     body = _canonical(payload)
     wire = _canonical(dict(payload, sha256=hashlib.sha256(body).hexdigest()))
+    # Refuse to write a checkpoint that the unchanged production admission
+    # limit would reject. The count is over the lossless compact wire form.
+    _tree(json.loads(wire))
     _need(len(wire) <= MAX_BYTES, 'native Arena state exceeds the file limit')
     return wire
 
@@ -173,22 +188,24 @@ def decode(wire):
         raise ArenaNativeSnapshotRejected(f'native Arena state JSON is invalid: {exc}') from exc
     _tree(data)
     _need(type(data) is dict and set(data) == _FIELDS
-          and data['schema'] in (SCHEMA, _LEGACY_SCHEMA),
+          and data['schema'] in (SCHEMA, *_LEGACY_SCHEMAS),
           'native Arena state has an unknown schema or field set')
     payload = {key: data[key] for key in data if key != 'sha256'}
     _need(type(data['sha256']) is str and hashlib.sha256(_canonical(payload)).hexdigest() == data['sha256'],
           'native Arena state digest does not match')
     _need(_canonical(data) == wire, 'native Arena state is not canonical')
     saved_compatibility = _tuples(data['compatibility'])
-    legacy = data['schema'] == _LEGACY_SCHEMA
-    expected_compatibility = _LEGACY_COMPATIBILITY if legacy else _compatibility()
+    legacy_schema = data['schema'] if data['schema'] in _LEGACY_SCHEMAS else None
+    expected_compatibility = (_LEGACY_COMPATIBILITY
+        if legacy_schema == 'universe.generated-arena-native-state/3' else
+        _LEGACY_V4_COMPATIBILITY if legacy_schema else _compatibility())
     _need(saved_compatibility == expected_compatibility,
           'saved native Arena implementation/rules differ from this runtime')
     try:
         inventory = _tuples(data['inventory'])
     except RecursionError as exc:
         raise ArenaNativeSnapshotRejected('native Arena state nesting exceeds limits') from exc
-    if legacy:
+    if legacy_schema == 'universe.generated-arena-native-state/3':
         _need(type(inventory) is tuple and len(inventory) == 2
               and inventory[0] == _LEGACY_COMPATIBILITY,
               'legacy native Arena inventory compatibility mismatch')
@@ -196,8 +213,138 @@ def decode(wire):
                             expected_compatibility=_LEGACY_COMPATIBILITY)
         inventory = _migrate_path_identities(inventory)
         inventory = (_compatibility(), inventory[1])
+    elif legacy_schema == 'universe.generated-arena-native-state/4':
+        _need(type(inventory) is tuple and len(inventory) == 2
+              and inventory[0] == _LEGACY_V4_COMPATIBILITY,
+              'legacy v4 native Arena inventory compatibility mismatch')
+        _validate_inventory(inventory,
+                            expected_compatibility=_LEGACY_V4_COMPATIBILITY)
+        inventory = (_compatibility(), inventory[1])
+    else:
+        inventory = _expand_compact_inventory(inventory)
     _validate_inventory(inventory)
     return inventory
+
+
+def _compact_inventory(inventory):
+    """Encode repeated scalar strings and pair tables losslessly.
+
+    Inspection history repeats a small vocabulary as typed strings in many
+    map entries. A negative integer indexes the sorted per-checkpoint string
+    table and replaces the three-node ('string', value) tuple. Native integer
+    values already have an explicit ('integer', decimal) tag. Field and map
+    pairs are stored flat and reconstructed only after strict tree admission.
+    """
+    _need(type(inventory) is tuple and len(inventory) == 2,
+          'native inventory envelope is malformed')
+    compatibility, body = inventory
+    _need(type(body) is tuple and len(body) == 5
+          and body[0] == 'checkpoint-inventory',
+          'native inventory body is outside Arena schema')
+    sections = []
+    symbols = set()
+    containers = {'ordered-map', 'list', 'tuple', 'set', 'frozenset'}
+    for section in body[1:]:
+        _need(type(section) is tuple and section,
+              'native inventory section is malformed')
+        if section[0] != 'nodes':
+            sections.append(section)
+            continue
+        _need(len(section) == 2 and type(section[1]) is tuple,
+              'native inventory node table is malformed')
+        rows = []
+        for row in section[1]:
+            _need(type(row) is tuple and len(row) == 3
+                  and type(row[2]) is tuple,
+                  'native graph node is malformed')
+            ref, tag, content = row
+            if tag == 'ordered-map' or tag not in containers:
+                flat = []
+                for pair in content:
+                    _need(type(pair) is tuple and len(pair) == 2,
+                          'native ordered field/key pair is malformed')
+                    flat.extend(pair)
+                content = tuple(flat)
+            rows.append((ref, tag, content))
+        sections.append(('nodes', tuple(rows)))
+
+    def collect(value):
+        if type(value) is tuple:
+            if (len(value) == 2 and value[0] == 'string'
+                    and type(value[1]) is str):
+                symbols.add(value[1])
+                return
+            for item in value:
+                collect(item)
+
+    compact_body = (body[0], *sections)
+    collect(compact_body)
+    symbol_table = tuple(sorted(symbols))
+    symbol_ids = {value: index for index, value in enumerate(symbol_table)}
+
+    def compact(value):
+        if type(value) is tuple:
+            if (len(value) == 2 and value[0] == 'string'
+                    and type(value[1]) is str):
+                return -symbol_ids[value[1]] - 1
+            return tuple(compact(item) for item in value)
+        return value
+
+    return (compatibility,
+            (_COMPACT_INVENTORY, symbol_table, compact(compact_body)))
+
+
+def _expand_compact_inventory(inventory):
+    _need(type(inventory) is tuple and len(inventory) == 2,
+          'compact native inventory envelope is malformed')
+    compatibility, compact = inventory
+    _need(type(compact) is tuple and len(compact) == 3
+          and compact[0] == _COMPACT_INVENTORY
+          and type(compact[1]) is tuple and type(compact[2]) is tuple,
+          'compact native inventory marker/table is malformed')
+    symbols, body = compact[1], compact[2]
+    _need(len(symbols) <= 250000 and all(type(value) is str for value in symbols)
+          and symbols == tuple(sorted(set(symbols))),
+          'compact native inventory symbol table is invalid')
+
+    def expand(value):
+        if type(value) is int and value < 0:
+            index = -value - 1
+            _need(index < len(symbols),
+                  'compact native inventory has a dangling symbol')
+            return ('string', symbols[index])
+        if type(value) is tuple:
+            return tuple(expand(item) for item in value)
+        return value
+
+    body = expand(body)
+    _need(type(body) is tuple and len(body) == 5
+          and body[0] == 'checkpoint-inventory',
+          'compact native inventory body is malformed')
+    containers = {'ordered-map', 'list', 'tuple', 'set', 'frozenset'}
+    sections = []
+    for section in body[1:]:
+        _need(type(section) is tuple and section,
+              'compact native inventory section is malformed')
+        if section[0] != 'nodes':
+            sections.append(section)
+            continue
+        _need(len(section) == 2 and type(section[1]) is tuple,
+              'compact native inventory node table is malformed')
+        rows = []
+        for row in section[1]:
+            _need(type(row) is tuple and len(row) == 3
+                  and type(row[2]) is tuple,
+                  'compact native graph node is malformed')
+            ref, tag, content = row
+            if tag == 'ordered-map' or tag not in containers:
+                _need(len(content) % 2 == 0,
+                      'compact native field/key sequence has an odd length')
+                content = tuple((content[index], content[index + 1])
+                                for index in range(0, len(content), 2))
+            rows.append((ref, tag, content))
+        sections.append(('nodes', tuple(rows)))
+    return compatibility, (body[0], *sections)
 
 
 def _unique(rows):

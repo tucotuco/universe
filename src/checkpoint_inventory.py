@@ -164,8 +164,7 @@ class _Inventory:
         self.known[id(value)]=ref
 
     def value(self,value,path,depth=0):
-        self.count+=1
-        _require(self.count<=250000 and depth<=100,'inventory size/depth limit exceeded')
+        _require(depth<=100,'inventory graph depth limit exceeded')
         kind=type(value)
         if value is None:return ('null',)
         if kind is bool:return ('boolean',value)
@@ -176,6 +175,12 @@ class _Inventory:
             return ('binary64',value.hex())
         existing=self.known.get(id(value))
         if existing is not None and id(value) in self.emitted:return ('reference',existing)
+        # Bound allocated graph nodes, not the number of scalar field visits.
+        # Repeated historical string values are losslessly interned by the
+        # strict wire encoder; counting their pre-encoding appearances here
+        # rejected checkpoints that fit both persisted admission limits.
+        self.count+=1
+        _require(self.count<=250000,'inventory graph node limit exceeded')
         ref=existing if existing is not None else self._owned_ref(path)
         self.known[id(value)]=ref;self.emitted.add(id(value));self.dependencies.append((id(value),id(kind)))
         if kind in (dict,MappingProxyType):

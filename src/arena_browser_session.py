@@ -1997,6 +1997,16 @@ class GeneratedArenaSession:
         try:
             encounter.prepare_action(action)
             encounter.schedule_action(action)
+        except ValueError as exc:
+            # Arena control is best-effort. A combatant that can no longer
+            # participate is a native refusal, not a failed Encounter
+            # interval or a reason to roll back previously committed history.
+            if str(exc) == 'combatants must be able to participate':
+                self._opponent_attack_refusal = "native_combatant_unavailable"
+                return None
+            self._opponent_attack_refusal = "native_scheduler_refused"
+            raise ArenaBrowserRequestError(
+                "native opponent Dagger strike was not accepted; Arena state is unchanged") from exc
         except Exception as exc:
             self._opponent_attack_refusal = "native_scheduler_refused"
             raise ArenaBrowserRequestError(
