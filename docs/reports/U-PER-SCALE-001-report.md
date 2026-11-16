@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Status:** ACTIVE; segmented persistence and the t=300/65-Action demonstration are verified, but the binding addendum acceptance matrix remains partial and is not accepted. Do not archive or mark the assignment complete before acceptance.
+**Status:** ACTIVE; the bounded native headless-resume slice is demonstrated and verified, but U-PER-SCALE-001's broader sufficient-persistence acceptance remains incomplete and is not accepted. Do not archive or mark the program complete.
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
@@ -15,6 +15,43 @@
 | Sufficiency addendum continuation | 2026-11-15T20:39:02-08:00 | 2026-11-16T03:09:14-08:00 | PT6H30M12S |
 | Exact serialized-field diagnostic audit | 2026-11-16T04:16:02-08:00 | 2026-11-16T04:24:43-08:00 | PT8M41S |
 | Headless initial/delta proof | 2026-11-16T04:59:08-08:00 | 2026-11-16T05:13:46-08:00 | PT14M38S |
+
+| Native headless resume slice | 2026-11-16T10:46:06-08:00 | CLOSEOUT TIME RECORDED BELOW | see problems-first closeout |
+
+## Latest continuation — native headless resume
+
+### Problems first
+
+- This continuation closes only the bounded native-resume experiment. It does **not** close U-PER-SCALE-001: production `/12` remains graph-backed, history is reassembled on Load, served Chrome Open remains unverified, and the prototype depends on an exact matching source/config/rules checkout. It also does not recreate historical native `CommittedBoundaryRecord` objects; their committed Event/delta facts remain in the lossless experimental history, while future native receipts are created normally.
+- The accepted closure is one quiescent two-Being Encounter with pinned Human/Dagger definitions, settled Run/Delay history, no pending/cancelled Actions or open Choice, and a supported Dagger thrust as the next Action. Other historical Action families, arbitrary object kinds, active schedules, personal-history values, and general native receipt queries are excluded and fail closed where checked.
+- No production persistence code or `/12` behavior changed. The source change is a narrow native restore-owner hook, not a general Save/Load API. U-PER-SCALE-001 remains sole ACTIVE; no user decision or external blocker is outstanding for this bounded slice.
+
+### Verified outcome
+
+The headless resume helper writes a strict, sealed checkpoint at t=4 from the existing native initial+delta/Event representation. A separate OS process validates it before creating Universe/Encounter objects; restores current Being/Object state, observer awareness, RNG, settled ChoiceBook, scheduler cursor, and historical Run/Delay Event identities without resolving prior Actions; then continues five boundaries via ordinary `Encounter.step()` and native transactional publication. Canonical resumed and uninterrupted results match for current state, chronology, identities, ChoiceBook, future receipts, RNG and observer-specific awareness.
+
+At t=8, native `action-native-dagger-strike` (`MeleeStrike`, thrust, Dagger, Ada→Bram) resolves `normal`. The native proposal contains `DamageEffect(source_action_id=action-native-dagger-strike, target_id=being-bram, amount=4, component=body)` plus Dagger practice; the atomic before/after fact is Bram HP 10→6. Receipt identities include boundary-8 effect slots 0/1, lifecycle slots 0/1, and release slot 0. Boundary 9 is quiet. Final t=9 state digest: `7b8c21204747e03396539954930c177adeb164bd5ce5a64da4e5aa41b1c8694a`.
+
+The child process imports none of `arena_native_snapshot`, Arena session/controller/server packages, or `npcgen`. Compatibility pins Python, `src/*.py`, `src/config/*.json`, and Encounter rule Markdown; the configured Library definitions are reloaded and profile-checked. Unknown/missing closure fields, corrupted checksum, compatibility mismatch, malformed preimage, missing/reordered commits, and dangling references reject before Universe construction. Full field/readers table, commands, component sizes and boundaries are in [native resume findings](../design/persistence-headless-resume-findings.md). The original delta findings now link to this later result and retain clearly labeled historical byte measurements.
+
+The boundary-4 sealed experimental checkpoint is **39,062 bytes**: initial state 9,020; delta stream including Events 12,134 (Event subcomponent 5,914 and change-array subcomponent 5,711); native current-state snapshot 10,748; settled action-history subcomponent 5,910; Choice/scheduler metadata 708; compatibility metadata 190; zero embedded definition bytes (definitions are pinned external dependencies). These subcomponents overlap and are not additive. In one fresh child sample validation/rehydration took 48.9 ms, whole process plus continuation 1.77 s, and `ru_maxrss` reported 51.2 MB platform units. Five native step calls in a separate control sample took approximately 269–350 ms each. These are fixture measurements, not scale claims.
+
+### Acceptance matrix for `U-PER-SCALE-001-NATIVE-HEADLESS-RESUME`
+
+| Criterion | Result |
+|---|---|
+| Fresh OS process restores native state without Arena runtime or replaying old Actions | Met for the declared pinned closure; prior Action/Event identities are materialized as historical evidence. |
+| Continue the ordinary native Encounter for ≥2 boundaries and compare with uninterrupted control | Met for boundaries 5–9; state, IDs, chronology, future receipts, RNG, ChoiceBook and observer views match. |
+| Preserve initial state + atomic deltas + Events, including zero-diff Event and simultaneous batch | Met; independent replay equals every recorded native boundary and the resume checkpoint. |
+| Demonstrate a lawful consequential non-position property change | Met; boundary-8 native DamageEffect changes HP 10→6 with committed effect identity. |
+| Reject malformed/incompatible/incomplete history transactionally | Met for tested field closure, checksum, compatibility, cursor, reference, preimage and chronology cases before graph construction. |
+| Keep `/12` unchanged and report measured evidence/limitations | Met; no production persistence source/format changed. |
+
+Focused verification: `.venv/bin/python -m unittest tests.test_native_headless_resume tests.test_persistence_headless_delta -v` — **8 passed, 16.783 s**; `py_compile` on both headless runners and `src/transactional_progression.py` passed. No full repository or Arena browser suite was run. Exact acceptance evidence and implementation details are in the linked findings. The scoped implementation and documentation commits, publication-safety audit, final HEAD and working-tree status are recorded at closeout below.
+
+The adjacent `.venv/bin/python -m unittest test_transactional_progression -v` could not import the suite's sibling fixture; rerunning with `PYTHONPATH=tests` executed 61 tests and reported **55 passed, 4 errors, 2 failures** in 34.815 s. The four errors are existing tests scheduling overlapping Actions without the adopted acquired Multi-action skill. The two failures expect `UnsupportedEvaluation` for unsupported starting graphs during mode selection. None calls the new private resume hook, and this diff adds that hook without changing existing progression code. These discrepancies were not reproduced against a separately checked-out baseline in this time-boxed slice; they remain separately documented and were not changed here.
+
+**Execution interval:** Start `2026-11-16T10:46:06-08:00`; End and elapsed are recorded at closeout immediately before the final audited documentation commit.
 
 **Current addendum disposition:** Current portable save schema `/12` (archive `/3`) stores the native resumable graph, compatibility-bound immutable definitions, and independently validated commit-boundary history. Completed native Action roots are now stored with their exact boundary segments and restored before strict native inventory validation. At t=300: snapshot 23,813 nodes / 331,315 bytes; definitions 51,921 / 560,106; history 1,139,080 / 12,815,153; compressed archive 2,968,730 bytes. Snapshot falls 39.3% (16,517 nodes / 214,795 bytes) versus `/11`, with no loss of Action identity or history. The 64+1 Feint run, 169 quiet boundaries, strict fresh-process Load→Save, and t=301 continuation pass. Supported `/10` and `/11` archives migrate through fresh processes. Chrome `/12` Save produced the served UI download confirmation; Open-file Load remains unverified because extension local-file access is disabled. HTTP/session Save/Load, transactional rejection, and interrupted-export preservation pass. The 2/20/200 curve concerns registry Beings, not active combatants. The assignment remains ACTIVE: state is still a recursive native graph, completed Choice settlement wrappers remain in current state, Load eagerly reassembles history, active Encounter participation is two Beings, and served Chrome Open is unverified.
 
@@ -247,8 +284,8 @@ Legacy native v3 migration, pinned native v4 migration, malformed compact symbol
 
 ### Problems first
 
-- The proof is deliberately narrower than the 109-node-type Arena schema. It does not establish universal historical sufficiency, general Action/Choice rehydration, or native resumability. The new complete experimental snapshot means complete only for the declared two-Being field closure; it is not a portable native save.
-- There is no general non-Arena native restore path to use for fresh-process resumption: `checkpoint_inventory` marks the closure incomplete, reports `restore_verified=False`, and `require_complete()` explicitly refuses for lack of restore support. An existing `arena_native_snapshot` capture/restore probe on this hand-authored fixture encoded 920,938 bytes and reconstructed a same-process native Universe/Encounter, but it relies on the Arena-specific checkpoint schema and did not test a fresh process/future branch. Thus native resumability remains **NOT DEMONSTRATED** for this experiment.
+- Historical status at the initial/delta-only milestone: the proof was narrower than the 109-node Arena schema and did not establish general Action/Choice rehydration or a portable native save. The later bounded fresh-process resume is reported above; it does not change these general limits.
+- At the prior checkpoint, `checkpoint_inventory` marked its closure incomplete with `restore_verified=False`, and `require_complete()` refused because it had no restore support. The same-process `arena_native_snapshot` probe (920,938 bytes) did not test fresh-process continuation. These statements describe the earlier delta-only experiment; the bounded two-Being native resume was subsequently implemented and verified in the latest continuation.
 - The demonstration exercises one successful moving Run, one no-effect successful Delay, three quiet boundaries, and two same-boundary Run Actions. It does not cover damage, failed combat, newly acquired observer evidence, fatigue/conditions/equipment evolution, entity birth/removal, arbitrary Event consumers, or pending future Choices. Those are unresolved production field/history coverage, not a blocker to this bounded proof.
 - The earlier 26,003-byte quiet history segment is from a different generated-Arena fixture; no direct same-scenario storage comparison exists.
 
@@ -283,9 +320,9 @@ Focused validation: `.venv/bin/python -B -m unittest tests.test_persistence_head
 | Simultaneous batch where native contract supports it | Met as one two-Action commit receipt with one atomic two-Being diff; not a contested combat test |
 | Deterministic rerun and malformed chronology/preimage refusal | Met |
 | Storage/execution measurements | Met for this fixture; no direct generated-Arena baseline comparison |
-| Fresh-process native resumability | Not demonstrated; no qualifying Arena-independent generic restore/rehydration path |
+| Fresh-process native resumability | Historical status in the prior delta-only closeout; now demonstrated for the explicitly bounded closure in the latest continuation above. Generic/production restoration remains open. |
 
-The bounded experiment is complete and supports this narrow tested closure. **Recommendation: do not integrate the delta representation into production yet.** The exact excluded field families and missing generic rehydration path make broader sufficiency unproven. Continue U-PER-SCALE-001 as sole ACTIVE; keep U-ACT-GATE-001 FUTURE/unpassed, U-NET-001 DEFERRED, and do not move on to shield work under this incomplete persistence program. No production Save/Load, rule, Arena mode, observer evidence or history was changed.
+The initial/delta experiment was complete at that earlier milestone. Its lack of restoration was closed only for the bounded native resume fixture described above. **Recommendation remains: do not integrate the delta representation into production yet.** Exact excluded field families and the absence of generic rehydration mean broader sufficiency remains unproven. Continue U-PER-SCALE-001 as sole ACTIVE; keep U-ACT-GATE-001 FUTURE/unpassed, U-NET-001 DEFERRED, and do not move on to shield work under this incomplete persistence program. No production Save/Load, rule, Arena mode, observer evidence or history was changed.
 
 ### Commits and closeout
 
@@ -307,4 +344,13 @@ The latest report's code-only/progress conclusions are superseded only within th
 - `ef01b913a129c17a58a2a17e831d84702eab5c9e` — portable save/archive `/12` and `/3`, completed Action roots in commit-boundary history, strict `/11` migration fixture, and extended exact continuation regressions.
 - `c20b3bde4c122683884c43442eb8a3a26e2670a0` — reconcile TASKS, the source-linked sufficiency inventory, `/12` acceptance evidence, exact world-size measurements and browser limitation.
 
-**Current closeout:** latest implementation commit is `ef01b913a129c17a58a2a17e831d84702eab5c9e`. `/12` materially reduces and bounds resume-state growth while retaining commit-boundary history and strict exact restoration; the report is still not accepted. Ordinary Chrome Save is verified, but Chrome Open-file Load was blocked by disabled extension local-file access. The current graph-backed representation and eager history reconstruction remain bounded design limits. U-PER-SCALE-001 remains ACTIVE; no push was performed.
+**Historical closeout at the `/12` milestone:** latest implementation commit at that time was `ef01b913a129c17a58a2a17e`. The current report top and “Latest continuation — native headless resume” section supersede this milestone status; see the final closeout section below for current repository evidence.
+
+
+## Current closeout — native headless resume slice
+
+- Implementation commits: `0de182cef463bc0d161752a17a0b060caa7aa12d` — bounded Arena-independent native Encounter resume, native HP consequence and focused tests; `71280b0176d559a6eb89f0ef88fba5e87ed6152d` — missing-checkpoint-metadata regression.
+- `TASKS.md`, prior delta findings, this engineering report, and `docs/design/persistence-headless-resume-findings.md` were reviewed together. The documentation closeout commit is recorded here after it is created.
+- Final focused run: **8 passed in 16.783 s**; `py_compile` and `git diff --check` passed. The 61-test adjacent transactional suite result and non-baseline-reproduced six mismatches are above.
+- `tools/check_publication_safety.py --staged` passed before the implementation commit (11 staged paths, 0 findings). After the scoped commit, the five unrelated historical archive operations remain staged and unchanged; the safety check again passed (6 staged paths, 0 findings). No unrelated staged paths entered the implementation commit. The user-provided assignment, archive save artifacts, process standard and other untracked files were preserved.
+- No push or history rewrite. U-PER-SCALE-001 remains sole ACTIVE; this bounded native resume is verified, while the broader program is not complete.
