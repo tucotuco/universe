@@ -18,7 +18,7 @@
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
-| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:32:03-08:00 | PT35M13S |
+| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:28-08:00 | PT38M38S |
 
 ## Latest continuation — faithful native replay
 
@@ -83,8 +83,12 @@ An initial attempt to invoke adjacent tests as package modules used an incorrect
 - `d95371bad1f15eef00be4cd832bc036460898651` — recorded declarations, time-indexed historical playback, native same-version rerun, generated-ID mapping and focused acceptance tests.
 - `58542acc5c1066278ad457227b8392d05b37dbd6` — independent native-state snapshots at every boundary, comparison against reconstructed playback and snapshot-tamper refusal.
 - `cd136c0282b3fb3743946cbf83e37c864f022ca2` — canonical assignment installation, findings, `TASKS.md` reconciliation and engineering-report update.
+- `a9212da20161d630f47464e655aaea89dc281638` — exact state projection fields, fail-closed exclusions and sufficiency assessment.
+- The final report-time/audit correction is the subsequent report-only closeout commit; its hash is the final repository HEAD reported in the Codex closeout.
 
 Staged publication-safety audit passed with **0 findings** for the implementation commits (9 staged paths, then 8), documentation commit (10), and post-commit preserved stage (6). Explicit-path commits excluded the five user-staged archive operations. `git diff --check`, staged whitespace check and local Markdown-link check (88 links, 0 missing) passed. Branch `main`; HEAD at documentation closeout was `cd136c0282b3fb3743946cbf83e37c864f022ca2`. Tracked worktree had no remaining assignment changes, while the five user-staged archive operations and seven user untracked files remained. The untracked revised assignment was copied byte-for-byte to the canonical assignment path; the revised source remains preserved. The two untracked save files, prior user assignments, process standard and all user data remain unmodified. No push.
+
+After the report audit, `a9212da20161d630f47464e655aaea89dc281638` added the exact projection/exclusion list and sufficiency assessment; its staged safety scan passed with 0 findings across 7 staged paths, and its three local Markdown links resolved. The final report-only commit records the execution interval and this closeout; its exact hash is the final HEAD in the Codex response. The five staged archive operations and seven untracked user files remain untouched.
 
 ## Prior continuation — native headless resume (extended by faithful replay above)
 
