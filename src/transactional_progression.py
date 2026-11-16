@@ -746,6 +746,134 @@ def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
     return descriptor
 
 
+def _enable_quiescent_headless_resume(encounter, *, rng_owner, completed_action_ids):
+    """Bind a validated, bounded native restore with externalized old receipts.
+
+    This narrow restoration-owner hook is for the experimental headless
+    initial+delta proof only. It accepts a closed history of completed native
+    Run/Delay Events, with their Action objects materialized in the restored
+    Universe and finished queue. Old publication receipts remain in the
+    experimental history artifact rather than being fabricated here. New
+    intervals still use the ordinary transactional Encounter engine.
+
+    This is not a portable Save/Load API and deliberately rejects other
+    Action families, pending choices, old native receipt rows and non-quiescent
+    state. Arena checkpoint restore continues to use its separate owner path.
+    """
+    from encounter import Encounter
+    from atomic_publication import RNGCursor, publication_boundary
+    from action import Action
+    from action_evaluation import ActionProposal
+    from activities import RunAction, DelayAction
+    from interval_staging import _rng_input
+
+    if type(encounter) is not Encounter or mode_of(encounter) != 'legacy':
+        raise TransactionalProgressionError('headless native restore requires a fresh native Encounter')
+    if type(completed_action_ids) is not tuple or any(type(value) is not str or not value for value in completed_action_ids):
+        raise TransactionalProgressionError('restored completed Action IDs must be an explicit tuple')
+    if len(completed_action_ids) != len(set(completed_action_ids)):
+        raise TransactionalProgressionError('restored completed Action IDs are duplicated')
+
+    with publication_boundary(encounter, quiescent=True) as ownership:
+        if not ownership:
+            raise TransactionalProgressionError('headless native restore requires publication ownership')
+        ed = object.__getattribute__(encounter, '__dict__')
+        world = encounter.universe
+        book = encounter._choice_book
+        history = ed.get('_atomic_interval_history', ())
+        actions = []
+        for action_id in completed_action_ids:
+            action = world.get_event_by_id(action_id)
+            if (type(action) not in (RunAction, DelayAction)
+                    or not isinstance(action, Action)
+                    or action.id != action_id or action.universe is not world
+                    or action.parent_event_id != encounter.id
+                    or action.actor_id not in encounter.being_list
+                    or type(action.resolution) is not ActionProposal
+                    or action.resolution.action_id != action_id
+                    or action.resolution.actor_id != action.actor_id
+                    or type(action.start_time) not in (int, float)
+                    or type(action.end_time) not in (int, float)
+                    or action.start_time < encounter.start_time
+                    or action.end_time > encounter.time):
+                raise TransactionalProgressionError('completed native history contains an unsupported or inconsistent Action')
+            actions.append(action)
+        from action_choice import _Accepted, ChoiceDraft, ChoiceView, ChoiceMember, declaration
+        from scheduling import PreparedSchedule
+        choice_ids = set()
+        registered_ids = set()
+        for choice_id, record in book._choices.items():
+            if (type(record) is not _Accepted or type(record.view) is not ChoiceView
+                    or record.view.id != choice_id or record.view.state != 'finished'
+                    or record.origin not in ('choice', 'single-adapter')
+                    or len(record.members) != len(record.prepared)
+                    or len(record.members) != len(record.view.action_ids)
+                    or not record.members):
+                raise TransactionalProgressionError('restored ChoiceBook contains an unsupported settled program')
+            choice_ids.add(choice_id)
+            for member, packet, action_id in zip(record.members, record.prepared,
+                                                  record.view.action_ids):
+                if (type(member) is not ChoiceMember or type(packet) is not PreparedSchedule
+                        or member.action.id != action_id or member.priority_penalty is not None
+                        or action_id not in completed_action_ids
+                        or packet.action_id != action_id
+                        or book._states.get(action_id) != 'finished'
+                        or not all(type(field) is str for field in (member.key, action_id))):
+                    raise TransactionalProgressionError('settled ChoiceBook member/packet is inconsistent')
+                registered = book._registered.get(action_id)
+                if (type(registered) is not tuple or len(registered) != 3
+                        or registered[0] != choice_id or registered[1] != packet
+                        or registered[2] != declaration(member.action)):
+                    raise TransactionalProgressionError('settled ChoiceBook registration is inconsistent')
+                registered_ids.add(action_id)
+        draft_ids = set(book._drafts)
+        if (book._closed_drafts != choice_ids or draft_ids != choice_ids
+                or registered_ids != set(completed_action_ids)
+                or set(book._states) != set(completed_action_ids)
+                or book._paused or book._tokens or book._reservations):
+            raise TransactionalProgressionError('headless restored ChoiceBook closure is incomplete')
+        registered_history = tuple(sorted(
+            (event_id for event_id, event in world.event_history.items()
+             if isinstance(event, Action)), key=lambda value: value))
+        if (not encounter.initiated
+                or type(encounter.time) is not int or encounter.time <= 0
+                or encounter.time != encounter.last_processed_boundary
+                or encounter.time != encounter._coordinator_time
+                or encounter.time != encounter._interval_start
+                or encounter.active_boundary is not None or encounter.boundary_fault is not None
+                or encounter._advancing or encounter._dispatching or encounter._running
+                or encounter.pending_action_list
+                or tuple(encounter.finished_action_list) != completed_action_ids
+                or encounter.cancelled_action_list
+                or type(history) not in (tuple, list) or history
+                or registered_history != tuple(sorted(completed_action_ids))
+                or book.encounter is not encounter
+                or type(book._counter) is not int or book._counter < len(choice_ids)
+                or any(draft_id not in book._closed_drafts
+                       or type(draft) is not ChoiceDraft or draft.id != draft_id
+                       for draft_id, draft in book._drafts.items())
+                or world._schedule_lock is not book.lock):
+            raise TransactionalProgressionError('headless restored Encounter is not the exact supported quiescent closure')
+        if type(rng_owner) is not RNGCursor:
+            raise TransactionalProgressionError('headless native restore requires an exclusive RNG cursor')
+        role, identity, _state = _rng_input(encounter, None, rng_owner)
+        if role != 'caller_cursor':
+            raise TransactionalProgressionError('headless native restore requires caller-owned RNG state')
+        _all_declarations(encounter, encounter.last_processed_boundary + 1, rng_owner)
+        descriptor = ProgressionMode('transactional', id(encounter), role, identity,
+                                     'validated_quiescent_headless_resume_v1')
+        key = id(encounter)
+        _BINDINGS[key] = _Binding(weakref.ref(encounter,
+            lambda ref: _BINDINGS.pop(key, None)), descriptor, rng_owner,
+            threading.Lock())
+        try:
+            ed['_transactional_mode'] = descriptor
+        except BaseException:
+            _BINDINGS.pop(key, None)
+            raise
+        return descriptor
+
+
 def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_member_candidate=None,
                         movement_intent=None,movement_conditions=None,movement_intents=None):
     from atomic_publication import publication_boundary,publish_interval_candidate

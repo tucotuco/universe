@@ -3,8 +3,9 @@
 
 Run from the repository root with ``.venv/bin/python examples/encounter_delta_headless.py``.
 The recorder observes native committed state; it never evaluates an Action or
-changes simulation state. Its projection is deliberately a declared domain
-closure, not a resumable checkpoint or replacement save format.
+changes simulation state. Its current projection is a declared bounded domain
+closure. ``native_headless_resume.py`` uses that representation for an isolated
+fresh-process resume proof, not a replacement save format.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import math
 import random
 import sys
 import time
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ from library import Library  # noqa: E402
 from spatial.geometry import Sphere  # noqa: E402
 from spatial.state import CartesianPosition  # noqa: E402
 from universe import Universe  # noqa: E402
+from weapon import WeaponInstance  # noqa: E402
 
 
 class DeltaError(ValueError):
@@ -47,13 +50,15 @@ def native_state(encounter, rng_owner):
     """The full state closure claimed by this experiment, captured from native objects.
 
     Historical completed Actions/receipts are encoded separately as Events.
-    Immutable definitions, physiology, unmodeled conditions and checkpoint
-    reconstruction dependencies are explicit exclusions (see findings doc).
+    This is a bounded resume test closure, not an inventory of every Universe
+    field; readers and external/excluded values are listed in the findings doc.
     """
     beings = {}
+    weapons = {}
     for being_id in encounter.being_list:  # preserve native participant ordering below
         being = encounter.get_being(being_id)
         position = being.get_position()
+        armed = being.armed_with(encounter.universe)
         beings[being_id] = {
             "id": being.id,
             "type": "BeingInstance",
@@ -61,9 +66,47 @@ def native_state(encounter, rng_owner):
             "definition_key": being.original.obj_type,
             "position": (None if position is None else list(position.as_tuple())),
             "hit_points": being.current.hit_points,
+            "armor_id": being.get_armor_id(),
+            "body_parts": dict(being.get_body_parts()),
+            "states": dict(being.get_states()),
+            "posture": being.posture,
+            "size_category": being.size_category,
+            "hex_facing": being.hex_facing,
+            "fatigue_level": being.get_fatigue_level(),
+            "physical_fatigue": _json_value(being.physical_fatigue),
+            "physiology_id": being.physiology_id,
+            "geometry": None if being.geometry is None else being.geometry.to_dict(),
+            "abilities": dict(being.current.get_abilities()),
+            "skills": dict(being.current.get_skills()),
+            "weapon_skills": dict(being.current.get_weapon_skills()),
+            "skill_experience": dict(being.skill_experience),
+            "skill_practice_baselines": dict(being._skill_practice_baselines),
+            "skill_use_history": [_json_value(entry) for entry in being.skill_use_history],
+            "strategy": {name: getattr(being.strategy, name)
+                         for name in ("attack", "defense", "timing", "extra_damage")},
+            "personal_history": (None if being.personal_history is None
+                                 else being.personal_history.to_jsonable()),
             "possessions": list(being.possessions),
             "weapons": list(being.weapons),
+            "armed": {hand: armed[hand] for hand in sorted(armed)},
         }
+        for weapon_id in being.weapons:
+            weapon = encounter.universe.get_object_by_id(weapon_id)
+            if type(weapon) is not WeaponInstance:
+                raise TypeError("headless closure includes only native WeaponInstances")
+            weapons[weapon_id] = {
+                "id": weapon.id,
+                "type": "WeaponInstance",
+                "name": weapon.name,
+                "definition_key": weapon.original.obj_type,
+                "position": (None if weapon.get_position() is None
+                             else list(weapon.get_position().as_tuple())),
+                "parent_container_id": weapon.parent_container_id,
+                "hit_points": weapon.current.hit_points,
+                "weapon_size": weapon.current.weapon_size,
+                "attacks": _json_value(weapon.current.attacks),
+                "geometry": None if weapon.geometry is None else weapon.geometry.to_dict(),
+            }
     awareness = {
         observer_id: sorted(encounter.awareness.get(observer_id, ()))
         for observer_id in encounter.being_list
@@ -75,9 +118,17 @@ def native_state(encounter, rng_owner):
             "difficulty_class": encounter.difficulty_class,
             "participants": list(encounter.being_list),
             "pending_action_ids": list(encounter.pending_action_list),
+            "cancelled_action_ids": list(encounter.cancelled_action_list),
+            "time": encounter.time,
+            "start_time": encounter.start_time,
+            "last_processed_boundary": encounter.last_processed_boundary,
+            "coordinator_time": encounter._coordinator_time,
+            "interval_start": encounter._interval_start,
+            "initiated": encounter.initiated,
             "awareness_by_observer": awareness,
         },
         "beings": beings,
+        "weapons": weapons,
         "rng_state": _json_value(rng_owner.state),
     }
 
@@ -85,10 +136,16 @@ def native_state(encounter, rng_owner):
 def _json_value(value):
     if value is None or type(value) in (str, int, float, bool):
         return value
+    if type(value) is CartesianPosition:
+        return {"$type": "CartesianPosition", "value": list(value.as_tuple())}
     if type(value) in (tuple, list):
         return [_json_value(item) for item in value]
     if type(value) is dict:
         return {str(key): _json_value(item) for key, item in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return {"$type": f"{type(value).__module__}.{type(value).__name__}",
+                "fields": {field.name: _json_value(getattr(value, field.name))
+                           for field in fields(value)}}
     raise TypeError(f"experimental state contains unsupported value: {type(value).__name__}")
 
 
@@ -181,8 +238,44 @@ def _boundary_events(encounter, previous_action_ids, boundary):
             raise AssertionError(f"native Action Event {action_id} missing")
         resolution = event.resolution
         outcome = getattr(resolution, "outcome", None)
+        from action_evaluation import (ActionProposal, PracticeEffect,
+            DelayDefenseEffect, DamageEffect)
+        if type(resolution) is not ActionProposal:
+            raise AssertionError("committed headless Action lacks a native proposal")
+        effects = []
+        for effect in resolution.effects:
+            if type(effect) not in (PracticeEffect, DelayDefenseEffect, DamageEffect):
+                raise AssertionError(f"unsupported effect in headless history: {type(effect).__name__}")
+            effects.append({"type": type(effect).__name__,
+                            "fields": {name: _json_value(getattr(effect, name))
+                                       for name in effect.__dataclass_fields__}})
+        from action_choice import ChoiceMember
+        book = encounter._choice_book
+        lifecycle = getattr(event, "_atomic_lifecycle", None)
+        choice_id = None if lifecycle is None else lifecycle.choice_id
+        accepted = book._choices.get(choice_id)
+        choice_packet = None
+        if accepted is not None:
+            member_packets = []
+            for member, packet in zip(accepted.members, accepted.prepared):
+                if type(member) is not ChoiceMember:
+                    raise AssertionError("headless history has an unsupported ChoiceMember")
+                member_packets.append({
+                    "key": member.key,
+                    "action_id": member.action.id,
+                    "target_action_key": member.target_action_key,
+                    "priority_penalty": member.priority_penalty,
+                    "packet": {name: _json_value(getattr(packet, name))
+                               for name in packet.__dataclass_fields__},
+                })
+            choice_packet = {"id": accepted.view.id,
+                "version": accepted.view.version, "state": accepted.view.state,
+                "action_ids": list(accepted.view.action_ids),
+                "first_start": accepted.view.first_start,
+                "origin": accepted.origin, "members": member_packets}
         result.append({
             "event_id": event.id,
+            "action_class": type(event).__name__,
             "event_type": event.event_type,
             "parent_event_id": event.parent_event_id,
             "action_id": action_id,
@@ -191,10 +284,37 @@ def _boundary_events(encounter, previous_action_ids, boundary):
             "start_time": event.start_time,
             "end_time": event.end_time,
             "outcome": outcome,
-            "effect_ids": [effect_id.source_action_id + ":" + effect_id.channel + ":" + str(effect_id.slot)
-                           for effect_id in receipt.effect_ids if effect_id.source_action_id == action_id],
+            "target_ids": list(resolution.target_ids),
+            "proposal_effects": effects,
+            "proposal_metadata": _json_value(resolution.metadata),
+            "choice_id": choice_id,
+            "choice_member_key": (None if accepted is None else next(
+                member.key for member in accepted.members if member.action.id == action_id)),
+            "choice": choice_packet,
+            "action_data": _history_action_data(event),
+            "effect_ids": [[effect_id.encounter_id, effect_id.boundary,
+                            effect_id.source_action_id, effect_id.channel, effect_id.slot]
+                           for effect_id in receipt.effect_ids
+                           if effect_id.source_action_id == action_id],
         })
     return result
+
+
+def _history_action_data(action):
+    if type(action) is RunAction:
+        position = action.start_position
+        return {"minimum_distance": action.minimum_distance,
+                "practice_experience": action.practice_experience,
+                "start_position": (None if position is None else list(position.as_tuple())),
+                "activity_started": bool(getattr(action, "_activity_started", False))}
+    if type(action) is DelayAction:
+        return {"defense": action.strategy.defense}
+    from melee_combat import MeleeStrike
+    if type(action) is MeleeStrike:
+        return {"weapon_id": action.instrument_id, "motion": action.event_type,
+                "reach": action.reach, "hit_type": action.hit_type,
+                "combat_result": _json_value(action.combat_result)}
+    raise AssertionError(f"unsupported Action history family: {type(action).__name__}")
 
 
 def _capture_boundary(encounter, rng_owner, prior_state, boundary, prior_action_ids):
@@ -208,7 +328,7 @@ def _capture_boundary(encounter, rng_owner, prior_state, boundary, prior_action_
     return actual, delta, elapsed_ns
 
 
-def build_demo():
+def build_demo(until=7, seed=0):
     """Run authored facts through the native transactional Encounter engine."""
     universe = Universe("Headless delta proof", library=Library(config_dir=str(ROOT / "src/config")))
     definition = universe.get_being_definition("Human")
@@ -219,6 +339,11 @@ def build_demo():
     for being, position in ((a, (0, 0, 0)), (b, (2, 0, 0))):
         being.set_position(CartesianPosition(*position))
         being.set_geometry(Sphere(0.2))
+    dagger = WeaponInstance(universe.get_weapon_definition("Dagger"), "Ada's dagger")
+    dagger.id = "weapon-ada-dagger"
+    universe.add_object(dagger)
+    a.weapons.append(dagger.id)
+    a.set_body_part_holds_object("right hand", dagger.id)
     encounter = Encounter(universe, difficulty_class=10, start_time=0, initiated=True,
                           name="Headless delta proof", id="headless-encounter")
     for being in (a, b):
@@ -226,7 +351,7 @@ def build_demo():
     for observer in (a, b):
         encounter.mark_aware(observer.id, a.id if observer is b else b.id)
     universe.add_event(encounter)
-    rng_owner = RNGCursor(random.Random(20261116).getstate())
+    rng_owner = RNGCursor(random.Random(seed).getstate())
     encounter.enable_transactional_progression(quiescent=True, rng_owner=rng_owner)
     actors = {"ada": a, "bram": b}
     previous_action_ids = set()
@@ -273,8 +398,27 @@ def build_demo():
     step_started = time.perf_counter_ns()
     encounter.step(1, velocities={a.id: (1, 0, 0), b.id: (-1, 0, 0)})
     record(4, time.perf_counter_ns() - step_started)
+    checkpoint = {
+        "boundary": 4,
+        "time": encounter.time,
+        "start_time": encounter.start_time,
+        "state": captured,
+        "finished_action_ids": list(encounter.finished_action_list),
+        "choice_state": encounter._choice_book.summary(),
+        "choice_counter": encounter._choice_book._counter,
+        "closed_draft_ids": sorted(encounter._choice_book._closed_drafts),
+        "schedule_revision": universe._schedule_revision,
+        "action_history": [event for row in boundaries for event in row["delta"]["events"]],
+    }
+    if until <= 4:
+        elapsed_ns = time.perf_counter_ns() - start
+        snapshot = {"boundary": encounter.last_processed_boundary, "time": encounter.time,
+                    "state": native_state(encounter, rng_owner)}
+        return {"universe": universe, "encounter": encounter, "rng_owner": rng_owner,
+                "initial": initial, "boundaries": boundaries, "snapshot": snapshot,
+                "checkpoint": checkpoint, "elapsed_ns": elapsed_ns}
     # A few quiet boundaries expose recurring bookkeeping cost without GUI work.
-    for boundary in (5, 6, 7):
+    for boundary in range(5, until + 1):
         step_started = time.perf_counter_ns()
         encounter.step(1)
         record(boundary, time.perf_counter_ns() - step_started)
@@ -287,7 +431,7 @@ def build_demo():
         raise AssertionError("full-stream replay differs from final native snapshot")
     return {"universe": universe, "encounter": encounter, "rng_owner": rng_owner,
             "initial": initial, "boundaries": boundaries, "snapshot": snapshot,
-            "elapsed_ns": elapsed_ns}
+            "checkpoint": checkpoint, "elapsed_ns": elapsed_ns}
 
 
 def artifact(result):
@@ -295,7 +439,8 @@ def artifact(result):
     return {"schema": "universe.headless-encounter-delta-log/1",
             "initial_state": result["initial"],
             "deltas": [row["delta"] for row in result["boundaries"]],
-            "snapshot": result["snapshot"]}
+            "snapshot": result["snapshot"],
+            "checkpoint": result["checkpoint"]}
 
 
 def main(argv=None):

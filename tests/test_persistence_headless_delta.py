@@ -29,13 +29,17 @@ class TestHeadlessEncounterDelta(unittest.TestCase):
 
     def test_zero_diff_action_event_quiet_boundary_and_atomic_simultaneous_batch(self):
         by_time = {delta["boundary"]: delta for delta in self.deltas}
-        self.assertEqual(len(by_time[1]["changes"]), 1)
+        self.assertEqual([change["path"] for change in by_time[1]["changes"]
+                          if change["path"][-1] == "position"],
+                         [["beings", "being-ada", "position"]])
         self.assertEqual(by_time[1]["events"][0]["event_type"], "run")
         self.assertEqual(by_time[2]["events"], [])
-        self.assertEqual(by_time[2]["changes"], [])
+        self.assertFalse(any(change["path"][0] != "encounter"
+                             for change in by_time[2]["changes"]))
         self.assertEqual(by_time[3]["events"][0]["event_type"], "delay")
         self.assertEqual(by_time[3]["events"][0]["outcome"], "success")
-        self.assertEqual(by_time[3]["changes"], [])
+        self.assertFalse(any(change["path"][0] != "encounter"
+                             for change in by_time[3]["changes"]))
         simultaneous = by_time[4]
         self.assertEqual(len(simultaneous["events"]), 2)
         self.assertEqual({event["event_type"] for event in simultaneous["events"]}, {"run"})
