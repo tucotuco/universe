@@ -70,6 +70,10 @@ class TestHeadlessEncounterDelta(unittest.TestCase):
         malformed["changes"][0]["before"] = [90, 0, 0]
         with self.assertRaises(proof.DeltaError):
             proof.apply_delta(self.payload["initial_state"], malformed)
+        duplicate_path = json.loads(proof.canonical_bytes(self.deltas[0]))
+        duplicate_path["changes"].append(dict(duplicate_path["changes"][0]))
+        with self.assertRaises(proof.DeltaError):
+            proof.apply_delta(self.payload["initial_state"], duplicate_path)
 
     def test_cli_runs_in_independent_process_without_arena_runtime(self):
         command = [sys.executable, "-B", str(ROOT / "examples/encounter_delta_headless.py"), "--json"]

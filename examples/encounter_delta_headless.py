@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import random
 import sys
 import time
@@ -117,6 +118,8 @@ def apply_delta(state, delta):
         raise DeltaError("delta schema mismatch")
     if (type(delta["boundary"]) is not int or delta["boundary"] <= 0
             or type(delta["time"]) not in (int, float)
+            or not math.isfinite(delta["time"])
+            or delta["time"] != delta["boundary"]
             or not isinstance(delta["events"], list)
             or not isinstance(delta["changes"], list)
             or type(delta["state_sha256"]) is not str):
@@ -235,6 +238,8 @@ def build_demo():
         nonlocal captured
         actual, delta, capture_ns = _capture_boundary(
             encounter, rng_owner, captured, boundary, previous_action_ids)
+        if encounter.last_processed_boundary != boundary or encounter.time != delta["time"]:
+            raise AssertionError("native time/cursor does not match committed boundary metadata")
         previous_action_ids.update(row["action_id"] for row in delta["events"])
         # Every boundary is independently reconstructed before the next engine step.
         reconstructed = apply_delta(captured, delta)
