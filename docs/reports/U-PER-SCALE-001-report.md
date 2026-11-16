@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Status:** ACTIVE; the bounded native headless-resume slice is demonstrated and verified, but U-PER-SCALE-001's broader sufficient-persistence acceptance remains incomplete and is not accepted. Do not archive or mark the program complete.
+**Status:** ACTIVE; bounded native resume and current-version faithful replay are demonstrated and verified, but U-PER-SCALE-001's broader sufficient-persistence acceptance remains incomplete and is not accepted. Do not archive or mark the program complete.
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
@@ -18,7 +18,75 @@
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
-## Latest continuation — native headless resume
+| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | [record at closeout] | [calculate at closeout] |
+
+## Latest continuation — faithful native replay
+
+### Problems first
+
+- The bounded assignment objective is demonstrated, but it does not close U-PER-SCALE-001. Production `/12` remains unchanged and graph-backed; general persistence, long-run scale, full native historical receipt APIs, and served Arena Save/Load remain open.
+- The fixed-seed native timeline did not happen to produce a failed/unproductive Action. No roll was forced and no rules changed; that optional branch is explicitly **unproven**.
+- This read model preserves the declared native projection and Event/Effect chronology, not every runtime object or receipt API. Directed awareness actually represented in the fixture is compared; broader observer evidence/belief history is not claimed.
+
+### Outcome and evidence
+
+Installed the revised [faithful-replay assignment](../assignments/U-PER-SCALE-001-FAITHFUL-REPLAY.md) at its canonical path while preserving the byte-identical user-provided revised source. Added separate-process historical playback and current-version native re-execution to the existing Arena-independent fixture. The replay input manifest now records legal Action declarations, Choice grouping, timing, movement inputs and RNG seed. The recording includes an independent full native-state snapshot oracle at every boundary, so historical reconstruction checks the declared values/presence against original native state at t=1–9. Playback itself reconstructs from initial state plus ordered atomic changes, Event-only/quiet boundaries and cumulative Event history without native Action resolution. Native re-execution starts a new Encounter and resubmits only those declarations through ordinary `Encounter.step()` and transactional publication. At each boundary, the comparator checks typed/present fields, delta ordering, Event multiplicity/order/causality, Action outcomes, receipt Effect identities, observer awareness and RNG cursor.
+
+Independent generated Action/Event and Choice IDs are compared through a validated one-to-one mapping; stable Being, Object, Encounter and parent references remain fixed. The nine-entry mapping covers five Action/Event identities and four Choice identities. Its remapping is consistent through Event rows, Choice packets, scheduler state and receipt references. The five t=8 EffectIdentity entries retain source Action, boundary, channel, slot, order and multiplicity; the source Action reference follows the validated map.
+
+| Boundary | Native result | Entity property changes | All paths | Delta bytes |
+|---:|---|---:|---:|---:|
+| 1 | Run success | 4 | 8 | 2,906 |
+| 2 | quiet | 0 | 4 | 546 |
+| 3 | successful zero-Being/Object-diff Delay Event | 0 | 4 | 1,732 |
+| 4 | two successful simultaneous Runs, shared receipt | 6 | 10 | 6,945 |
+| 5 | quiet; scheduler pending-list change | 0 | 5 | 685 |
+| 6 | quiet | 0 | 4 | 546 |
+| 7 | quiet | 0 | 4 | 546 |
+| 8 | native Dagger thrust, normal | 4 | 10 | 19,251 |
+| 9 | quiet after strike | 0 | 4 | 546 |
+
+The t=8 native receipt records Ada's `DamageEffect` against Bram for 4 body damage and her Dagger `PracticeEffect`; Bram HP changes 10→6. At t=4 both Run events and both position changes are one native atomic commit. The t=3 Delay event retains its `DelayDefenseEffect` despite no Being/Object property delta.
+
+Recorded canonical UTF-8 sizes: initial state 9,020 bytes; t=4 checkpoint snapshot 10,748; t=9 snapshot 11,388; all nine delta/Event records 33,703 (Event arrays 7,651; property-change arrays 24,918); nine redundant full native snapshots retained as verification oracles 94,649; whole recording including verification oracles 266,521. Playback itself needs only initial state plus deltas/Events. One measured playback query set took 24.2 ms including validation, native re-execution plus semantic comparison 2.37 s, fresh-process strict checkpoint rehydration 47.5 ms, and child process plus t=4→9 continuation 1.76 s. Native step calls ranged 219–290 ms in that sample. Full boundaries, state digests, commands, exclusions and semantic-reference audit are in [faithful replay findings](../design/persistence-faithful-replay-findings.md).
+
+### Assignment acceptance and verification
+
+| `U-PER-SCALE-001-FAITHFUL-REPLAY` bounded criterion | Result |
+|---|---|
+| Historical playback in separate OS process, queries include quiet/Event-only/simultaneous/combat boundaries | Met for the declared projection; native `Encounter.step()` is patched to fail during playback test. |
+| Reconstructed state/presence matches independently captured native snapshots, including observer awareness | Met at all t=1–9; selected queries also cover t=2/3/4/7/8/9. |
+| Two simultaneous Actions remain one atomic boundary | Met at t=4. |
+| Consequential native combat, causal Effects and receipt correspondence | Met at t=8, HP 10→6, five ordered receipt EffectIdentity records. |
+| Separate-process native rerun matches each boundary under identity mapping | Met at t=1–9 for the same Python/source/config/rules; RNG cursor matches. This is a current-version test, not cross-version replay. |
+| Corruption, chronology, preimage, unexpected path and identity refusal | Met for tested checksum changes, broken references, malformed timestamp, missing/reordered commit, bad preimage, duplicate path/Effect, unknown property path and ambiguous generated-ID mapping. |
+| Fresh-process checkpoint resume | Met from t=4 through t=9, with terminal state, RNG and receipts equal to uninterrupted control. |
+| Optional naturally failed Action | Not reached; explicitly unproven. |
+| Generic historical native receipt objects and production persistence migration | Excluded; not claimed. `/12` unchanged. |
+
+Focused checks:
+
+| Command | Result |
+|---|---|
+| `.venv/bin/python -B -m unittest tests.test_faithful_replay tests.test_native_headless_resume tests.test_persistence_headless_delta` | 13 passed, 22.121s. Includes separate OS processes for record, playback, native rerun and checkpoint resume. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_action_choices.py'` | 63 passed, 0.646s. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_atomic_publication.py'` | 70 passed, 42.761s. |
+| `python -m py_compile examples/encounter_delta_headless.py examples/native_headless_resume.py tests/test_faithful_replay.py` | Passed. |
+| `git diff --check` | Passed. |
+
+An initial attempt to invoke adjacent tests as package modules used an incorrect singular module name and lacked the `tests` directory on the import path; it produced import errors, not test failures. The corrected discovery commands above passed. An early new-test draft also encoded two wrong expectations (Delay has a retained effect, and Choice IDs may remain equal); both assertions were corrected to reflect observed native data and the adopted ID clarification. The final focused test set passes. No entire repository suite or long Arena persistence suite was run; no baseline claim is made about the previously reported transactional progression mismatches.
+
+`TASKS.md` remains U-PER-SCALE-001 sole ACTIVE, U-ACT-GATE-001 FUTURE/unpassed, U-NET-001 DEFERRED and U-ACT-FULL-003 DEFERRED. No implementation priority changed. This bounded assignment is complete; the broader program is not accepted or archived. Production `/12`, Arena operation, user saves, independent `npc-generator`, frozen Playtest Edition and pre-staged historical archive operations remain outside the diff.
+
+### Commits and audits
+
+- `d95371bad1f15eef00be4cd832bc036460898651` — recorded declarations, time-indexed historical playback, native same-version rerun, generated-ID mapping and focused acceptance tests.
+- `58542acc5c1066278ad457227b8392d05b37dbd6` — independent native-state snapshots at every boundary, comparison against reconstructed playback and snapshot-tamper refusal.
+- Documentation, canonical assignment installation, `TASKS.md` and report: commit after final audit (record exact hash at closeout).
+
+Before the two implementation commits, staged publication-safety audit passed with **0 findings** (9 staged paths for the first commit; 8 for the snapshot follow-up); explicit-path commits excluded the five user-staged archive operations. The untracked revised assignment was copied byte-for-byte to the canonical assignment path; the revised source remains preserved. The two untracked save files, prior user assignments, process standard and all user data remain unmodified. Record final documentation audit, HEAD and worktree state here at closeout. No push.
+
+## Prior continuation — native headless resume (extended by faithful replay above)
 
 ### Problems first
 
@@ -344,10 +412,10 @@ The latest report's code-only/progress conclusions are superseded only within th
 - `ef01b913a129c17a58a2a17e831d84702eab5c9e` — portable save/archive `/12` and `/3`, completed Action roots in commit-boundary history, strict `/11` migration fixture, and extended exact continuation regressions.
 - `c20b3bde4c122683884c43442eb8a3a26e2670a0` — reconcile TASKS, the source-linked sufficiency inventory, `/12` acceptance evidence, exact world-size measurements and browser limitation.
 
-**Historical closeout at the `/12` milestone:** latest implementation commit at that time was `ef01b913a129c17a58a2a17e`. The current report top and “Latest continuation — native headless resume” section supersede this milestone status; see the final closeout section below for current repository evidence.
+**Historical closeout at the `/12` milestone:** latest implementation commit at that time was `ef01b913a129c17a58a2a17e`. The current report status and faithful-replay continuation above supersede that milestone summary.
 
 
-## Current closeout — native headless resume slice
+## Prior milestone closeout — native headless resume slice (superseded by faithful replay above)
 
 - Implementation commits: `0de182cef463bc0d161752a17a0b060caa7aa12d` — bounded Arena-independent native Encounter resume, native HP consequence and focused tests; `71280b060bd8fa26157505d754972d06fe8ff155` — missing-checkpoint-metadata regression.
 - `TASKS.md`, prior delta findings, this engineering report, and `docs/design/persistence-headless-resume-findings.md` were reviewed together. Documentation commit: `2c8d21d19c78096f307ccf3e5d72d611ea2fe8a4` — reconcile TASKS, previous findings, this report and the new native resume findings.
