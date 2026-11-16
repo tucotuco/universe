@@ -425,14 +425,37 @@ def encode_portable_native_reproduction_registry(world) -> str:
         if registry._world is not world or world._reproduction_group_registry is not registry:
             raise ReproductionCheckpointValidationError(
                 "native reproduction registry owner is inconsistent")
-        if registry._native_beings_by_person_id or registry._native_being_requests:
-            raise ReproductionCheckpointValidationError(
-                "native Being-linked reproduction bindings lack a portable adapter")
         reserved = (set(registry._person_id_reservations)
                     | set(registry._group_id_reservations))
-        if reserved & set(world.object_registry.object_instances):
+        binding_ids = set(registry._native_beings_by_person_id)
+        if reserved & set(world.object_registry.object_instances) != binding_ids:
             raise ReproductionCheckpointValidationError(
-                "reproduction IDs collide with native Object identities")
+                "reproduction IDs collide with unbound native Object identities")
+        if set(registry._native_being_requests) != {
+                record.request_key for record in registry._native_being_requests.values()}:
+            raise ReproductionCheckpointValidationError(
+                "native Being materialization request index is inconsistent")
+        binding_rows = []
+        for person_id, being in sorted(registry._native_beings_by_person_id.items()):
+            from being import BeingInstance
+            from reproduction_being_bridge import _definition_signature
+            if (type(being) is not BeingInstance
+                    or world.object_registry.get_object_by_id(person_id) is not being):
+                raise ReproductionCheckpointValidationError(
+                    "native Being binding does not reference its registered Being")
+            records = [record for record in registry._native_being_requests.values()
+                       if record.person_id == person_id and record.being is being]
+            if len(records) != 1:
+                raise ReproductionCheckpointValidationError(
+                    "native Being binding has no unique materialization request")
+            record = records[0]
+            expected = (person_id, being.name, _definition_signature(being.original))
+            if record.normalized_request != expected:
+                raise ReproductionCheckpointValidationError(
+                    "native Being materialization request differs from its Being")
+            binding_rows.append({"person_id": person_id,
+                                 "request_key": record.request_key,
+                                 "normalized_request": list(expected)})
         if registry._revision:
             registry._assert_consistent()
         elif any((registry._groups_by_id, registry._group_id_by_parent_set,
@@ -462,23 +485,58 @@ def encode_portable_native_reproduction_registry(world) -> str:
         owner._reproduction_group_registry = detached_registry
         detached_registry.world_identity = 1
         _populate_registry(detached_registry, rebound)
-        portable = {
+        checkpoint = {
             "schema": CHECKPOINT_SCHEMA,
             "version": CHECKPOINT_VERSION,
             "registry_contract": REGISTRY_CONTRACT,
             "source_world_identity": 1,
             "payload": _registry_data(detached_registry),
         }
-        portable["sha256"] = hashlib.sha256(_canonical(portable).encode("ascii")).hexdigest()
+        checkpoint["sha256"] = hashlib.sha256(_canonical(checkpoint).encode("ascii")).hexdigest()
+        registry_wire = json.dumps(checkpoint, sort_keys=True, ensure_ascii=True,
+                             indent=2, allow_nan=False) + "\n"
+        _parse_checkpoint(registry_wire)
+        portable = {"schema": "universe.native-reproduction-registry/1",
+                    "registry": registry_wire, "bindings": binding_rows}
+        portable["sha256"] = hashlib.sha256(
+            _canonical(portable).encode("ascii")).hexdigest()
         encoded = json.dumps(portable, sort_keys=True, ensure_ascii=True,
                              indent=2, allow_nan=False) + "\n"
-        _parse_checkpoint(encoded)
         return encoded
 
 
 def restore_portable_native_reproduction_registry(world, checkpoint):
     """Restore logical reproduction facts into an Encounter-owned Universe."""
-    candidate = _parse_checkpoint(checkpoint)
+    def reject_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ReproductionCheckpointRestoreError(
+                    "native reproduction registry contains duplicate fields")
+            result[key] = value
+        return result
+    try:
+        portable = json.loads(checkpoint, object_pairs_hook=reject_duplicates)
+    except ReproductionCheckpointError:
+        raise
+    except (json.JSONDecodeError, TypeError, UnicodeError) as exc:
+        raise ReproductionCheckpointRestoreError(
+            "native reproduction registry wrapper is malformed") from exc
+    if (type(portable) is not dict
+            or set(portable) != {"schema", "registry", "bindings", "sha256"}
+            or portable.get("schema") != "universe.native-reproduction-registry/1"
+            or type(portable.get("registry")) is not str
+            or type(portable.get("bindings")) is not list
+            or type(portable.get("sha256")) is not str):
+        raise ReproductionCheckpointRestoreError(
+            "native reproduction registry wrapper has unsupported fields")
+    digest = portable["sha256"]
+    body = {key: value for key, value in portable.items() if key != "sha256"}
+    if hashlib.sha256(_canonical(body).encode("ascii")).hexdigest() != digest:
+        raise ReproductionCheckpointRestoreError(
+            "native reproduction registry wrapper integrity differs")
+    candidate = _parse_checkpoint(portable["registry"])
+    binding_rows = portable["bindings"]
     with world._schedule_lock:
         registry = world._reproduction_group_registry
         if registry._world is not world or world._reproduction_group_registry is not registry:
@@ -492,16 +550,54 @@ def restore_portable_native_reproduction_registry(world, checkpoint):
                 "native Being-linked reproduction bindings conflict with Load")
         rebound = _rebind(candidate, registry.world_identity)
         _validate_detached(rebound)
-        reserved = (set(rebound.person_id_reservations)
-                    | set(rebound.group_id_reservations))
-        if reserved & set(world.object_registry.object_instances):
+        person_reserved = set(rebound.person_id_reservations)
+        group_reserved = set(rebound.group_id_reservations)
+        bound_ids = set()
+        request_ids = set()
+        for row in binding_rows:
+            if (type(row) is not dict
+                    or set(row) != {"person_id", "request_key", "normalized_request"}
+                    or any(type(row[name]) is not str or not row[name]
+                           for name in ("person_id", "request_key"))
+                    or type(row["normalized_request"]) is not list
+                    or len(row["normalized_request"]) != 3
+                    or any(type(value) is not str for value in row["normalized_request"])):
+                raise ReproductionCheckpointRestoreError(
+                    "native Being binding row is malformed")
+            if row["person_id"] in bound_ids or row["request_key"] in request_ids:
+                raise ReproductionCheckpointRestoreError(
+                    "native Being binding identity is duplicated")
+            bound_ids.add(row["person_id"]); request_ids.add(row["request_key"])
+        from being import BeingInstance
+        if bound_ids != (person_reserved & set(world.object_registry.object_instances)):
             raise ReproductionCheckpointRestoreError(
-                "reproduction IDs collide with restored native Object identities")
-        owner = _ValidationOwner()
-        scratch = ReproductionGroupRegistry(owner)
-        owner._reproduction_group_registry = scratch
+                "native Being bindings do not account for saved Object identity collisions")
+        if not bound_ids <= person_reserved or group_reserved & set(world.object_registry.object_instances):
+            raise ReproductionCheckpointRestoreError(
+                "native Being binding is not an established offspring identity")
+        for person_id in bound_ids:
+            if type(world.get_object_by_id(person_id)) is not BeingInstance:
+                raise ReproductionCheckpointRestoreError(
+                    "native Being binding does not point to a restored Being")
+        scratch = ReproductionGroupRegistry(world)
         scratch.world_identity = registry.world_identity
         _populate_registry(scratch, rebound)
+        from reproduction_being_bridge import (_NativeBeingBindingRecord,
+                                               _definition_signature)
+        for row in binding_rows:
+            being = world.get_object_by_id(row["person_id"])
+            normalized = tuple(row["normalized_request"])
+            expected = (row["person_id"], being.name,
+                        _definition_signature(being.original))
+            if (normalized != expected or row["person_id"] not in scratch._group_id_by_offspring
+                    or row["request_key"] in (set(scratch._requests)
+                        | set(scratch._generation_requests)
+                        | set(scratch._progressive_requests))):
+                raise ReproductionCheckpointRestoreError(
+                    "native Being binding does not match the restored offspring facts")
+            scratch._native_beings_by_person_id[row["person_id"]] = being
+            scratch._native_being_requests[row["request_key"]] = _NativeBeingBindingRecord(
+                row["request_key"], row["person_id"], normalized, being)
         if scratch._revision:
             scratch._assert_consistent()
         undo = registry._capture_undo()
@@ -512,7 +608,8 @@ def restore_portable_native_reproduction_registry(world, checkpoint):
                     "_person_id_reservations", "_group_id_reservations", "_requests",
                     "_offspring_origin_ticks", "_generation_requests",
                     "_generation_parent_set_scopes", "_progressive_histories",
-                    "_progressive_parent_set_scopes", "_progressive_requests"):
+                    "_progressive_parent_set_scopes", "_progressive_requests",
+                    "_native_beings_by_person_id", "_native_being_requests"):
                 target, source_value = getattr(registry, name), getattr(scratch, name)
                 target.update(source_value)
             registry._revision = scratch._revision
