@@ -11,9 +11,9 @@
 | Interval | Start | End | Elapsed |
 |---|---|---|---|
 | Initial implementation | 2026-11-15T16:42:40-08:00 | 2026-11-15T17:52:06-08:00 | PT1H9M26S |
-| Extended operational verification | 2026-11-15T18:19:20-08:00 | 2026-11-15T19:07:16-08:00 | PT47M56S |
+| Extended operational verification | 2026-11-15T18:19:20-08:00 | 2026-11-15T19:08:18-08:00 | PT48M58S |
 
-**Active execution time:** PT1H57M22S across the two recorded intervals. **Total calendar span:** PT2H24M36S from the first start to the final end; the gap between intervals is not active execution time.
+**Active execution time:** PT1H58M24S across the two recorded intervals. **Total calendar span:** PT2H25M38S from the first start to the final end; the gap between intervals is not active execution time.
 
 The original interval established a fixed-size graph-reference encoding and corrected four checkpoint-adapter cases. The latest interval followed up because that first format still failed strict Save at t=91. Its results supersede the earlier report's t=67-only reliability conclusion.
 
