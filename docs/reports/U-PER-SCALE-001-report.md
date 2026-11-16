@@ -14,6 +14,7 @@
 | Extended operational verification | 2026-11-15T18:19:20-08:00 | 2026-11-15T19:08:18-08:00 | PT48M58S |
 | Sufficiency addendum continuation | 2026-11-15T20:39:02-08:00 | 2026-11-16T03:09:14-08:00 | PT6H30M12S |
 | Exact serialized-field diagnostic audit | 2026-11-16T04:16:02-08:00 | 2026-11-16T04:24:43-08:00 | PT8M41S |
+| Headless initial/delta proof | 2026-11-16T04:59:08-08:00 | 2026-11-16T05:13:46-08:00 | PT14M38S |
 
 **Current addendum disposition:** Current portable save schema `/12` (archive `/3`) stores the native resumable graph, compatibility-bound immutable definitions, and independently validated commit-boundary history. Completed native Action roots are now stored with their exact boundary segments and restored before strict native inventory validation. At t=300: snapshot 23,813 nodes / 331,315 bytes; definitions 51,921 / 560,106; history 1,139,080 / 12,815,153; compressed archive 2,968,730 bytes. Snapshot falls 39.3% (16,517 nodes / 214,795 bytes) versus `/11`, with no loss of Action identity or history. The 64+1 Feint run, 169 quiet boundaries, strict fresh-process Load→Save, and t=301 continuation pass. Supported `/10` and `/11` archives migrate through fresh processes. Chrome `/12` Save produced the served UI download confirmation; Open-file Load remains unverified because extension local-file access is disabled. HTTP/session Save/Load, transactional rejection, and interrupted-export preservation pass. The 2/20/200 curve concerns registry Beings, not active combatants. The assignment remains ACTIVE: state is still a recursive native graph, completed Choice settlement wrappers remain in current state, Load eagerly reassembles history, active Encounter participation is two Beings, and served Chrome Open is unverified.
 
@@ -23,7 +24,7 @@
 
 The exhaustive schema and observed-field matrix is in the new [persistence node field catalog](../design/persistence-node-field-catalog.md). It derives the 109-node-type generated-Arena allowlist (104 typed node types plus five containers) from `arena_native_snapshot._ARENA_TAGS` and `checkpoint_fields.FIELD_ADAPTERS`, then records exact allowed/required properties and actual t=0/t=1/t=2 fields. The shared field registry contains 48 additional types excluded from the Arena allowlist; the catalog lists them separately. The requested `docs/assignments/U-PER-SCALE-001-EXACT-FIELD-AUDIT.md` was absent from the checkout; this audit follows the scope provided in the user request. U-PER-SCALE-001 remains the sole ACTIVE program.
 
-**Active execution time across four sessions:** PT8H37M17S. **Total calendar span:** PT11H42M03S from first recorded Start to last End; three inter-session gaps total PT3H4M46S and are excluded from active execution time.
+**Active execution time across five sessions:** PT8H51M55S. **Total calendar span:** PT12H31M06S from first recorded Start to last End; four inter-session gaps total PT3H39M11S and are excluded from active execution time.
 
 The original interval established a fixed-size graph-reference encoding and corrected four checkpoint-adapter cases. The latest interval followed up because that first format still failed strict Save at t=91. Its results supersede the earlier report's t=67-only reliability conclusion.
 
@@ -241,6 +242,58 @@ Legacy native v3 migration, pinned native v4 migration, malformed compact symbol
 - The inbox check found no files under `docs/ideas/inbox/`.
 - The five pre-staged user archive paths remain unchanged and excluded from these commits: deletions of U-CAP-002/U-CAP-003 assignment and report files, and the U-THROW-001 patch rename into archive. Untracked `docs/assignments/universe-arena.json` and `docs/assignments/universe-arena.uarena` remain untouched. `.venv`, ignored `legacy/`, saved worlds, independent `npc-generator`, repository backups and the frozen Playtest Edition were not modified.
 - No shield implementation or geometry, ranged Action, combat-mechanics, observer privacy or NPC generation work was added. Save/Load preserves represented observer evidence and combat state.
+
+## Headless initial-state/delta proof — 2026-11-16
+
+### Problems first
+
+- The proof is deliberately narrower than the 109-node-type Arena schema. It does not establish universal historical sufficiency, general Action/Choice rehydration, or native resumability. The new complete experimental snapshot means complete only for the declared two-Being field closure; it is not a portable native save.
+- There is no general non-Arena native restore path to use for fresh-process resumption: `checkpoint_inventory` marks the closure incomplete, reports `restore_verified=False`, and `require_complete()` explicitly refuses for lack of restore support. An existing `arena_native_snapshot` capture/restore probe on this hand-authored fixture encoded 920,938 bytes and reconstructed a same-process native Universe/Encounter, but it relies on the Arena-specific checkpoint schema and did not test a fresh process/future branch. Thus native resumability remains **NOT DEMONSTRATED** for this experiment.
+- The demonstration exercises one successful moving Run, one no-effect successful Delay, three quiet boundaries, and two same-boundary Run Actions. It does not cover damage, failed combat, newly acquired observer evidence, fatigue/conditions/equipment evolution, entity birth/removal, arbitrary Event consumers, or pending future Choices. Those are unresolved production field/history coverage, not a blocker to this bounded proof.
+- The earlier 26,003-byte quiet history segment is from a different generated-Arena fixture; no direct same-scenario storage comparison exists.
+
+### Accomplished and tested
+
+Added [`examples/encounter_delta_headless.py`](../../examples/encounter_delta_headless.py) and its independent [`test_persistence_headless_delta.py`](../../tests/test_persistence_headless_delta.py). The runner authors fixed Being/Encounter IDs, positions, geometry, awareness and private RNG seed, then uses the ordinary native `Encounter.step()` → transactional staging → atomic publication route. It does not import or call Arena session/controller/browser/server, Chrome, `npcgen` or GUI code. The recorder does not evaluate Actions or mutate the live graph.
+
+It captures the declared current-state closure: stable Encounter and Being identities, participant ordering, definition keys, position with explicit null/presence, HP, ordered possession/weapon references, directed awareness by observer, pending Action IDs, RNG cursor, and boundary/time metadata. Completed native Action Events are recorded separately with Action/Event IDs, type, parent, actor/target, timing, native outcome and committed effect identities, even when no current-state property changes. Each boundary's property diff is one before/after change set; the two simultaneous movements are attached to the same native committed receipt. Boundary 7's full experimental projection replays byte-identically from the initial state and seven ordered deltas.
+
+| Boundary | Native event(s) | State-property delta | Actual/replay SHA-256 prefix | Delta bytes |
+|---:|---|---|---|---:|
+| 1 | Run, success | Ada position `[0,0,0]` → `[1,0,0]` | `b7f521a5b02f` | 563 |
+| 2 | Quiet | none | `b7f521a5b02f` | 130 |
+| 3 | Delay, success | none (zero-diff Event retained) | `b7f521a5b02f` | 451 |
+| 4 | Two Runs, same native receipt | Ada `[1,0,0]` → `[2,0,0]`; Bram `[2,0,0]` → `[1,0,0]` | `931378bdfeee` | 1,015 |
+| 5 | Quiet | none | `931378bdfeee` | 130 |
+| 6 | Quiet | none | `931378bdfeee` | 130 |
+| 7 | Quiet | none | `931378bdfeee` | 130 |
+
+The exact field audit, full SHA-256 values, risk analysis and source links are in [`persistence-headless-delta-findings.md`](../design/persistence-headless-delta-findings.md). Seven quiet/action commits retain precise boundary time even if their domain diff is empty; boundaries 5–7 cost 130 bytes apiece in canonical JSON. Initial state is 7,320 bytes, the seven deltas 2,557 bytes (1,261 Event-array bytes and 406 diff-array bytes, including empty arrays), selected full experimental snapshot 7,352 bytes, and total uncompressed artifact 17,320 bytes. A sampled runner execution used 1,590.151 ms in native steps and 1.225 ms in capture/diff/hash. These are one small fixture, not a universal performance estimate.
+
+Focused validation: `.venv/bin/python -B -m unittest tests.test_persistence_headless_delta -v` — **4 passed, 6.770s**; it independently launches the CLI twice and confirms deterministic canonical bytes, compares reconstructed and actual state after every boundary, retains the zero-diff Delay Event, checks directed observer views and same-receipt simultaneous Actions, and rejects altered preimages, duplicate paths/commits, missing commits and reordering. `.venv/bin/python -B examples/encounter_delta_headless.py` passed (7 native boundaries / 4 Events). `py_compile` for the two new Python files and `git diff --check` passed. No full repository, browser or extended Arena suite was run; no production persistence source was modified.
+
+### Acceptance against this bounded proof; current standing
+
+| Bounded proof requirement | Result |
+|---|---|
+| Runnable independent native runner; no second resolver | Met |
+| Initial realized state and typed stable property paths | Met for the enumerated closure; definitions are referenced by Library key |
+| Atomic property diffs and causally associated Events, including zero-diff Event | Met for the tested native commits |
+| Reconstruct and compare each Action/quiet boundary; full snapshot | Met for all seven tested boundaries and the selected boundary-7 projection |
+| Simultaneous batch where native contract supports it | Met as one two-Action commit receipt with one atomic two-Being diff; not a contested combat test |
+| Deterministic rerun and malformed chronology/preimage refusal | Met |
+| Storage/execution measurements | Met for this fixture; no direct generated-Arena baseline comparison |
+| Fresh-process native resumability | Not demonstrated; no qualifying Arena-independent generic restore/rehydration path |
+
+The bounded experiment is complete and supports this narrow tested closure. **Recommendation: do not integrate the delta representation into production yet.** The exact excluded field families and missing generic rehydration path make broader sufficiency unproven. Continue U-PER-SCALE-001 as sole ACTIVE; keep U-ACT-GATE-001 FUTURE/unpassed, U-NET-001 DEFERRED, and do not move on to shield work under this incomplete persistence program. No production Save/Load, rule, Arena mode, observer evidence or history was changed.
+
+### Commits and closeout
+
+- `221cf3820af5ddab08db0223df0e0558e938b570` — add deterministic headless native Encounter delta runner and focused regressions.
+- `d6757cfe3aeafab1c207d6aa97a51b0edc0e0042` — validate stream chronology, boundary/time agreement, and duplicate property-path refusal.
+- TASKS/findings/report closeout documentation is committed separately after these implementation commits. The five unrelated staged archival paths remained excluded. No push was performed.
+
+The latest report's code-only/progress conclusions are superseded only within the scope of this dated experiment; U-PER-SCALE-001 remains ACTIVE and unaccepted pending its broader persistence criteria.
 
 ## Commits
 
