@@ -12,10 +12,12 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "examples"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import encounter_delta_headless
 import native_history
 import test_encounter_inspection as inspection_fixtures
+import test_action_evaluation as action_fixtures
 from native_history import NativeHistoryRecorder
 from activities import DelayAction
 from atomic_publication import RNGCursor
@@ -210,6 +212,62 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             export_save(observer_fixture.enc)
         self.assertIn("validator_rehydration_required", str(refused.exception))
         self.assertEqual(observer_fixture.raw(), before)
+
+    def test_native_stun_condition_and_interrupted_action_resume_in_fresh_process(self):
+        fixture = action_fixtures.TestActionEvaluation()
+        fixture.setUp()
+        fixture.b.set_position(CartesianPosition(.2, 0, 0))
+        skills = fixture.world.get_skill_dictionary()
+        fixture.a.set_skill_level(skills, "unarmed combat", 5)
+        fixture.a.set_skill_level(skills, "stun", 2)
+        fixture.a.current.tags["universe.stun_categories"] = {"humanoid": 2}
+        fixture.b.current.tags["universe.stun_category"] = "humanoid"
+        rng = RNGCursor(__import__("random").Random(6).getstate())
+        fixture.enc.enable_transactional_progression(quiescent=True, rng_owner=rng)
+        from activities import declare_stun
+        stun = declare_stun(fixture.world, fixture.enc, fixture.a.id,
+                            fixture.b.id, region="Arm", motion="thrust")
+        later = MeleeStrike(fixture.enc, fixture.b.id, fixture.a.id, fixture.w3,
+                            motion="swing", reach=2)
+        self.assertGreater(later.end_time, stun.end_time)
+        fixture.enc.schedule_action(stun)
+        fixture.enc.schedule_action(later)
+        fixture.enc.step(stun.end_time)
+        self.assertEqual(fixture.enc.inspect_committed().action(stun.id).facts.outcome,
+                         "stunned")
+        self.assertEqual(fixture.b.current.states.states["stunned_until"], 10)
+        self.assertIn(later.id, fixture.enc.cancelled_action_list)
+        save = export_save(fixture.enc)
+        fixture.enc.step(8)
+        expected = {
+            "time": fixture.enc.time,
+            "rng": json.loads(json.dumps(rng.state)),
+            "hp": [fixture.a.get_hit_points(), fixture.b.get_hit_points()],
+            "stunned_until": fixture.b.current.states.states["stunned_until"],
+            "cancelled": list(fixture.enc.cancelled_action_list),
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(fixture.enc))).hexdigest(),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-stun-save.json"
+            path.write_bytes(save)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+encounter.step(8)
+print(json.dumps({'time':encounter.time,'rng':rng.state,
+ 'hp':[encounter.get_being(i).get_hit_points() for i in encounter.being_list],
+ 'stunned_until':encounter.get_being(encounter.being_list[1]).current.states.states['stunned_until'],
+ 'cancelled':list(encounter.cancelled_action_list),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(encounter))).hexdigest()},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)], cwd=ROOT,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
 
 
 if __name__ == "__main__":
