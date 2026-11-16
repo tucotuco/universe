@@ -37,6 +37,30 @@ class DeltaError(ValueError):
     """An experimental delta is duplicate, misordered, or has a bad preimage."""
 
 
+def native_input_manifest(seed=0):
+    """Recorded lawful inputs for the fixed two-Being replay fixture."""
+    return {
+        "schema": "universe.headless-native-inputs/1",
+        "seed": seed,
+        "boundaries": [
+            {"boundary": 1, "mode": "single", "actions": [{
+                "kind": "run", "action_id": "action-run-ada", "actor_id": "being-ada",
+                "start_time": 0, "duration": 1, "minimum_distance": 1,
+                "experience": 0}], "velocities": {"being-ada": [1, 0, 0]}},
+            {"boundary": 2, "mode": "single", "actions": [], "velocities": {}},
+            {"boundary": 3, "mode": "single", "actions": [{
+                "kind": "delay", "action_id": "action-delay-bram", "actor_id": "being-bram",
+                "start_time": 2, "defense": 0}], "velocities": {}},
+            {"boundary": 4, "mode": "choice", "actions": [
+                {"kind": "run", "action_id": "action-run-ada-2", "actor_id": "being-ada",
+                 "start_time": 3, "duration": 1, "minimum_distance": 1, "experience": 0},
+                {"kind": "run", "action_id": "action-run-bram", "actor_id": "being-bram",
+                 "start_time": 3, "duration": 1, "minimum_distance": 1, "experience": 0}],
+             "velocities": {"being-ada": [1, 0, 0], "being-bram": [-1, 0, 0]}},
+        ],
+    }
+
+
 def canonical_bytes(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False, allow_nan=False).encode("utf-8")
@@ -328,7 +352,7 @@ def _capture_boundary(encounter, rng_owner, prior_state, boundary, prior_action_
     return actual, delta, elapsed_ns
 
 
-def build_demo(until=7, seed=0):
+def build_demo(until=7, seed=0, *, inputs=None, action_id_prefix=""):
     """Run authored facts through the native transactional Encounter engine."""
     universe = Universe("Headless delta proof", library=Library(config_dir=str(ROOT / "src/config")))
     definition = universe.get_being_definition("Human")
@@ -353,7 +377,15 @@ def build_demo(until=7, seed=0):
     universe.add_event(encounter)
     rng_owner = RNGCursor(random.Random(seed).getstate())
     encounter.enable_transactional_progression(quiescent=True, rng_owner=rng_owner)
-    actors = {"ada": a, "bram": b}
+    actors = {"being-ada": a, "being-bram": b}
+    inputs = native_input_manifest(seed) if inputs is None else inputs
+    if (type(inputs) is not dict or set(inputs) != {"schema", "seed", "boundaries"}
+            or inputs["schema"] != "universe.headless-native-inputs/1"
+            or type(inputs["seed"]) is not int or type(inputs["boundaries"]) is not list
+            or len(inputs["boundaries"]) != 4):
+        raise ValueError("unsupported native replay input manifest")
+    if inputs["seed"] != seed:
+        raise ValueError("native replay seed differs from its recorded input manifest")
     previous_action_ids = set()
     initial = native_state(encounter, rng_owner)
     boundaries = []
@@ -375,29 +407,41 @@ def build_demo(until=7, seed=0):
         captured = actual
 
     start = time.perf_counter_ns()
-    # A legal Run moves Ada by one represented metre and resolves natively.
-    run = RunAction(universe, a.id, 0, 1, 1, experience=0, id="action-run-ada")
-    encounter.schedule_action(run)
-    step_started = time.perf_counter_ns()
-    encounter.step(1, velocities={a.id: (1, 0, 0)})
-    record(1, time.perf_counter_ns() - step_started)
-    # A quiet second still commits native time/fatigue/history bookkeeping.
-    step_started = time.perf_counter_ns()
-    encounter.step(1)
-    record(2, time.perf_counter_ns() - step_started)
-    # Delay resolves as an actual native Event without changing projected properties.
-    delay = DelayAction(encounter, b.id, start_time=2, id="action-delay-bram")
-    encounter.schedule_action(delay)
-    step_started = time.perf_counter_ns()
-    encounter.step(1)
-    record(3, time.perf_counter_ns() - step_started)
-    # Two independent Actions share the same native boundary snapshot and commit.
-    one = RunAction(universe, a.id, 3, 1, 1, experience=0, id="action-run-ada-2")
-    two = RunAction(universe, b.id, 3, 1, 1, experience=0, id="action-run-bram")
-    encounter.schedule_choice((one, two))
-    step_started = time.perf_counter_ns()
-    encounter.step(1, velocities={a.id: (1, 0, 0), b.id: (-1, 0, 0)})
-    record(4, time.perf_counter_ns() - step_started)
+    for expected_boundary, declaration in enumerate(inputs["boundaries"], 1):
+        if (type(declaration) is not dict or set(declaration) != {
+                "boundary", "mode", "actions", "velocities"}
+                or declaration["boundary"] != expected_boundary
+                or declaration["mode"] not in ("single", "choice")
+                or type(declaration["actions"]) is not list
+                or type(declaration["velocities"]) is not dict):
+            raise ValueError("invalid native input boundary declaration")
+        actions = []
+        for row in declaration["actions"]:
+            action_id = action_id_prefix + row["action_id"]
+            if row["kind"] == "run" and set(row) == {
+                    "kind", "action_id", "actor_id", "start_time", "duration",
+                    "minimum_distance", "experience"}:
+                action = RunAction(universe, row["actor_id"], row["start_time"],
+                    row["duration"], row["minimum_distance"], experience=row["experience"], id=action_id)
+            elif row["kind"] == "delay" and set(row) == {
+                    "kind", "action_id", "actor_id", "start_time", "defense"}:
+                action = DelayAction(encounter, row["actor_id"], defense=row["defense"],
+                                     start_time=row["start_time"], id=action_id)
+            else:
+                raise ValueError("native replay declaration contains an unsupported Action family")
+            actions.append(action)
+        if declaration["mode"] == "choice" and actions:
+            encounter.schedule_choice(tuple(actions))
+        elif declaration["mode"] == "single" and len(actions) <= 1:
+            for action in actions:
+                encounter.schedule_action(action)
+        else:
+            raise ValueError("native Action group does not match its declared scheduling mode")
+        velocities = {actor_id: tuple(vector)
+                      for actor_id, vector in declaration["velocities"].items()}
+        step_started = time.perf_counter_ns()
+        encounter.step(1, velocities=velocities or None)
+        record(expected_boundary, time.perf_counter_ns() - step_started)
     checkpoint = {
         "boundary": 4,
         "time": encounter.time,
@@ -416,7 +460,7 @@ def build_demo(until=7, seed=0):
                     "state": native_state(encounter, rng_owner)}
         return {"universe": universe, "encounter": encounter, "rng_owner": rng_owner,
                 "initial": initial, "boundaries": boundaries, "snapshot": snapshot,
-                "checkpoint": checkpoint, "elapsed_ns": elapsed_ns}
+        "checkpoint": checkpoint, "native_inputs": inputs, "elapsed_ns": elapsed_ns}
     # A few quiet boundaries expose recurring bookkeeping cost without GUI work.
     for boundary in range(5, until + 1):
         step_started = time.perf_counter_ns()
@@ -431,7 +475,8 @@ def build_demo(until=7, seed=0):
         raise AssertionError("full-stream replay differs from final native snapshot")
     return {"universe": universe, "encounter": encounter, "rng_owner": rng_owner,
             "initial": initial, "boundaries": boundaries, "snapshot": snapshot,
-            "checkpoint": checkpoint, "elapsed_ns": elapsed_ns}
+                "checkpoint": checkpoint, "native_inputs": inputs,
+                "elapsed_ns": elapsed_ns}
 
 
 def artifact(result):
@@ -440,7 +485,7 @@ def artifact(result):
             "initial_state": result["initial"],
             "deltas": [row["delta"] for row in result["boundaries"]],
             "snapshot": result["snapshot"],
-            "checkpoint": result["checkpoint"]}
+            "checkpoint": result["checkpoint"], "native_inputs": result["native_inputs"]}
 
 
 def main(argv=None):

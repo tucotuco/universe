@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
 import resource
 import subprocess
@@ -135,8 +136,9 @@ def _tuple_tree(value):
     return value
 
 
-def _capture_resume_artifact():
-    base = delta.build_demo(until=CHECKPOINT_BOUNDARY)
+def _capture_resume_artifact(*, seed=0, action_id_prefix=""):
+    base = delta.build_demo(until=CHECKPOINT_BOUNDARY, seed=seed,
+        action_id_prefix=action_id_prefix)
     checkpoint = base["checkpoint"]
     if checkpoint["boundary"] != CHECKPOINT_BOUNDARY:
         raise AssertionError("fixture did not reach the intended quiescent boundary")
@@ -146,6 +148,16 @@ def _capture_resume_artifact():
         "initial_state": base["initial"],
         "deltas": [row["delta"] for row in base["boundaries"]],
         "checkpoint": checkpoint,
+        "native_inputs": {
+            "history": base["native_inputs"],
+            "continuation": {
+                "after_boundary": CHECKPOINT_BOUNDARY,
+                "action": {"kind": "melee_strike", "action_id": ATTACK_ID,
+                    "actor_id": BEING_IDS[0], "target_id": BEING_IDS[1],
+                    "weapon_id": WEAPON_ID, "motion": "thrust", "reach": 2},
+                "steps": 5,
+            },
+        },
     }
     body["integrity_sha256"] = _seal(body)
     return base, body
@@ -159,7 +171,8 @@ def save_checkpoint(path):
 
 
 def validate_artifact(body):
-    required = {"schema", "compatibility", "initial_state", "deltas", "checkpoint", "integrity_sha256"}
+    required = {"schema", "compatibility", "initial_state", "deltas", "checkpoint",
+                "native_inputs", "integrity_sha256"}
     if type(body) is not dict or set(body) != required or body["schema"] != SCHEMA:
         raise ResumeRejected("checkpoint schema mismatch")
     unsigned = dict(body); supplied = unsigned.pop("integrity_sha256")
@@ -168,6 +181,22 @@ def validate_artifact(body):
     if body["compatibility"] != _source_compatibility():
         raise ResumeRejected("Encounter source, rules, Library or Python compatibility mismatch")
     checkpoint = body["checkpoint"]
+    inputs = body["native_inputs"]
+    if (type(inputs) is not dict or set(inputs) != {"history", "continuation"}
+            or type(inputs["history"]) is not dict
+            or set(inputs["history"]) != {"schema", "seed", "boundaries"}
+            or type(inputs["history"]["seed"]) is not int):
+        raise ResumeRejected("recorded native input manifest is invalid")
+    if (inputs["history"] != delta.native_input_manifest(inputs["history"]["seed"])
+            or type(inputs["continuation"]) is not dict
+            or set(inputs["continuation"]) != {"after_boundary", "action", "steps"}
+            or inputs["continuation"]["after_boundary"] != CHECKPOINT_BOUNDARY
+            or inputs["continuation"]["steps"] != 5
+            or type(inputs["continuation"]["action"]) is not dict
+            or set(inputs["continuation"]["action"]) != {
+                "kind", "action_id", "actor_id", "target_id", "weapon_id", "motion", "reach"}
+            or inputs["continuation"]["action"]["kind"] != "melee_strike"):
+        raise ResumeRejected("recorded native input manifest is invalid")
     expected_checkpoint = {"boundary", "time", "start_time", "state", "finished_action_ids",
                            "choice_state", "choice_counter", "closed_draft_ids",
                            "schedule_revision", "action_history"}
@@ -319,6 +348,50 @@ def _validate_native_history(checkpoint):
             or state["beings"][BEING_IDS[0]]["armed"].get("right hand") != WEAPON_ID
             or state["beings"][BEING_IDS[1]]["hit_points"] <= 0):
         raise ResumeRejected("checkpoint object inventory/custody closure is unsupported")
+
+
+def _validate_replay_path_closure(initial_state, delta_row):
+    """Reject changes outside the explicitly captured headless projection."""
+    encounter_fields = {"difficulty_class", "participants", "pending_action_ids",
+        "cancelled_action_ids", "time", "start_time", "last_processed_boundary",
+        "coordinator_time", "interval_start", "initiated", "awareness_by_observer"}
+    being_fields = {"name", "definition_key", "position", "hit_points", "armor_id",
+        "body_parts", "states", "posture", "size_category", "hex_facing",
+        "fatigue_level", "physical_fatigue", "physiology_id", "geometry",
+        "abilities", "skills", "weapon_skills", "skill_experience",
+        "skill_practice_baselines", "skill_use_history", "strategy",
+        "personal_history", "possessions", "weapons", "armed"}
+    weapon_fields = {"name", "position", "parent_container_id", "hit_points",
+        "weapon_size", "attacks", "geometry"}
+    nested_maps = {"body_parts", "states", "abilities", "skills", "weapon_skills",
+                   "skill_experience", "skill_practice_baselines", "strategy", "armed"}
+    for change in delta_row.get("changes", []):
+        path = change.get("path")
+        if type(path) is not list or not path:
+            raise ResumeRejected("delta contains an invalid projection path")
+        if path == ["rng_state"]:
+            continue
+        if len(path) == 2 and path[0] == "encounter" and path[1] in encounter_fields:
+            continue
+        if path[0] in ("beings", "weapons") and len(path) in (3, 4):
+            collection = initial_state.get(path[0], {})
+            entity = collection.get(path[1]) if type(collection) is dict else None
+            allowed = being_fields if path[0] == "beings" else weapon_fields
+            if type(entity) is not dict or path[2] not in allowed:
+                raise ResumeRejected("delta property is outside the captured entity field closure")
+            if len(path) == 4:
+                field, key = path[2], path[3]
+                if field not in nested_maps:
+                    raise ResumeRejected("delta nested path is outside the captured field closure")
+                current = entity.get(field)
+                if type(current) is not dict:
+                    raise ResumeRejected("delta nested path parent is not a captured map")
+                if key not in current and not (
+                        field in ("skill_experience", "skill_practice_baselines")
+                        and key in ("run", "Dagger")):
+                    raise ResumeRejected("delta introduces an unmodeled map entry")
+            continue
+        raise ResumeRejected("delta property path is outside the captured projection")
 
 
 def _make_effect(row):
@@ -491,15 +564,25 @@ def restore_private_checkpoint(body):
     return universe, encounter, rng_owner
 
 
-def continue_native(encounter, rng_owner, *, previous_state, prior_action_ids):
+def continue_native(encounter, rng_owner, *, previous_state, prior_action_ids,
+                    action_input=None, action_id_prefix=""):
     """Schedule a real melee hit, then commit one quiet boundary via Encounter.step."""
-    strike = MeleeStrike(encounter, BEING_IDS[0], BEING_IDS[1], WEAPON_ID,
-                         motion="thrust", reach=2)
-    strike.id = ATTACK_ID
+    action_input = action_input or {
+        "kind": "melee_strike", "action_id": ATTACK_ID,
+        "actor_id": BEING_IDS[0], "target_id": BEING_IDS[1],
+        "weapon_id": WEAPON_ID, "motion": "thrust", "reach": 2}
+    if type(action_input) is not dict or set(action_input) != {
+            "kind", "action_id", "actor_id", "target_id", "weapon_id", "motion", "reach"}:
+        raise ResumeRejected("unsupported continuation Action declaration")
+    strike = MeleeStrike(encounter, action_input["actor_id"], action_input["target_id"],
+                         action_input["weapon_id"], motion=action_input["motion"],
+                         reach=action_input["reach"])
+    strike.id = action_id_prefix + action_input["action_id"]
     encounter.schedule_action(strike)
     rows = []
     known_actions = set(prior_action_ids)
-    for boundary in range(CHECKPOINT_BOUNDARY + 1, CHECKPOINT_BOUNDARY + 6):
+    steps = 5
+    for boundary in range(CHECKPOINT_BOUNDARY + 1, CHECKPOINT_BOUNDARY + steps + 1):
         started = time.perf_counter_ns()
         encounter.step(1)
         native_ns = time.perf_counter_ns() - started
@@ -546,8 +629,300 @@ def continue_native(encounter, rng_owner, *, previous_state, prior_action_ids):
         "rng_state": delta._json_value(rng_owner.state),
         "recent_native_receipts": receipts,
         "continuation_deltas": [row["delta"] for row in rows],
+        "boundary_states": [{"boundary": row["delta"]["boundary"],
+                             "state": row["state"]} for row in rows],
         "native_step_ns": [row["step_ns"] for row in rows]}
     return final
+
+
+def record_full_timeline(*, seed=0):
+    """Record the native control and its reusable action inputs at boundaries 1–9."""
+    base, checkpoint = _capture_resume_artifact(seed=seed)
+    control = continue_native(base["encounter"], base["rng_owner"],
+        previous_state=checkpoint["checkpoint"]["state"],
+        prior_action_ids=checkpoint["checkpoint"]["finished_action_ids"],
+        action_input=checkpoint["native_inputs"]["continuation"]["action"])
+    body = {"schema": "universe.headless-faithful-replay/1",
+            "compatibility": checkpoint["compatibility"],
+            "checkpoint": checkpoint, "control": control}
+    body["integrity_sha256"] = _seal(body)
+    return body
+
+
+def validate_full_timeline(body):
+    required = {"schema", "compatibility", "checkpoint", "control", "integrity_sha256"}
+    if type(body) is not dict or set(body) != required or body["schema"] != "universe.headless-faithful-replay/1":
+        raise ResumeRejected("faithful replay recording schema mismatch")
+    unsigned = dict(body); supplied = unsigned.pop("integrity_sha256")
+    if type(supplied) is not str or _seal(unsigned) != supplied:
+        raise ResumeRejected("faithful replay recording integrity mismatch")
+    checkpoint_body = body["checkpoint"]
+    validate_artifact(checkpoint_body)
+    if body["compatibility"] != checkpoint_body["compatibility"]:
+        raise ResumeRejected("recording/checkpoint compatibility differs")
+    control = body["control"]
+    required_control = {"state", "time", "last_processed_boundary", "start_time",
+        "pending_action_ids", "finished_action_ids", "cancelled_action_ids",
+        "choice_state", "choice_counter", "schedule_revision", "action_rows",
+        "rng_state", "recent_native_receipts", "continuation_deltas",
+        "boundary_states", "native_step_ns"}
+    if type(control) is not dict or set(control) != required_control:
+        raise ResumeRejected("recorded continuation field closure mismatch")
+    if (type(control["continuation_deltas"]) is not list
+            or any(type(row) is not dict for row in control["continuation_deltas"])
+            or [row["boundary"] for row in control["continuation_deltas"]]
+                != [5, 6, 7, 8, 9]
+            or type(control["boundary_states"]) is not list
+            or len(control["boundary_states"]) != 5
+            or any(type(row) is not dict or set(row) != {"boundary", "state"}
+                   for row in control["boundary_states"])
+            or [row["boundary"] for row in control["boundary_states"]]
+                != [5, 6, 7, 8, 9]
+            or type(control["native_step_ns"]) is not list
+            or len(control["native_step_ns"]) != 5
+            or any(type(value) is not int or value <= 0
+                   for value in control["native_step_ns"])):
+        raise ResumeRejected("recorded continuation timeline is incomplete or reordered")
+    expected_events = checkpoint_body["checkpoint"]["action_history"]
+    if len(expected_events) != 4:
+        raise ResumeRejected("recording does not contain the supported boundary-1..4 history")
+    deltas = checkpoint_body["deltas"] + control["continuation_deltas"]
+    initial_state = checkpoint_body["initial_state"]
+    state = initial_state
+    action_ids, seen_effects = [], set()
+    effects_by_boundary = {}
+    if (type(control["action_rows"]) is not list
+            or any(type(row) is not dict or set(row) != {
+                "id", "type", "event_type", "start_time", "end_time", "outcome"}
+                for row in control["action_rows"])):
+        raise ResumeRejected("recorded native Action row schema is invalid")
+    action_rows = {row.get("id"): row for row in control["action_rows"]
+                   if type(row) is dict}
+    if len(action_rows) != len(control["action_rows"]):
+        raise ResumeRejected("duplicate native Action row identity")
+    for boundary, row in enumerate(deltas, 1):
+        if row.get("boundary") != boundary or row.get("time") != boundary:
+            raise ResumeRejected("full replay boundary/time chronology is inconsistent")
+        _validate_replay_path_closure(initial_state, row)
+        state = delta.apply_delta(state, row)
+        for event in row["events"]:
+            if (type(event) is not dict or event.get("event_id") != event.get("action_id")
+                    or event.get("parent_event_id") != initial_state["encounter"]["id"]
+                    or event.get("actor_id") not in BEING_IDS
+                    or event.get("target_id") not in (None, *BEING_IDS)
+                    or type(event.get("end_time")) not in (int, float)
+                    or not math.isfinite(event["end_time"])
+                    or math.ceil(event["end_time"]) != boundary):
+                raise ResumeRejected("historical Event identity/cause/time reference is invalid")
+            action_id = event["action_id"]
+            if action_id in action_ids:
+                raise ResumeRejected("duplicate Action/Event identity in one logical Encounter")
+            action_ids.append(action_id)
+            action = action_rows.get(action_id)
+            if (action is None or action.get("type") != event["action_class"]
+                    or action.get("outcome") != event["outcome"]
+                    or action.get("event_type") != event["event_type"]
+                    or action.get("start_time") != event["start_time"]
+                    or action.get("end_time") != event["end_time"]):
+                raise ResumeRejected("Event outcome/timing differs from the committed Action row")
+            event_effects = []
+            for effect_id in event["effect_ids"]:
+                if (type(effect_id) is not list or len(effect_id) != 5
+                        or effect_id[0] != initial_state["encounter"]["id"]
+                        or effect_id[1] != boundary or effect_id[2] != action_id
+                        or type(effect_id[3]) is not str or type(effect_id[4]) is not int):
+                    raise ResumeRejected("Effect identity has a broken causal or boundary reference")
+                identity = tuple(effect_id)
+                if identity in seen_effects:
+                    raise ResumeRejected("duplicate Effect identity in one logical Encounter")
+                seen_effects.add(identity); event_effects.append(effect_id)
+            for effect in event["proposal_effects"]:
+                fields = effect.get("fields", {}) if type(effect) is dict else None
+                if (type(fields) is not dict or fields.get("source_action_id") != action_id
+                        or fields.get("target_id") not in (None, *BEING_IDS)):
+                    raise ResumeRejected("proposal Effect source/recipient reference is inconsistent")
+            effects_by_boundary.setdefault(boundary, []).extend(event_effects)
+    if action_ids != control["finished_action_ids"] or action_ids != list(action_rows):
+        raise ResumeRejected("finished Action queue and chronological Event history disagree")
+    if _canonical(state) != _canonical(control["state"]):
+        raise ResumeRejected("full delta playback differs from recorded terminal snapshot")
+    if (control["time"] != 9 or control["last_processed_boundary"] != 9
+            or control["start_time"] != 0
+            or control["state"].get("encounter", {}).get("time") != control["time"]
+            or control["state"].get("encounter", {}).get("last_processed_boundary")
+                != control["last_processed_boundary"]
+            or control["state"].get("rng_state") != control["rng_state"]
+            or type(control["pending_action_ids"]) is not list
+            or type(control["cancelled_action_ids"]) is not list
+            or control["pending_action_ids"] or control["cancelled_action_ids"]):
+        raise ResumeRejected("native continuation cursor differs from its terminal snapshot")
+    control_state = checkpoint_body["checkpoint"]["state"]
+    state_by_boundary = {row["boundary"]: row["state"] for row in control["boundary_states"]}
+    for row in control["continuation_deltas"]:
+        control_state = delta.apply_delta(control_state, row)
+        if _canonical(control_state) != _canonical(state_by_boundary[row["boundary"]]):
+            raise ResumeRejected("continuation delta differs from its native boundary snapshot")
+    receipts = control["recent_native_receipts"]
+    receipt_fields = {"boundary", "action_ids", "effect_ids", "rng_state",
+                      "inspection_start", "inspection_end"}
+    if (type(receipts) is not list or len(receipts) != 5
+            or any(type(row) is not dict or set(row) != receipt_fields for row in receipts)
+            or [row["boundary"] for row in receipts] != [5, 6, 7, 8, 9]):
+        raise ResumeRejected("continuation is missing a committed boundary receipt")
+    for receipt in receipts:
+        row_events = deltas[receipt["boundary"] - 1]["events"]
+        if (receipt["action_ids"] != [event["action_id"] for event in row_events]
+                or receipt["effect_ids"] != effects_by_boundary.get(receipt["boundary"], [])):
+            raise ResumeRejected("receipt Event/Effect grouping differs from committed history")
+    return checkpoint_body, control
+
+
+def historical_playback(body, boundaries=None):
+    """Reconstruct selected timeline boundaries without native Action resolution."""
+    started = time.perf_counter_ns()
+    checkpoint, control = validate_full_timeline(body)
+    deltas = checkpoint["deltas"] + control["continuation_deltas"]
+    if boundaries is None:
+        boundaries = list(range(0, 10))
+    if (type(boundaries) not in (list, tuple) or not boundaries
+            or any(type(boundary) is not int or not 0 <= boundary <= 9
+                   for boundary in boundaries)):
+        raise ResumeRejected("playback query boundary is outside the recorded timeline")
+    states = {0: checkpoint["initial_state"]}
+    events = {0: []}
+    cumulative_events = []
+    state = checkpoint["initial_state"]
+    for row in deltas:
+        state = delta.apply_delta(state, row)
+        boundary = row["boundary"]
+        states[boundary] = state
+        events[boundary] = row["events"]
+        cumulative_events.extend(row["events"])
+    result = []
+    for boundary in boundaries:
+        result.append({"boundary": boundary,
+                       "time": states[boundary]["encounter"]["time"],
+                       "state": states[boundary],
+                       "events_at_boundary": events[boundary],
+                       "event_history": [event for event in cumulative_events
+                                         if math.ceil(event["end_time"]) <= boundary],
+                       "state_sha256": delta.state_digest(states[boundary])})
+    return {"schema": "universe.headless-historical-playback/1",
+            "boundaries": result, "native_resolution_invoked": False,
+            "playback_elapsed_ns": time.perf_counter_ns() - started}
+
+
+def _id_mapping(reference_deltas, candidate_deltas):
+    mapping, reverse = {}, {}
+    for reference, candidate in zip(reference_deltas, candidate_deltas):
+        if reference["boundary"] != candidate["boundary"]:
+            raise ResumeRejected("replay boundary correspondence mismatch")
+        ref_events, candidate_events = reference["events"], candidate["events"]
+        if len(ref_events) != len(candidate_events):
+            raise ResumeRejected("replay Event multiplicity differs")
+        for left, right in zip(ref_events, candidate_events):
+            for key in ("action_class", "event_type", "parent_event_id", "actor_id",
+                        "target_id", "start_time", "end_time", "outcome", "target_ids"):
+                if left.get(key) != right.get(key):
+                    raise ResumeRejected(f"replay Event semantic field differs: {key}")
+            for key in ("event_id", "action_id", "choice_id"):
+                first, second = left.get(key), right.get(key)
+                if first is None and second is None:
+                    continue
+                if type(first) is not str or type(second) is not str:
+                    raise ResumeRejected("replay generated identity is missing or malformed")
+                if (first in mapping and mapping[first] != second
+                        or second in reverse and reverse[second] != first):
+                    raise ResumeRejected("replay generated-identity map is not bijective")
+                mapping[first] = second; reverse[second] = first
+    return mapping, reverse
+
+
+def _remap_ids(value, mapping):
+    if type(value) is str:
+        return mapping.get(value, value)
+    if type(value) is list:
+        return [_remap_ids(item, mapping) for item in value]
+    if type(value) is dict:
+        return {_remap_ids(key, mapping): _remap_ids(item, mapping)
+                for key, item in value.items()}
+    return value
+
+
+def deterministic_native_reexecution(body, *, action_id_prefix="independent/"):
+    """Rerun only recorded legal Action inputs through a fresh native Encounter."""
+    started = time.perf_counter_ns()
+    checkpoint, control = validate_full_timeline(body)
+    if (type(action_id_prefix) is not str or not action_id_prefix
+            or action_id_prefix in ("action", "being", "weapon")):
+        raise ValueError("reexecution needs a distinct explicit Action-ID prefix")
+    inputs = body["checkpoint"]["native_inputs"]
+    base = delta.build_demo(until=CHECKPOINT_BOUNDARY,
+        seed=inputs["history"]["seed"], inputs=inputs["history"],
+        action_id_prefix=action_id_prefix)
+    candidate_history = [row["delta"] for row in base["boundaries"]]
+    if len(candidate_history) != len(checkpoint["deltas"]):
+        raise ResumeRejected("re-executed history length differs")
+    continuation_input = inputs["continuation"]["action"]
+    candidate_control = continue_native(base["encounter"], base["rng_owner"],
+        previous_state=base["checkpoint"]["state"],
+        prior_action_ids=base["encounter"].finished_action_list,
+        action_input=continuation_input, action_id_prefix=action_id_prefix)
+    candidate_deltas = candidate_history + candidate_control["continuation_deltas"]
+    reference_deltas = checkpoint["deltas"] + control["continuation_deltas"]
+    mapping, reverse = _id_mapping(reference_deltas, candidate_deltas)
+    matched = []
+    reference_state = checkpoint["initial_state"]
+    candidate_state = base["initial"]
+    if _canonical(reference_state) != _canonical(candidate_state):
+        raise ResumeRejected("re-execution initial state differs")
+    candidate_states = [row["actual"] for row in base["boundaries"]]
+    candidate_states.extend(row["state"] for row in candidate_control["boundary_states"])
+    for index, (expected_delta, actual_delta, actual_state) in enumerate(
+            zip(reference_deltas, candidate_deltas, candidate_states), 1):
+        reference_state = delta.apply_delta(reference_state, expected_delta)
+        candidate_state = delta.apply_delta(candidate_state, actual_delta)
+        normalized_reference_state = _remap_ids(reference_state, mapping)
+        if _canonical(normalized_reference_state) != _canonical(candidate_state):
+            raise ResumeRejected(f"re-executed native state differs at boundary {index}")
+        if _canonical(actual_state) != _canonical(candidate_state):
+            raise ResumeRejected(f"re-executed boundary snapshot differs from native state at {index}")
+        normalized_delta = _remap_ids(expected_delta, mapping)
+        normalized_delta.pop("state_sha256", None)
+        candidate_compare = dict(actual_delta); candidate_compare.pop("state_sha256", None)
+        if _canonical(normalized_delta) != _canonical(candidate_compare):
+            raise ResumeRejected(f"re-executed Event/effect/cause/delta differs at boundary {index}")
+        matched.append({"boundary": index, "state_sha256": delta.state_digest(candidate_state),
+                        "event_count": len(actual_delta["events"]),
+                        "property_change_count": len(actual_delta["changes"])})
+    normalized_receipts = _remap_ids(control["recent_native_receipts"], mapping)
+    if _canonical(normalized_receipts) != _canonical(candidate_control["recent_native_receipts"]):
+        raise ResumeRejected("native receipt/effect identity correspondence differs")
+    normalized_action_rows = _remap_ids(control["action_rows"], mapping)
+    if _canonical(normalized_action_rows) != _canonical(candidate_control["action_rows"]):
+        raise ResumeRejected("native Action outcome/order differs")
+    for key in ("time", "last_processed_boundary", "start_time", "pending_action_ids",
+                "finished_action_ids", "cancelled_action_ids", "choice_state",
+                "choice_counter", "schedule_revision", "rng_state"):
+        if _canonical(_remap_ids(control[key], mapping)) != _canonical(candidate_control[key]):
+            raise ResumeRejected(f"native final Encounter continuation field differs: {key}")
+    return {"schema": "universe.headless-native-reexecution/1",
+        "boundaries": matched, "event_id_map": mapping,
+        "final_rng_state": candidate_control["rng_state"],
+        "control_rng_state": control["rng_state"],
+        "rng_equal": candidate_control["rng_state"] == control["rng_state"],
+        "native_resolution_invoked": True,
+        "reexecution_elapsed_ns": time.perf_counter_ns() - started,
+        "native_step_ns": [row["step_ns"] for row in base["boundaries"]]
+                           + candidate_control["native_step_ns"]}
+
+
+def _forbidden_runtime_imports():
+    forbidden = ("arena_native_snapshot", "arena_session", "arena_controller",
+                 "arena_server", "npcgen")
+    return sorted(name for name in sys.modules
+                  if any(name == prefix or name.startswith(prefix + ".")
+                         for prefix in forbidden))
 
 
 def _main(argv=None):
@@ -555,7 +930,29 @@ def _main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--resume", type=Path, help="validate and continue a saved native checkpoint")
     parser.add_argument("--write-checkpoint", type=Path, help="write the boundary-4 native checkpoint")
+    parser.add_argument("--record-full", type=Path, help="record the native control timeline through boundary 9")
+    parser.add_argument("--playback", type=Path, help="historically reconstruct a recorded timeline")
+    parser.add_argument("--boundary", type=int, action="append", help="playback boundary query; repeatable")
+    parser.add_argument("--reexecute", type=Path, help="re-run only the recorded native Action inputs")
+    parser.add_argument("--id-prefix", default="independent/", help="independent replay Action-ID namespace")
     args = parser.parse_args(argv)
+    if args.playback:
+        body = _strict_json(args.playback.read_bytes())
+        result = historical_playback(body, args.boundary)
+        result["forbidden_runtime_imports"] = _forbidden_runtime_imports()
+        print(_canonical(result).decode("utf-8"))
+        return 0
+    if args.reexecute:
+        body = _strict_json(args.reexecute.read_bytes())
+        result = deterministic_native_reexecution(body, action_id_prefix=args.id_prefix)
+        result["forbidden_runtime_imports"] = _forbidden_runtime_imports()
+        print(_canonical(result).decode("utf-8"))
+        return 0
+    if args.record_full:
+        body = record_full_timeline()
+        args.record_full.write_bytes(_canonical(body))
+        print(f"wrote faithful native Encounter replay through boundary 9: {args.record_full}")
+        return 0
     if args.resume:
         body = _strict_json(args.resume.read_bytes())
         started = time.perf_counter_ns()
@@ -563,14 +960,11 @@ def _main(argv=None):
         load_ns = time.perf_counter_ns() - started
         result = continue_native(encounter, rng,
             previous_state=body["checkpoint"]["state"],
-            prior_action_ids=body["checkpoint"]["finished_action_ids"])
+            prior_action_ids=body["checkpoint"]["finished_action_ids"],
+            action_input=body["native_inputs"]["continuation"]["action"])
         result["strict_load_and_rehydrate_ns"] = load_ns
         result["peak_rss_platform_units"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        forbidden = ("arena_native_snapshot", "arena_session", "arena_controller",
-                     "arena_server", "npcgen")
-        result["forbidden_runtime_imports"] = sorted(
-            name for name in sys.modules if any(name == prefix or name.startswith(prefix + ".")
-                for prefix in forbidden))
+        result["forbidden_runtime_imports"] = _forbidden_runtime_imports()
         print(_canonical(result).decode("utf-8"))
         return 0
     base, body = _capture_resume_artifact()
@@ -580,7 +974,8 @@ def _main(argv=None):
         return 0
     result = continue_native(base["encounter"], base["rng_owner"],
         previous_state=body["checkpoint"]["state"],
-        prior_action_ids=body["checkpoint"]["finished_action_ids"])
+        prior_action_ids=body["checkpoint"]["finished_action_ids"],
+        action_input=body["native_inputs"]["continuation"]["action"])
     result["checkpoint_artifact_bytes"] = len(_canonical(body))
     result["checkpoint_components"] = {
         "initial_state": len(_canonical(body["initial_state"])),
