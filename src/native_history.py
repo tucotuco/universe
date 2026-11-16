@@ -282,6 +282,12 @@ def _initial_state(initial):
     }
 
 
+def _seal(body):
+    value = dict(body)
+    value["sha256"] = hashlib.sha256(_canonical(value)).hexdigest()
+    return value
+
+
 def capture(encounter):
     """Capture committed facts from a native Encounter without resolving work.
 
@@ -350,8 +356,82 @@ def capture(encounter):
             "boundaries": boundaries,
             "latest_boundary": previous_boundary}
     _measure(body)
-    body["sha256"] = hashlib.sha256(_canonical(body)).hexdigest()
-    return body
+    return _seal(body)
+
+
+def append_committed(log, encounter):
+    """Return a new history log with exactly the next authenticated commit.
+
+    The caller invokes this only after ordinary native publication returns.
+    A rolled-back candidate has no registered committed receipt and cannot be
+    appended. One receipt is one atomic boundary, including a simultaneous
+    multi-Action batch. The input log is never modified on refusal.
+    """
+    validate(log)
+    from encounter import Encounter
+    import atomic_publication
+    from encounter_inspection import fingerprint
+
+    if type(encounter) is not Encounter:
+        raise NativeHistoryRejected("native Encounter required")
+    if (log["initial"]["encounter_id"] != encounter.id
+            or log["initial"]["universe_id"] != encounter.universe.id):
+        raise NativeHistoryRejected("history belongs to another logical Encounter")
+    history = encounter.__dict__.get("_atomic_interval_history")
+    expected = log["latest_boundary"] + 1
+    if type(history) is not list or not history:
+        raise NativeHistoryRejected("native committed receipt is missing")
+    receipt = history[-1]
+    if (type(receipt) is not atomic_publication.PublishedInterval
+            or receipt.encounter_id != encounter.id or receipt.boundary != expected
+            or encounter.time != expected or encounter.last_processed_boundary != expected):
+        raise NativeHistoryRejected("there is no next committed boundary to append")
+    issued = atomic_publication._COMMITTED_RECEIPTS.get(id(receipt))
+    if (issued is None or issued[0]() is not receipt or issued[1]() is not encounter
+            or issued[2] != fingerprint(receipt)):
+        raise NativeHistoryRejected("native boundary receipt is not authenticated")
+
+    # inspect_committed validates the complete receipt chain and obtains the
+    # authoritative, detached historical read model after publication.
+    view = encounter.inspect_committed(receipt=receipt)
+    targets = {}
+    for target_id, rows in view.histories.items():
+        for row in rows:
+            if row.boundary == expected:
+                targets[target_id] = row
+                break
+    payload = _boundary_payload(encounter, receipt, view, {expected: targets})
+    state = {
+        "boundary": payload["boundary"],
+        "time": payload["end"],
+        "entities": payload["target_states"],
+        "schedule": payload["schedule"],
+        "objective": payload["objective"],
+        "objective_use": payload["objective_use"],
+        "recipients": payload["recipients"],
+        "projectile_states": payload["projectile_states"],
+    }
+    previous = state_at(log, log["latest_boundary"])
+    row = {
+        "boundary": expected,
+        "start": payload["start"], "end": payload["end"],
+        "changes": _diff(previous, state),
+        "events": {"action_ids": payload["action_ids"],
+                    "effect_ids": payload["effect_ids"],
+                    "actions": payload["actions"],
+                    "effects": payload["effects"],
+                    "starts": payload["starts"],
+                    "participants": payload["participants"]},
+        "rng_after": payload["rng_after"],
+        "state_sha256": hashlib.sha256(_canonical(state)).hexdigest(),
+    }
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["boundaries"] = list(log["boundaries"]) + [row]
+    body["latest_boundary"] = expected
+    _measure(body)
+    result = _seal(body)
+    validate(result)
+    return result
 
 
 def validate(log):

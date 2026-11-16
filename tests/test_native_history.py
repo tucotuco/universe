@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -12,7 +13,8 @@ sys.path.insert(0, str(ROOT / "examples"))
 
 import encounter_delta_headless
 from native_history import (NativeHistoryRejected, capture, decode, encode,
-                            events_at, state_at, validate, write, _plain)
+                            append_committed, events_at, state_at, validate,
+                            write, _plain)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -121,6 +123,50 @@ class NativeHistoryTests(unittest.TestCase):
             with self.assertRaises(NativeHistoryRejected):
                 write(self.log, path)
             self.assertEqual(path.read_bytes(), before)
+
+    def test_append_accepts_only_the_next_authenticated_native_commit(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo["encounter"]
+        log = capture(encounter)
+        from activities import DelayAction
+        action = DelayAction(encounter, encounter.being_list[1], defense=0,
+                             start_time=4, id="append-delay")
+        encounter.schedule_action(action)
+        encounter.step(1)
+
+        appended = append_committed(log, encounter)
+        self.assertEqual(log["latest_boundary"], 4)  # immutable input
+        self.assertEqual(appended["latest_boundary"], 5)
+        self.assertEqual(events_at(appended, 5)["action_ids"], ["append-delay"])
+        self.assertEqual(state_at(appended, 5)["boundary"], 5)
+        self.assertTrue(validate(decode(encode(appended))))
+        with self.assertRaisesRegex(NativeHistoryRejected, "no next committed"):
+            append_committed(appended, encounter)
+
+    def test_rolled_back_publication_has_no_appendable_history_receipt(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo["encounter"]
+        log = capture(encounter)
+        from activities import DelayAction
+        action = DelayAction(encounter, encounter.being_list[1], defense=0,
+                             start_time=4, id="rolled-back-delay")
+        encounter.schedule_action(action)
+        import atomic_publication
+        publish = atomic_publication.publish_interval_candidate
+
+        def fail_after_commit_marker(*args, **kwargs):
+            kwargs["_fail_after"] = "mark_committed"
+            return publish(*args, **kwargs)
+
+        with patch.object(atomic_publication, "publish_interval_candidate",
+                          fail_after_commit_marker):
+            with self.assertRaises(atomic_publication.PublicationFailure):
+                encounter.step(1)
+        self.assertEqual(encounter.time, 4)
+        self.assertEqual(log["latest_boundary"], 4)
+        with self.assertRaisesRegex(NativeHistoryRejected,
+                                    "no next committed boundary"):
+            append_committed(log, encounter)
 
 
 if __name__ == "__main__":
