@@ -29,8 +29,8 @@ class TestFaithfulNativeReplay(unittest.TestCase):
         state = states[0]
         deltas = (self.body["checkpoint"]["deltas"]
                   + self.body["control"]["continuation_deltas"])
-        control_states = {row["boundary"]: row["state"]
-                          for row in self.body["control"]["boundary_states"]}
+        native_states = {row["boundary"]: row["state"]
+                         for row in self.body["native_snapshots"]}
         for row in deltas:
             state = replay.delta.apply_delta(state, row)
             states[row["boundary"]] = state
@@ -38,9 +38,8 @@ class TestFaithfulNativeReplay(unittest.TestCase):
             with self.subTest(boundary=boundary):
                 self.assertEqual(replay._canonical(boundaries[boundary]["state"]),
                                  replay._canonical(states[boundary]))
-                if boundary >= 5:
-                    self.assertEqual(replay._canonical(states[boundary]),
-                                     replay._canonical(control_states[boundary]))
+                self.assertEqual(replay._canonical(boundaries[boundary]["state"]),
+                                 replay._canonical(native_states[boundary]))
                 self.assertEqual(boundaries[boundary]["state_sha256"],
                                  replay.delta.state_digest(states[boundary]))
                 self.assertEqual(set(states[boundary]["encounter"][
@@ -127,6 +126,13 @@ class TestFaithfulNativeReplay(unittest.TestCase):
         effects = duplicate_effect["control"]["continuation_deltas"][3]["events"][0]["effect_ids"]
         effects.append(copy.deepcopy(effects[0]))
         mutations.append(duplicate_effect)
+        snapshot_mismatch = copy.deepcopy(self.body)
+        snapshot_mismatch["native_snapshots"][0]["state"]["beings"]["being-ada"][
+            "hit_points"] -= 1
+        unsigned = {key: value for key, value in snapshot_mismatch.items()
+                    if key != "integrity_sha256"}
+        snapshot_mismatch["integrity_sha256"] = replay._seal(unsigned)
+        mutations.append(snapshot_mismatch)
         for body in mutations:
             with self.subTest(mutation=len(mutations)):
                 with self.assertRaises(replay.ResumeRejected):

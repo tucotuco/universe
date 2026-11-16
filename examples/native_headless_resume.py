@@ -644,13 +644,18 @@ def record_full_timeline(*, seed=0):
         action_input=checkpoint["native_inputs"]["continuation"]["action"])
     body = {"schema": "universe.headless-faithful-replay/1",
             "compatibility": checkpoint["compatibility"],
-            "checkpoint": checkpoint, "control": control}
+            "checkpoint": checkpoint, "control": control,
+            "native_snapshots": ([{"boundary": row["delta"]["boundary"],
+                                   "state": row["actual"]}
+                                  for row in base["boundaries"]]
+                + control["boundary_states"])}
     body["integrity_sha256"] = _seal(body)
     return body
 
 
 def validate_full_timeline(body):
-    required = {"schema", "compatibility", "checkpoint", "control", "integrity_sha256"}
+    required = {"schema", "compatibility", "checkpoint", "control",
+                "native_snapshots", "integrity_sha256"}
     if type(body) is not dict or set(body) != required or body["schema"] != "universe.headless-faithful-replay/1":
         raise ResumeRejected("faithful replay recording schema mismatch")
     unsigned = dict(body); supplied = unsigned.pop("integrity_sha256")
@@ -661,6 +666,12 @@ def validate_full_timeline(body):
     if body["compatibility"] != checkpoint_body["compatibility"]:
         raise ResumeRejected("recording/checkpoint compatibility differs")
     control = body["control"]
+    snapshots = body["native_snapshots"]
+    if (type(snapshots) is not list or len(snapshots) != 9
+            or any(type(row) is not dict or set(row) != {"boundary", "state"}
+                   for row in snapshots)
+            or [row["boundary"] for row in snapshots] != list(range(1, 10))):
+        raise ResumeRejected("native state snapshot timeline is incomplete or reordered")
     required_control = {"state", "time", "last_processed_boundary", "start_time",
         "pending_action_ids", "finished_action_ids", "cancelled_action_ids",
         "choice_state", "choice_counter", "schedule_revision", "action_rows",
@@ -705,6 +716,8 @@ def validate_full_timeline(body):
             raise ResumeRejected("full replay boundary/time chronology is inconsistent")
         _validate_replay_path_closure(initial_state, row)
         state = delta.apply_delta(state, row)
+        if _canonical(state) != _canonical(snapshots[boundary - 1]["state"]):
+            raise ResumeRejected("historical delta state differs from native snapshot")
         for event in row["events"]:
             if (type(event) is not dict or event.get("event_id") != event.get("action_id")
                     or event.get("parent_event_id") != initial_state["encounter"]["id"]
