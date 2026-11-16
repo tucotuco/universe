@@ -18,7 +18,7 @@
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
-| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | [record at closeout] | [calculate at closeout] |
+| Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:32:03-08:00 | PT35M13S |
 
 ## Latest continuation — faithful native replay
 
@@ -82,9 +82,9 @@ An initial attempt to invoke adjacent tests as package modules used an incorrect
 
 - `d95371bad1f15eef00be4cd832bc036460898651` — recorded declarations, time-indexed historical playback, native same-version rerun, generated-ID mapping and focused acceptance tests.
 - `58542acc5c1066278ad457227b8392d05b37dbd6` — independent native-state snapshots at every boundary, comparison against reconstructed playback and snapshot-tamper refusal.
-- Documentation, canonical assignment installation, `TASKS.md` and report: commit after final audit (record exact hash at closeout).
+- `cd136c0282b3fb3743946cbf83e37c864f022ca2` — canonical assignment installation, findings, `TASKS.md` reconciliation and engineering-report update.
 
-Before the two implementation commits, staged publication-safety audit passed with **0 findings** (9 staged paths for the first commit; 8 for the snapshot follow-up); explicit-path commits excluded the five user-staged archive operations. The untracked revised assignment was copied byte-for-byte to the canonical assignment path; the revised source remains preserved. The two untracked save files, prior user assignments, process standard and all user data remain unmodified. Record final documentation audit, HEAD and worktree state here at closeout. No push.
+Staged publication-safety audit passed with **0 findings** for the implementation commits (9 staged paths, then 8), documentation commit (10), and post-commit preserved stage (6). Explicit-path commits excluded the five user-staged archive operations. `git diff --check`, staged whitespace check and local Markdown-link check (88 links, 0 missing) passed. Branch `main`; HEAD at documentation closeout was `cd136c0282b3fb3743946cbf83e37c864f022ca2`. Tracked worktree had no remaining assignment changes, while the five user-staged archive operations and seven user untracked files remained. The untracked revised assignment was copied byte-for-byte to the canonical assignment path; the revised source remains preserved. The two untracked save files, prior user assignments, process standard and all user data remain unmodified. No push.
 
 ## Prior continuation — native headless resume (extended by faithful replay above)
 
