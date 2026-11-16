@@ -12,11 +12,11 @@
 |---|---|---|---|
 | Initial implementation | 2026-11-15T16:42:40-08:00 | 2026-11-15T17:52:06-08:00 | PT1H9M26S |
 | Extended operational verification | 2026-11-15T18:19:20-08:00 | 2026-11-15T19:08:18-08:00 | PT48M58S |
-| Sufficiency addendum continuation | 2026-11-15T20:39:02-08:00 | 2026-11-16T03:08:36-08:00 | PT6H29M34S |
+| Sufficiency addendum continuation | 2026-11-15T20:39:02-08:00 | 2026-11-16T03:09:14-08:00 | PT6H30M12S |
 
 **Current addendum disposition:** Current portable save schema `/12` (archive `/3`) stores the native resumable graph, compatibility-bound immutable definitions, and independently validated commit-boundary history. Completed native Action roots are now stored with their exact boundary segments and restored before strict native inventory validation. At t=300: snapshot 23,813 nodes / 331,315 bytes; definitions 51,921 / 560,106; history 1,139,080 / 12,815,153; compressed archive 2,968,730 bytes. Snapshot falls 39.3% (16,517 nodes / 214,795 bytes) versus `/11`, with no loss of Action identity or history. The 64+1 Feint run, 169 quiet boundaries, strict fresh-process Load→Save, and t=301 continuation pass. Supported `/10` and `/11` archives migrate through fresh processes. Chrome `/12` Save produced the served UI download confirmation; Open-file Load remains unverified because extension local-file access is disabled. HTTP/session Save/Load, transactional rejection, and interrupted-export preservation pass. The 2/20/200 curve concerns registry Beings, not active combatants. The assignment remains ACTIVE: state is still a recursive native graph, completed Choice settlement wrappers remain in current state, Load eagerly reassembles history, active Encounter participation is two Beings, and served Chrome Open is unverified.
 
-**Active execution time across three sessions:** PT8H27M58S. **Total calendar span:** PT10H25M56S from first recorded Start to last End; the two inter-session gaps total PT1H57M58S and are excluded from active execution time.
+**Active execution time across three sessions:** PT8H28M36S. **Total calendar span:** PT10H26M34S from first recorded Start to last End; the two inter-session gaps total PT1H57M58S and are excluded from active execution time.
 
 The original interval established a fixed-size graph-reference encoding and corrected four checkpoint-adapter cases. The latest interval followed up because that first format still failed strict Save at t=91. Its results supersede the earlier report's t=67-only reliability conclusion.
 
@@ -245,5 +245,6 @@ Legacy native v3 migration, pinned native v4 migration, malformed compact symbol
 - `8fe46b1bec68105306528123187795b0f2167979` — equal-value inspection/Target history sharing, 2/20/200 world-registry growth with exact fresh-process round trips, archive interruption/process-kill recovery, and their tests and measurements.
 - `1a4199c` — fail-closed Arena snapshot field allowlists/required-field checks, per-type coverage additions, and focused negative-schema regressions.
 - `ef01b913a129c17a58a2a17e831d84702eab5c9e` — portable save/archive `/12` and `/3`, completed Action roots in commit-boundary history, strict `/11` migration fixture, and extended exact continuation regressions.
+- `c20b3bde4c122683884c43442eb8a3a26e2670a0` — reconcile TASKS, the source-linked sufficiency inventory, `/12` acceptance evidence, exact world-size measurements and browser limitation.
 
 **Current closeout:** latest implementation commit is `ef01b913a129c17a58a2a17e831d84702eab5c9e`. `/12` materially reduces and bounds resume-state growth while retaining commit-boundary history and strict exact restoration; the report is still not accepted. Ordinary Chrome Save is verified, but Chrome Open-file Load was blocked by disabled extension local-file access. The current graph-backed representation and eager history reconstruction remain bounded design limits. U-PER-SCALE-001 remains ACTIVE; no push was performed.
