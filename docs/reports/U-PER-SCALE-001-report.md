@@ -20,6 +20,21 @@
 
 | Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:58-08:00 | PT39M8S |
 
+## Latest continuation — revised full native-history bridge
+
+### Problems first
+
+- The assignment is not complete. Current `/12` persistence is generated-Arena-only; `Universe.save_to_file()/load_from_file()` explicitly refuses transactional/Encounter restoration. The broad inventory and adapter recipes are not production capture/restore.
+- History is still serialized as selected native object graphs, reassembled at Load; there is no generic native historical-delta query API. The 152-type field registry includes many families outside the current 104-domain-type Arena allowlist.
+- No user rule decision or external integration is currently required. Main blockers are engineering scope: transaction-coupled recording, full current state restoration, caller-owned observation/reality adapters, native API parity, legacy coexistence and scaling tests.
+- The existing 64-Feint arena persistence suite invocation was interrupted during JSON serialization in `arena_history_segments.py:470` after it reached the t=64 save. It has no reported pass/fail count and will be rerun after the new implementation; this is not treated as a test failure.
+
+### Verified source audit
+
+Installed the revised full-capability assignment at its canonical `docs/assignments/U-PER-SCALE-001-NATIVE-HISTORY-BRIDGE.md` path without changing the user-provided `-REVISED.md` source. Added a complete 152-row exact field inventory and family status matrix at [`persistence-capability-matrix.md`](../design/persistence-capability-matrix.md), plus the problems-first [`native history bridge findings`](../design/persistence-native-history-bridge-findings.md). The source audit traces the production Arena encoder/decoder, checkpoint candidate, Arena restore, atomic publication/rollback, native inspection, and legacy Universe save refusal.
+
+Focused verification: `test_checkpoint_inventory.py` — 30 passed; `test_checkpoint_adapters.py` — 48 passed. The combined package-style test command was interrupted and is not evidence. No production Save/Load implementation changed in this audit phase. The full acceptance matrix remains open and U-PER-SCALE-001 remains sole ACTIVE.
+
 ## Latest continuation — faithful native replay
 
 ### Problems first
