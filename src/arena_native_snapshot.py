@@ -13,9 +13,24 @@ import math
 import threading
 from types import MappingProxyType
 
-SCHEMA = 'universe.generated-arena-native-state/3'
+SCHEMA = 'universe.generated-arena-native-state/4'
+_LEGACY_SCHEMA = 'universe.generated-arena-native-state/3'
 _FIELDS = frozenset(('schema', 'compatibility', 'inventory', 'sha256'))
 MAX_BYTES = 64 * 1024 * 1024
+
+# Exact implementation/rule/runtime fingerprint from the last path-identity
+# native snapshot format. Only this one legacy producer is migrated; future
+# unknown fingerprints remain fail-closed.
+_LEGACY_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', '7f0fc28b8e1d1599c5340a81208f06d70c2ac883f3d3cc1071ea03c4ce0b194f'),
+    ('rule-kernel-source', 'bb6cfd2f532748094488f220397f9ad4f7f277af787dcf551ec5de83443ec8c1'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
 
 # Exact native type closure exercised by the current Arena UI: generated
 # Beings, typed ground/carry Objects, Run, Pick up, Draw, Dagger strikes, their Choice and
@@ -157,18 +172,30 @@ def decode(wire):
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise ArenaNativeSnapshotRejected(f'native Arena state JSON is invalid: {exc}') from exc
     _tree(data)
-    _need(type(data) is dict and set(data) == _FIELDS and data['schema'] == SCHEMA,
+    _need(type(data) is dict and set(data) == _FIELDS
+          and data['schema'] in (SCHEMA, _LEGACY_SCHEMA),
           'native Arena state has an unknown schema or field set')
     payload = {key: data[key] for key in data if key != 'sha256'}
     _need(type(data['sha256']) is str and hashlib.sha256(_canonical(payload)).hexdigest() == data['sha256'],
           'native Arena state digest does not match')
     _need(_canonical(data) == wire, 'native Arena state is not canonical')
-    _need(_tuples(data['compatibility']) == _compatibility(),
+    saved_compatibility = _tuples(data['compatibility'])
+    legacy = data['schema'] == _LEGACY_SCHEMA
+    expected_compatibility = _LEGACY_COMPATIBILITY if legacy else _compatibility()
+    _need(saved_compatibility == expected_compatibility,
           'saved native Arena implementation/rules differ from this runtime')
     try:
         inventory = _tuples(data['inventory'])
     except RecursionError as exc:
         raise ArenaNativeSnapshotRejected('native Arena state nesting exceeds limits') from exc
+    if legacy:
+        _need(type(inventory) is tuple and len(inventory) == 2
+              and inventory[0] == _LEGACY_COMPATIBILITY,
+              'legacy native Arena inventory compatibility mismatch')
+        _validate_inventory(inventory, allow_legacy_paths=True,
+                            expected_compatibility=_LEGACY_COMPATIBILITY)
+        inventory = _migrate_path_identities(inventory)
+        inventory = (_compatibility(), inventory[1])
     _validate_inventory(inventory)
     return inventory
 
@@ -182,13 +209,15 @@ def _unique(rows):
     return result
 
 
-def _validate_inventory(envelope):
+def _validate_inventory(envelope, *, allow_legacy_paths=False,
+                        expected_compatibility=None):
     from checkpoint_inventory import _TYPES
     _need(type(envelope) is tuple and len(envelope) == 2,
           'native inventory envelope is malformed')
     compatibility, body = envelope
     from checkpoint_inventory import _compatibility
-    _need(compatibility == _compatibility(), 'native inventory compatibility mismatch')
+    expected_compatibility = _compatibility() if expected_compatibility is None else expected_compatibility
+    _need(compatibility == expected_compatibility, 'native inventory compatibility mismatch')
     _need(type(body) is tuple and len(body) == 5 and body[0] == 'checkpoint-inventory',
           'native inventory body is outside Arena schema')
     sections = {row[0]: row[1:] for row in body[1:] if type(row) is tuple and row}
@@ -210,6 +239,8 @@ def _validate_inventory(envelope):
         _need(type(row) is tuple and len(row) == 3 and type(row[0]) is tuple
               and row[1] in allowed_tags and row[0] not in refs,
               'native graph contains a duplicate identity or unsupported type')
+        _need(_valid_reference_identity(row[0], allow_legacy_paths=allow_legacy_paths),
+              'native graph contains a malformed identity')
         refs.add(row[0])
     _need(sections['root'] == (('reference', ('universe', _root_id(nodes, 'universe.Universe'))),),
           'native inventory root is not its unique Universe')
@@ -218,6 +249,52 @@ def _validate_inventory(envelope):
           'native Arena Encounter/Being nodes are missing')
     # Resolve every logical reference and exact native class before allocating.
     _walk_refs(envelope, refs)
+
+
+def _valid_reference_identity(ref, *, allow_legacy_paths=False):
+    if not ref or type(ref[0]) is not str:
+        return False
+    kind = ref[0]
+    if kind == 'owned-node':
+        return (len(ref) == 2 and type(ref[1]) is str and len(ref[1]) == 64
+                and all(char in '0123456789abcdef' for char in ref[1]))
+    if kind == 'owned-path':
+        return (allow_legacy_paths and len(ref) >= 2
+                and all(type(part) is str for part in ref[1:]))
+    if kind in ('universe', 'encounter', 'object', 'event'):
+        return len(ref) == 2 and type(ref[1]) is str and bool(ref[1])
+    if kind == 'choice':
+        return (len(ref) == 3 and all(type(part) is str and part for part in ref[1:]))
+    return False
+
+
+def _migrate_path_identities(envelope):
+    """Translate exact v3 traversal-path identities to compact v4 references."""
+    from checkpoint_inventory import owned_node_ref
+
+    body=envelope[1]
+    sections={row[0]:row[1:] for row in body[1:]}
+    nodes=sections['nodes'][0]
+    remap={row[0]:owned_node_ref(tuple(row[0][1:]))
+           for row in nodes if row[0][0]=='owned-path'}
+
+    def rewrite(value):
+        if type(value) is tuple:
+            try:
+                replacement=remap.get(value)
+            except TypeError:
+                replacement=None
+            if replacement is not None:
+                return replacement
+            if value and value[0]=='reference' and len(value)==2:
+                return ('reference',remap.get(value[1],value[1]))
+            return tuple(rewrite(item) for item in value)
+        return value
+
+    migrated=rewrite(envelope)
+    _need(type(migrated) is tuple and len(migrated)==2,
+          'legacy identity migration produced malformed inventory')
+    return migrated
 
 
 def _root_id(nodes, tag):

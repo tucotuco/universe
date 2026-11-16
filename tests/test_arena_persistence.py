@@ -1,6 +1,7 @@
 """Portable generated-Arena save/load integration tests."""
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -565,6 +566,161 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         source_player = source.active_candidate.participants[0].native.being
         self.assertEqual(restored_player._atomic_target_history,
                          source_player._atomic_target_history)
+
+    def test_compact_native_graph_ids_reject_corrupt_references_and_types(self):
+        import base64
+        import copy
+        import hashlib
+        from arena_native_snapshot import (ArenaNativeSnapshotRejected,
+            _canonical, decode as decode_native)
+
+        source = GeneratedArenaSession(root_seed_factory=lambda: 20261115)
+        source.generate({"starting_experience": "10000", "width_cells": "5",
+                         "height_cells": "5"})
+        payload = json.loads(source.save_encounter_bytes())
+        native_wire = base64.b64decode(payload["native_state_base64"], validate=True)
+        native = json.loads(native_wire)
+        self.assertEqual(native["schema"], "universe.generated-arena-native-state/4")
+        nodes = native["inventory"][1][2][1]
+        self.assertTrue(any(row[0][0] == "owned-node" for row in nodes))
+
+        def reseal(mutator):
+            value = copy.deepcopy(native)
+            mutator(value)
+            body = {key: value[key] for key in value if key != "sha256"}
+            value["sha256"] = hashlib.sha256(_canonical(body)).hexdigest()
+            return _canonical(value)
+
+        cases = []
+        cases.append(lambda value: value["inventory"][1][2][1][1].__setitem__(
+            0, value["inventory"][1][2][1][0][0]))
+
+        def make_dangling(value):
+            def visit(row):
+                if type(row) is list:
+                    if (len(row) == 2 and row[0] == "reference"
+                            and type(row[1]) is list and row[1]
+                            and row[1][0] == "owned-node"):
+                        row[1] = ["owned-node", "f" * 64]
+                        return True
+                    return any(visit(child) for child in row)
+                if type(row) is dict:
+                    return any(visit(child) for child in row.values())
+                return False
+            if not visit(value["inventory"]):
+                raise AssertionError("compact native reference fixture was not found")
+        cases.append(make_dangling)
+        cases.append(lambda value: value["inventory"][1][2][1][1][0].__setitem__(
+            1, "z" * 64))
+        cases.append(lambda value: value["inventory"][1][2][1][1].__setitem__(
+            1, "unreviewed.Process"))
+        for mutate in cases:
+            with self.subTest(corruption=cases.index(mutate)):
+                with self.assertRaises(ArenaNativeSnapshotRejected):
+                    decode_native(reseal(mutate))
+
+
+    def test_extended_seed14_combat_checkpoint_stays_strict_and_continues_exactly(self):
+        """The former 67-second combat overflow resumes exactly in a new OS process."""
+        import base64
+        from arena_native_snapshot import _tree
+        profile = json.loads((ROOT / "tests/fixtures/arena/uact-full-002-one-shield.json").read_text())
+        source = GeneratedArenaSession(root_seed_factory=lambda: 14,
+                                       ground_loadout_profile=profile)
+        source.generate({"starting_experience": "10000", "width_cells": "10",
+                         "height_cells": "5", "equipment_mode": "equipped",
+                         "opponent_strategy": "attack_only", "root_seed": "14"})
+        candidate = source.active_candidate
+        encounter = candidate.encounter
+        player, opponent = (row.native.being for row in candidate.participants)
+
+        def checkpoint():
+            wire = source.save_encounter_bytes()
+            native = base64.b64decode(json.loads(wire)["native_state_base64"], validate=True)
+            count = [0]
+            _tree(json.loads(native), count=count)
+            return {"wire": wire, "native_bytes": len(native), "nodes": count[0]}
+
+        checkpoints = {0: checkpoint()}
+        placement = candidate.ground_objects[0]
+        destination = HexAddress(placement.column, placement.row)
+        source.choose_destination({"column": destination.column, "row": destination.row,
+                                   "rate": "walk", "facing_policy": "turn"})
+        while (encounter.time < 1
+               or candidate.arena_map.layout.cell_at_position(player.get_position()) != destination):
+            source.advance_one_second()
+        visible = next(row for row in source.public_view()["entities"]
+                       if row["name"] == "Small shield")
+        shield_id = placement.native_object_id
+        source.choose_pickup({"handle": visible["handle"]})
+        source.advance_one_second()
+        source.advance_one_second()
+        visible = next(row for row in source.public_view()["entities"]
+                       if row["name"] == "Small shield")
+        source.choose_shield_equipment({"handle": visible["handle"],
+                                        "hand": "left hand", "operation": "don"})
+
+        for boundary in (10, 20, 35, 50, 67):
+            while encounter.time < boundary:
+                source.advance_one_second()
+            checkpoints[boundary] = checkpoint()
+            self.assertLess(checkpoints[boundary]["nodes"], 1_000_000,
+                            f"strict tree limit exceeded at native t={boundary}")
+
+        self.assertEqual(encounter.time, 67)
+        self.assertEqual(len(encounter._atomic_interval_history), 67)
+        self.assertEqual(len(source._all_melee_actions(candidate)), 16)
+        self.assertEqual((player.get_hit_points(), opponent.get_hit_points()), (9, 17))
+        shield = candidate.universe.get_object_by_id(shield_id)
+        self.assertIn(shield_id, player.possessions)
+        self.assertIn(shield_id, player.current.body_parts.values())
+        self.assertTrue(all(row.native.being._arena_perception_ledger.history
+                            for row in candidate.participants))
+        self.assertGreater(checkpoints[67]["nodes"], checkpoints[35]["nodes"])
+
+        with tempfile.TemporaryDirectory(prefix="arena-long-checkpoint-") as directory:
+            save_path = Path(directory) / "t67.json"
+            resumed_path = Path(directory) / "resumed.json"
+            save_path.write_bytes(checkpoints[67]["wire"])
+            script = """
+import json,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();s.load_encounter_bytes(Path(sys.argv[1]).read_bytes())
+c=s.active_candidate;e=c.encounter
+assert e.time==67 and len(e._atomic_interval_history)==67
+p,o=(row.native.being for row in c.participants);ids=(p.id,o.id)
+for _ in range(5):s.advance_one_second()
+Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
+print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
+ 'ids':ids,'hp':(p.get_hit_points(),o.get_hit_points())},sort_keys=True))
+"""
+            child_env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                             PYTHONNOUSERSITE="1",
+                             PYTHONPATH=os.pathsep.join((str(ROOT / "tests"),
+                                 str(ROOT / "src"), str(ROOT / "examples"))))
+            result = subprocess.run([sys.executable, "-B", "-c", script,
+                str(save_path), str(resumed_path)], cwd=ROOT, env=child_env,
+                capture_output=True, text=True, timeout=180, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            resumed = json.loads(result.stdout)
+            for _ in range(5):
+                source.advance_one_second()
+            self.assertEqual(resumed_path.read_bytes(), source.save_encounter_bytes())
+        self.assertEqual(resumed["time"], 72)
+        self.assertEqual(resumed["receipts"], 72)
+        self.assertEqual(tuple(resumed["ids"]), (player.id, opponent.id))
+        # The original legal combat cannot reach 64 attacks: continue without
+        # altering either Being or the adopted attack-only strategy and prove
+        # that ordinary combat kills the player first. Its t=67 history above
+        # is already the same/larger payload that exceeded the old cap.
+        while (len(source._all_melee_actions(candidate)) < 64
+               and player.get_hit_points() > 0 and opponent.get_hit_points() > 0
+               and encounter.time < 1000):
+            source.advance_one_second()
+        self.assertEqual(encounter.time, 91)
+        self.assertEqual(len(source._all_melee_actions(candidate)), 22)
+        self.assertEqual((player.get_hit_points(), opponent.get_hit_points()), (-2, 17))
 
 
 if __name__ == "__main__":

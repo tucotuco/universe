@@ -560,6 +560,9 @@ RUN_SPOT_FIELD_CLOSURE = {
         'derived': ('type',),
         'transient': ('_active_fatigue_frame', '_advancing', '_boundary_context',
                       '_dispatching', '_running', '_transactional_mode'),
+        # Post-roll Disarm landing Choices are outside the bounded Run/Spot
+        # field certificate; Arena snapshots have a dedicated typed adapter.
+        'out_of_scope': ('_disarm_landing_receipts',),
     },
     'universe.Universe': {
         'authoritative': ('id', 'name', 'library', 'object_registry', 'event_history',

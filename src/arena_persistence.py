@@ -9,8 +9,8 @@ import math
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/7'
-_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
+SCHEMA = 'universe.generated-arena-save/8'
+_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/7', 'universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
 MAX_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 
@@ -154,7 +154,7 @@ def decode(wire):
         'map','world_premise','display_names','movement_plan_base64','movement_sequence',
         'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
         'initial_equipment_provenance','equipment_mode'}
-    if data['schema'] == SCHEMA:
+    if data['schema'] in (SCHEMA, 'universe.generated-arena-save/7'):
         required.update(('opponent_strategy', 'authored_scenario_id', 'encounter_mode', 'arena_strategies'))
     elif data['schema'] == 'universe.generated-arena-save/6':
         required.update(('opponent_strategy', 'authored_scenario_id'))

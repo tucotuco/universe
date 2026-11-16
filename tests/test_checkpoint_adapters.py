@@ -18,7 +18,6 @@ from conditional_attributes import ConditionalAttributes
 from statistical_group import StatisticalGroup
 from personal_history import PersonalHistory
 from test_checkpoint_inventory import strings,tags
-from interval_staging import IntervalIntegrityError
 
 
 class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
@@ -49,12 +48,13 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
         self.enable();before=self.raw();c=self.capture();self.assert_partial(c)
         self.assertEqual(before,self.raw());self.assertIn('native-closure-recipes/1',set(strings(c.envelope)))
 
-    def test_unstarted_arena_opt_in_is_outside_the_initiated_checkpoint_path(self):
+    def test_unstarted_arena_opt_in_is_inventory_only_not_interval_authority(self):
         self.enable()
         self.enc.arena_activation_enabled = True
         self.enc.initiated = False
-        with self.assertRaisesRegex(IntervalIntegrityError, 'interval requires an initiated Encounter'):
-            self.capture()
+        before=self.raw();candidate=self.capture()
+        self.assert_partial(candidate)
+        self.assertEqual(before,self.raw())
 
     def test_activated_arena_is_refused_without_capture_mutation(self):
         self.enable()
@@ -67,7 +67,7 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
             self.capture()
         self.assertEqual(before, self.raw())
 
-    def test_movement_activated_arena_remains_outside_bounded_checkpoint(self):
+    def test_movement_activation_phase_is_certified_but_not_resumable(self):
         self.enable()
         self.enc.initiated = True
         self.enc.arena_activation_enabled = True
@@ -75,8 +75,8 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
             self.enc.id, self.a.id, 'movement-decision-test', self.enc.time)
         before = self.raw()
         candidate = self.capture()
-        self.assertTrue(any('movement-activated Arena has no committed boundary history'
-                            in row.reason for row in candidate.diagnostics))
+        self.assertIn('bounded_run_spot_closure_verified',
+                      {row.code for row in candidate.diagnostics})
         self.assert_partial(candidate)
         self.assertEqual(before, self.raw())
 

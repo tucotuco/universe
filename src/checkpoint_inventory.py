@@ -26,6 +26,12 @@ class CheckpointRejected(ValueError):
     pass
 
 
+def owned_node_ref(path):
+    """Compact stable checkpoint-local ID for a synthetic graph node."""
+    encoded=json.dumps(path,ensure_ascii=True,separators=(',',':'))
+    return ('owned-node',hashlib.sha256(encoded.encode('ascii')).hexdigest())
+
+
 @dataclass(frozen=True)
 class CheckpointDiagnostic:
     code: str
@@ -133,6 +139,21 @@ class _Inventory:
     types = _TYPES
     def __init__(self):
         self.known={};self.nodes=[];self.dependencies=[];self.diagnostics=[];self.count=0
+        self._owned_path_digests={}
+
+    def _owned_ref(self, path):
+        """Return a compact, deterministic identity for a non-domain graph node.
+
+        Domain identities (Universe, Encounter, Event, Object and Choice IDs)
+        remain explicit. A traversal path is only a checkpoint-local node
+        identity; serializing the whole path into every edge made historical
+        snapshots grow with the product of history length and path length.
+        """
+        ref=owned_node_ref(path)
+        digest=ref[1]
+        previous=self._owned_path_digests.setdefault(digest,path)
+        _require(previous==path,'checkpoint graph node identity digest collision')
+        return ref
 
     def issue(self,code,owner,field,reason):
         self.diagnostics.append(CheckpointDiagnostic(code,owner,field,reason))
@@ -155,7 +176,7 @@ class _Inventory:
             return ('binary64',value.hex())
         existing=self.known.get(id(value))
         if existing is not None and id(value) in self.emitted:return ('reference',existing)
-        ref=existing if existing is not None else ('owned-path',)+path
+        ref=existing if existing is not None else self._owned_ref(path)
         self.known[id(value)]=ref;self.emitted.add(id(value));self.dependencies.append((id(value),id(kind)))
         if kind in (dict,MappingProxyType):
             _require(all(type(k) in (str,int,float,bool,tuple) or type(k) in _TYPES for k in value),'opaque mapping key')

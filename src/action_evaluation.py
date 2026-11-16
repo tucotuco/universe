@@ -34,7 +34,7 @@ def _timing_adjustment(strategy):
     return math.floor((-1 + math.sqrt(1 + 8 * value)) / 2)
 
 
-def freeze(value):
+def freeze(value, _active=None):
     """Detach data without deepcopy/reduce/serialization extension callbacks."""
     if value is None or type(value) in (str, bool, int):
         return value
@@ -42,13 +42,41 @@ def freeze(value):
         if not math.isfinite(value):
             raise EvaluationIntegrityError('non-finite evaluation data')
         return value
-    if type(value) in (list, tuple):
-        return tuple(freeze(x) for x in value)
-    if type(value) in (set, frozenset):
-        return frozenset(freeze(x) for x in value)
-    if type(value) in (dict, MappingProxyType):
-        return MappingProxyType({freeze(k): freeze(v) for k, v in value.items()})
+    if type(value) in (list, tuple, set, frozenset, dict, MappingProxyType):
+        active=set() if _active is None else _active
+        identity=id(value)
+        if identity in active:
+            raise EvaluationIntegrityError('cyclic nested evaluation data')
+        active.add(identity)
+        try:
+            if type(value) in (list, tuple):
+                return tuple(freeze(x, active) for x in value)
+            if type(value) in (set, frozenset):
+                return frozenset(freeze(x, active) for x in value)
+            return MappingProxyType({freeze(k, active): freeze(v, active)
+                                     for k, v in value.items()})
+        finally:
+            active.remove(identity)
     raise UnsupportedEvaluation('opaque nested evaluation data')
+
+
+def freeze_named_data(value):
+    """Freeze a named state projection with mapping order made canonical.
+
+    This is used only for evaluator/inspection data whose dictionaries are
+    keyed facts, not ordered native collections. Native persistence retains
+    the source object's own representation and ordering.
+    """
+    if type(value) in (dict, MappingProxyType):
+        if any(type(key) is not str for key in value):
+            return freeze(value)
+        return MappingProxyType({key:freeze_named_data(value[key])
+                                 for key in sorted(value)})
+    if type(value) in (list, tuple):
+        return tuple(freeze_named_data(item) for item in value)
+    if type(value) in (set, frozenset):
+        return frozenset(freeze_named_data(item) for item in value)
+    return freeze(value)
 
 
 def native_data(value, classes):
@@ -543,6 +571,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 burden, _ = subdual_recovery_state(burden, anchor, boundary)
                 state_values['subdual_unconscious'] = burden >= current['hit_points']
                 state_values['subdual_damage_current'] = burden
+            strategy_state=native_data(od['strategy'], (Strategy,))
+            strategy_view=MappingProxyType({key:freeze(strategy_state[key])
+                                             for key in sorted(strategy_state)})
             data.update(skills=freeze(skills['skills']), weapon_skills=freeze(skills['weapon_skills']),
                 race=freeze(cd.get('race')),
                 immunities=freeze(cd.get('immunities', {})),
@@ -555,9 +586,9 @@ def capture_snapshot(encounter, boundary, *, rng_state=None, _objective=False, _
                 dominant_hand=freeze((cd.get('tags') or {}).get('universe.native_dominant_hand')),
                 experience=freeze(cd['experience']), armor_id=freeze(cd['armor_id']),
                 height=freeze(cd.get('height')), length=freeze(cd.get('length')),
-                body_parts=freeze(cd['body_parts']), strategy=freeze(native_data(od['strategy'], (Strategy,))),
+                body_parts=freeze(cd['body_parts']), strategy=strategy_view,
                 fatigue_level=freeze(od['fatigue_level']),
-                exertion=freeze(native_data(od['exertion'], (Exertion,))),
+                exertion=freeze_named_data(native_data(od['exertion'], (Exertion,))),
                 fatigue_adjustments=freeze(od['exertion'].fatigue_levels))
             data['unarmed_profiles'] = freeze({name:
                 native_data(weapon_dictionary['objects'][name], (WeaponDefinition,))['attacks']
