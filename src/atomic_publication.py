@@ -1065,6 +1065,16 @@ def _make_plan(encounter,candidate,rng_owner):
                 projected['subdual_unconscious'] = projected['subdual_damage'] >= target.projected_hp
             if projected != status:
                 plan.contents('targets', status, projected)
+        # TargetIntervalRecord identity and boundary remain unique, while an
+        # identical immutable TargetCandidate can be shared with the previous
+        # receipt. This records the full historical value once for unchanged
+        # Targets instead of copying it into every quiet boundary.
+        from action_settlement import TargetCandidate
+        prior_history=object.__getattribute__(obj,'__dict__').get('_atomic_target_history',())
+        if (prior_history and type(prior_history[-1]) is TargetIntervalRecord
+                and type(prior_history[-1].state) is TargetCandidate
+                and type(target) is TargetCandidate and prior_history[-1].state==target):
+            target=prior_history[-1].state
         record=TargetIntervalRecord(encounter.id,candidate.boundary,target)
         storage=plan.append('targets',obj,'_atomic_target_history',record)
         expected_spatial_state=(id(None) if key in picked_up_ids else

@@ -94,6 +94,7 @@ class TestArenaPersistence(unittest.TestCase):
         import io
         import zipfile
         from arena_persistence import ArenaSaveRejected, decode
+        from unittest.mock import patch
 
         source=GeneratedArenaSession(root_seed_factory=lambda:20261115)
         source.generate({"starting_experience":"10000","width_cells":"5",
@@ -102,6 +103,19 @@ class TestArenaPersistence(unittest.TestCase):
         source.advance_one_second()
         original_candidate=source.active_candidate
         original=source.save_encounter_bytes()
+        native_before=source.active_candidate.encounter.inspect_committed()
+        import arena_persistence as portable
+        write_entry=portable._write_archive_entry
+        def interrupt_export(archive,name,data):
+            if name.startswith('history/'):
+                raise OSError('injected interruption while building portable archive')
+            write_entry(archive,name,data)
+        with patch('arena_persistence._write_archive_entry',side_effect=interrupt_export):
+            with self.assertRaisesRegex(OSError,'injected interruption'):
+                source.save_encounter_bytes()
+        self.assertIs(source.active_candidate,original_candidate)
+        self.assertEqual(source.active_candidate.encounter.inspect_committed(),native_before)
+        self.assertEqual(source.save_encounter_bytes(),original)
         parsed=decode(original)
         metrics=parsed["manifest"]["metrics"]
         self.assertEqual(parsed["manifest"]["snapshot_cursor"],1)
@@ -917,6 +931,83 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
                                 if key != "wire"}
                 for boundary, row in checkpoints.items()}, sort_keys=True))
 
+    def test_native_world_registry_persistence_size_curve_2_20_200(self):
+        """Measure supported, unplaced world-Beings without inventing participant facts."""
+        script = r'''
+import json,resource,sys,time
+from pathlib import Path
+mode,size,path,resaved=sys.argv[1],int(sys.argv[2]),Path(sys.argv[3]),Path(sys.argv[4])
+from arena_browser_session import GeneratedArenaSession
+from being import BeingInstance
+from weapon import WeaponInstance
+if mode == "create":
+    session=GeneratedArenaSession(root_seed_factory=lambda:20261115)
+    session.generate({'starting_experience':'10000','width_cells':'5','height_cells':'5'})
+    candidate=session.active_candidate
+    base=candidate.participants[0].native.being
+    world=candidate.universe
+    weapon_definition=world.get_weapon_definition('Dagger')
+    assert weapon_definition is not None
+    started=time.perf_counter()
+    for index in range(size-2):
+        ordinal=index+1
+        being=BeingInstance(base.original,name=f'Unplaced world Being {ordinal:03d}',
+            id=f'per-scale/world-being/{ordinal:03d}')
+        world.add_object(being)
+        weapon=WeaponInstance(weapon_definition,name=f'World Dagger {ordinal:03d}')
+        weapon.id=f'per-scale/world-dagger/{ordinal:03d}'
+        world.add_object(weapon)
+        being.weapons.append(weapon.id)
+    create_seconds=time.perf_counter()-started
+    started=time.perf_counter();wire=session.save_encounter_bytes();save_seconds=time.perf_counter()-started
+    path.write_bytes(wire)
+    from arena_persistence import decode
+    metrics=decode(wire)['manifest']['metrics']
+    print(json.dumps({'mode':'create','beings':size,'extra_weapons':size-2,
+      'snapshot_nodes':metrics['snapshot_nodes'],'snapshot_bytes':metrics['snapshot_bytes'],
+      'archive_bytes':len(wire),'create_seconds':create_seconds,'save_seconds':save_seconds,
+      'peak_rss_platform_units':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},sort_keys=True))
+elif mode == "load":
+    wire=path.read_bytes();session=GeneratedArenaSession();started=time.perf_counter()
+    session.load_encounter_bytes(wire);load_seconds=time.perf_counter()-started
+    candidate=session.active_candidate
+    beings=[row for row in candidate.universe.object_registry.object_instances.values()
+            if type(row) is BeingInstance]
+    weapons=[row for row in candidate.universe.object_registry.object_instances.values()
+             if type(row) is WeaponInstance]
+    assert len(beings)==size and len(weapons)==size-2,(len(beings),len(weapons))
+    started=time.perf_counter();again=session.save_encounter_bytes();resave_seconds=time.perf_counter()-started
+    assert again==wire
+    resaved.write_bytes(again)
+    print(json.dumps({'mode':'load','beings':len(beings),'weapons':len(weapons),
+      'load_seconds':load_seconds,'resave_seconds':resave_seconds,
+      'exact_resave':True,'peak_rss_platform_units':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},sort_keys=True))
+else: raise AssertionError(mode)
+'''
+        measurements=[]
+        environment=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',PYTHONNOUSERSITE='1',
+            PYTHONPATH=os.pathsep.join((str(ROOT/'tests'),str(ROOT/'src'),str(ROOT/'examples'))))
+        with tempfile.TemporaryDirectory(prefix='arena-world-size-') as directory:
+            root=Path(directory)
+            for size in (2,20,200):
+                input_path=root/f'{size}.uarena'
+                resaved_path=root/f'{size}-resaved.uarena'
+                outputs=[]
+                for mode in ('create','load'):
+                    process=subprocess.run([sys.executable,'-B','-c',script,mode,str(size),
+                        str(input_path),str(resaved_path)],cwd=ROOT,env=environment,
+                        capture_output=True,text=True,timeout=240,check=False)
+                    self.assertEqual(process.returncode,0,process.stderr)
+                    outputs.append(json.loads(process.stdout.strip().splitlines()[-1]))
+                self.assertEqual(input_path.read_bytes(),resaved_path.read_bytes())
+                self.assertEqual(outputs[0]['beings'],size)
+                self.assertEqual(outputs[1]['beings'],size)
+                self.assertTrue(outputs[1]['exact_resave'])
+                measurements.append({'beings':size,'create_save':outputs[0],
+                                     'fresh_process_load':outputs[1]})
+        if os.environ.get('UNIVERSE_PER_SCALE_METRICS') == '1':
+            print('U-PER-SCALE-WORLD-METRICS '+json.dumps(measurements,sort_keys=True))
+
     def test_64_lawful_native_feint_resolutions_segment_history_and_resume(self):
         """A generated Arena can retain and continue more than 64 native combat Actions."""
         profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
@@ -980,7 +1071,9 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
         self.assertEqual(metrics["history_segments"], encounter.time)
         self.assertEqual(metrics["history_field_entries"][
             "encounter.Encounter._atomic_interval_history"], encounter.time)
-        self.assertGreater(metrics["history_wire_nodes"], 500_000)
+        # Shared immutable interval projections materially reduce the prior
+        # count while retaining the full 64-Action receipt history.
+        self.assertGreater(metrics["history_wire_nodes"], 400_000)
 
         def advance_one_more(session):
             candidate = session.active_candidate
@@ -1042,12 +1135,32 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
         for _ in range(169):
             encounter.step(1)
         self.assertEqual(encounter.time, 300)
+        quiet_receipts = encounter._atomic_interval_history
+        self.assertIs(quiet_receipts[130].inspection.entities,
+                      quiet_receipts[299].inspection.entities)
+        self.assertIsNot(quiet_receipts[130].inspection,
+                         quiet_receipts[299].inspection)
+        self.assertNotEqual(quiet_receipts[130].inspection.actions,
+                            quiet_receipts[299].inspection.actions)
+        self.assertEqual(quiet_receipts[299].inspection.end, 300)
+        targets_with_history = [obj for obj in candidate.universe.object_registry.object_instances.values()
+                                if obj.__dict__.get("_atomic_target_history")]
+        self.assertTrue(targets_with_history)
+        for obj in targets_with_history:
+            history = obj.__dict__["_atomic_target_history"]
+            # Boundary 131 carries the just-finished Feint's outgoing effect
+            # identities. From the following quiet boundary onward, unchanged
+            # target projections are structurally shared exactly.
+            self.assertIs(history[131].state, history[299].state)
         import time
         save_started = time.perf_counter()
         at_300_wire = source.save_encounter_bytes()
         save_seconds = time.perf_counter() - save_started
         at_300 = decode_save(at_300_wire)
         at_300_metrics = at_300["manifest"]["metrics"]
+        from arena_history_segments import split as split_history
+        _, _, history_attribution = split_history(
+            at_300["decoded_native"], include_diagnostics=True)
         self.assertEqual(at_300["manifest"]["snapshot_cursor"], 300)
         self.assertEqual(at_300_metrics["snapshot_nodes"], at_65_metrics["snapshot_nodes"])
         self.assertEqual(at_300_metrics["snapshot_bytes"], at_65_metrics["snapshot_bytes"])
@@ -1087,6 +1200,10 @@ print(json.dumps({'load_and_resave_seconds':time.perf_counter()-started},sort_ke
                 "t65": at_65_metrics,
                 "t300": at_300_metrics,
                 "t300_outer_archive_bytes": len(at_300_wire),
+                "t300_history_category_owned_rows": history_attribution[
+                    "history_category_owned_rows"],
+                "t300_history_category_owned_row_bytes": history_attribution[
+                    "history_category_owned_row_bytes"],
                 "t300_save_seconds": save_seconds,
                 "fresh_process_load_and_resave_seconds": load_metrics["load_and_resave_seconds"],
                 "process_peak_rss_platform_units": resource.getrusage(

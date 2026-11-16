@@ -136,7 +136,7 @@ def _references(value):
             yield from _references(item)
 
 
-def split(inventory):
+def split(inventory, *, include_diagnostics=False):
     """Return compact snapshot bytes, ordered segment bytes and metrics."""
     from arena_native_snapshot import _compact_inventory
 
@@ -298,6 +298,21 @@ def split(inventory):
             for owner in first_owner_field.values())
             for tag, field in sorted(set(list_categories.values()))},
         'history_cursor': history_cursor}
+    if include_diagnostics:
+        # Diagnostic-only attribution of native graph rows to the first
+        # history field that owns them. This is intentionally excluded from
+        # production Save so normal exports do not pay for report metrics.
+        category_rows = {}
+        category_bytes = {}
+        for row in rows:
+            category = first_owner_field.get(row[0])
+            if category is None:
+                continue
+            name = f'{category[0]}.{category[1]}'
+            category_rows[name] = category_rows.get(name, 0) + 1
+            category_bytes[name] = category_bytes.get(name, 0) + len(_canonical(_json(row)))
+        metrics['history_category_owned_rows'] = category_rows
+        metrics['history_category_owned_row_bytes'] = category_bytes
     return snapshot_wire, tuple(segments), metrics
 
 

@@ -314,11 +314,31 @@ def prepare_record(encounter, candidate, anchors, events):
                 position=CartesianPosition(*effect.position))
     for update in candidate.projectile_updates:
         projectile_states[update.object_id]=update.state
-    return detached(CommittedBoundaryRecord(candidate.start_checkpoint.start, candidate.boundary,
+    record = detached(CommittedBoundaryRecord(candidate.start_checkpoint.start, candidate.boundary,
         entities, anchors, actions, {aid: id(events[aid]) for aid in actions},
         supported.effects, supported.objective.subjects, supported.objective_use,
         supported.recipients, candidate.start_fences, snap.participant_ids,
         candidate.proposed_authoritative_changes['queues'], projectile_states))
+    # A committed receipt is unique per boundary, but many of its immutable
+    # projections can be exactly unchanged. Share those values with the prior
+    # receipt instead of retaining another copy of the same historical fact.
+    # The record's boundary/start fields remain distinct, and any changed field
+    # keeps its newly detached value. This is content-preserving structural
+    # sharing; readers still see the exact full projection at every boundary.
+    history = object.__getattribute__(encounter, '__dict__').get('_atomic_interval_history', ())
+    if history:
+        previous = history[-1].inspection
+        shared = {}
+        for name in ('entities', 'target_anchors', 'actions', 'action_anchors',
+                     'effects', 'objective', 'objective_use', 'recipients',
+                     'starts', 'participants', 'schedule', 'projectile_states'):
+            current_value = getattr(record, name)
+            previous_value = getattr(previous, name)
+            if current_value == previous_value:
+                shared[name] = previous_value
+        if shared:
+            record = replace(record, **shared)
+    return record
 
 
 def _idle(encounter):
