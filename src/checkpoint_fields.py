@@ -315,7 +315,7 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'object.ObjectInstance': {
-        "allowed": '_atomic_target_history current front_facing geometry id name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
+        "allowed": '_atomic_projectile_history _atomic_target_history _projectile_flight current front_facing geometry id name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
         "required": 'current front_facing geometry name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
     },
     'object.ObjectRegistry': {
@@ -540,6 +540,46 @@ FIELD_ADAPTERS = {
     },
 }
 
+# Arena persistence closes these additional native Action/effect types with
+# explicit field vocabularies. Action subclasses preserve the base Action
+# fields plus their own declaration data; the other records are immutable
+# constructor-shaped values. This table is data-only and never calls a class.
+_ACTION_ALLOWED = set(FIELD_ADAPTERS['action.Action']['allowed'])
+_ACTION_REQUIRED = set(FIELD_ADAPTERS['action.Action']['required'])
+_ACTION_ADDITIONS = {
+    'activities.DelayAction': ('encounter',),
+    'activities.PickUpAction': ('encounter', 'map_width_cells', 'map_height_cells'),
+    'activities.ReadyPreparationAction': ('encounter', 'ready_motion', 'readying_seconds', 'pole_set'),
+    'activities.ReadyWeaponAction': ('encounter', 'hand'),
+    'activities.ShieldEquipmentAction': ('encounter', 'hand', 'operation'),
+    'activities.ThrowAction': ('heavy_load_reference_lb', 'elevation_degrees',
+        'azimuth_degrees', 'landing_elevation_m', 'coup_de_grace'),
+}
+for _tag, _additions in _ACTION_ADDITIONS.items():
+    FIELD_ADAPTERS[_tag] = {
+        'allowed': sorted(_ACTION_ALLOWED | set(_additions)),
+        'required': sorted(_ACTION_REQUIRED | set(_additions)),
+    }
+
+_ARENA_TYPED_FIELDS = {
+    'action_evaluation.DelayDefenseEffect': ('source_action_id target_id defense').split(),
+    'action_evaluation.PickupEffect': ('source_action_id target_id object_id').split(),
+    'action_evaluation.ProjectileReleaseEffect': ('source_action_id target_id release_time release_position velocity_m_s impact_time landing_position landing_elevation_m intended_target_id attack_bonus range_dc_adjustment source_moving attacker_id extra_damage damage_potential damage_penetration coup_de_grace').split(),
+    'action_evaluation.ReadyConsumptionEffect': ('source_action_id target_id object_id ready_action_id').split(),
+    'action_evaluation.ReadyPreparationEffect': ('source_action_id target_id object_id motion readying_seconds pole_set').split(),
+    'action_evaluation.ReadyWeaponEffect': ('source_action_id target_id object_id hand').split(),
+    'action_evaluation.ShieldEquipmentEffect': ('source_action_id target_id object_id hand operation').split(),
+    'encounter_inspection.DisarmLandingReceipt': ('source_action_id target_id owner_id actor_id boundary origin_cell landing_cell margin maximum_landing_hexes position').split(),
+    'experience.ActionResolution': ('outcome skill_exercises observations').split(),
+    'experience.SkillExercise': ('skill_name experience').split(),
+    'melee_combat.MeleeResult': ('action_id at_time actor_id target_id instrument_id motion outcome distance actor_hp_before actor_hp_after target_hp_before target_hp_after target_armor_damage actor_armor_damage').split(),
+    'throwing.ProjectileBoundaryState': ('source_action_id boundary position status impact_time source_effect_identity impact_outcome miss_direction impact_damage').split(),
+    'throwing.ProjectileFlight': ('source_action_id release_time impact_time release_position landing_position velocity_m_s landing_elevation_m source_effect_identity status landing_recorded_at target_id attack_bonus range_dc_adjustment source_moving attacker_id extra_damage damage_potential damage_penetration impact_outcome miss_direction coup_de_grace').split(),
+}
+for _tag, _fields in _ARENA_TYPED_FIELDS.items():
+    FIELD_ADAPTERS[_tag] = {'allowed': list(_fields), 'required': list(_fields)}
+del _ACTION_ALLOWED, _ACTION_REQUIRED, _ACTION_ADDITIONS, _ARENA_TYPED_FIELDS, _tag, _additions, _fields
+
 # Semantic scope certified by 5D2C3.  FIELD_ADAPTERS supplies the reviewed
 # closed field vocabulary; this table adds role-specific treatment for the
 # native Run/Spot dependency graph.  It deliberately does not claim closure
@@ -662,10 +702,14 @@ RUN_SPOT_FIELD_CLOSURE = {
     'object.ObjectInstance': {
         'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',
                           'top_facing', 'front_facing', 'spatial_state', 'geometry',
-                          'visual_occlusion', '_atomic_target_history'),
+                          'visual_occlusion', '_atomic_target_history',
+                          '_projectile_flight', '_atomic_projectile_history'),
         'derived': ('type',),
-        'optional_values': {'_atomic_target_history': ('absent-before-first-commit',
-                                                       'list-matching-receipts')},
+        'optional_values': {
+            '_atomic_target_history': ('absent-before-first-commit', 'list-matching-receipts'),
+            '_projectile_flight': ('absent-before-release', 'one-matching-flight'),
+            '_atomic_projectile_history': ('absent-before-first-commit', 'list-matching-receipts'),
+        },
     },
     'weapon.WeaponInstance': {
         'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',

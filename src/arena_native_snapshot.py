@@ -147,6 +147,48 @@ def _tree(value, depth=0, count=None):
     raise ArenaNativeSnapshotRejected('native Arena state has unsupported JSON data')
 
 
+def _validate_arena_field_schema(inventory, *, require_required=True):
+    """Admit only the reviewed per-type field vocabulary for Arena state."""
+    from checkpoint_fields import FIELD_ADAPTERS
+    _need(type(inventory) is tuple and len(inventory) == 2,
+          'native Arena field-schema inventory is malformed')
+    body = inventory[1]
+    _need(type(body) is tuple and body and body[0] == 'checkpoint-inventory',
+          'native Arena field-schema body is malformed')
+    node_sections = [row for row in body[1:] if type(row) is tuple
+                     and row and row[0] == 'nodes']
+    _need(len(node_sections) == 1 and type(node_sections[0][1]) is tuple,
+          'native Arena field-schema node table is malformed')
+    containers = {'ordered-map', 'list', 'tuple', 'set', 'frozenset'}
+    for row in node_sections[0][1]:
+        _need(type(row) is tuple and len(row) == 3,
+              'native Arena field-schema node is malformed')
+        _ref, tag, content = row
+        _need(type(tag) is str and type(content) is tuple,
+              'native Arena field-schema node contents are malformed')
+        if tag in containers:
+            continue
+        adapter = FIELD_ADAPTERS.get(tag)
+        _need(type(adapter) is dict and 'allowed' in adapter and 'required' in adapter,
+              f'native Arena type has no reviewed field adapter: {tag}')
+        _need(all(type(pair) is tuple and len(pair) == 2
+                  and type(pair[0]) is str for pair in content),
+              f'native Arena field table is malformed: {tag}')
+        names = tuple(pair[0] for pair in content)
+        _need(len(names) == len(set(names)),
+              f'native Arena field table has duplicate names: {tag}')
+        fields = set(names)
+        allowed = set(adapter['allowed'])
+        required = set(adapter['required'])
+        _need(fields <= allowed,
+              f'native Arena node has unreviewed fields: {tag}: '
+              + ', '.join(sorted(fields - allowed)))
+        if require_required:
+            _need(required <= fields,
+                  f'native Arena node is missing required fields: {tag}: '
+                  + ', '.join(sorted(required - fields)))
+
+
 def capture(world, encounter, rng_owner):
     from checkpoint_inventory import capture_checkpoint_candidate, _compatibility
     from transactional_progression import is_quarantined
@@ -161,11 +203,13 @@ def capture(world, encounter, rng_owner):
           'native Arena state contains a value outside the supported save contract: '
           + ', '.join(sorted({row.code for row in candidate.diagnostics if row.code not in allowed})))
     _need(candidate.envelope[0] == _compatibility(), 'native compatibility changed during capture')
+    _validate_arena_field_schema(candidate.envelope)
     return candidate.envelope
 
 
 def encode(inventory):
     from checkpoint_inventory import _compatibility
+    _validate_arena_field_schema(inventory)
     payload = {'schema': SCHEMA, 'compatibility': _compatibility(),
                'inventory': _compact_inventory(inventory)}
     body = _canonical(payload)
@@ -211,6 +255,7 @@ def decode(wire):
               'legacy native Arena inventory compatibility mismatch')
         _validate_inventory(inventory, allow_legacy_paths=True,
                             expected_compatibility=_LEGACY_COMPATIBILITY)
+        _validate_arena_field_schema(inventory, require_required=False)
         inventory = _migrate_path_identities(inventory)
         inventory = (_compatibility(), inventory[1])
     elif legacy_schema == 'universe.generated-arena-native-state/4':
@@ -219,9 +264,11 @@ def decode(wire):
               'legacy v4 native Arena inventory compatibility mismatch')
         _validate_inventory(inventory,
                             expected_compatibility=_LEGACY_V4_COMPATIBILITY)
+        _validate_arena_field_schema(inventory, require_required=False)
         inventory = (_compatibility(), inventory[1])
     else:
         inventory = _expand_compact_inventory(inventory)
+        _validate_arena_field_schema(inventory)
     _validate_inventory(inventory)
     return inventory
 
@@ -470,6 +517,7 @@ def restore(envelope):
         _unbind_restored_arena_progression)
 
     _validate_inventory(envelope)
+    _validate_arena_field_schema(envelope, require_required=False)
     body = envelope[1]
     sections = {row[0]: row[1:] for row in body[1:]}
     nodes = sections['nodes'][0]

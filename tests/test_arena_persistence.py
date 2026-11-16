@@ -63,6 +63,56 @@ class TestArenaPersistence(unittest.TestCase):
                                    "rate": "walk", "facing_policy": "turn"})
         return session
 
+    def test_current_snapshot_requires_reviewed_per_type_field_schemas(self):
+        from arena_native_snapshot import ArenaNativeSnapshotRejected, encode
+        from arena_persistence import decode
+
+        source=GeneratedArenaSession(root_seed_factory=lambda:20261116)
+        source.generate({"starting_experience":"10000","width_cells":"5",
+                         "height_cells":"5"})
+        inventory=decode(source.save_encounter_bytes())["decoded_native"]
+
+        def change_node(tag, transform):
+            compatibility,body=inventory
+            changed=False
+            sections=[]
+            for section in body:
+                if section[0] != "nodes":
+                    sections.append(section)
+                    continue
+                rows=[]
+                for ref,node_tag,content in section[1]:
+                    if node_tag == tag and not changed:
+                        content=transform(ref,list(content))
+                        changed=True
+                    rows.append((ref,node_tag,tuple(content)))
+                sections.append(("nodes",tuple(rows)))
+            self.assertTrue(changed,tag)
+            return (compatibility,tuple(sections))
+
+        from checkpoint_fields import FIELD_ADAPTERS
+        instance_tag="being.BeingInstance"
+        required=next(iter(FIELD_ADAPTERS[instance_tag]["required"]))
+        unknown=change_node(instance_tag,
+            lambda ref,fields: fields+[("unreviewed_runtime_cache",("none",))])
+        missing=change_node(instance_tag,
+            lambda ref,fields: [(name,value) for name,value in fields if name != required])
+        original_field=next(pair for ref,tag,content in next(
+            section for section in inventory[1] if section[0]=="nodes")[1]
+            if tag==instance_tag for pair in content if pair[0]==required)
+        duplicate=change_node(instance_tag,
+            lambda ref,fields: fields+[original_field])
+        alien_rows=next(section[1] for section in inventory[1]
+                        if section[0]=="nodes")+(("alien-node","unreviewed.Type",()),)
+        alien_sections=tuple(("nodes",alien_rows) if section[0]=="nodes" else section
+                             for section in inventory[1])
+        alien=(inventory[0],alien_sections)
+        for label,candidate in (("unknown field",unknown),("missing required",missing),
+                                ("duplicate field",duplicate),("unreviewed type",alien)):
+            with self.subTest(candidate=label):
+                with self.assertRaises(ArenaNativeSnapshotRejected):
+                    encode(candidate)
+
     def test_pristine_ground_objects_restore_with_native_identity_and_evidence(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
         source = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
@@ -116,6 +166,45 @@ class TestArenaPersistence(unittest.TestCase):
         self.assertIs(source.active_candidate,original_candidate)
         self.assertEqual(source.active_candidate.encounter.inspect_committed(),native_before)
         self.assertEqual(source.save_encounter_bytes(),original)
+        with tempfile.TemporaryDirectory(prefix='arena-save-crash-') as directory:
+            prior_path=Path(directory)/'last-complete.uarena'
+            prior_path.write_bytes(original)
+            crash_script=r'''
+import os,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+import arena_persistence
+s=GeneratedArenaSession();s.load_encounter_bytes(Path(sys.argv[1]).read_bytes())
+s.choose_delay({'defense':0})
+write=arena_persistence._write_archive_entry
+def crash_during_new_archive(archive,name,data):
+    if name.startswith('history/'):
+        os._exit(73)
+    write(archive,name,data)
+arena_persistence._write_archive_entry=crash_during_new_archive
+s.save_encounter_bytes()
+raise SystemExit(2)
+'''
+            environment=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',PYTHONNOUSERSITE='1',
+                PYTHONPATH=os.pathsep.join((str(ROOT/'tests'),str(ROOT/'src'),str(ROOT/'examples'))))
+            killed=subprocess.run([sys.executable,'-B','-c',crash_script,str(prior_path)],
+                cwd=ROOT,env=environment,capture_output=True,text=True,timeout=30,check=False)
+            self.assertEqual(killed.returncode,73,killed.stderr)
+            self.assertEqual(prior_path.read_bytes(),original)
+            recovery_script=r'''
+import sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+wire=Path(sys.argv[1]).read_bytes();s=GeneratedArenaSession();s.load_encounter_bytes(wire)
+assert s.save_encounter_bytes()==wire
+Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
+'''
+            recovered_path=Path(directory)/'recovered.uarena'
+            recovered=subprocess.run([sys.executable,'-B','-c',recovery_script,
+                str(prior_path),str(recovered_path)],cwd=ROOT,env=environment,
+                capture_output=True,text=True,timeout=30,check=False)
+            self.assertEqual(recovered.returncode,0,recovered.stderr)
+            self.assertEqual(recovered_path.read_bytes(),original)
         parsed=decode(original)
         metrics=parsed["manifest"]["metrics"]
         self.assertEqual(parsed["manifest"]["snapshot_cursor"],1)
