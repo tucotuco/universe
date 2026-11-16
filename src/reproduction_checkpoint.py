@@ -412,6 +412,119 @@ def encode_reproduction_checkpoint(world) -> str:
         return encoded
 
 
+def encode_portable_native_reproduction_registry(world) -> str:
+    """Encode logical reproduction facts for a native Encounter Save.
+
+    Unlike the standalone no-Encounter checkpoint API, this narrow adapter
+    permits an Encounter-owned Universe. Process-local world identities are
+    normalized to a private sentinel and rebound on Load. Native Being pointer
+    bindings are not in this logical record format and therefore fail closed.
+    """
+    with world._schedule_lock:
+        registry = world._reproduction_group_registry
+        if registry._world is not world or world._reproduction_group_registry is not registry:
+            raise ReproductionCheckpointValidationError(
+                "native reproduction registry owner is inconsistent")
+        if registry._native_beings_by_person_id or registry._native_being_requests:
+            raise ReproductionCheckpointValidationError(
+                "native Being-linked reproduction bindings lack a portable adapter")
+        reserved = (set(registry._person_id_reservations)
+                    | set(registry._group_id_reservations))
+        if reserved & set(world.object_registry.object_instances):
+            raise ReproductionCheckpointValidationError(
+                "reproduction IDs collide with native Object identities")
+        if registry._revision:
+            registry._assert_consistent()
+        elif any((registry._groups_by_id, registry._group_id_by_parent_set,
+                  registry._group_id_by_offspring, registry._parent_set_by_offspring,
+                  registry._person_id_reservations, registry._group_id_reservations,
+                  registry._group_id_aliases, registry._requests,
+                  registry._offspring_origin_ticks, registry._generation_requests,
+                  registry._generation_parent_set_scopes, registry._progressive_histories,
+                  registry._progressive_parent_set_scopes, registry._progressive_requests)):
+            raise ReproductionCheckpointValidationError(
+                "revision-zero reproduction registry contains unpublished records")
+        source_identity = registry.world_identity
+        source = {
+            "schema": CHECKPOINT_SCHEMA,
+            "version": CHECKPOINT_VERSION,
+            "registry_contract": REGISTRY_CONTRACT,
+            "source_world_identity": source_identity,
+            "payload": _registry_data(registry),
+        }
+        source["sha256"] = hashlib.sha256(_canonical(source).encode("ascii")).hexdigest()
+        parsed = _parse_checkpoint(json.dumps(source, sort_keys=True, ensure_ascii=True,
+                                              separators=(",", ":"), allow_nan=False))
+        rebound = _rebind(parsed, 1)
+        _validate_detached(rebound)
+        owner = _ValidationOwner()
+        detached_registry = ReproductionGroupRegistry(owner)
+        owner._reproduction_group_registry = detached_registry
+        detached_registry.world_identity = 1
+        _populate_registry(detached_registry, rebound)
+        portable = {
+            "schema": CHECKPOINT_SCHEMA,
+            "version": CHECKPOINT_VERSION,
+            "registry_contract": REGISTRY_CONTRACT,
+            "source_world_identity": 1,
+            "payload": _registry_data(detached_registry),
+        }
+        portable["sha256"] = hashlib.sha256(_canonical(portable).encode("ascii")).hexdigest()
+        encoded = json.dumps(portable, sort_keys=True, ensure_ascii=True,
+                             indent=2, allow_nan=False) + "\n"
+        _parse_checkpoint(encoded)
+        return encoded
+
+
+def restore_portable_native_reproduction_registry(world, checkpoint):
+    """Restore logical reproduction facts into an Encounter-owned Universe."""
+    candidate = _parse_checkpoint(checkpoint)
+    with world._schedule_lock:
+        registry = world._reproduction_group_registry
+        if registry._world is not world or world._reproduction_group_registry is not registry:
+            raise ReproductionCheckpointRestoreError(
+                "native reproduction registry owner is inconsistent")
+        if registry._revision or registry._groups_by_id or registry._group_id_aliases:
+            raise ReproductionCheckpointRestoreError(
+                "native reproduction registry is not empty before Load")
+        if registry._native_beings_by_person_id or registry._native_being_requests:
+            raise ReproductionCheckpointRestoreError(
+                "native Being-linked reproduction bindings conflict with Load")
+        rebound = _rebind(candidate, registry.world_identity)
+        _validate_detached(rebound)
+        reserved = (set(rebound.person_id_reservations)
+                    | set(rebound.group_id_reservations))
+        if reserved & set(world.object_registry.object_instances):
+            raise ReproductionCheckpointRestoreError(
+                "reproduction IDs collide with restored native Object identities")
+        owner = _ValidationOwner()
+        scratch = ReproductionGroupRegistry(owner)
+        owner._reproduction_group_registry = scratch
+        scratch.world_identity = registry.world_identity
+        _populate_registry(scratch, rebound)
+        if scratch._revision:
+            scratch._assert_consistent()
+        undo = registry._capture_undo()
+        try:
+            for name in (
+                    "_groups_by_id", "_group_id_aliases", "_group_id_by_parent_set",
+                    "_group_id_by_offspring", "_parent_set_by_offspring",
+                    "_person_id_reservations", "_group_id_reservations", "_requests",
+                    "_offspring_origin_ticks", "_generation_requests",
+                    "_generation_parent_set_scopes", "_progressive_histories",
+                    "_progressive_parent_set_scopes", "_progressive_requests"):
+                target, source_value = getattr(registry, name), getattr(scratch, name)
+                target.update(source_value)
+            registry._revision = scratch._revision
+            if registry._revision:
+                registry._assert_consistent()
+        except BaseException as exc:
+            registry._restore_undo(undo)
+            raise ReproductionCheckpointRestoreError(
+                f"native reproduction restore rolled back: {exc}") from exc
+    return world.reproduction_group_snapshot()
+
+
 def _parse_checkpoint(text) -> DetachedReproductionCheckpoint:
     if type(text) is not str:
         _fail("checkpoint input must be text")

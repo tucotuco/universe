@@ -752,10 +752,6 @@ def restore(envelope, *, native=False):
         elif tag == 'set': cache[ref].update(scalar(v) for v in content)
         elif tag == 'frozenset': cache[ref] = frozenset(scalar(v) for v in content)
 
-    if native:
-        _rehydrate_native_services(cache, nodes, native_recipes,
-                                   sections['host-bindings'][0])
-
     # Restore is an authoritative admission boundary: never normalize a file
     # whose saved measured state was written with a different precision rule.
     from object import ObjectDefinition
@@ -806,6 +802,9 @@ def restore(envelope, *, native=False):
         encounter._physiology_registry = None
     if '_atomic_interval_history' not in encounter.__dict__:
         encounter._atomic_interval_history = []
+    if native:
+        _rehydrate_native_services(cache, nodes, native_recipes,
+                                   sections['host-bindings'][0])
     book = encounter._choice_book
     _need(type(book) is ChoiceBook and book.encounter is encounter,
           'native ChoiceBook owner is inconsistent')
@@ -904,14 +903,34 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     from objective_reality import SubjectRealityCandidate
     from field_observation import BeliefLedger
     from history_conversation import HeardAccount
+    from checkpoint_adapters import NativeInventory
+    from statistical_group import validate_composition_records
 
     groups = [value for value in cache.values()
               if type(value) is StatisticalGroup]
     histories = [value for value in cache.values()
                  if type(value) is PersonalHistory]
+    from universe import Universe
+    worlds = [value for value in cache.values() if type(value) is Universe]
+    _need(len(worlds) == 1, 'native Save has no unique Universe root')
+    world = worlds[0]
+    reproduction_recipes = [recipe for recipe in recipes
+                            if len(recipe) >= 3 and recipe[2] ==
+                            'reproduction_group.logical_registry']
     ledgers = [value for value in cache.values()
                if type(value) is RealityLedger]
-    expected_recipes = []
+    expected_recipes = [
+        ('native-recipe', 'native-closure-recipes/1',
+         'reproduction_group.logical_registry', ('object', world.id),
+         reproduction_recipes[0][4])
+    ] if len(reproduction_recipes) == 1 else []
+    _need(len(reproduction_recipes) == 1
+          and len(reproduction_recipes[0]) == 5
+          and reproduction_recipes[0][1] == 'native-closure-recipes/1'
+          and reproduction_recipes[0][3] == ('object', world.id)
+          and type(reproduction_recipes[0][4]) is str,
+          'native reproduction registry recipe is missing or malformed')
+    expected_recipes = [reproduction_recipes[0]]
     for group in groups:
         expected_recipes.extend((
             ('native-recipe', 'native-closure-recipes/1',
@@ -936,13 +955,32 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
         for ledger in ledgers if id(ledger) not in owned_ledgers)
     _need(sorted(recipes, key=repr) == sorted(expected_recipes, key=repr),
           'native Save callback recipes do not match restored owners')
+    from reproduction_checkpoint import (
+        restore_portable_native_reproduction_registry,
+        ReproductionCheckpointError,
+    )
+    try:
+        restore_portable_native_reproduction_registry(world,
+                                                      reproduction_recipes[0][4])
+    except ReproductionCheckpointError as exc:
+        raise ArenaNativeSnapshotRejected(
+            f'native reproduction registry restore refused: {exc}') from exc
     for group in groups:
         store = group._conditional_attributes
         group._composition_reality._validators = (
             group._validate_composition_facts,)
         store._rng_for = _formation_attribute_rng_provider(group)
+        records = tuple(group._composition_reality._records.values())
+        validate_composition_records(group.id, group.formation_time, records)
+        class _RejectPendingRecipe:
+            @staticmethod
+            def issue(code, _owner, _field, reason):
+                raise ArenaNativeSnapshotRejected(
+                    f'native Group callback recipe is incomplete: {code}: {reason}')
+        NativeInventory._conditional(_RejectPendingRecipe(), store, group)
     for history in histories:
         history.reality._validators = (history._validate,)
+        history._validate(history.reality.view())
     for ledger in ledgers:
         if not any(group._composition_reality is ledger for group in groups) \
                 and not any(history.reality is ledger for history in histories):

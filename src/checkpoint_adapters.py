@@ -255,6 +255,23 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if tag=='universe.Universe' and field=='_reproduction_group_registry':
+            from reproduction_group import ReproductionGroupRegistry
+            _require(type(item) is ReproductionGroupRegistry and item._world is self.world,
+                     'ReproductionGroup registry is not bound to the captured Universe')
+            if not self.full_native:
+                return super().field(tag,field,item,ref,path,depth)
+            from reproduction_checkpoint import (
+                encode_portable_native_reproduction_registry,
+                ReproductionCheckpointError,
+            )
+            try:
+                portable=encode_portable_native_reproduction_registry(self.world)
+            except ReproductionCheckpointError as exc:
+                raise CheckpointRejected(str(exc)) from exc
+            return ('native-recipe', ADAPTER_VERSION,
+                    'reproduction_group.logical_registry', ('object',self.world.id),
+                    portable)
         if tag=='being.BeingInstance' and field=='_arena_perception_ledger':
             if item is None:
                 _require(not self.encounter.arena_activation_enabled,

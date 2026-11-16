@@ -31,6 +31,7 @@ from universe import Universe
 from native_persistence import (NativeSaveRejected, export_save, load_path,
                                 load_save, write_save)
 from checkpoint_adapters import RecipientBinding
+from reproduction_group import ReproductionGroupProposal, prepare_reproduction_group
 
 
 class NativePersistenceTests(unittest.TestCase):
@@ -394,6 +395,124 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
                 text=True, capture_output=True, check=False, timeout=45)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+
+    def test_personal_history_facts_and_validator_resume_in_fresh_process(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        from personal_history import PersonalHistory
+        from realization import Fact
+        history = PersonalHistory(fixture.a, earliest=-10, known_through=0,
+                                  nondeclining_skills=())
+        fixture.a.personal_history = history
+        key = history.episode_key(-1, "earlier-training")
+        history.realize_episode(-1, "earlier-training", lambda _view: (
+            Fact(key, {"description": "practiced earlier"}),))
+        fixture.enable()
+        first = DelayAction(fixture.enc, fixture.a.id, defense=0,
+                            start_time=0, id="native-personal-history-delay")
+        fixture.enc.schedule_action(first)
+        fixture.enc.step(1)
+        wire = export_save(fixture.enc)
+
+        continuation = DelayAction(fixture.enc, fixture.a.id, defense=0,
+                                   start_time=1, id="native-history-continuation")
+        fixture.enc.schedule_action(continuation)
+        fixture.enc.step(1)
+        live_history = fixture.a.personal_history
+        history_digest = hashlib.sha256(json.dumps(
+            live_history.to_jsonable(), sort_keys=True, separators=(",", ":"),
+            allow_nan=False).encode()).hexdigest()
+        expected = {
+            "time": fixture.enc.time,
+            "rng": json.loads(json.dumps(fixture.rng.state)),
+            "history_digest": history_digest,
+            "native_history": hashlib.sha256(native_history.encode(
+                native_history.capture(fixture.enc))).hexdigest(),
+            "actions": list(fixture.enc._atomic_interval_history[-1].action_ids),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-personal-history-save.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+being=world.get_object_by_id(enc.being_list[0])
+history=being.personal_history
+history._validate(history.reality.view())
+action=DelayAction(enc,being.id,defense=0,start_time=enc.time,
+ id='native-history-continuation')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history_digest':hashlib.sha256(json.dumps(history.to_jsonable(),sort_keys=True,
+  separators=(',',':'),allow_nan=False).encode()).hexdigest(),
+ 'native_history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'actions':list(enc._atomic_interval_history[-1].action_ids)},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
+
+    def test_logical_reproduction_registry_resumes_with_native_encounter(self):
+        world = Universe('native-reproduction', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        world.publish_reproduction_group(prepare_reproduction_group(
+            ReproductionGroupProposal('RG-NATIVE', ('P1', 'P2'), ('C1',),
+                                      'native-save:test')),
+            request_key='native-create', expected_revision=0)
+        snapshot = world.reproduction_group_snapshot()
+        self.assertEqual(snapshot.revision, 1)
+        self.assertEqual(world.get_reproduction_group('RG-NATIVE').offspring_ids, ('C1',))
+        from encounter import Encounter
+        ids = [world.make_being('Human', name) for name in ('Native A', 'Native B')]
+        encounter = Encounter(world, 10, 0, initiated=True, id='native-reproduction-encounter')
+        for identity in ids:
+            encounter.add_being(identity)
+        world.add_event(encounter)
+        rng = RNGCursor(__import__('random').Random(91).getstate())
+        encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
+        initial = DelayAction(encounter, ids[0], defense=0, start_time=0,
+                              id='native-reproduction-initial')
+        encounter.schedule_action(initial)
+        encounter.step(1)
+        wire = export_save(encounter)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-reproduction-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+snapshot=world.reproduction_group_snapshot()
+group=world.get_reproduction_group('RG-NATIVE')
+assert group.parent_ids == ('P1','P2') and group.offspring_ids == ('C1',)
+action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
+ id='native-reproduction-continuation')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'revision':world.reproduction_group_snapshot().revision,
+ 'group_id':group.group_id,'parents':group.parent_ids,'offspring':group.offspring_ids,
+ 'time':enc.time,'rng':rng.state},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        restored = json.loads(result.stdout)
+        self.assertEqual(restored['revision'], snapshot.revision)
+        self.assertEqual(restored['group_id'], 'RG-NATIVE')
+        self.assertEqual(restored['parents'], ['P1', 'P2'])
+        self.assertEqual(restored['offspring'], ['C1'])
+        self.assertEqual(restored['time'], 2)
 
 
 if __name__ == "__main__":
