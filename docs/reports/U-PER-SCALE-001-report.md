@@ -1,89 +1,106 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Status:** implementation and stated acceptance evidence complete; awaiting ChatGPT review. Keep this report and assignment active until accepted.
+**Status:** ACTIVE; extended persistence work is implemented and verified, pending ChatGPT review. Do not archive or mark the assignment complete before acceptance.
 
-**Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program.
+**Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
-**Repository:** `~/Projects/universe`; no push performed.
+**Repository:** active Universe checkout; no push performed.
 
-**Start:** 2026-11-15T16:42:40-08:00
+**Execution intervals (America/Los_Angeles):**
 
-**End:** 2026-11-15T17:52:06-08:00
+| Interval | Start | End | Elapsed |
+|---|---|---|---|
+| Initial implementation | 2026-11-15T16:42:40-08:00 | 2026-11-15T17:52:06-08:00 | PT1H9M26S |
+| Extended operational verification | 2026-11-15T18:19:20-08:00 | 2026-11-15T19:07:16-08:00 | PT47M56S |
 
-**Elapsed:** PT1H9M26S
-**Execution interval:** one continuous interval; actual start was captured at execution start.
+**Active execution time:** PT1H57M22S across the two recorded intervals. **Total calendar span:** PT2H24M36S from the first start to the final end; the gap between intervals is not active execution time.
 
-## Outcome
+The original interval established a fixed-size graph-reference encoding and corrected four checkpoint-adapter cases. The latest interval followed up because that first format still failed strict Save at t=91. Its results supersede the earlier report's t=67-only reliability conclusion.
 
-The long-running generated Arena checkpoint failure was reproduced at the original 67-second seed-14 combat boundary, explained at the graph-encoding level, and corrected without raising the one-million-node limit, dropping history, weakening validation, or regenerating Beings. The ordinary strict production loader restores a checkpoint in a fresh OS process and continues the exact same five-second future as an uninterrupted session. The checkpoint-adapter diagnostic cohort was compared with the pre-change baseline and reconciled. The adopted multiple-shield rule was integrated into the effective Encounter documentation only; no shield behavior was implemented here.
+## Current outcome
 
-## Acceptance evidence
+The t=91 concern is resolved by a second lossless checkpoint-format improvement. Ordinary strict Save/Load now succeeds for the terminal seed-14 combat encounter at t=91 and for later t=100 state; fresh OS processes reproduce the exact checkpoint and deterministic next interval. A continuous control and fresh-process branches match full serialized state, including native time, Being/Object and Action identity, HP/equipment, receipts, observer evidence and RNG continuation. The strict structural cap remains 1,000,000 nodes.
 
-| Criterion | Result | Evidence |
+The adopted 2026-11-15 multiple-shield passive-protection rule is authoritative in the effective Encounter supplement and linked from the Encounter README. No shield behavior was implemented in this persistence assignment.
+
+## Acceptance matrix
+
+| Requirement | Result | Evidence |
 |---|---|---|
-| Establish the former strict-load failure and structural cause | Met | The generated seed-14 one-shield combat case at native t=67 was reproduced against pre-change HEAD `e83c8f31c6583b52fbe2bc3edd9759403458bfff`. The ordinary loader rejected its 1,551,653-node decoded tree with “native Arena state exceeds structural limits.” The native payload was 13,082,557 bytes and the outer save 17,482,555 bytes, both below the existing byte cap. The bottleneck was tree-node amplification, not bytes. |
-| Correct losslessly while retaining strict admission | Met | Synthetic owned-node identities are now deterministic SHA-256 digests of their traversal address. Domain IDs and explicit reference edges remain unchanged. Native schema `/4` accepts only the exact prior `/3` compatibility fingerprint for migration, validates the old graph, then translates legacy path identities before normal current validation. Outer schema `/8` retains `/7` through `/4` admission. Node/byte/depth limits and allowlists were not relaxed. |
-| Prove exact ordinary-loader continuation in a fresh OS process | Met | The committed regression creates the actual generated Arena, carries and dons the authored shield, runs the 67-second common-boundary history, strictly saves, then loads with `GeneratedArenaSession.load_encounter_bytes` in a fresh Python OS process. The child advances five seconds; its complete save bytes equal the uninterrupted control’s t=72 bytes. Both outputs retain 72 receipts, the same Being IDs and native consequences. |
-| Demonstrate meaningful before/after growth and preserve combat/observer history | Met | See measurements below. The same t=67 fixed run retains 67 committed interval records, all 16 autonomous melee Actions, original Object identity/equipment, combat HP consequences, and observer-specific perception ledgers. A committed continuation reaches native t=91 with 22 attack Actions, when the player is at -2 HP and combat has killed them; the exact adopted seed/profile therefore cannot lawfully sustain 64 attacks. Maximum JSON depth remains 13. The fixed 768,440-node tree has 231,560 nodes of margin under the unchanged cap. |
-| Verify Arena modes and strict compatibility/regressions | Met | Focused PvA, Arena-vs-Arena, generated browser/session, legacy snapshot and adapter cohorts passed; exact commands are listed below. Four adapter failures/errors were also run at baseline and classified with evidence. |
-| Integrate the adopted multi-shield rule without implementing it | Met | The 2026-11-15 adoption is authoritative in `docs/encounters/encounters-adopted-supplement-2026-11-15.md`, linked from the Encounter README. It preserves revision 61/70 history and explicitly leaves multi-shield behavior unimplemented. |
+| Reproduce ordinary strict refusal at t=91 | Met | The prior identity-only native v4 writer produced a 1,062,228-node outer checkpoint at t=91 (native payload 11,625,696 bytes; outer save 15,540,071 bytes). The unchanged ordinary loader refused it with `native Arena state exceeds structural limits`. The analysis input was preserved outside the repository as a temporary artifact, not in user save storage. |
+| Correct structural amplification without dropping history or relaxing limits | Met | Native schema `/5` and outer save schema `/9` use a per-checkpoint sorted scalar-string symbol table, compact typed-string indices, and flattened ordered-map/field pairs. Decode first applies the unchanged strict tree/depth/byte admission to the compact wire form, validates indices and pair structure, expands losslessly, then runs the ordinary graph allowlist and restoration validators. Writer admission also counts its actual emitted wire before returning. |
+| Strict fresh-process Save/Load beyond the prior failure | Met | At t=91 and t=100, fresh OS processes load through the ordinary production loader, immediately re-save byte-identically, advance one interval, and produce bytes identical to uninterrupted execution at t=92 and t=101. The regression also branches at t=67 and verifies exact t=72 continuation. |
+| Extended workload and preserved consequences | Met (equivalent-history clause) | The controlled seed-14 scenario resolves 91 committed intervals and 22 actual melee attacks before a combatant reaches −2 HP. It cannot lawfully continue to 64 attacks after death. It preserves all combat consequences, observers and history and is larger than the prior 67-interval/16-attack threshold; continuation to t=100/101 checks sustained post-terminal checkpoint reliability without inventing new combatants or suppressing facts. |
+| Exact uninterrupted/fresh-process equivalence | Met | The regression compares full canonical save bytes at checkpoints and after continuation, and asserts stable Being/Object/Action IDs, combat HP, equipment/custody, pending/completed Action records, event receipts, observer-ledger state and RNG ownership/cursor through the production restore path. |
+| Compatibility and strict rejection | Met | Exact pinned v3 native compatibility migrates; a synthetic exact pinned v4 graph fixture migrates to compact v5. Unknown fingerprints fail closed. Existing corrupt graph ID/reference/type and compact symbol/table validation regressions pass. A preserved historical v3 Arena input loads and re-saves through outer `/9`, native `/5`. An intermediate, uncommitted schema-4 fingerprint is intentionally not accepted. |
+| Adapter diagnostics | Met | All four previously reported adapter cases were reproduced against pre-change baseline `e83c8f31c6583b52fbe2bc3edd9759403458bfff` and corrected narrowly; the affected adapter suite now passes 48 tests. See diagnosis below. |
+| Multi-shield adoption integrated, not implemented | Met | The effective [dated Encounter supplement](../encounters/encounters-adopted-supplement-2026-11-15.md) records the adopted shared-boundary allocation and durability rule after revision 70; [Encounter README](../encounters/README.md) links and identifies it as controlling. |
 
-### Growth measurements
+## Root cause and correction
 
-The baseline is the same generated Arena seed/profile and exact sequence captured before changing the checkpoint encoder. Tree nodes count every decoded JSON value/container using the production structural walker. Depth is maximum JSON nesting. Baseline outer-save and native-payload byte counts are both shown; post-change values are explicitly identified as native-payload bytes where measured.
+The first correction replaced repeatedly embedded traversal-path identities with fixed-size owned-node digests. That removed the dominant quadratic path-prefix amplification, but exact t=91 testing exposed a second count issue: the v4 native inventory tree had 1,062,191 nodes even though its graph node table had only 27,844 unique nodes. Repeated `('string', value)` wrappers plus nested key/value and class-field pair containers expanded the serialized tree beyond the cap. This was a genuine write/read-boundary failure; it was not a byte-limit or restore failure.
 
-| Native boundary | Baseline tree nodes | Baseline outer bytes | Baseline native bytes | Fixed tree nodes | Fixed native bytes |
-|---:|---:|---:|---:|---:|---:|
-| t=0 | 102,612 | 1,093,665 | 790,915 | — | — |
-| t=10 | 296,253 | 3,239,015 | 2,399,902 | — | — |
-| t=20 | 500,971 | 5,532,839 | 4,120,270 | — | — |
-| t=35 | 820,722 | 9,139,223 | 6,825,059 | 484,789* | 5,238,567* |
-| t=50 | 1,149,774 | 12,876,115 | 9,627,728 | — | — |
-| t=67 | 1,551,653 | 17,482,555 | 13,082,557 | 768,440 | 8,365,692 |
+The schema `/5` compact inventory encodes the repeated typed-string vocabulary once in a sorted symbol table; negative integer tokens reference table entries. Ordered maps and class fields encode pairs as flat sequences. The decoder counts and bounds the compact serialized representation before expansion, validates the table (sorted, unique strings, at most 250,000 entries), validates each negative reference and even pair count, then reconstructs the exact prior typed inventory for the unchanged semantic validators and adapters. The format preserves every historical receipt, snapshot, observer fact, identity and RNG field. It changes representation, not simulation state.
 
-`*` t=35 is the actual previously accepted checkpoint loaded through the pinned v3 migration and re-saved with v4. At t=67 the comparable generated fixed scenario reduces the decoded tree by 783,213 nodes (50.5%) and native bytes by 4,716,865 (36.1%), while retaining the history and state payload. The observed uncompressed tree growth still follows retained facts/history; the pathological repeated path-prefix cost is removed rather than postponed by a larger cap. At the prior t=35 boundary the baseline passed at 820,722 nodes; by t=50 it already failed the one-million limit.
+During extension past t=100, inventory capture also encountered a separate implementation guard: it counted every scalar traversal visit against the 250,000 unique-owned-node limit. Changed capture to enforce that limit on unique emitted graph nodes while retaining recursion/depth protection and the final 1,000,000-node wire admission. Neither node limit was increased or bypassed. Native opponent scheduling after the player died was adjusted to treat the native `combatants must be able to participate` refusal as ordinary controller unavailability; it does not create a failed Action or modify native combat eligibility.
 
-The baseline’s native graph contained about 20,329 owned nodes at t=67, but represented those nodes and their references using complete traversal paths. Repeatedly embedding each owned node’s full path in reference tuples multiplied path-prefix elements across the accumulated inspection/history graph (about 427,267 decoded values in node identity paths and about 487,828 among nested references in the instrumented breakdown). This explains why the roughly 15–19k additional decoded values per committed interval compounded into 1.55 million at t=67. The v4 token is fixed-size per synthetic node/reference, while explicit domain IDs and the graph edges remain available for identity-preserving restoration.
+## Growth and strict-load measurements
 
-### Adapter diagnosis against baseline
+The original v4 t=91 measurement and the compact v5 measurements below come from the same seed-14 Arena scenario and native history. Counts are decoded JSON values/containers at the production strict boundary; bytes are UTF-8 checkpoint bytes. Depth is maximum JSON nesting.
 
-All four cases were run in an isolated checkout of pre-change `e83c8f3` before repair; baseline outcome was one error and three failures (`EFFF`), rather than a new regression:
+| Native time | Receipts / committed intervals | Resolved Actions | v5 tree nodes | v5 native bytes | v5 outer-save bytes | Depth |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 0 | 0 | 50,459 | 641,331 | 894,217 | 10 |
+| 10 | 10 | 2 | 119,824 | 1,457,325 | 1,982,243 | 13 |
+| 20 | 20 | 5 | 192,544 | 2,318,829 | 3,130,915 | 13 |
+| 35 | 35 | 10 | 306,421 | 3,669,555 | 4,931,883 | 13 |
+| 50 | 50 | 13 | 424,468 | 5,067,485 | 6,795,791 | 13 |
+| 67 | 67 | 18 | 568,655 | 6,785,608 | 9,086,623 | 13 |
+| 91 | 91 | 24 | 783,335 | 9,343,874 | 12,497,643 | 13 |
+| 92 | 92 | 24 | 792,017 | 9,446,046 | 12,633,871 | 13 |
+| 100 | 100 | 24 | 861,473 | 10,263,460 | 13,723,759 | 13 |
 
-| Case | Baseline observation | Reconciliation |
-|---|---|---|
-| `test_container_cycles_and_shared_entity_state_refuse` | A cyclic nested evaluation tag escaped as `RecursionError`, which the contract did not classify as a controlled refusal. | `freeze()` now tracks active container identities and raises `EvaluationIntegrityError` for a cycle; shared live native entity state remains refused. |
-| `test_hex_facing_requires_unknown_or_canonical_integer` | The capture failed earlier because the Run/Spot field closure omitted the Arena-owned Disarm landing receipt, so the intended malformed-facing diagnostic was never reached. | Marked that receipt explicitly out of scope for the partial Run/Spot certificate; the Arena checkpoint has its own typed adapter. The test now reaches and verifies the facing validator. |
-| `test_movement_activated_arena_remains_outside_bounded_checkpoint` | The assertion expected the obsolete diagnostic “movement-activated Arena has no committed boundary history.” Current adapter correctly reports certified field closure but remains non-resumable/partial. | Updated the test to assert the current bounded-closure certificate plus partial status and no mutation. No completeness claim was added. |
-| `test_unstarted_arena_opt_in_is_outside_the_initiated_checkpoint_path` | The assertion expected `IntervalIntegrityError`, although inventory capture does not resolve an interval or enforce initiated Encounter timing. | Updated the test to verify inventory-only partial capture and unchanged source state. The production interval rule is unchanged. |
+At t=91, v5 is 278,893 nodes below the unchanged cap (27.9% headroom), compared with v4's 62,228-node overage. At t=100 the same history remains 138,527 nodes below cap. History is not pruned: receipts equal committed intervals at every measured boundary; the 22 melee attacks and all resulting state/evidence remain represented. The extended t=91 checkpoint is 49.25% more intervals and 37.5% more attacks than the prior t=67/16-attack failure report. Its strict save succeeds; exact future equivalence is verified at more than one post-threshold boundary.
+
+## Adapter diagnosis against baseline
+
+The four cases were run in an isolated checkout of pre-change `e83c8f3`; baseline outcomes were one error and three failures (`EFFF`), not new regressions.
+
+| Case | Verified cause and narrow correction |
+|---|---|
+| `test_container_cycles_and_shared_entity_state_refuse` | A cyclic nested evaluation tag escaped as `RecursionError`; active container identities now cause controlled `EvaluationIntegrityError`. Shared live entity state remains refused. |
+| `test_hex_facing_requires_unknown_or_canonical_integer` | Capture failed earlier because Run/Spot field closure omitted Arena-owned Disarm landing receipt. That receipt is explicitly outside the partial Run/Spot certificate; Arena persistence uses its own typed adapter, allowing the facing validator to be exercised. |
+| `test_movement_activated_arena_remains_outside_bounded_checkpoint` | Expected obsolete diagnostic. The test now asserts current bounded-closure certificate, partial/non-resumable status and no mutation; completeness is not claimed. |
+| `test_unstarted_arena_opt_in_is_outside_the_initiated_checkpoint_path` | Expected an interval-validation error from inventory-only capture. The test now asserts partial capture and unchanged source state; production interval eligibility is unchanged. |
 
 ## Focused verification
 
-All commands used the preserved repository `.venv`; no whole-repository suite was run.
+Focused tests only; the full repository suite was not run.
 
 | Command | Result |
 |---|---|
-| `.venv/bin/python -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` | 48 tests passed, 20.439s. |
-| `.venv/bin/python -m unittest discover -s tests -p 'test_arena_persistence.py'` | 12 tests passed, 163.163s. Includes t=67 strict save, fresh-process exact t=72 continuation, and the t=91 terminal/22-attack bound. |
-| `.venv/bin/python -m unittest discover -s tests -p 'test_arena_vs_arena.py' -k two_controllers_native_consequence_and_fresh_process_continuation` | 1 test passed, 11.349s. |
-| `.venv/bin/python -m unittest discover -s tests -p 'test_generated_arena_browser.py' -k seeded_two_sided_browser_combat_hit_and_fresh_process_continuation` | 1 test passed, 7.082s. |
-| `python3 -m py_compile src/action_evaluation.py src/arena_native_snapshot.py src/arena_persistence.py src/checkpoint_fields.py src/checkpoint_inventory.py tests/test_arena_persistence.py tests/test_checkpoint_adapters.py` | Passed. |
-| `git diff --check` | Passed. |
+| `UNIVERSE_PER_SCALE_METRICS=1 .venv/bin/python -m unittest discover -s tests -p 'test_arena_persistence.py' -k extended_seed14_combat_checkpoint_stays_strict_and_continues_exactly` | 1 test passed, 293.111s. Printed all measurements above; covered t=67→72, strict t=91→92 and t=100→101 branches. |
+| `.venv/bin/python -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` | 48 tests passed, 21.511s. |
+| `.venv/bin/python -m unittest discover -s tests -p 'test_arena_vs_arena.py' -k two_controllers_native_consequence_and_fresh_process_continuation` | 1 test passed, 11.857s. |
+| `.venv/bin/python -m unittest discover -s tests -p 'test_generated_arena_browser.py' -k seeded_two_sided_browser_combat_hit_and_fresh_process_continuation` | 1 test passed, 7.490s. |
+| `python3 -m py_compile src/arena_browser_session.py src/arena_native_snapshot.py src/arena_persistence.py src/checkpoint_inventory.py tests/test_arena_persistence.py` | Passed. |
+| `git diff --check` | Passed before final staging; will rerun with staged audit. |
 
-The new regression also rejects corrupt graph references and identity encodings: duplicate identities, dangling references, malformed owned-node digests, and unsupported type tags. Existing `/3` legacy input was admitted only under its exact pinned source/rule/runtime compatibility fingerprint, migrated, and emitted in the current representation. A different/unknown fingerprint still fails closed.
+Legacy native v3 migration, pinned native v4 migration, malformed compact symbols/references, duplicate/dangling graph IDs and unsupported types are exercised in `test_arena_persistence.py`. The earlier standalone runs of those specific tests passed; they are also part of the persistence regression cohort. No whole-suite green claim is made.
 
-## Scope, limits, data preservation
+## Scope, task state and preservation
 
-- The one-million-node structural admission limit, 250,000-node inventory cap, 64 MiB byte cap, depth guard, graph allowlist, strict checksum/canonical JSON checks, and no-mutation behavior remain unchanged.
-- No combat, shield, observer-privacy, Arena scheduling, or NPC generation rule was changed. U-ACT-FULL-003 remains deferred. The multi-shield rule was documented but not implemented.
-- U-ACT-GATE-001 remains FUTURE/unpassed; U-NET-001 remains DEFERRED; U-PER-SCALE-001 remains the sole ACTIVE program pending review.
-- The staged historical U-CAP archive changes and untracked `docs/assignments/universe-arena.json` were preserved and excluded from these commits. The working `.venv`, ignored `legacy/`, local saved-world data, independent `npc-generator`, backups, and frozen Playtest Edition were not modified.
-- The idea inbox was absent at startup; it will be checked again before the final TASKS commit.
+- `TASKS.md` retains U-PER-SCALE-001 as the sole ACTIVE program and advances U-PER-002 with verified 101-interval evidence, pending report review. U-ACT-GATE-001 remains FUTURE/unpassed; U-NET-001 remains DEFERRED; U-ACT-FULL-003 remains DEFERRED. Shield completion is next; ranged Actions remain after shared geometry.
+- The inbox check found no files under `docs/ideas/inbox/`.
+- The five pre-staged user archive paths remain unchanged and excluded from these commits: deletions of U-CAP-002/U-CAP-003 assignment and report files, and the U-THROW-001 patch rename into archive. Untracked `docs/assignments/universe-arena.json` remains untouched. `.venv`, ignored `legacy/`, local saves, independent `npc-generator`, repository backups and the frozen Playtest Edition were not modified.
+- No shield implementation or geometry, ranged Action, combat-mechanics, observer privacy or NPC generation work was added. Save/Load preserves represented observer evidence and combat state.
 
 ## Commits
 
-- `5076e497d3b92cf31a77fd4d59c112ffa4fe2387` — register U-PER-SCALE-001, archive accepted U-ACT-FULL-002 assignment/report, integrate the dated shield adoption, and reconcile program priorities.
-- `240668f867bbda3469b60a34a98effc5cba3819d` — compact long-running Arena checkpoint references; includes focused regressions and the U-PER-002 status reconciliation in TASKS.md.
+- `5076e497d3b92cf31a77fd4d59c112ffa4fe2387` — register U-PER-SCALE-001, archive accepted U-ACT-FULL-002 assignment/report, integrate the adopted shield supplement, and reconcile program priorities.
+- `240668f867bbda3469b60a34a98effc5cba3819d` — introduce compact long-running checkpoint graph identities and initial regressions.
+- `17c147ad4ddab102dce52acd4cd7e301dc00a132` — earlier report closeout for the initial t=67 milestone, now superseded by this follow-up evidence.
+- `d345ed525217571acbd68861c016824af69c8e80` — compact repeated-string/pair inventory encoding, unique-node capture limit correction, terminal-continuation handling, extended fresh-process regressions, and TASKS reconciliation.
+- The current report is committed separately after a scoped staged audit; its commit is the report-only closeout directly following `d345ed525217571acbd68861c016824af69c8e80` in `git log`.
 
-### Closeout audit
-
-The implementation and TASKS reconciliation are committed as `240668f867bbda3469b60a34a98effc5cba3819d`. The report-only commit was separately staged and scoped; `git diff --cached --check` passed and `python3 tools/check_publication_safety.py --staged` reported `files=7 findings=0 result=PASS` (the five pre-existing user archive paths remained in the staged set). Exact final HEAD/report commit is recorded in the Codex closeout. The unrelated archive changes and untracked Arena save remain untouched. No push was authorized or performed.
+**Current closeout:** implementation commit `d345ed525217571acbd68861c016824af69c8e80` is verified. Assignment and report remain active pending ChatGPT review. No push was performed.
