@@ -5,6 +5,7 @@
 ## Current production boundary
 
 - Native closed-field catalog: 152 types in `src/checkpoint_fields.py` (`FIELD_ADAPTERS`).
+- Executable `checkpoint_inventory._TYPES` now includes the same 152 reviewed types. `test_executable_native_type_registry_matches_all_reviewed_field_adapters` prevents type/field-registry drift; this admits the four previously omitted typed records but does not imply semantic closure or restoration readiness.
 - Current production `/12` snapshot admits 104 domain types plus five structural container types via `src/arena_native_snapshot.py` (`_ARENA_TAGS`); the only production capture entry requires a generated Arena and an Arena-owned/exclusive Encounter RNG cursor.
 - `/12` persistence contract is currently rooted in `src/arena_persistence.py` and `src/arena_history_segments.py`; restoration reassembles the graph and calls `arena_native_snapshot.restore()`, which binds Arena-specific progression/receipts. It is not a general native persistence API.
 - `src/checkpoint_inventory.py` advertises a 250,000-node inventory candidate with readiness flags false; `CheckpointCandidate.require_complete()` rejects. `src/checkpoint_adapters.py` contains data recipes/host recipient bindings, not serializers or executable restore callbacks.

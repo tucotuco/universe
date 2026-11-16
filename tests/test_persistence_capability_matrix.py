@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from arena_native_snapshot import _ARENA_TAGS
 from checkpoint_fields import FIELD_ADAPTERS
+from checkpoint_inventory import _TYPES
 
 
 MATRIX = ROOT / 'docs/design/persistence-capability-matrix.md'
@@ -41,6 +42,10 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
             source = ROOT / 'src' / (tag.rsplit('.', 1)[0].replace('.', '/') + '.py')
             self.assertTrue(source.is_file(), (tag, source))
             self.assertIn('Arena snapshot schema', cells[3]) if tag in _ARENA_TAGS else self.assertIn('Outside Arena snapshot schema', cells[3])
+
+    def test_executable_native_type_registry_matches_all_reviewed_field_adapters(self):
+        tags = {f'{cls.__module__}.{cls.__name__}' for cls in _TYPES}
+        self.assertEqual(tags, set(FIELD_ADAPTERS))
 
     def test_matrix_states_arena_only_and_native_restore_boundary(self):
         text = MATRIX.read_text()

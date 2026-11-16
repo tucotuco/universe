@@ -30,7 +30,9 @@
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` — 48 passed.
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — 9 passed in 5.838s.
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` — 4 passed in 9.444s.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` — 2 passed.
+- `.venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` — 3 passed; exact `_TYPES`/`FIELD_ADAPTERS` coverage now includes all 152 registered types.
+- `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_inventory.py'` — 30 passed in 14.012s.
+- `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` — 48 passed in 20.816s.
 - `.venv/bin/python -B -m py_compile src/native_history.py src/native_persistence.py src/transactional_progression.py tests/test_native_history.py tests/test_native_persistence.py` — passed.
 - The combined attempt to run these by package module name plus `test_arena_persistence.py` was interrupted after early test markers, so it is not counted.
 - `PYTHONPATH=tests .venv/bin/python -B -m unittest test_arena_persistence.TestArenaPersistence.test_64_lawful_native_feint_resolutions_segment_history_and_resume` — 1 passed in 272.770s. This confirms the current `/12` path retains and resumes 64 lawful Actions, but the test spends over four minutes at export/fresh-process work and its graph-history storage remains the architecture being replaced. This is measured baseline, not acceptable completion of the new native history requirement.
