@@ -665,13 +665,19 @@ class TestArenaOpponentAttack(unittest.TestCase):
 
     def test_old_arena_save_schema_loads_with_autonomous_strategy_disabled(self):
         import hashlib
-        from arena_persistence import _canonical
+        from arena_persistence import _canonical, _session_record
+        from arena_native_snapshot import encode as encode_native
+        from arena_persistence import decode as decode_portable
 
         session, _candidate, _player, _opponent, _ = create_session()
         # A legacy file never selected an opponent strategy. Re-encode its
         # exact old closed field set and digest, then exercise normal loading.
-        data = json.loads(session.save_encounter_bytes())
-        data.pop("sha256")
+        current = decode_portable(session.save_encounter_bytes())
+        native_wire = encode_native(current["decoded_native"])
+        data = {"schema": "universe.generated-arena-save/4",
+                "native_state_base64": __import__('base64').b64encode(
+                    native_wire).decode("ascii"),
+                "session": _session_record(session,native_wire)}
         data["schema"] = "universe.generated-arena-save/4"
         data["session"].pop("opponent_strategy")
         data["session"].pop("encounter_mode", None)

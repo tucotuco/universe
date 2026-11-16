@@ -254,6 +254,14 @@ def _read_set(encounter):
             current = object.__getattribute__(data['current'], '__dict__')
             keys.update(x for x in current['body_parts'].values() if x is not None)
             if current['armor_id'] is not None: keys.add(current['armor_id'])
+    def history_token(value):
+        # These rows are closed frozen values, appended only by atomic
+        # publication. Capture the full identity sequence so concurrent list
+        # replacement, reorder, insertion or deletion is detected without
+        # recursively copying every previously committed receipt. Strict
+        # checkpoint/inspection paths still validate row content/fingerprints.
+        return ('append_only_history', id(value), tuple(id(row) for row in value))
+
     roots = (
         ('encounter', {k:v for k,v in ed.items() if k not in ('universe','_choice_book')}),
         ('choice_book', {k:v for k,v in book.__dict__.items() if k not in ('encounter','lock')}),
@@ -284,14 +292,27 @@ def _read_set(encounter):
         if cls.__module__ in _DATA_MODULES:
             try: data = object.__getattribute__(value, '__dict__')
             except AttributeError: return ('native_leaf', cls.__name__, identity)
-            return ('native',cls.__module__,cls.__name__,identity,walk(data))
+            data_identity = id(data)
+            if data_identity in seen:
+                data_token = ('alias', data_identity)
+            else:
+                seen.add(data_identity)
+                data_token = ('mapping', data_identity, tuple(
+                    (walk(key), history_token(item)
+                     if ((cls.__module__, cls.__name__, key) in _APPEND_ONLY_HISTORY_FIELDS
+                         and type(item) is list) else walk(item))
+                    for key, item in data.items()))
+            return ('native',cls.__module__,cls.__name__,identity,data_token)
         return ('opaque_identity',cls.__module__,cls.__name__,identity)
     # The synthetic root maps have fresh identities on each capture; discard
     # their container identities while retaining actual authority descendants.
     result = []
     for name, value in roots:
         if name in ('encounter','choice_book','objects','events'):
-            token = tuple((key,walk(item)) for key,item in value.items())
+            token = tuple((key, history_token(item)
+                if (type(encounter).__module__, type(encounter).__name__, key)
+                    in _APPEND_ONLY_HISTORY_FIELDS and type(item) is list
+                else walk(item)) for key,item in value.items())
         elif name == 'library':
             token = walk(value)
         elif name == 'schedule':
@@ -313,6 +334,22 @@ _DATA_MODULES = frozenset(('being','object','weapon','armor','action','activitie
     'location_observation','arena_perception',
     'skill','states','abilities','exertion','physical_fatigue','physiology_registry','library',
     'ability','experience','condition','encounter','standard_fatigue_check','encounter_fatigue_bridge'))
+
+# These are source-reviewed append-only durable records. The checkpoint
+# inventory owns their full content validation; the per-boundary read fence
+# uses only the sequence owner, length and terminal identity to detect a
+# publication/rebinding race without making quiet-time progression quadratic.
+_APPEND_ONLY_HISTORY_FIELDS = frozenset({
+    ('encounter', 'Encounter', '_atomic_interval_history'),
+    ('being', 'BeingInstance', '_atomic_target_history'),
+    ('being', 'BeingInstance', 'skill_use_history'),
+    ('object', 'ObjectInstance', '_atomic_target_history'),
+    ('object', 'ObjectInstance', '_atomic_projectile_history'),
+    ('weapon', 'WeaponInstance', '_atomic_target_history'),
+    ('weapon', 'WeaponInstance', '_atomic_projectile_history'),
+    ('armor', 'ArmorInstance', '_atomic_target_history'),
+    ('arena_perception', 'ArenaPerceptionLedger', '_history'),
+})
 
 
 def _rng_input(encounter, rng_state, rng_owner):

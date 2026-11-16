@@ -2693,6 +2693,7 @@ print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':sh
         self.assertIn('id="saveFile" disabled', page)
         self.assertIn('id="loadFile"', page)
         self.assertIn('id="saveFileInput"', page)
+        self.assertIn('accept=".uarena,.zip,application/zip,.json,application/json"', page)
         self.assertIn('/api/generated/save', page)
         self.assertIn('/api/generated/load', page)
         self.assertIn('id="generate" disabled', page)
@@ -2778,7 +2779,7 @@ print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':sh
         self.assertEqual(saved["status"], 200)
         self.assertEqual(saved["content_type"], "application/octet-stream")
         wire = saved["body"]
-        self.assertTrue(wire.startswith(b'{'))
+        self.assertTrue(wire.startswith(b'PK\x03\x04'))
 
         replacement = GeneratedArenaSession(root_seed_factory=lambda: 1)
         replacement.generate({"starting_experience": "10000",

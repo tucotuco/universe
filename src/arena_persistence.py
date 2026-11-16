@@ -3,16 +3,22 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import math
+import stat
+import zipfile
 
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/9'
-_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/8', 'universe.generated-arena-save/7', 'universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
+SCHEMA = 'universe.generated-arena-save/10'
+_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/9', 'universe.generated-arena-save/8', 'universe.generated-arena-save/7', 'universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
 MAX_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 4098
+MAX_ARCHIVE_CONTENT_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
+_ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/1'
 
 
 class ArenaSaveRejected(ValueError):
@@ -115,39 +121,230 @@ def _session_record(session, native_wire):
 
 
 def encode(session, native_inventory):
-    try:native_wire=encode_native(native_inventory)
-    except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'native Arena state is invalid: {exc}') from exc
+    from arena_history_segments import split
+    try:
+        snapshot, segments, metrics = split(native_inventory)
+    except (TypeError, ValueError) as exc:
+        raise ArenaSaveRejected(f'native Arena state cannot be segmented: {exc}') from exc
     with session._lock:
-        record=_session_record(session,native_wire)
+        record=_session_record(session,b'')
         _tree(record)
-        payload={'schema':SCHEMA,
-            'native_state_base64':base64.b64encode(native_wire).decode('ascii'),
-            'session':record}
-        wire=_canonical(dict(payload,sha256=hashlib.sha256(_canonical(payload)).hexdigest()))
-    if len(wire)>MAX_BYTES:raise ArenaSaveRejected('Arena save exceeds the file size limit')
+        entries={'session.json':_canonical(record), 'snapshot.json':snapshot}
+        for index, segment in enumerate(segments):
+            entries[f'history/segment-{index:06d}.json']=segment
+        _need_archive(len(entries) <= MAX_ARCHIVE_ENTRIES,
+                      'Arena archive has too many independent entries')
+        total_content=sum(map(len,entries.values()))
+        _need_archive(total_content <= MAX_ARCHIVE_CONTENT_BYTES,
+                      'Arena archive exceeds aggregate decoded content limit')
+        listing=[{'name':name,'size':len(data),
+                  'sha256':hashlib.sha256(data).hexdigest()}
+                 for name,data in sorted(entries.items())]
+        manifest_payload={'schema':_ARCHIVE_SCHEMA,'save_schema':SCHEMA,
+            'entry_count':len(entries),'history_segment_count':len(segments),
+            'snapshot_cursor':metrics['history_cursor'],
+            'snapshot_sha256':hashlib.sha256(snapshot).hexdigest(),
+            'entries':listing,
+            'metrics':{'snapshot_bytes':metrics['snapshot_bytes'],
+                'history_bytes':metrics['history_bytes'],
+                'snapshot_nodes':metrics['snapshot_nodes'],
+                'snapshot_depth':metrics['snapshot_depth'],
+                'history_wire_nodes':metrics['history_wire_nodes'],
+                'history_max_depth':metrics['history_max_depth'],
+                'history_segments':metrics['history_segment_count'],
+                'history_owned_nodes':metrics['history_owned_nodes'],
+                'total_inventory_nodes':metrics['total_inventory_nodes'],
+                'history_field_entries':metrics['history_field_entries']}}
+        manifest=_canonical(dict(manifest_payload,
+            sha256=hashlib.sha256(_canonical(manifest_payload)).hexdigest()))
+        output=io.BytesIO()
+        with zipfile.ZipFile(output,'w',compression=zipfile.ZIP_DEFLATED,
+                             compresslevel=6,strict_timestamps=True) as archive:
+            _write_archive_entry(archive,'manifest.json',manifest)
+            for name,data in sorted(entries.items()):
+                _write_archive_entry(archive,name,data)
+        wire=output.getvalue()
+    if len(wire)>MAX_BYTES:raise ArenaSaveRejected('Arena archive exceeds the file size limit')
     return wire
+
+
+def _need_archive(ok, message):
+    if not ok:raise ArenaSaveRejected(message)
+
+
+def _write_archive_entry(archive,name,data):
+    info=zipfile.ZipInfo(name,date_time=(1980,1,1,0,0,0))
+    info.compress_type=zipfile.ZIP_DEFLATED
+    info.external_attr=0o600 << 16
+    info.create_system=3
+    archive.writestr(info,data,compress_type=zipfile.ZIP_DEFLATED,compresslevel=6)
+
+
+def _decode_archive(wire):
+    from arena_history_segments import reassemble, _count, _max_depth
+    _need_archive(type(wire) is bytes and len(wire)<=MAX_BYTES,
+                  'Arena archive is empty or exceeds the file limit')
+    try:
+        archive=zipfile.ZipFile(io.BytesIO(wire),'r')
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ArenaSaveRejected('Arena portable archive is invalid') from exc
+    with archive:
+        infos=archive.infolist()
+        _need_archive(0<len(infos)<=MAX_ARCHIVE_ENTRIES,
+                      'Arena archive entry count is outside limits')
+        names=[item.filename for item in infos]
+        _need_archive(len(names)==len(set(names)) and 'manifest.json' in names,
+                      'Arena archive has duplicate entries or no manifest')
+        _need_archive(all(not item.is_dir() and not item.flag_bits & 1
+                          and item.compress_type in (zipfile.ZIP_STORED,zipfile.ZIP_DEFLATED)
+                          and stat.S_IFMT(item.external_attr >> 16) != stat.S_IFLNK
+                          and item.file_size<=MAX_ARCHIVE_CONTENT_BYTES
+                          and item.filename and not item.filename.startswith('/')
+                          and '\\' not in item.filename
+                          and all(part not in ('','.','..') for part in item.filename.split('/'))
+                          for item in infos),
+                      'Arena archive entry path or metadata is unsafe')
+        decoded_total=sum(item.file_size for item in infos)
+        _need_archive(decoded_total<=MAX_ARCHIVE_CONTENT_BYTES,
+                      'Arena archive exceeds aggregate decoded content limit')
+        _need_archive(all(item.file_size <= max(1,item.compress_size)*200
+                          for item in infos),
+                      'Arena archive compression ratio exceeds safety limit')
+        try:
+            raw={item.filename:archive.read(item) for item in infos}
+        except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
+            raise ArenaSaveRejected('Arena archive CRC or decompression validation failed') from exc
+    def parse(name):
+        try:
+            value=json.loads(raw[name].decode('utf-8'),object_pairs_hook=_pairs,
+                parse_constant=lambda _x:(_ for _ in ()).throw(ValueError('nonfinite number')))
+        except (KeyError,UnicodeError,ValueError,RecursionError) as exc:
+            raise ArenaSaveRejected(f'Arena archive {name} is invalid JSON') from exc
+        canonical=(_canonical(value) if name=='session.json'
+                   else __import__('arena_history_segments')._canonical(value))
+        if canonical!=raw[name]:
+            raise ArenaSaveRejected(f'Arena archive {name} is not canonical')
+        return value
+    manifest=parse('manifest.json')
+    fields={'schema','save_schema','entry_count','history_segment_count',
+            'snapshot_cursor','snapshot_sha256','entries','metrics','sha256'}
+    _need_archive(type(manifest) is dict and set(manifest)==fields
+        and manifest['schema']==_ARCHIVE_SCHEMA and manifest['save_schema']==SCHEMA,
+        'Arena archive manifest schema is unknown or malformed')
+    payload={key:value for key,value in manifest.items() if key!='sha256'}
+    _need_archive(type(manifest['sha256']) is str and hashlib.sha256(_canonical(payload)).hexdigest()==manifest['sha256'],
+                  'Arena archive manifest digest does not match')
+    metric_fields={'snapshot_bytes','history_bytes','snapshot_nodes',
+                   'snapshot_depth','history_wire_nodes','history_max_depth',
+                   'history_segments','history_owned_nodes',
+                   'total_inventory_nodes','history_field_entries'}
+    metrics=manifest['metrics']
+    history_field_entries=metrics.get('history_field_entries') if type(metrics) is dict else None
+    _need_archive(type(metrics) is dict and set(metrics)==metric_fields
+        and all(type(value) is int and value>=0 for key,value in metrics.items()
+                if key!='history_field_entries')
+        and type(history_field_entries) is dict
+        and all(type(key) is str and type(value) is int and value>=0
+                for key,value in history_field_entries.items())
+        and type(manifest['snapshot_cursor']) is int and manifest['snapshot_cursor']>=0,
+        'Arena archive metrics or history cursor are malformed')
+    listing=manifest['entries']
+    _need_archive(type(listing) is list and manifest['entry_count']==len(raw)-1
+                  and len(listing)==len(raw)-1,
+                  'Arena archive manifest entry set is incomplete')
+    declared={}
+    for row in listing:
+        _need_archive(type(row) is dict and set(row)=={'name','size','sha256'}
+            and type(row['name']) is str and row['name'] not in declared
+            and type(row['size']) is int and type(row['sha256']) is str,
+            'Arena archive manifest entry is malformed')
+        declared[row['name']]=row
+    _need_archive(set(raw)-{'manifest.json'}==set(declared),
+                  'Arena archive contains undeclared or missing entries')
+    for name,row in declared.items():
+        _need_archive(len(raw[name])==row['size']
+            and hashlib.sha256(raw[name]).hexdigest()==row['sha256'],
+            'Arena archive entry digest or size does not match')
+    segment_names=sorted(name for name in raw if name.startswith('history/'))
+    expected_names=[f'history/segment-{index:06d}.json'
+                    for index in range(len(segment_names))]
+    _need_archive(segment_names==expected_names
+        and manifest['history_segment_count']==len(segment_names)
+        and set(raw)-{'manifest.json'}=={'snapshot.json','session.json',*segment_names},
+        'Arena archive history segments are missing, duplicated or unordered')
+    snapshot_wire=raw['snapshot.json']
+    snapshot_value=parse('snapshot.json')
+    expected_field_entries={}
+    for descriptor in snapshot_value['history_fields']:
+        _need_archive(type(descriptor) is list and len(descriptor)==5
+            and type(descriptor[2]) is str and type(descriptor[3]) is str
+            and type(descriptor[4]) is int and descriptor[4]>=0,
+            'Arena snapshot history field catalog is malformed')
+        key=f'{descriptor[2]}.{descriptor[3]}'
+        expected_field_entries[key]=expected_field_entries.get(key,0)+descriptor[4]
+    _need_archive(history_field_entries==expected_field_entries,
+                  'Arena archive history field counts disagree with its snapshot')
+    _need_archive(hashlib.sha256(snapshot_wire).hexdigest()==manifest['snapshot_sha256'],
+                  'Arena resumable snapshot digest does not match')
+    inventory=reassemble(snapshot_wire,tuple(raw[name] for name in segment_names))
+    snapshot_nodes=_count(json.loads(snapshot_wire))
+    history_wire_nodes=sum(_count(json.loads(raw[name])) for name in segment_names)
+    snapshot_depth=_max_depth(json.loads(snapshot_wire))
+    history_max_depth=max((_max_depth(json.loads(raw[name]))
+                           for name in segment_names),default=0)
+    history_owned_nodes=sum(len(json.loads(raw[name])['nodes'])
+                            for name in segment_names)
+    sections={row[0]:row[1:] for row in inventory[1][1:]}
+    nodes=sections['nodes'][0]
+    encounter_rows=[row for row in nodes if row[1]=='encounter.Encounter']
+    _need_archive(len(encounter_rows)==1,'Arena archive must contain one Encounter')
+    cursor=dict(encounter_rows[0][2]).get('last_processed_boundary')
+    _need_archive(type(cursor) is tuple and len(cursor)==2 and cursor[0]=='integer'
+        and cursor[1].isdigit() and int(cursor[1])==manifest['snapshot_cursor'],
+        'Arena history cursor disagrees with native Encounter state')
+    _need_archive(metrics['snapshot_bytes']==len(snapshot_wire)
+        and metrics['history_bytes']==sum(len(raw[name]) for name in segment_names)
+        and metrics['snapshot_nodes']==snapshot_nodes
+        and metrics['history_wire_nodes']==history_wire_nodes
+        and metrics['snapshot_depth']==snapshot_depth
+        and metrics['history_max_depth']==history_max_depth
+        and metrics['history_owned_nodes']==history_owned_nodes
+        and metrics['total_inventory_nodes']==len(nodes)
+        and metrics['history_segments']==len(segment_names),
+        'Arena archive measured content does not match its manifest')
+    session=parse('session.json')
+    return {'schema':SCHEMA,'session':session,'decoded_native':inventory,
+            'native_wire':None,'manifest':manifest}
 
 
 def decode(wire):
     if type(wire) is not bytes or not wire or len(wire)>MAX_BYTES:
         raise ArenaSaveRejected('Arena save is empty or exceeds the file size limit')
-    try:data=json.loads(wire.decode('utf-8'),object_pairs_hook=_pairs,
-        parse_constant=lambda _x:(_ for _ in ()).throw(ArenaSaveRejected('non-finite JSON number')))
-    except ArenaSaveRejected:raise
-    except (UnicodeDecodeError,json.JSONDecodeError,RecursionError) as exc:
-        raise ArenaSaveRejected(f'Arena save is not valid UTF-8 JSON: {exc}') from exc
-    if (type(data) is not dict or set(data)!=_FIELDS
-            or data['schema'] not in (SCHEMA, *sorted(_PREVIOUS_SCHEMAS))):
-        raise ArenaSaveRejected('unknown Arena save schema or field set')
-    payload={key:data[key] for key in data if key!='sha256'}
-    if type(data['sha256']) is not str or hashlib.sha256(_canonical(payload)).hexdigest()!=data['sha256']:
-        raise ArenaSaveRejected('Arena save digest does not match its contents')
-    if _canonical(data)!=wire:raise ArenaSaveRejected('Arena save is not canonical')
+    segmented=wire.startswith(b'PK\x03\x04')
+    if segmented:
+        data=_decode_archive(wire)
+    else:
+        try:data=json.loads(wire.decode('utf-8'),object_pairs_hook=_pairs,
+            parse_constant=lambda _x:(_ for _ in ()).throw(ArenaSaveRejected('non-finite JSON number')))
+        except ArenaSaveRejected:raise
+        except (UnicodeDecodeError,json.JSONDecodeError,RecursionError) as exc:
+            raise ArenaSaveRejected(f'Arena save is not valid UTF-8 JSON: {exc}') from exc
+        if (type(data) is not dict or set(data)!=_FIELDS
+                or data['schema'] not in _PREVIOUS_SCHEMAS):
+            raise ArenaSaveRejected('unknown Arena save schema or field set')
+        payload={key:data[key] for key in data if key!='sha256'}
+        if type(data['sha256']) is not str or hashlib.sha256(_canonical(payload)).hexdigest()!=data['sha256']:
+            raise ArenaSaveRejected('Arena save digest does not match its contents')
+        if _canonical(data)!=wire:raise ArenaSaveRejected('Arena save is not canonical')
     _tree(data['session'])
-    try:native_wire=base64.b64decode(data['native_state_base64'],validate=True)
-    except (TypeError,ValueError) as exc:raise ArenaSaveRejected('embedded native state encoding is invalid') from exc
-    try:decoded=decode_native(native_wire)
-    except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'embedded native Arena state refused: {exc}') from exc
+    if segmented:
+        native_wire=None
+        decoded=data['decoded_native']
+    else:
+        try:native_wire=base64.b64decode(data['native_state_base64'],validate=True)
+        except (TypeError,ValueError) as exc:raise ArenaSaveRejected('embedded native state encoding is invalid') from exc
+        try:decoded=decode_native(native_wire)
+        except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'embedded native Arena state refused: {exc}') from exc
     s=data['session']
     required={'encounter_name','player_name','player_id','opponent_id','starting_experience',
         'root_seed','placement_seed',
@@ -205,4 +402,6 @@ def decode(wire):
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)
         except (TypeError,ValueError) as exc:raise ArenaSaveRejected('movement plan encoding is invalid') from exc
-    return {'native_wire':native_wire,'decoded_native':decoded,'session':s}
+    result={'native_wire':native_wire,'decoded_native':decoded,'session':s}
+    if segmented:result['manifest']=data['manifest']
+    return result

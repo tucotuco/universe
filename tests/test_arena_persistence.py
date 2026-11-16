@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from arena_browser_session import GeneratedArenaSession
 from arena_browser_session import ArenaBrowserRequestError
 from arena_hex_map import HexAddress
+from action import Action
 from activities import DelayAction, ThrowAction
 
 
@@ -88,6 +89,64 @@ class TestArenaPersistence(unittest.TestCase):
                 candidate.participants, loaded.participants):
             self.assertEqual(source_being.native.being._arena_perception_ledger.history,
                              loaded_participant.native.being._arena_perception_ledger.history)
+
+    def test_segmented_portable_archive_is_exact_and_rejects_partial_history_transactionally(self):
+        import io
+        import zipfile
+        from arena_persistence import ArenaSaveRejected, decode
+
+        source=GeneratedArenaSession(root_seed_factory=lambda:20261115)
+        source.generate({"starting_experience":"10000","width_cells":"5",
+                         "height_cells":"5"})
+        source.choose_run()
+        source.advance_one_second()
+        original_candidate=source.active_candidate
+        original=source.save_encounter_bytes()
+        parsed=decode(original)
+        metrics=parsed["manifest"]["metrics"]
+        self.assertEqual(parsed["manifest"]["snapshot_cursor"],1)
+        self.assertGreater(metrics["history_segments"],0)
+        self.assertLess(metrics["snapshot_nodes"],60_000)
+        restored=GeneratedArenaSession()
+        restored.load_encounter_bytes(original)
+        self.assertEqual(restored.save_encounter_bytes(),original)
+
+        with zipfile.ZipFile(io.BytesIO(original)) as archive:
+            entries={name:archive.read(name) for name in archive.namelist()}
+        segment_name=next(name for name in entries if name.startswith("history/"))
+        corrupted=dict(entries)
+        corrupted[segment_name]=corrupted[segment_name]+b" "
+        extra=dict(entries)
+        extra['history/unlisted-extra.json']=b'{}'
+        unsafe_path=dict(entries)
+        unsafe_path['../outside.json']=b'{}'
+
+        def archive_bytes(rows):
+            output=io.BytesIO()
+            with zipfile.ZipFile(output,"w",compression=zipfile.ZIP_DEFLATED) as archive:
+                for name,data in rows.items():
+                    archive.writestr(name,data)
+            return output.getvalue()
+
+        missing=dict(entries)
+        del missing[segment_name]
+        duplicate_output=io.BytesIO()
+        with zipfile.ZipFile(duplicate_output,"w",compression=zipfile.ZIP_DEFLATED) as archive:
+            for name,data in entries.items():
+                archive.writestr(name,data)
+            archive.writestr("snapshot.json",entries["snapshot.json"])
+        for label,bad in (("truncated",original[:-12]),
+                          ("missing-history-segment",archive_bytes(missing)),
+                          ("altered-history-segment",archive_bytes(corrupted)),
+                          ("unlisted-extra-entry",archive_bytes(extra)),
+                          ("unsafe-path",archive_bytes(unsafe_path)),
+                          ("duplicate-entry",duplicate_output.getvalue())):
+            with self.subTest(corruption=label):
+                with self.assertRaises((ArenaSaveRejected, ArenaBrowserRequestError)):
+                    source.load_encounter_bytes(bad)
+                self.assertIs(source.active_candidate,original_candidate)
+                self.assertEqual(source.active_candidate.encounter.time,1)
+                self.assertEqual(source.save_encounter_bytes(),original)
 
     def test_observer_current_view_and_history_restore_in_fresh_process(self):
         source = GeneratedArenaSession(root_seed_factory=lambda: 20261114)
@@ -568,17 +627,16 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
                          source_player._atomic_target_history)
 
     def test_compact_native_graph_ids_reject_corrupt_references_and_types(self):
-        import base64
         import copy
         import hashlib
         from arena_native_snapshot import (ArenaNativeSnapshotRejected,
-            _canonical, decode as decode_native)
+            _canonical, capture, encode as encode_native, decode as decode_native)
 
         source = GeneratedArenaSession(root_seed_factory=lambda: 20261115)
         source.generate({"starting_experience": "10000", "width_cells": "5",
                          "height_cells": "5"})
-        payload = json.loads(source.save_encounter_bytes())
-        native_wire = base64.b64decode(payload["native_state_base64"], validate=True)
+        native_wire = encode_native(capture(source.active_candidate.universe,
+            source.active_candidate.encounter, source._rng_cursor))
         native = json.loads(native_wire)
         self.assertEqual(native["schema"], "universe.generated-arena-native-state/5")
         compact = native["inventory"][1]
@@ -653,14 +711,16 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         import base64
         import hashlib
         from arena_native_snapshot import (_LEGACY_V4_COMPATIBILITY,
-            _canonical as native_canonical, decode as decode_native)
+            _canonical as native_canonical, capture, encode as encode_native,
+            decode as decode_native)
         from arena_persistence import _canonical as save_canonical
 
         source = GeneratedArenaSession(root_seed_factory=lambda: 20261115)
         source.generate({"starting_experience": "10000", "width_cells": "5",
                          "height_cells": "5"})
-        current_outer = json.loads(source.save_encounter_bytes())
-        current_wire = base64.b64decode(current_outer["native_state_base64"], validate=True)
+        current_inventory = capture(source.active_candidate.universe,
+            source.active_candidate.encounter, source._rng_cursor)
+        current_wire = encode_native(current_inventory)
         current_inventory = decode_native(current_wire)
         legacy_inventory = (_LEGACY_V4_COMPATIBILITY, current_inventory[1])
         legacy_payload = {"schema": "universe.generated-arena-native-state/4",
@@ -670,25 +730,20 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             sha256=hashlib.sha256(native_canonical(legacy_payload)).hexdigest()))
         outer_payload = {"schema": "universe.generated-arena-save/8",
             "native_state_base64": base64.b64encode(legacy_wire).decode("ascii"),
-            "session": current_outer["session"]}
+            "session": __import__('arena_persistence')._session_record(source,current_wire)}
         legacy_save = save_canonical(dict(outer_payload,
             sha256=hashlib.sha256(save_canonical(outer_payload)).hexdigest()))
 
         restored = GeneratedArenaSession()
         restored.load_encounter_bytes(legacy_save)
-        migrated = json.loads(restored.save_encounter_bytes())
-        migrated_native = json.loads(base64.b64decode(
-            migrated["native_state_base64"], validate=True))
-        self.assertEqual(migrated["schema"], "universe.generated-arena-save/9")
-        self.assertEqual(migrated_native["schema"],
-                         "universe.generated-arena-native-state/5")
+        migrated = restored.save_encounter_bytes()
+        self.assertTrue(migrated.startswith(b"PK\x03\x04"))
         self.assertEqual(restored.active_candidate.encounter.time, 0)
 
 
     def test_extended_seed14_combat_checkpoint_stays_strict_and_continues_exactly(self):
         """The former 67-second combat overflow resumes exactly in a new OS process."""
-        import base64
-        from arena_native_snapshot import _tree
+        from arena_persistence import decode as decode_save
         profile = json.loads((ROOT / "tests/fixtures/arena/uact-full-002-one-shield.json").read_text())
         source = GeneratedArenaSession(root_seed_factory=lambda: 14,
                                        ground_loadout_profile=profile)
@@ -701,20 +756,17 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
 
         def checkpoint():
             wire = source.save_encounter_bytes()
-            native = base64.b64decode(json.loads(wire)["native_state_base64"], validate=True)
-            count = [0]
-            decoded = json.loads(native)
-            _tree(decoded, count=count)
-            def max_depth(value, depth=0):
-                if type(value) is list:
-                    return max([depth] + [max_depth(item, depth + 1) for item in value])
-                if type(value) is dict:
-                    return max([depth] + [max_depth(item, depth + 1)
-                                          for item in value.values()])
-                return depth
+            parsed = decode_save(wire)
+            metrics = parsed["manifest"]["metrics"]
             return {"wire": wire, "outer_bytes": len(wire),
-                    "native_bytes": len(native), "nodes": count[0],
-                    "depth": max_depth(decoded),
+                    "native_bytes": metrics["snapshot_bytes"]+metrics["history_bytes"],
+                    "nodes": metrics["snapshot_nodes"]+metrics["history_wire_nodes"],
+                    "snapshot_nodes": metrics["snapshot_nodes"],
+                    "history_bytes": metrics["history_bytes"],
+                    "history_segments": metrics["history_segments"],
+                    "history_field_entries": metrics["history_field_entries"],
+                    "depth": max(metrics["snapshot_depth"],
+                                 metrics["history_max_depth"]),
                     "receipts": len(getattr(encounter, "_atomic_interval_history", ())),
                     "actions": len(source._all_melee_actions(candidate)),
                     "pending_actions": len(encounter.pending_action_list),
@@ -743,8 +795,8 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             while encounter.time < boundary:
                 source.advance_one_second()
             checkpoints[boundary] = checkpoint()
-            self.assertLess(checkpoints[boundary]["nodes"], 1_000_000,
-                            f"strict tree limit exceeded at native t={boundary}")
+            self.assertLess(checkpoints[boundary]["snapshot_nodes"], 1_000_000,
+                            f"resumable snapshot exceeds its per-document limit at t={boundary}")
 
         self.assertEqual(encounter.time, 67)
         self.assertEqual(len(encounter._atomic_interval_history), 67)
@@ -801,7 +853,8 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
         self.assertEqual(len(source._all_melee_actions(candidate)), 22)
         self.assertEqual((player.get_hit_points(), opponent.get_hit_points()), (-2, 17))
         checkpoints[91] = checkpoint()
-        self.assertLess(checkpoints[91]["nodes"], 1_000_000)
+        self.assertLess(checkpoints[91]["snapshot_nodes"], 1_000_000)
+        self.assertLess(checkpoints[91]["nodes"], 10_000_000)
 
         def fresh_process_roundtrip(boundary, steps):
             with tempfile.TemporaryDirectory(prefix=f"arena-checkpoint-t{boundary}-") as directory:
@@ -848,6 +901,10 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
         while encounter.time < 100:
             source.advance_one_second()
         checkpoints[100] = checkpoint()
+        self.assertEqual(checkpoints[100]["snapshot_nodes"],
+                         checkpoints[91]["snapshot_nodes"])
+        self.assertGreater(checkpoints[100]["history_bytes"],
+                           checkpoints[91]["history_bytes"])
         continued, later_view = fresh_process_roundtrip(100, 1)
         self.assertEqual(later_view["time"], 101)
         source.advance_one_second()
@@ -859,6 +916,182 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
                 str(boundary): {key: value for key, value in row.items()
                                 if key != "wire"}
                 for boundary, row in checkpoints.items()}, sort_keys=True))
+
+    def test_64_lawful_native_feint_resolutions_segment_history_and_resume(self):
+        """A generated Arena can retain and continue more than 64 native combat Actions."""
+        profile = json.loads((ROOT / "tests/fixtures/arena/empty.json").read_text())
+        source = GeneratedArenaSession(root_seed_factory=lambda: 20261107,
+                                       ground_loadout_profile=profile)
+        source.generate({"starting_experience": "5000000", "width_cells": "10",
+                         "height_cells": "5", "equipment_mode": "equipped",
+                         "opponent_strategy": "none"})
+        # Prepublication scenario setup uses represented continuous positions
+        # from the native Arena map so each Feint reaches the Attack Roll.
+        from spatial.state import CartesianPosition
+        from hex_facing import nearest_facing
+        candidate = source.active_candidate
+        player, target = (row.native.being for row in candidate.participants)
+        origin = player.get_position()
+        target.set_position(CartesianPosition(origin.x + 0.2, origin.y, origin.z))
+        player.set_hex_facing(nearest_facing((1.0, 0.0, 0.0)))
+        candidate.encounter.difficulty_class = 1
+        source.choose_run()
+        source.advance_one_second()
+        candidate = source.active_candidate
+        encounter = candidate.encounter
+        player, target = (row.native.being for row in candidate.participants)
+        handle = source._view_handles[target.id]
+
+        def resolve_feint():
+            ledger = object.__getattribute__(player, "__dict__")["_arena_perception_ledger"]
+            evidence = next(row for row in ledger.current if row.entity_id == target.id)
+            action, prepared = source._feint_preflight(
+                candidate, player, target.id, evidence, "thrust")
+            sequence = 1 + sum(
+                type(event) is Action and event.event_type == "feint"
+                and event.actor_id == player.id
+                for event in candidate.universe.event_history.values())
+            action.id = f"{encounter.id}/arena-player-feint/{sequence}"
+            source._selected_entity_handle = handle
+            encounter.schedule_action(action)
+            self.assertNotIn(action.id, encounter.finished_action_list)
+            encounter.step(int(prepared.end_time - encounter.time))
+            self.assertIn(action.id, encounter.finished_action_list)
+            return action
+
+        actions = [resolve_feint() for _ in range(64)]
+        feint_ids = {action.id for action in actions}
+        self.assertEqual(len(feint_ids), 64)
+        self.assertTrue(feint_ids <= set(encounter.finished_action_list))
+        committed = encounter.inspect_committed(encounter.time)
+        for action in actions:
+            receipt = committed.action(action.id)
+            self.assertEqual(receipt.lifecycle.status, "finished")
+            self.assertIn(receipt.facts.outcome, ("success", "failure"))
+            self.assertAlmostEqual(dict(receipt.facts.metadata)["distance"], 0.2)
+        self.assertEqual((player.get_hit_points(), target.get_hit_points()),
+                         (81, 97))
+        at_64 = source.save_encounter_bytes()
+        from arena_persistence import decode as decode_save
+        parsed = decode_save(at_64)
+        metrics = parsed["manifest"]["metrics"]
+        self.assertEqual(parsed["manifest"]["snapshot_cursor"], encounter.time)
+        self.assertLess(metrics["snapshot_nodes"], 1_000_000)
+        self.assertEqual(metrics["history_segments"], encounter.time)
+        self.assertEqual(metrics["history_field_entries"][
+            "encounter.Encounter._atomic_interval_history"], encounter.time)
+        self.assertGreater(metrics["history_wire_nodes"], 500_000)
+
+        def advance_one_more(session):
+            candidate = session.active_candidate
+            player = candidate.participants[0].native.being
+            target = candidate.participants[1].native.being
+            handle = session._view_handles[target.id]
+            view = session.choose_feint({"handle": handle, "motion": "thrust"})
+            action = session._player_feint_action(candidate, player)
+            while view["feint_action"]["status"] == "executing":
+                view = session.advance_one_second()
+            return action
+
+        with tempfile.TemporaryDirectory(prefix="arena-64-actions-") as directory:
+            input_path = Path(directory) / "64-actions.uarena"
+            restored_path = Path(directory) / "restored.uarena"
+            continued_path = Path(directory) / "continued.uarena"
+            input_path.write_bytes(at_64)
+            script = """
+import json,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();raw=Path(sys.argv[1]).read_bytes();s.load_encounter_bytes(raw)
+assert s.save_encounter_bytes()==raw
+c=s.active_candidate;e=c.encounter;p,t=(r.native.being for r in c.participants)
+ids=[p.id,t.id]
+v=s.choose_feint({'handle':s._view_handles[t.id],'motion':'thrust'})
+a=s._player_feint_action(c,p)
+while v['feint_action']['status']=='executing':v=s.advance_one_second()
+Path(sys.argv[2]).write_bytes(raw)
+Path(sys.argv[3]).write_bytes(s.save_encounter_bytes())
+print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
+ 'ids':ids,'action_id':a.id,'feints':sum(1 for x in e.finished_action_list
+ if getattr(c.universe.get_event_by_id(x),'event_type',None)=='feint'),
+ 'hp':[p.get_hit_points(),t.get_hit_points()]},sort_keys=True))
+"""
+            environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                PYTHONNOUSERSITE="1", PYTHONPATH=os.pathsep.join(
+                    (str(ROOT / "tests"), str(ROOT / "src"), str(ROOT / "examples"))))
+            result = subprocess.run([sys.executable, "-B", "-c", script,
+                str(input_path), str(restored_path), str(continued_path)], cwd=ROOT,
+                env=environment, capture_output=True, text=True, timeout=240,
+                check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            continued = json.loads(result.stdout)
+            self.assertEqual(restored_path.read_bytes(), at_64)
+            action = advance_one_more(source)
+            self.assertEqual(continued_path.read_bytes(), source.save_encounter_bytes())
+        self.assertEqual(continued["time"], encounter.time)
+        self.assertEqual(continued["receipts"], encounter.time)
+        self.assertEqual(continued["ids"], [player.id, target.id])
+        self.assertEqual(continued["action_id"], action.id)
+        self.assertEqual(continued["feints"], 65)
+        self.assertEqual(continued["hp"], [81, 97])
+        at_65 = decode_save(source.save_encounter_bytes())
+        at_65_metrics = at_65["manifest"]["metrics"]
+        # After a burst of Actions, hold the represented world steady for 169
+        # legal native quiet boundaries. Only current time and committed
+        # history advance; the resume snapshot must plateau.
+        for _ in range(169):
+            encounter.step(1)
+        self.assertEqual(encounter.time, 300)
+        import time
+        save_started = time.perf_counter()
+        at_300_wire = source.save_encounter_bytes()
+        save_seconds = time.perf_counter() - save_started
+        at_300 = decode_save(at_300_wire)
+        at_300_metrics = at_300["manifest"]["metrics"]
+        self.assertEqual(at_300["manifest"]["snapshot_cursor"], 300)
+        self.assertEqual(at_300_metrics["snapshot_nodes"], at_65_metrics["snapshot_nodes"])
+        self.assertEqual(at_300_metrics["snapshot_bytes"], at_65_metrics["snapshot_bytes"])
+        self.assertEqual(at_300_metrics["history_segments"], 300)
+        self.assertEqual(at_300_metrics["history_field_entries"][
+            "encounter.Encounter._atomic_interval_history"], 300)
+        self.assertGreater(at_300_metrics["history_bytes"], at_65_metrics["history_bytes"])
+        self.assertEqual((player.get_hit_points(), target.get_hit_points()), (81, 97))
+        with tempfile.TemporaryDirectory(prefix="arena-300-quiet-") as directory:
+            path = Path(directory) / "t300.uarena"
+            output = Path(directory) / "t301.uarena"
+            path.write_bytes(at_300_wire)
+            script = """import sys
+import json,time
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+s=GeneratedArenaSession();raw=Path(sys.argv[1]).read_bytes();started=time.perf_counter();s.load_encounter_bytes(raw)
+assert s.save_encounter_bytes()==raw
+s.active_candidate.encounter.step(1)
+Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
+print(json.dumps({'load_and_resave_seconds':time.perf_counter()-started},sort_keys=True))
+"""
+            environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                PYTHONNOUSERSITE="1", PYTHONPATH=os.pathsep.join(
+                    (str(ROOT / "tests"), str(ROOT / "src"), str(ROOT / "examples"))))
+            result = subprocess.run([sys.executable, "-B", "-c", script,
+                str(path), str(output)], cwd=ROOT, env=environment,
+                capture_output=True, text=True, timeout=240, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            load_metrics = json.loads(result.stdout)
+            encounter.step(1)
+            self.assertEqual(output.read_bytes(), source.save_encounter_bytes())
+        import resource
+        if os.environ.get("UNIVERSE_PER_SCALE_METRICS"):
+            print("U-PER-SCALE-64-METRICS " + json.dumps({
+                "t64": metrics,
+                "t65": at_65_metrics,
+                "t300": at_300_metrics,
+                "t300_outer_archive_bytes": len(at_300_wire),
+                "t300_save_seconds": save_seconds,
+                "fresh_process_load_and_resave_seconds": load_metrics["load_and_resave_seconds"],
+                "process_peak_rss_platform_units": resource.getrusage(
+                    resource.RUSAGE_SELF).ru_maxrss,
+            }, sort_keys=True))
 
 
 if __name__ == "__main__":

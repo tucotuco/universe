@@ -728,6 +728,38 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
             and copies[0].inspection.start == encounter.start_time, 'missing initial committed receipt')
         all_action_ids=[]
         target_storage={}
+        target_records={}
+        target_anchor_index={}
+        for live_receipt, record in zip(history, copies):
+            for key, anchor in record.inspection.target_anchors.items():
+                target_anchor_index.setdefault(key, {})[record.boundary] = anchor
+        # Build one boundary index per Target history. The old validator copied
+        # and searched every Target's complete prefix once for every Encounter
+        # boundary (quadratic work) even though publication appends immutable,
+        # boundary-keyed records. Validate each durable row once, then check its
+        # receipt anchor at the corresponding boundary below.
+        for key, anchors in target_anchor_index.items():
+            obj = objects.get(key)
+            native_data(obj, _OBJECTS)
+            storage = obj.__dict__.get('_atomic_target_history')
+            _require(type(storage) is list, 'Target history is not a native list')
+            records = {}
+            for row in storage:
+                _require(type(row) is publication.TargetIntervalRecord,
+                         'unreviewed Target history entry')
+                encounter_id = object.__getattribute__(row, '__dict__').get('encounter_id')
+                if type(encounter_id) is not str:
+                    raise UnsupportedEvaluation('Target history provenance identity is malformed')
+                if encounter_id != encounter.id:
+                    continue
+                row_boundary = object.__getattribute__(row, '__dict__').get('boundary')
+                _require(type(row_boundary) is int and row_boundary not in records,
+                         'duplicate Target history boundary')
+                records[row_boundary] = row
+            _require(set(records) == set(anchors),
+                     'unreceipted Target history entry')
+            target_storage[key] = storage
+            target_records[key] = records
         projectile_effects=set()
         for live_receipt, record in zip(history,copies):
             meta = record.inspection
@@ -825,16 +857,14 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                     or key in authorized_spatial_transition_ids)
                 _require(detached(obj.id) == key and id(obj) == anchor[0] and id(obj.current) == anchor[1]
                     and spatial_identity_ok, 'Target identity changed')
-                storage = obj.__dict__.get('_atomic_target_history')
-                _require(type(storage) is list and id(storage) == anchor[3], 'Target history identity changed')
-                target_storage[key]=storage
-                _require(all(type(r) is publication.TargetIntervalRecord for r in storage), 'unreviewed Target history entry')
-                validated=tuple(detached(r) for r in storage)
-                owned = [r for r, value in zip(storage,validated)
-                         if value.encounter_id == encounter.id and value.boundary == record.boundary]
-                _require(len(owned) == 1 and id(owned[0]) == anchor[4]
-                    and fingerprint(owned[0]) == anchor[5], 'Target history/provenance changed')
-                state = detached(owned[0].state)
+                storage = target_storage.get(key)
+                owned = target_records.get(key, {}).get(record.boundary)
+                _require(type(storage) is list and id(storage) == anchor[3],
+                         'Target history identity changed')
+                _require(owned is not None and id(owned) == anchor[4]
+                    and fingerprint(owned) == anchor[5],
+                    'Target history/provenance changed')
+                state = detached(owned.state)
                 _require(state.target_id == key, 'foreign Target state')
                 batch_targets[key] = state
                 _require(all(row.identity in meta.effects and row == meta.effects[row.identity] for row in state.incoming)
@@ -894,10 +924,8 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
                 timeline.append(BoundaryInspection(encounter.id,record.boundary,meta.start,record.action_ids,record.effect_ids,meta.starts))
                 selected_meta = meta
         for key, storage in target_storage.items():
-            own_records=[row for row in storage if type(row) is publication.TargetIntervalRecord
-                         and row.encounter_id == encounter.id]
-            expected=[row.boundary for row in copies if key in row.inspection.target_anchors]
-            _require([row.boundary for row in own_records] == expected, 'unreceipted Target history entry')
+            _require(id(objects[key].__dict__.get('_atomic_target_history')) == id(storage),
+                     'Target history identity changed')
         _validate_live_latest(encounter, latest_targets, copies[-1].inspection, objectives, recipients, all_action_ids,
                               tuple(row for row in issued_landings if row.boundary==copies[-1].boundary))
         return detached(EncounterInspection(encounter.id, boundary, history[-1].boundary, actions,

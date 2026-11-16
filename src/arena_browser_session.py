@@ -3161,6 +3161,15 @@ class GeneratedArenaSession:
             action, prepared = self._feint_preflight(
                 candidate, player, entity_id, evidence, motion,
                 unarmed=unarmed, body_region=body_region)
+            # Action IDs are durable Encounter identity, so a legal post-load
+            # choice must not receive a fresh uuid4.  The count derives only
+            # from already registered native Feints and is identical after a
+            # strict restore; the Encounter ID supplies the stable namespace.
+            sequence = 1 + sum(
+                type(event) is Action and event.event_type == "feint"
+                and event.actor_id == player.id
+                for event in candidate.universe.event_history.values())
+            action.id = f"{candidate.encounter.id}/arena-player-feint/{sequence}"
             try:
                 candidate.encounter.schedule_action(action)
             except Exception as exc:

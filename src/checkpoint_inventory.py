@@ -200,6 +200,25 @@ class _Inventory:
             for field,item in sorted(data.items()):
                 projected=self.field(tag,field,item,ref,path,depth)
                 parts.append((field,projected))
+            # Restore initializes this append-only receipt list for pristine
+            # Encounters even before the first transactional boundary. Make
+            # its empty value explicit in the canonical inventory from the
+            # initial save so immediate fresh-process Save remains stable.
+            if tag == 'encounter.Encounter' and '_atomic_interval_history' not in data:
+                self.count += 1
+                _require(self.count <= 250000,'inventory graph node limit exceeded')
+                history_ref = self._owned_ref(path+('_atomic_interval_history',))
+                self.nodes.append((history_ref,'list',()))
+                parts.append(('_atomic_interval_history',('reference',history_ref)))
+                parts.sort(key=lambda row: row[0])
+            if tag == 'encounter.Encounter':
+                for transient_field in ('_transactional_mode', '_active_fatigue_frame',
+                                        '_boundary_context', '_advancing', '_running',
+                                        '_dispatching'):
+                    if transient_field not in data:
+                        parts.append((transient_field,
+                            ('excluded-transient', transient_field)))
+                parts.sort(key=lambda row: row[0])
             node=(ref,tag,tuple(parts))
         else:
             # No property, serializer, repr or callback from an extension runs.
