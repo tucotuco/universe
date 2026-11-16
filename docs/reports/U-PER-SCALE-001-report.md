@@ -16,7 +16,7 @@
 | Exact serialized-field diagnostic audit | 2026-11-16T04:16:02-08:00 | 2026-11-16T04:24:43-08:00 | PT8M41S |
 | Headless initial/delta proof | 2026-11-16T04:59:08-08:00 | 2026-11-16T05:13:46-08:00 | PT14M38S |
 
-| Native headless resume slice | 2026-11-16T10:46:06-08:00 | CLOSEOUT TIME RECORDED BELOW | see problems-first closeout |
+| Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
 ## Latest continuation — native headless resume
 
@@ -51,7 +51,7 @@ Focused verification: `.venv/bin/python -m unittest tests.test_native_headless_r
 
 The adjacent `.venv/bin/python -m unittest test_transactional_progression -v` could not import the suite's sibling fixture; rerunning with `PYTHONPATH=tests` executed 61 tests and reported **55 passed, 4 errors, 2 failures** in 34.815 s. The four errors are existing tests scheduling overlapping Actions without the adopted acquired Multi-action skill. The two failures expect `UnsupportedEvaluation` for unsupported starting graphs during mode selection. None calls the new private resume hook, and this diff adds that hook without changing existing progression code. These discrepancies were not reproduced against a separately checked-out baseline in this time-boxed slice; they remain separately documented and were not changed here.
 
-**Execution interval:** Start `2026-11-16T10:46:06-08:00`; End and elapsed are recorded at closeout immediately before the final audited documentation commit.
+**Execution interval:** Start `2026-11-16T10:46:06-08:00`; End `2026-11-16T11:27:35-08:00`; elapsed `PT41M29S`.
 
 **Current addendum disposition:** Current portable save schema `/12` (archive `/3`) stores the native resumable graph, compatibility-bound immutable definitions, and independently validated commit-boundary history. Completed native Action roots are now stored with their exact boundary segments and restored before strict native inventory validation. At t=300: snapshot 23,813 nodes / 331,315 bytes; definitions 51,921 / 560,106; history 1,139,080 / 12,815,153; compressed archive 2,968,730 bytes. Snapshot falls 39.3% (16,517 nodes / 214,795 bytes) versus `/11`, with no loss of Action identity or history. The 64+1 Feint run, 169 quiet boundaries, strict fresh-process Load→Save, and t=301 continuation pass. Supported `/10` and `/11` archives migrate through fresh processes. Chrome `/12` Save produced the served UI download confirmation; Open-file Load remains unverified because extension local-file access is disabled. HTTP/session Save/Load, transactional rejection, and interrupted-export preservation pass. The 2/20/200 curve concerns registry Beings, not active combatants. The assignment remains ACTIVE: state is still a recursive native graph, completed Choice settlement wrappers remain in current state, Load eagerly reassembles history, active Encounter participation is two Beings, and served Chrome Open is unverified.
 
@@ -349,8 +349,8 @@ The latest report's code-only/progress conclusions are superseded only within th
 
 ## Current closeout — native headless resume slice
 
-- Implementation commits: `0de182cef463bc0d161752a17a0b060caa7aa12d` — bounded Arena-independent native Encounter resume, native HP consequence and focused tests; `71280b0176d559a6eb89f0ef88fba5e87ed6152d` — missing-checkpoint-metadata regression.
-- `TASKS.md`, prior delta findings, this engineering report, and `docs/design/persistence-headless-resume-findings.md` were reviewed together. The documentation closeout commit is recorded here after it is created.
-- Final focused run: **8 passed in 16.783 s**; `py_compile` and `git diff --check` passed. The 61-test adjacent transactional suite result and non-baseline-reproduced six mismatches are above.
+- Implementation commits: `0de182cef463bc0d161752a17a0b060caa7aa12d` — bounded Arena-independent native Encounter resume, native HP consequence and focused tests; `71280b060bd8fa26157505d754972d06fe8ff155` — missing-checkpoint-metadata regression.
+- `TASKS.md`, prior delta findings, this engineering report, and `docs/design/persistence-headless-resume-findings.md` were reviewed together. Documentation commit: `2c8d21d19c78096f307ccf3e5d72d611ea2fe8a4` — reconcile TASKS, previous findings, this report and the new native resume findings.
+- Final focused run: **8 passed in 16.783 s**; `py_compile` and `git diff --check` passed. A direct fresh-CLI write/resume command also reached t=9 with Bram HP 6, zero forbidden Arena imports, 46.558 ms strict load/rehydration and 48,300,032 peak-RSS platform units. The 61-test adjacent transactional suite result and non-baseline-reproduced six mismatches are above.
 - `tools/check_publication_safety.py --staged` passed before the implementation commit (11 staged paths, 0 findings). After the scoped commit, the five unrelated historical archive operations remain staged and unchanged; the safety check again passed (6 staged paths, 0 findings). No unrelated staged paths entered the implementation commit. The user-provided assignment, archive save artifacts, process standard and other untracked files were preserved.
-- No push or history rewrite. U-PER-SCALE-001 remains sole ACTIVE; this bounded native resume is verified, while the broader program is not complete.
+- Active time across six recorded sessions is `PT9H33M24S`; total calendar span is `PT18H44M55S`, with `PT9H11M31S` between sessions excluded. No push or history rewrite. U-PER-SCALE-001 remains sole ACTIVE; this bounded native resume is verified, while the broader program is not complete.
