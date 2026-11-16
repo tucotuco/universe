@@ -181,7 +181,7 @@ def _write_archive_entry(archive,name,data):
 
 
 def _decode_archive(wire):
-    from arena_history_segments import reassemble, _count, _max_depth
+    from arena_history_segments import reassemble
     _need_archive(type(wire) is bytes and len(wire)<=MAX_BYTES,
                   'Arena archive is empty or exceeds the file limit')
     try:
@@ -286,14 +286,9 @@ def _decode_archive(wire):
                   'Arena archive history field counts disagree with its snapshot')
     _need_archive(hashlib.sha256(snapshot_wire).hexdigest()==manifest['snapshot_sha256'],
                   'Arena resumable snapshot digest does not match')
-    inventory=reassemble(snapshot_wire,tuple(raw[name] for name in segment_names))
-    snapshot_nodes=_count(json.loads(snapshot_wire))
-    history_wire_nodes=sum(_count(json.loads(raw[name])) for name in segment_names)
-    snapshot_depth=_max_depth(json.loads(snapshot_wire))
-    history_max_depth=max((_max_depth(json.loads(raw[name]))
-                           for name in segment_names),default=0)
-    history_owned_nodes=sum(len(json.loads(raw[name])['nodes'])
-                            for name in segment_names)
+    inventory,archive_metrics=reassemble(snapshot_wire,
+        tuple(raw[name] for name in segment_names),snapshot_value=snapshot_value,
+        include_metrics=True)
     sections={row[0]:row[1:] for row in inventory[1][1:]}
     nodes=sections['nodes'][0]
     encounter_rows=[row for row in nodes if row[1]=='encounter.Encounter']
@@ -304,11 +299,11 @@ def _decode_archive(wire):
         'Arena history cursor disagrees with native Encounter state')
     _need_archive(metrics['snapshot_bytes']==len(snapshot_wire)
         and metrics['history_bytes']==sum(len(raw[name]) for name in segment_names)
-        and metrics['snapshot_nodes']==snapshot_nodes
-        and metrics['history_wire_nodes']==history_wire_nodes
-        and metrics['snapshot_depth']==snapshot_depth
-        and metrics['history_max_depth']==history_max_depth
-        and metrics['history_owned_nodes']==history_owned_nodes
+        and metrics['snapshot_nodes']==archive_metrics['snapshot_nodes']
+        and metrics['history_wire_nodes']==archive_metrics['history_wire_nodes']
+        and metrics['snapshot_depth']==archive_metrics['snapshot_depth']
+        and metrics['history_max_depth']==archive_metrics['history_max_depth']
+        and metrics['history_owned_nodes']==archive_metrics['history_owned_nodes']
         and metrics['total_inventory_nodes']==len(nodes)
         and metrics['history_segments']==len(segment_names),
         'Arena archive measured content does not match its manifest')

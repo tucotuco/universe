@@ -72,12 +72,14 @@ def _canonical(value):
         raise ArenaHistorySegmentsRejected('history archive JSON is not canonical data') from exc
 
 
-def _count(value, *, max_nodes=MAX_SEGMENT_NODES, max_depth=128):
+def _measure(value, *, max_nodes=MAX_SEGMENT_NODES, max_depth=128):
     count = 0
+    deepest = 0
     stack = [(value, 0)]
     while stack:
         row, depth = stack.pop()
         count += 1
+        deepest = max(deepest, depth)
         _need(count <= max_nodes and depth <= max_depth,
               'history archive document exceeds structural limits')
         if type(row) is list:
@@ -89,20 +91,11 @@ def _count(value, *, max_nodes=MAX_SEGMENT_NODES, max_depth=128):
         else:
             _need(row is None or type(row) in (str, int, bool),
                   'history archive has unsupported JSON data')
-    return count
+    return count, deepest
 
 
-def _max_depth(value):
-    maximum = 0
-    stack = [(value, 0)]
-    while stack:
-        row, depth = stack.pop()
-        maximum = max(maximum, depth)
-        if type(row) is list:
-            stack.extend((item, depth + 1) for item in row)
-        elif type(row) is dict:
-            stack.extend((item, depth + 1) for item in row.values())
-    return maximum
+def _count(value, *, max_nodes=MAX_SEGMENT_NODES, max_depth=128):
+    return _measure(value, max_nodes=max_nodes, max_depth=max_depth)[0]
 
 
 def _read_rows(inventory):
@@ -260,9 +253,12 @@ def split(inventory, *, include_diagnostics=False):
     history_cursor = (int(cursor_value[1]) if type(cursor_value) is tuple
                       and len(cursor_value) == 2 and cursor_value[0] == 'integer'
                       else 0 if cursor_value == ('null',) else None)
-    snapshot_wire = _canonical(_json(snapshot))
-    _count(json.loads(snapshot_wire), max_nodes=MAX_SNAPSHOT_NODES)
+    snapshot_value = _json(snapshot)
+    snapshot_wire = _canonical(snapshot_value)
+    snapshot_nodes_count, snapshot_depth = _measure(
+        snapshot_value, max_nodes=MAX_SNAPSHOT_NODES)
     segments = []
+    segment_metrics = []
     all_segment_nodes = 0
     for ordinal, roots in enumerate(segment_roots):
         node_rows = tuple(sorted((row for row in rows
@@ -271,8 +267,9 @@ def split(inventory, *, include_diagnostics=False):
         all_segment_nodes += len(node_rows)
         segment = {'schema': SCHEMA, 'ordinal': ordinal,
                    'attachments': roots, 'nodes': node_rows}
-        wire = _canonical(_json(segment))
-        _count(json.loads(wire), max_nodes=MAX_SEGMENT_NODES)
+        segment_value = _json(segment)
+        wire = _canonical(segment_value)
+        segment_metrics.append(_measure(segment_value, max_nodes=MAX_SEGMENT_NODES))
         segments.append(wire)
     aggregate = len(snapshot_wire) + sum(map(len, segments))
     _need(aggregate <= MAX_TOTAL_BYTES,
@@ -280,15 +277,13 @@ def split(inventory, *, include_diagnostics=False):
     _need(len(snapshot_nodes) + all_segment_nodes == len(rows),
           'segmented graph accounting is inconsistent')
     metrics = {'snapshot_bytes': len(snapshot_wire),
-        'snapshot_nodes': _count(json.loads(snapshot_wire), max_nodes=MAX_SNAPSHOT_NODES),
-        'snapshot_depth': _max_depth(json.loads(snapshot_wire)),
+        'snapshot_nodes': snapshot_nodes_count,
+        'snapshot_depth': snapshot_depth,
         'history_segment_count': len(segments),
         'history_bytes': sum(map(len, segments)),
         'history_owned_nodes': all_segment_nodes,
-        'history_wire_nodes': sum(_count(json.loads(row), max_nodes=MAX_SEGMENT_NODES)
-                                  for row in segments),
-        'history_max_depth': max((_max_depth(json.loads(row)) for row in segments),
-                                 default=0),
+        'history_wire_nodes': sum(count for count, _depth in segment_metrics),
+        'history_max_depth': max((depth for _count, depth in segment_metrics), default=0),
         'aggregate_bytes': aggregate, 'total_inventory_nodes': len(rows),
         'history_field_entries': {f'{tag}.{field}': sum(len(value['items'])
             for value in history_lists.values()
@@ -316,15 +311,19 @@ def split(inventory, *, include_diagnostics=False):
     return snapshot_wire, tuple(segments), metrics
 
 
-def reassemble(snapshot_wire, segment_wires):
+def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
+               include_metrics=False):
     """Validate independently bounded documents, then restore exact inventory."""
-    try:
-        snapshot_data = json.loads(snapshot_wire.decode('ascii'))
-    except (AttributeError, UnicodeError, ValueError, RecursionError) as exc:
-        raise ArenaHistorySegmentsRejected('resumable snapshot is invalid JSON') from exc
+    if snapshot_value is None:
+        try:
+            snapshot_data = json.loads(snapshot_wire.decode('ascii'))
+        except (AttributeError, UnicodeError, ValueError, RecursionError) as exc:
+            raise ArenaHistorySegmentsRejected('resumable snapshot is invalid JSON') from exc
+    else:
+        snapshot_data = snapshot_value
     _need(_canonical(snapshot_data) == snapshot_wire,
           'resumable snapshot is not canonical')
-    _count(snapshot_data, max_nodes=MAX_SNAPSHOT_NODES)
+    snapshot_nodes, snapshot_depth = _measure(snapshot_data, max_nodes=MAX_SNAPSHOT_NODES)
     _need(type(snapshot_data) is dict and set(snapshot_data) ==
           {'schema', 'compatibility', 'inventory', 'history_fields'}
           and snapshot_data['schema'] == SNAPSHOT_SCHEMA,
@@ -368,7 +367,8 @@ def reassemble(snapshot_wire, segment_wires):
 
     node_owners = {}
     aggregate_bytes = len(snapshot_wire)
-    total_nodes = _count(json.loads(snapshot_wire), max_nodes=MAX_SNAPSHOT_NODES)
+    total_nodes = snapshot_nodes
+    history_wire_nodes = history_max_depth = history_owned_nodes = 0
     for expected_ordinal, wire in enumerate(segment_wires):
         aggregate_bytes += len(wire)
         _need(aggregate_bytes <= MAX_TOTAL_BYTES,
@@ -378,7 +378,8 @@ def reassemble(snapshot_wire, segment_wires):
         except (UnicodeError, ValueError, RecursionError) as exc:
             raise ArenaHistorySegmentsRejected('history segment is invalid JSON') from exc
         _need(_canonical(data) == wire, 'history segment is not canonical')
-        total_nodes += _count(data, max_nodes=MAX_SEGMENT_NODES)
+        segment_nodes, segment_depth = _measure(data, max_nodes=MAX_SEGMENT_NODES)
+        total_nodes += segment_nodes
         _need(total_nodes <= MAX_TOTAL_NODES,
               'segmented native state exceeds aggregate structural limit')
         _need(type(data) is dict and set(data) ==
@@ -387,6 +388,9 @@ def reassemble(snapshot_wire, segment_wires):
               'history segment schema/order is invalid')
         _need(type(data['attachments']) is list and type(data['nodes']) is list,
               'history segment content is malformed')
+        history_wire_nodes += segment_nodes
+        history_max_depth = max(history_max_depth, segment_depth)
+        history_owned_nodes += len(data['nodes'])
         for attachment in data['attachments']:
             _need(type(attachment) is list and len(attachment) == 3,
                   'history attachment is malformed')
@@ -417,4 +421,9 @@ def reassemble(snapshot_wire, segment_wires):
     result = (compatibility, (body[0], *rebuilt_body))
     from arena_native_snapshot import _validate_inventory
     _validate_inventory(result)
-    return result
+    metrics = {'snapshot_nodes': snapshot_nodes, 'snapshot_depth': snapshot_depth,
+        'history_wire_nodes': history_wire_nodes, 'history_max_depth': history_max_depth,
+        'history_owned_nodes': history_owned_nodes,
+        'total_inventory_nodes': len(rows), 'history_segment_count': len(segment_wires),
+        'aggregate_bytes': aggregate_bytes}
+    return (result, metrics) if include_metrics else result
