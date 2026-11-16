@@ -11,7 +11,8 @@ import hashlib
 import json
 
 
-SCHEMA = 'universe.generated-arena-history-segment/1'
+SCHEMA = 'universe.generated-arena-history-segment/2'
+_LEGACY_SCHEMA = 'universe.generated-arena-history-segment/1'
 SNAPSHOT_SCHEMA = 'universe.generated-arena-resumable-snapshot/1'
 DEFINITION_SCHEMA = 'universe.generated-arena-definition-table/1'
 MAX_SNAPSHOT_NODES = 1_000_000
@@ -239,6 +240,63 @@ def split(inventory, *, include_diagnostics=False):
                                        'items': node[2]}
 
     history_refs = set(history_lists)
+    encounter_row = next(row for row in rows if row[1] == 'encounter.Encounter')
+    encounter_fields = dict(encounter_row[2])
+    cursor_value = encounter_fields.get('last_processed_boundary')
+    history_cursor = (int(cursor_value[1]) if type(cursor_value) is tuple
+                      and len(cursor_value) == 2 and cursor_value[0] == 'integer'
+                      else 0 if cursor_value == ('null',) else None)
+    _need(history_cursor is not None, 'committed history cursor is malformed')
+    finished_ref_value = encounter_fields.get('finished_action_list')
+    finished_ref = (finished_ref_value[1] if type(finished_ref_value) is tuple
+                    and len(finished_ref_value) == 2 and finished_ref_value[0] == 'reference'
+                    else None)
+    finished_node = by_ref.get(finished_ref)
+    _need(finished_node is not None and finished_node[1] == 'list',
+          'finished Action registry is malformed')
+    finished_ids = set()
+    for value in finished_node[2]:
+        _need(type(value) is tuple and len(value) == 2 and value[0] == 'string',
+              'finished Action identity is malformed')
+        finished_ids.add(value[1])
+    universe_rows = [row for row in rows if row[1] == 'universe.Universe']
+    _need(len(universe_rows) == 1, 'native checkpoint must have one Universe')
+    event_value = dict(universe_rows[0][2]).get('event_history')
+    event_ref = (event_value[1] if type(event_value) is tuple and len(event_value) == 2
+                 and event_value[0] == 'reference' else None)
+    event_map = by_ref.get(event_ref)
+    _need(event_map is not None and event_map[1] == 'ordered-map',
+          'Universe event registry is malformed')
+    event_entries = {}
+    for pair in event_map[2]:
+        _need(type(pair) is tuple and len(pair) == 2
+              and type(pair[0]) is tuple and len(pair[0]) == 2 and pair[0][0] == 'string'
+              and type(pair[1]) is tuple and len(pair[1]) == 2
+              and pair[1][0] == 'reference', 'Universe event registry entry is malformed')
+        event_entries[pair[0][1]] = pair[1][1]
+    completed_actions = {}
+    for ref, tag, content in rows:
+        if not tag.endswith('Action'):
+            continue
+        fields = dict(content)
+        action_id = fields.get('id')
+        resolution = fields.get('resolution')
+        if (type(action_id) is not tuple or len(action_id) != 2
+                or action_id[0] != 'string' or action_id[1] not in finished_ids
+                or resolution in (None, ('null',))):
+            continue
+        end_time = fields.get('end_time')
+        _need(type(end_time) is tuple and len(end_time) == 2
+              and end_time[0] == 'integer' and end_time[1].isdigit(),
+              'completed Action end time is malformed')
+        boundary = int(end_time[1])
+        _need(0 < boundary <= history_cursor,
+              'completed Action is beyond committed history')
+        _need(event_entries.get(action_id[1]) == ref,
+              'completed Action is not the event registry identity')
+        completed_actions.setdefault(boundary - 1, []).append(ref)
+    action_refs = {ref for refs in completed_actions.values() for ref in refs}
+    history_refs.update(action_refs)
     snapshot_refs = set()
 
     def snapshot_value(value):
@@ -247,6 +305,8 @@ def split(inventory, *, include_diagnostics=False):
 
     def snapshot_node(ref):
         if ref in definition_refs:
+            return
+        if ref in action_refs:
             return
         if ref in snapshot_refs:
             return
@@ -283,17 +343,22 @@ def split(inventory, *, include_diagnostics=False):
             items = history_lists[list_ref]['items']
             if ordinal < len(items):
                 roots.append((list_ref, ordinal, items[ordinal]))
-        segment_roots.append(tuple(roots))
+        action_roots = tuple(sorted(completed_actions.get(ordinal, ()), key=repr))
+        segment_roots.append((tuple(roots), action_roots))
 
     segment_reach = []
     first_owner = {}
     first_owner_field = {}
     list_categories = {list_ref: (value['tag'], value['field'])
                        for list_ref, value in history_lists.items()}
-    for ordinal, roots in enumerate(segment_roots):
+    for ordinal, (roots, action_roots) in enumerate(segment_roots):
         reached = set()
-        for list_ref, _index, item in roots:
-            category = list_categories[list_ref]
+        seed_values = [(item, list_categories[list_ref])
+                       for list_ref, _index, item in roots]
+        seed_values.extend((('reference', ref),
+                            ('universe.Universe', 'event_history'))
+                           for ref in action_roots)
+        for item, category in seed_values:
             stack = list(_references(item))
             while stack:
                 ref = stack.pop()
@@ -394,12 +459,13 @@ def split(inventory, *, include_diagnostics=False):
     segments = []
     segment_metrics = []
     all_segment_nodes = 0
-    for ordinal, (roots, owned_rows) in enumerate(zip(segment_roots, rows_by_segment)):
+    for ordinal, ((roots, action_roots), owned_rows) in enumerate(zip(segment_roots, rows_by_segment)):
         node_rows = tuple(sorted(owned_rows,
                           key=lambda row: _canonical(_json(row[0]))))
         all_segment_nodes += len(node_rows)
         segment = {'schema': SCHEMA, 'ordinal': ordinal,
-                   'attachments': roots, 'nodes': node_rows}
+                   'attachments': roots, 'action_roots': action_roots,
+                   'nodes': node_rows}
         segment_value = _json(segment)
         wire = _canonical(segment_value)
         segment_metrics.append(_measure(segment_value, max_nodes=MAX_SEGMENT_NODES))
@@ -430,9 +496,11 @@ def split(inventory, *, include_diagnostics=False):
             for value in history_lists.values()
             if (value['tag'], value['field']) == (tag, field))
             for tag, field in sorted(set(list_categories.values()))},
+        'completed_action_roots': len(action_refs),
         'history_category_owned_nodes': {f'{tag}.{field}': sum(owner == (tag,field)
             for owner in first_owner_field.values())
-            for tag, field in sorted(set(list_categories.values()))},
+            for tag, field in sorted(set(list_categories.values())
+                | ({('universe.Universe', 'event_history')} if action_refs else set()))},
         'history_cursor': history_cursor}
     if include_diagnostics:
         # Diagnostic-only attribution of native graph rows to the first
@@ -556,6 +624,7 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
               'snapshot history field does not reference its declared list')
 
     node_owners = {}
+    action_root_owners = {}
     aggregate_bytes = len(snapshot_wire) + (0 if definitions_wire is None else len(definitions_wire))
     total_nodes = snapshot_nodes + definition_wire_nodes
     history_wire_nodes = history_max_depth = history_owned_nodes = 0
@@ -572,10 +641,22 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
         total_nodes += segment_nodes
         _need(total_nodes <= MAX_TOTAL_NODES,
               'segmented native state exceeds aggregate structural limit')
-        _need(type(data) is dict and set(data) ==
-              {'schema', 'ordinal', 'attachments', 'nodes'}
-              and data['schema'] == SCHEMA and data['ordinal'] == expected_ordinal,
+        _need(type(data) is dict and data['schema'] in (SCHEMA, _LEGACY_SCHEMA)
+              and data['ordinal'] == expected_ordinal
+              and (set(data) == {'schema', 'ordinal', 'attachments', 'action_roots', 'nodes'}
+                   if data['schema'] == SCHEMA else
+                   set(data) == {'schema', 'ordinal', 'attachments', 'nodes'}),
               'history segment schema/order is invalid')
+        if data['schema'] == SCHEMA:
+            _need(type(data['action_roots']) is list,
+                  'history segment Action roots are malformed')
+            for action_ref in data['action_roots']:
+                action_ref = _tuples(action_ref)
+                _need(type(action_ref) is tuple and len(action_ref) == 2
+                      and all(type(part) is str for part in action_ref)
+                      and action_ref not in action_root_owners,
+                      'history Action root is malformed or duplicated')
+                action_root_owners[action_ref] = expected_ordinal
         _need(type(data['attachments']) is list and type(data['nodes']) is list,
               'history segment content is malformed')
         history_wire_nodes += segment_nodes
@@ -604,6 +685,20 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
         row = by_ref[list_ref]
         by_ref[list_ref] = (row[0], row[1], tuple(state['items'][i]
                                                   for i in range(state['length'])))
+    for action_ref, ordinal in action_root_owners.items():
+        action = by_ref.get(action_ref)
+        _need(action is not None and action[1].endswith('Action'),
+              'history Action root is missing or has the wrong native type')
+        fields = dict(action[2])
+        action_id = fields.get('id')
+        end_time = fields.get('end_time')
+        _need(type(action_id) is tuple and len(action_id) == 2
+              and action_id[0] == 'string' and action_ref == ('event', action_id[1])
+              and type(end_time) is tuple and len(end_time) == 2
+              and end_time[0] == 'integer' and end_time[1].isdigit()
+              and int(end_time[1]) == ordinal + 1
+              and fields.get('resolution') not in (None, ('null',)),
+              'history Action root does not match its committed boundary')
     rows = (tuple(by_ref[row[0]] for row in snapshot_rows)
         + tuple(by_ref[ref] for ref in definition_node_refs)
         + tuple(by_ref[ref] for ref in node_owners))
@@ -618,5 +713,6 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
         'aggregate_document_nodes': snapshot_nodes + definition_wire_nodes + history_wire_nodes,
         'history_owned_nodes': history_owned_nodes,
         'total_inventory_nodes': len(rows), 'history_segment_count': len(segment_wires),
+        'completed_action_roots': len(action_root_owners),
         'aggregate_bytes': aggregate_bytes}
     return (result, metrics) if include_metrics else result

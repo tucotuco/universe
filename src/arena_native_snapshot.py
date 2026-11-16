@@ -53,6 +53,19 @@ _LEGACY_V5_COMPATIBILITY = (
     ('python-native-rng', 'MT19937-state-v3'),
     ('restore-adapters', 'not-implemented'),
 )
+# Exact source fingerprint of portable Save /11 emitted by commit 1deb61d.
+# The next archive schema may migrate this one validated graph while all new
+# Saves bind to the current implementation and rule source.
+_LEGACY_V6_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', '4519f498014ce1191665af22d5b9d8f4f9e5e0114d34165506b95ac4cde0401a'),
+    ('rule-kernel-source', '6133094b36bdb6e5fdd6e9d3890046b93fe6519ac7abbc931d26918c7b5fdb91'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
 
 # Exact native type closure exercised by the current Arena UI: generated
 # Beings, typed ground/carry Objects, Run, Pick up, Draw, Dagger strikes, their Choice and
@@ -213,6 +226,23 @@ def _migrate_legacy_v5_inventory(inventory):
     _validate_arena_field_schema(inventory, require_required=False)
     migrated = (_compatibility(), inventory[1])
     _validate_arena_field_schema(migrated)
+    _validate_inventory(migrated)
+    return migrated
+
+
+def _migrate_legacy_v6_inventory(inventory):
+    """Migrate the exact pre-Action-root /11 inventory without re-simulation."""
+    from checkpoint_inventory import _compatibility
+    _need(type(inventory) is tuple and len(inventory) == 2
+          and inventory[0] == _LEGACY_V6_COMPATIBILITY,
+          'legacy /11 native inventory compatibility mismatch')
+    _validate_inventory(inventory, expected_compatibility=_LEGACY_V6_COMPATIBILITY)
+    _validate_arena_field_schema(inventory, require_required=False)
+    migrated = (_compatibility(), inventory[1])
+    # The /11 segmented adapter had already proved and omitted its exact
+    # rebuilt runtime markers, so current-schema migration validates field
+    # vocabulary while allowing those reviewed omissions for restore.
+    _validate_arena_field_schema(migrated, require_required=False)
     _validate_inventory(migrated)
     return migrated
 

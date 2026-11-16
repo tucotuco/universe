@@ -812,6 +812,42 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         self.assertEqual(restored_player._atomic_target_history,
                          source_player._atomic_target_history)
 
+    def test_completed_action_instances_are_stored_in_boundary_history(self):
+        import io
+        import zipfile
+        from arena_persistence import decode
+
+        source = GeneratedArenaSession(root_seed_factory=lambda: 7071)
+        source.generate({"starting_experience": "10000", "width_cells": "5",
+                         "height_cells": "5"})
+        source.choose_run()
+        source.advance_one_second()
+        wire = source.save_encounter_bytes()
+        parsed = decode(wire)
+        self.assertEqual(parsed["manifest"]["save_schema"],
+                         "universe.generated-arena-save/12")
+        action_id = next(action.id for action in source.active_candidate.universe.event_history.values()
+                         if isinstance(action, Action) and action.event_type == "run"
+                         and action.resolution is not None)
+        encounter = source.active_candidate.encounter
+        self.assertIn(action_id, encounter.finished_action_list)
+        with zipfile.ZipFile(io.BytesIO(wire)) as archive:
+            snapshot = json.loads(archive.read("snapshot.json"))
+            segments = [json.loads(archive.read(name)) for name in sorted(archive.namelist())
+                        if name.startswith("history/")]
+        rows = snapshot["inventory"][1][2][2][1]
+        snapshot_action_ids = {row[0][1] for row in rows
+                               if row[1].endswith("Action") and row[0][0] == "event"}
+        self.assertNotIn(action_id, snapshot_action_ids)
+        roots = [root for segment in segments for root in segment["action_roots"]]
+        self.assertEqual(roots, [["event", action_id]])
+        self.assertEqual(parsed["manifest"]["metrics"]["completed_action_roots"], 1)
+        restored = GeneratedArenaSession()
+        restored.load_encounter_bytes(wire)
+        restored_action = restored.active_candidate.universe.get_event_by_id(action_id)
+        self.assertEqual(restored_action.id, action_id)
+        self.assertEqual(restored.save_encounter_bytes(), wire)
+
     def test_compact_native_graph_ids_reject_corrupt_references_and_types(self):
         import copy
         import hashlib
@@ -953,7 +989,36 @@ Path(sys.argv[2]).write_bytes(session.save_encounter_bytes())
             current=migrated.read_bytes()
             self.assertNotEqual(current,raw)
             self.assertEqual(decode(current)["manifest"]["save_schema"],
-                             "universe.generated-arena-save/11")
+                             "universe.generated-arena-save/12")
+
+    def test_supported_segmented_v11_archive_migrates_in_fresh_process(self):
+        from arena_persistence import decode
+
+        legacy=ROOT/"tests/fixtures/arena/legacy-per-scale-011-v11.uarena"
+        raw=legacy.read_bytes()
+        self.assertEqual(decode(raw)["manifest"]["save_schema"],
+                         "universe.generated-arena-save/11")
+        with tempfile.TemporaryDirectory(prefix="arena-v11-migration-") as directory:
+            migrated=Path(directory)/"migrated.uarena"
+            script="""import sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+source=Path(sys.argv[1]).read_bytes(); session=GeneratedArenaSession()
+view=session.load_encounter_bytes(source)
+assert view['time_seconds']==0
+Path(sys.argv[2]).write_bytes(session.save_encounter_bytes())
+"""
+            environment=dict(os.environ,PYTHONDONTWRITEBYTECODE="1",
+                PYTHONNOUSERSITE="1",PYTHONPATH=os.pathsep.join(
+                    (str(ROOT/"tests"),str(ROOT/"src"),str(ROOT/"examples"))))
+            result=subprocess.run([sys.executable,"-B","-c",script,str(legacy),
+                str(migrated)],cwd=ROOT,env=environment,capture_output=True,
+                text=True,timeout=60,check=False)
+            self.assertEqual(result.returncode,0,result.stderr)
+            current=migrated.read_bytes()
+            self.assertNotEqual(current,raw)
+            self.assertEqual(decode(current)["manifest"]["save_schema"],
+                             "universe.generated-arena-save/12")
 
 
     def test_extended_seed14_combat_checkpoint_stays_strict_and_continues_exactly(self):
@@ -1273,6 +1338,7 @@ else: raise AssertionError(mode)
         parsed = decode_save(at_64)
         metrics = parsed["manifest"]["metrics"]
         self.assertEqual(parsed["manifest"]["snapshot_cursor"], encounter.time)
+        self.assertGreaterEqual(metrics["completed_action_roots"], 64)
         self.assertLess(metrics["snapshot_nodes"], 1_000_000)
         self.assertEqual(metrics["history_segments"], encounter.time)
         self.assertEqual(metrics["history_field_entries"][
@@ -1280,6 +1346,19 @@ else: raise AssertionError(mode)
         # Shared immutable interval projections materially reduce the prior
         # count while retaining the full 64-Action receipt history.
         self.assertGreater(metrics["history_wire_nodes"], 400_000)
+        import io, zipfile
+        with zipfile.ZipFile(io.BytesIO(at_64)) as archive:
+            snapshot = json.loads(archive.read("snapshot.json"))
+            segment_values = [json.loads(archive.read(name)) for name in
+                              sorted(archive.namelist()) if name.startswith("history/")]
+        snapshot_rows = snapshot["inventory"][1][2][2][1]
+        snapshot_action_ids = {row[0][1] for row in snapshot_rows
+                               if row[1].endswith("Action") and row[0][0] == "event"}
+        self.assertTrue(feint_ids.isdisjoint(snapshot_action_ids))
+        stored_action_roots = {tuple(root) for segment in segment_values
+                               for root in segment["action_roots"]}
+        self.assertTrue({("event", action_id) for action_id in feint_ids}
+                        <= stored_action_roots)
 
         def advance_one_more(session):
             candidate = session.active_candidate
