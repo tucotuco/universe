@@ -62,6 +62,12 @@ def composition_rng(seed, group_id, *parts):
     return random.Random(value)
 
 
+def _formation_attribute_rng_provider(self):
+    """Return the exact keyed provider rebound by the native Save adapter."""
+    return lambda member_id, attribute: self._rng(
+        "formation_attribute", member_id, attribute)
+
+
 def validate_composition_records(group_id, formation_time, records):
     """Native formation constraints, accepting detached frozen values too."""
     from types import MappingProxyType
@@ -184,7 +190,7 @@ class StatisticalGroup(ObjectInstance):
         traits = self._formation_traits.get("adults", {})
         self._conditional_attributes = ConditionalAttributes(
             adult_specs,
-            lambda member_id, attribute: self._rng("formation_attribute", member_id, attribute),
+            _formation_attribute_rng_provider(self),
             external_names=traits.keys(),
         )
 

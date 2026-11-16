@@ -132,6 +132,12 @@ def _plain(value, depth=0, active=None):
             # owner reference and the live validator is rebound by authority.
             data = {name: value for name, value in data.items()
                     if name != "ledger_identity"}
+        elif tag == "objective_reality.SubjectRealityCandidate":
+            # The candidate's stable subject ID identifies the owning native
+            # Group. ledger_identity is a process address and is rebound on
+            # restoration from that owner.
+            data = {name: value for name, value in data.items()
+                    if name != "ledger_identity"}
         return {"$record": tag,
                 "fields": {name: _plain(data[name], depth + 1, active)
                            for name in sorted(data)}}

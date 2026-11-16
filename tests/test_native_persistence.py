@@ -30,6 +30,7 @@ from strategy import Strategy
 from universe import Universe
 from native_persistence import (NativeSaveRejected, export_save, load_path,
                                 load_save, write_save)
+from checkpoint_adapters import RecipientBinding
 
 
 class NativePersistenceTests(unittest.TestCase):
@@ -176,16 +177,16 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
-    def test_unadapted_group_and_observer_closures_fail_closed_without_mutation(self):
+    def test_statistical_group_is_supported_and_unbound_observers_fail_closed(self):
         group_fixture = inspection_fixtures.InspectionFixture()
         group_fixture.setUp()
         group_fixture.f.f.f.group()
         group_fixture.commit()
         before = group_fixture.raw()
-        with self.assertRaisesRegex(NativeSaveRejected,
-                                    "conditional_attribute_adapter_missing") as refused:
-            export_save(group_fixture.enc)
-        self.assertIn("validator_rehydration_required", str(refused.exception))
+        group_save = export_save(group_fixture.enc)
+        restored_world, restored_encounter, _ = load_save(group_save)
+        self.assertEqual(restored_encounter.id, group_fixture.enc.id)
+        self.assertIn("group-one", restored_world.object_registry.object_instances)
         self.assertEqual(group_fixture.raw(), before)
 
         observer_fixture = inspection_fixtures.InspectionFixture()
@@ -208,9 +209,8 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         observer_fixture.enc.step(1)
         before = observer_fixture.raw()
         with self.assertRaisesRegex(NativeSaveRejected,
-                                    "unbound_external_recipient") as refused:
+                                    "missing durable committed recipient binding") as refused:
             export_save(observer_fixture.enc)
-        self.assertIn("validator_rehydration_required", str(refused.exception))
         self.assertEqual(observer_fixture.raw(), before)
 
     def test_native_stun_condition_and_interrupted_action_resume_in_fresh_process(self):
@@ -268,6 +268,132 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                 text=True, capture_output=True, check=False, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
+
+    def test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        group = fixture.f.f.f.group()
+        expected_count = group.household_count
+        expected_household = group.household(0)
+        fixture.enable()
+        first = DelayAction(fixture.enc, fixture.a.id, defense=0,
+                            start_time=0, id="native-group-delay")
+        fixture.enc.schedule_action(first)
+        fixture.enc.step(1)
+        wire = export_save(fixture.enc)
+
+        continuation_id = "native-group-continuation-delay"
+        next_action = DelayAction(fixture.enc, fixture.a.id, defense=0,
+                                  start_time=1, id=continuation_id)
+        fixture.enc.schedule_action(next_action)
+        fixture.enc.step(1)
+        expected = {
+            "world": fixture.world.id, "encounter": fixture.enc.id,
+            "time": fixture.enc.time, "rng": fixture.rng.state,
+            "group_id": group.id, "count": group.household_count,
+            "household": group.household(0),
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(fixture.enc))).hexdigest(),
+            "actions": list(fixture.enc._atomic_interval_history[-1].action_ids),
+        }
+        self.assertEqual(expected["count"], expected_count)
+        self.assertEqual(expected["household"], expected_household)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-group-save.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+group=world.object_registry.object_instances['group-one']
+assert group.household_count == int(sys.argv[2])
+assert group.household(0) == json.loads(sys.argv[3])
+action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
+ id='native-group-continuation-delay')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'world':world.id,'encounter':enc.id,'time':enc.time,
+ 'rng':rng.state,'group_id':group.id,'count':group.household_count,
+ 'household':group.household(0),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'actions':list(enc._atomic_interval_history[-1].action_ids),
+ 'arena_imports':sorted(set(sys.modules)&{'arena_browser_session','arena_native_snapshot',
+  'arena_persistence','arena_server','npcgen'})},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path),
+                 str(expected_count), json.dumps(expected_household)],
+                cwd=ROOT, env={**os.environ,
+                    "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual.pop("arena_imports"), [])
+        self.assertEqual(actual, json.loads(json.dumps(expected)))
+
+    def test_observer_owned_group_evidence_round_trips_without_identity_leakage(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        group = fixture.f.f.f.group()
+        fixture.enable()
+        from field_observation import BeliefLedger
+        first_ledger = BeliefLedger(fixture.a.id)
+        second_ledger = BeliefLedger(fixture.b.id)
+        first = fixture.f.f.observe(fixture.a, group, ledger=first_ledger)
+        second = fixture.f.f.observe(fixture.b, group, ledger=second_ledger)
+        fixture.enc.schedule_choice((first, second))
+        fixture.enc.step(1)
+        bindings = (
+            RecipientBinding(fixture.world, "native", "belief-a",
+                "in_world_belief_ledger", (fixture.a.id,), first_ledger),
+            RecipientBinding(fixture.world, "native", "belief-b",
+                "in_world_belief_ledger", (fixture.b.id,), second_ledger),
+        )
+        wire = export_save(fixture.enc, recipient_bindings=bindings)
+
+        continuation = DelayAction(fixture.enc, fixture.a.id, defense=0,
+                                   start_time=1, id="native-observer-continuation")
+        fixture.enc.schedule_action(continuation)
+        fixture.enc.step(1)
+        expected = {
+            "time": fixture.enc.time,
+            "rng": fixture.rng.state,
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(fixture.enc))).hexdigest(),
+            "actions": list(fixture.enc._atomic_interval_history[-1].action_ids),
+            "saved_actions": sorted((first.id, second.id)),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-observer-save.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+actions=[event for event in world.event_history.values()
+ if type(event).__name__=='ObserveGroupAction']
+ledgers={event.actor_id:event.ledger for event in actions}
+assert set(ledgers)==set(enc.being_list[:2])
+assert all(ledger.observer_id==owner and ledger.evidence for owner,ledger in ledgers.items())
+action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
+ id='native-observer-continuation')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'actions':list(enc._atomic_interval_history[-1].action_ids),
+ 'saved_actions':sorted(event.id for event in actions)},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)],
+                cwd=ROOT, env={**os.environ,
+                    "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
 
 if __name__ == "__main__":

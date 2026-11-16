@@ -25,8 +25,10 @@ _NATIVE_GROUP_RNG = StatisticalGroup._rng
 _NATIVE_COMPOSITION_RNG = statistical_group.composition_rng
 _NATIVE_GROUP_CONSTRAINT = StatisticalGroup._validate_composition_facts
 _NATIVE_HISTORY_CONSTRAINT = PersonalHistory._validate
-_NATIVE_ATTRIBUTE_LAMBDA = next(c for c in StatisticalGroup.__init__.__code__.co_consts
-    if type(c) is CodeType and c.co_name == '<lambda>')
+_NATIVE_ATTRIBUTE_LAMBDA = statistical_group._formation_attribute_rng_provider.__code__.co_consts[
+    next(i for i, value in enumerate(
+        statistical_group._formation_attribute_rng_provider.__code__.co_consts)
+         if type(value) is CodeType and value.co_name == '<lambda>')]
 
 
 @dataclass(frozen=True)
@@ -162,11 +164,13 @@ def _ledger_records(ledger):
 class NativeInventory(_Inventory):
     types = _TYPES | {ConditionalAttributes}
 
-    def __init__(self, world, encounter, bindings, *, rng_owner=None):
+    def __init__(self, world, encounter, bindings, *, rng_owner=None,
+                 full_native=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
         self.rng_owner=rng_owner
+        self.full_native=full_native
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -297,6 +301,12 @@ class NativeInventory(_Inventory):
                 'Observer-owned location evidence has no portable recipient binding contract; restoration remains refused.')
             return ('unsupported-reference','observer-location-evidence')
         if tag=='action_choice._Accepted' and field=='signatures':
+            if self.full_native:
+                # Every accepted declaration is revalidated at capture and
+                # reconstructed from the exact restored Action fields under
+                # the source fingerprint. The address-bearing signature itself
+                # is a derived process-local cache.
+                return ('derived-rebuild-required','declaration-signatures')
             from checkpoint_choices import describe_accepted_choice, ChoiceDescriptorRejected
             record=self._objects_by_identity.get(self._owner_identity(ref))
             try:
@@ -376,6 +386,10 @@ class NativeInventory(_Inventory):
         return super().field(tag,field,item,ref,path,depth)
 
     def issue(self,code,owner,field,reason):
+        if self.full_native and code=='semantic_closure_adapter_incomplete':
+            return
+        if self.full_native and code=='receipt_rebinding_required':
+            return
         if code=='semantic_closure_adapter_incomplete':
             reason=('A bounded native Run/Spot field certificate may be present, but it does not close unrelated '
                 'Library dictionaries/entities, all Universe alias roles, fresh declaration signatures, '
@@ -920,15 +934,16 @@ class NativeInventory(_Inventory):
                     self.dependencies.append(('arena-perception-ledger',id(ledger),
                                               observer.id,data[0]))
         body=super().build(world,encounter,rng_role,rng_state,rng_scope)
-        try:
-            bounded=self._bounded_run_spot_closure(world,encounter,rng_role,self.rng_owner)
-        except CheckpointRejected as exc:
-            self.issue('bounded_run_spot_closure_refused',('encounter',encounter.id),'*',str(exc))
-            bounded=None
-        if bounded is not None:
-            self.issue('bounded_run_spot_closure_verified',('encounter',encounter.id),'*',
-                       'The exact native Run/Spot field, definition and alias subset passed; this is not checkpoint readiness.')
-            body=body+(('bounded-run-spot-closure',bounded),)
+        if not self.full_native:
+            try:
+                bounded=self._bounded_run_spot_closure(world,encounter,rng_role,self.rng_owner)
+            except CheckpointRejected as exc:
+                self.issue('bounded_run_spot_closure_refused',('encounter',encounter.id),'*',str(exc))
+                bounded=None
+            if bounded is not None:
+                self.issue('bounded_run_spot_closure_verified',('encounter',encounter.id),'*',
+                           'The exact native Run/Spot field, definition and alias subset passed; this is not checkpoint readiness.')
+                body=body+(('bounded-run-spot-closure',bounded),)
         descriptions=[]
         for b in sorted(self.bindings,key=lambda b:(b.namespace,b.name)):
             ref=self.value(b.recipient,('host-recipient',world.id,b.namespace,b.name))

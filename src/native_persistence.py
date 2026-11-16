@@ -42,12 +42,25 @@ def _unique(pairs):
     return value
 
 
-def export_save(encounter):
-    """Return a self-contained native graph plus authenticated fact history."""
+def export_save(encounter, *, recipient_bindings=()):
+    """Return a self-contained native graph plus authenticated fact history.
+
+    Caller-owned observer ledgers and account lists must be supplied as
+    explicit :class:`checkpoint_adapters.RecipientBinding` values. Their data
+    is included once in the graph; no external process handle is serialized.
+    """
     try:
-        from arena_native_snapshot import capture as capture_graph, encode as encode_graph
-        graph = encode_graph(capture_graph(encounter.universe, encounter,
-                                           _native_rng_owner(encounter)))
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, bindings=recipient_bindings,
+            rng_owner=_native_rng_owner(encounter))
+        if candidate.diagnostics:
+            codes = ", ".join(sorted({row.code for row in candidate.diagnostics}))
+            raise NativeSaveRejected("native semantic closure refused: " + codes)
+        graph = encode_graph(candidate.envelope, native=True)
         history = native_history.current_recording(encounter)
         if history is None:
             history = native_history.capture(encounter)
@@ -99,10 +112,11 @@ def load_save(wire):
         graph_wire = base64.b64decode(value["graph_b64"].encode("ascii"), validate=True)
         if base64.b64encode(graph_wire).decode("ascii") != value["graph_b64"]:
             raise NativeSaveRejected("native graph payload is not canonical base64")
-        from arena_native_snapshot import decode as decode_graph, restore as restore_graph
+        from native_graph_snapshot import decode as decode_graph, restore as restore_graph
         native_history.validate(value["history"])
         expected_history = native_history.encode(value["history"])
-        world, encounter, rng_owner = restore_graph(decode_graph(graph_wire))
+        world, encounter, rng_owner = restore_graph(
+            decode_graph(graph_wire, native=True), native=True)
         actual_history = native_history.encode(native_history.capture(encounter))
         if actual_history != expected_history:
             raise NativeSaveRejected("restored native graph disagrees with saved history")
@@ -115,9 +129,9 @@ def load_save(wire):
         raise NativeSaveRejected(f"native Save restoration refused: {exc}") from exc
 
 
-def write_save(encounter, path):
+def write_save(encounter, path, *, recipient_bindings=()):
     """Durably publish one new Save without replacing an existing path."""
-    wire = export_save(encounter)
+    wire = export_save(encounter, recipient_bindings=recipient_bindings)
     target = Path(path)
     temporary = None
     linked = False

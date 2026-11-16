@@ -185,6 +185,37 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(events_at(log, 5)["action_ids"], [action.id])
         self.assertEqual(log, capture(encounter))
 
+    def test_two_observers_keep_distinct_group_evidence_in_native_history(self):
+        # This is a current native observation Action, not a fabricated
+        # evidence row. The independently owned ledgers must remain separate
+        # in the historical read model at the committed boundary.
+        import test_encounter_inspection as fixtures
+        from field_observation import BeliefLedger
+
+        fixture = fixtures.InspectionFixture()
+        fixture.setUp()
+        group = fixture.f.f.f.group()
+        fixture.enable()
+        first_ledger = BeliefLedger(fixture.a.id)
+        second_ledger = BeliefLedger(fixture.b.id)
+        first = fixture.f.f.observe(fixture.a, group, ledger=first_ledger)
+        second = fixture.f.f.observe(fixture.b, group, ledger=second_ledger)
+        fixture.enc.schedule_choice((first, second))
+        fixture.enc.step(1)
+
+        log = decode(encode(capture(fixture.enc)))
+        boundary = state_at(log, 1)
+        evidence = {row["owner_id"]: row["projection"]
+                    for row in boundary["recipients"]
+                    if row["role"] == "in_world_belief_ledger"}
+        self.assertEqual(set(evidence), {fixture.a.id, fixture.b.id})
+        self.assertIn(first.id, events_at(log, 1)["action_ids"])
+        self.assertIn(second.id, events_at(log, 1)["action_ids"])
+        self.assertNotEqual(evidence[fixture.a.id], evidence[fixture.b.id])
+        self.assertEqual(evidence[fixture.a.id]["observer_id"], fixture.a.id)
+        self.assertEqual(evidence[fixture.b.id]["observer_id"], fixture.b.id)
+        self.assertTrue(validate(log))
+
 
 if __name__ == "__main__":
     unittest.main()

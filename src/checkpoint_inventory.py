@@ -318,7 +318,8 @@ def _candidate_seal(candidate):
     return _digest((candidate.schema,candidate.envelope,diagnostics,candidate.content_digest,False,False,False))
 
 
-def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,bindings=(),rng_owner=None):
+def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
+             bindings=(),rng_owner=None,full_native=False):
     from universe import Universe
     from encounter import Encounter
     from transactional_progression import _BINDINGS,_all_declarations
@@ -331,6 +332,8 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
         _require(_movement_checkpoint_capture_is_authorized(world, encounter),
                  'quarantined movement checkpoint capture is restoration-owner controlled')
     _require(type(native_adapters) is bool, 'native_adapters must be a bool')
+    _require(type(full_native) is bool and (not full_native or native_adapters),
+             'full_native requires the reviewed native adapter mode')
     _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
     _require(native_adapters or bindings == (), 'bindings require explicit native adapter mode')
     _require(quiescent is True,'explicit quiescent/coordinated read ownership is required')
@@ -385,7 +388,8 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
             _require(not any(b.encounter() is not encounter and b.encounter() is not None and b.rng_owner is owner for b in _BINDINGS.values()),'RNG is shared with another Encounter')
         if native_adapters:
             from checkpoint_adapters import NativeInventory
-            inventory=NativeInventory(world,encounter,bindings,rng_owner=owner)
+            inventory=NativeInventory(world,encounter,bindings,rng_owner=owner,
+                                      full_native=full_native)
         else:
             inventory=_Inventory()
         body=inventory.build(world,encounter,role,rng,rng_scope)
@@ -398,16 +402,21 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,binding
         return envelope,tuple(inventory.diagnostics),stamp
 
 
-def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=None,native_adapters=False,bindings=(),rng_owner=None):
+def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=None,
+        native_adapters=False,bindings=(),rng_owner=None,full_native=False):
     """Return an inactive partial inventory; all readiness flags remain false.
 
     rng_scope is an explicit caller assertion, not evidence of global privacy.
     No binding IDs are invented for externally owned recipients.
     """
-    envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,rng_scope=rng_scope,native_adapters=native_adapters,bindings=bindings,rng_owner=rng_owner)
+    envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,
+        rng_scope=rng_scope,native_adapters=native_adapters,bindings=bindings,
+        rng_owner=rng_owner,full_native=full_native)
     candidate=CheckpointCandidate(SCHEMA,envelope,diagnostics,_digest(envelope))
     key=id(candidate)
-    _ISSUED[key]=(weakref.ref(candidate,lambda ref,key=key:_ISSUED.pop(key,None)),weakref.ref(world),weakref.ref(encounter),stamp,_candidate_seal(candidate),rng_scope,native_adapters,bindings)
+    _ISSUED[key]=(weakref.ref(candidate,lambda ref,key=key:_ISSUED.pop(key,None)),
+        weakref.ref(world),weakref.ref(encounter),stamp,_candidate_seal(candidate),
+        rng_scope,native_adapters,bindings,full_native)
     return candidate
 
 
@@ -416,6 +425,8 @@ def validate_checkpoint_candidate(world,encounter,candidate,*,quiescent=False):
     issued=_ISSUED.get(id(candidate))
     _require(issued is not None and issued[0]()is candidate and issued[1]()is world and issued[2]()is encounter,'foreign, copied or non-issued inventory candidate')
     _require(_candidate_seal(candidate)==issued[4] and candidate.content_digest==_digest(candidate.envelope),'modified inventory candidate')
-    envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,rng_scope=issued[5],native_adapters=issued[6],bindings=issued[7])
+    envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,
+        rng_scope=issued[5],native_adapters=issued[6],bindings=issued[7],
+        full_native=issued[8])
     _require(stamp==issued[3] and envelope==candidate.envelope and diagnostics==candidate.diagnostics,'stale checkpoint inventory; recapture after correction')
     return CheckpointValidation(not any(d.code=='unsupported_native_value' for d in diagnostics),diagnostics)
