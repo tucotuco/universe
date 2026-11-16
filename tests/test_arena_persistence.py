@@ -64,7 +64,7 @@ class TestArenaPersistence(unittest.TestCase):
         return session
 
     def test_current_snapshot_requires_reviewed_per_type_field_schemas(self):
-        from arena_native_snapshot import ArenaNativeSnapshotRejected, encode
+        from arena_native_snapshot import ArenaNativeSnapshotRejected, encode, restore
         from arena_persistence import decode
 
         source=GeneratedArenaSession(root_seed_factory=lambda:20261116)
@@ -112,6 +112,83 @@ class TestArenaPersistence(unittest.TestCase):
             with self.subTest(candidate=label):
                 with self.assertRaises(ArenaNativeSnapshotRejected):
                     encode(candidate)
+        with self.assertRaises(ArenaNativeSnapshotRejected):
+            restore(missing)
+
+    def test_portable_snapshot_omits_rebuilt_quiescent_runtime_fields(self):
+        from arena_persistence import decode
+
+        source=GeneratedArenaSession(root_seed_factory=lambda:20261116)
+        source.generate({"starting_experience":"10000","width_cells":"5",
+                         "height_cells":"5"})
+        source.choose_run()
+        source.advance_one_second()
+        saved=source.save_encounter_bytes()
+        inventory=decode(saved)["decoded_native"]
+        rows=next(section[1] for section in inventory[1][1:]
+                  if section[0]=="nodes")
+        fields_by_tag={tag:dict(content) for _ref,tag,content in rows
+                       if tag in ("universe.Universe","encounter.Encounter",
+                                  "action_choice.ChoiceBook")}
+        omitted={
+            "universe.Universe":{"_schedule_lock","_reproduction_group_registry"},
+            "encounter.Encounter":{"_transactional_mode","_active_fatigue_frame",
+                "_boundary_context","_advancing","_running","_dispatching",
+                "_coordinator_time","_interval_start","_physiology_registry"},
+            "action_choice.ChoiceBook":{"lock","_drafts","_closed_drafts","_tokens"},
+        }
+        candidate=source.active_candidate
+        live_objects={"universe.Universe":candidate.universe,
+                      "encounter.Encounter":candidate.encounter,
+                      "action_choice.ChoiceBook":candidate.encounter._choice_book}
+        for tag,names in omitted.items():
+            self.assertTrue(names <= object.__getattribute__(live_objects[tag],"__dict__").keys())
+            self.assertTrue(names.isdisjoint(fields_by_tag[tag]))
+
+        restored=GeneratedArenaSession()
+        restored.load_encounter_bytes(saved)
+        candidate=restored.active_candidate
+        world=candidate.universe
+        encounter=candidate.encounter
+        book=encounter._choice_book
+        self.assertIs(book.lock,world._schedule_lock)
+        self.assertEqual((book._drafts,book._closed_drafts,book._tokens),({},set(),{}))
+        self.assertEqual((encounter._coordinator_time,encounter._interval_start),
+                         (encounter.time,encounter.time))
+        self.assertFalse(encounter._advancing or encounter._running or encounter._dispatching)
+        self.assertEqual(encounter._transactional_mode.name,"transactional")
+        self.assertIsNone(encounter._active_fatigue_frame)
+        self.assertIsNone(encounter._boundary_context)
+        self.assertIsNone(encounter._physiology_registry)
+        self.assertEqual(restored.save_encounter_bytes(),saved)
+
+    def test_portable_archive_separates_immutable_definition_table(self):
+        import io
+        import zipfile
+        from arena_history_segments import _DEFINITION_TAGS
+        from arena_persistence import decode
+
+        source=GeneratedArenaSession(root_seed_factory=lambda:20261116)
+        source.generate({"starting_experience":"10000","width_cells":"5",
+                         "height_cells":"5"})
+        wire=source.save_encounter_bytes()
+        with zipfile.ZipFile(io.BytesIO(wire)) as archive:
+            snapshot=json.loads(archive.read("snapshot.json"))
+            definitions=json.loads(archive.read("definitions.json"))
+        snapshot_rows=snapshot["inventory"][1][2][2][1]
+        definition_rows=definitions["nodes"]
+        snapshot_tags={row[1] for row in snapshot_rows}
+        definition_tags={row[1] for row in definition_rows}
+        self.assertTrue(_DEFINITION_TAGS & definition_tags)
+        self.assertTrue(_DEFINITION_TAGS.isdisjoint(snapshot_tags))
+        snapshot_ids=[row[0] for row in snapshot_rows]
+        self.assertTrue(all(ref not in snapshot_ids
+                            for ref,_tag in definitions["roots"]))
+        self.assertEqual(decode(wire)["decoded_native"],
+                         decode(source.save_encounter_bytes())["decoded_native"])
+        restored=GeneratedArenaSession()
+        restored.load_encounter_bytes(wire)
+        self.assertEqual(restored.save_encounter_bytes(),wire)
 
     def test_pristine_ground_objects_restore_with_native_identity_and_evidence(self):
         profile = json.loads((ROOT / "tests/fixtures/arena/test_ground_loadout_profile.json").read_text())
@@ -219,6 +296,8 @@ Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
         segment_name=next(name for name in entries if name.startswith("history/"))
         corrupted=dict(entries)
         corrupted[segment_name]=corrupted[segment_name]+b" "
+        corrupted_definitions=dict(entries)
+        corrupted_definitions["definitions.json"] += b" "
         extra=dict(entries)
         extra['history/unlisted-extra.json']=b'{}'
         unsafe_path=dict(entries)
@@ -233,6 +312,8 @@ Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
 
         missing=dict(entries)
         del missing[segment_name]
+        missing_definitions=dict(entries)
+        del missing_definitions["definitions.json"]
         duplicate_output=io.BytesIO()
         with zipfile.ZipFile(duplicate_output,"w",compression=zipfile.ZIP_DEFLATED) as archive:
             for name,data in entries.items():
@@ -241,6 +322,8 @@ Path(sys.argv[2]).write_bytes(s.save_encounter_bytes())
         for label,bad in (("truncated",original[:-12]),
                           ("missing-history-segment",archive_bytes(missing)),
                           ("altered-history-segment",archive_bytes(corrupted)),
+                          ("missing-definitions",archive_bytes(missing_definitions)),
+                          ("altered-definitions",archive_bytes(corrupted_definitions)),
                           ("unlisted-extra-entry",archive_bytes(extra)),
                           ("unsafe-path",archive_bytes(unsafe_path)),
                           ("duplicate-entry",duplicate_output.getvalue())):
@@ -843,6 +926,35 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
         self.assertTrue(migrated.startswith(b"PK\x03\x04"))
         self.assertEqual(restored.active_candidate.encounter.time, 0)
 
+    def test_supported_segmented_v10_archive_migrates_in_fresh_process(self):
+        from arena_persistence import decode
+
+        legacy=ROOT/"tests/fixtures/arena/legacy-per-scale-010-v10.uarena"
+        raw=legacy.read_bytes()
+        self.assertEqual(decode(raw)["manifest"]["save_schema"],
+                         "universe.generated-arena-save/10")
+        with tempfile.TemporaryDirectory(prefix="arena-v10-migration-") as directory:
+            migrated=Path(directory)/"migrated.uarena"
+            script="""import sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+source=Path(sys.argv[1]).read_bytes(); session=GeneratedArenaSession()
+view=session.load_encounter_bytes(source)
+assert view['time_seconds']==0
+Path(sys.argv[2]).write_bytes(session.save_encounter_bytes())
+"""
+            environment=dict(os.environ,PYTHONDONTWRITEBYTECODE="1",
+                PYTHONNOUSERSITE="1",PYTHONPATH=os.pathsep.join(
+                    (str(ROOT/"tests"),str(ROOT/"src"),str(ROOT/"examples"))))
+            result=subprocess.run([sys.executable,"-B","-c",script,str(legacy),
+                str(migrated)],cwd=ROOT,env=environment,capture_output=True,
+                text=True,timeout=60,check=False)
+            self.assertEqual(result.returncode,0,result.stderr)
+            current=migrated.read_bytes()
+            self.assertNotEqual(current,raw)
+            self.assertEqual(decode(current)["manifest"]["save_schema"],
+                             "universe.generated-arena-save/11")
+
 
     def test_extended_seed14_combat_checkpoint_stays_strict_and_continues_exactly(self):
         """The former 67-second combat overflow resumes exactly in a new OS process."""
@@ -862,9 +974,12 @@ print(json.dumps({'time':e.time,'ids':ids,'objects':[(o.id,o.type,o.get_position
             parsed = decode_save(wire)
             metrics = parsed["manifest"]["metrics"]
             return {"wire": wire, "outer_bytes": len(wire),
-                    "native_bytes": metrics["snapshot_bytes"]+metrics["history_bytes"],
-                    "nodes": metrics["snapshot_nodes"]+metrics["history_wire_nodes"],
+                    "native_bytes": metrics["snapshot_bytes"]+metrics["definitions_bytes"]+metrics["history_bytes"],
+                    "nodes": metrics["aggregate_document_nodes"],
                     "snapshot_nodes": metrics["snapshot_nodes"],
+                    "snapshot_bytes": metrics["snapshot_bytes"],
+                    "definitions_nodes": metrics["definitions_nodes"],
+                    "definitions_bytes": metrics["definitions_bytes"],
                     "history_bytes": metrics["history_bytes"],
                     "history_segments": metrics["history_segments"],
                     "history_field_entries": metrics["history_field_entries"],
@@ -1054,6 +1169,8 @@ if mode == "create":
     metrics=decode(wire)['manifest']['metrics']
     print(json.dumps({'mode':'create','beings':size,'extra_weapons':size-2,
       'snapshot_nodes':metrics['snapshot_nodes'],'snapshot_bytes':metrics['snapshot_bytes'],
+      'definitions_nodes':metrics['definitions_nodes'],'definitions_bytes':metrics['definitions_bytes'],
+      'history_bytes':metrics['history_bytes'],
       'archive_bytes':len(wire),'create_seconds':create_seconds,'save_seconds':save_seconds,
       'peak_rss_platform_units':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},sort_keys=True))
 elif mode == "load":
@@ -1207,7 +1324,35 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
                 check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             continued = json.loads(result.stdout)
-            self.assertEqual(restored_path.read_bytes(), at_64)
+            restored_bytes=restored_path.read_bytes()
+            if restored_bytes != at_64:
+                import io,zipfile
+                def archive_rows(wire):
+                    with zipfile.ZipFile(io.BytesIO(wire)) as archive:
+                        return {name:archive.read(name) for name in archive.namelist()}
+                before_rows=archive_rows(at_64)
+                after_rows=archive_rows(restored_bytes)
+                changed=[]
+                for name in sorted(set(before_rows)|set(after_rows)):
+                    if before_rows.get(name)==after_rows.get(name):
+                        continue
+                    detail=name
+                    if name in before_rows and name in after_rows and name.endswith('.json'):
+                        try:
+                            before_json=json.loads(before_rows[name])
+                            after_json=json.loads(after_rows[name])
+                            if name=='snapshot.json':
+                                before_nodes=before_json['inventory'][2][2][1]
+                                after_nodes=after_json['inventory'][2][2][1]
+                                detail+=f" snapshot_nodes={len(before_nodes)}/{len(after_nodes)}"
+                                detail+=f" snapshot_equal={before_json==after_json}"
+                            else:
+                                detail+=f" json_equal={before_json==after_json}"
+                        except (KeyError,TypeError,ValueError):
+                            pass
+                    changed.append(detail)
+                self.fail('fresh-process exact resave changed archive members: '
+                          + ', '.join(changed[:12]))
             action = advance_one_more(source)
             self.assertEqual(continued_path.read_bytes(), source.save_encounter_bytes())
         self.assertEqual(continued["time"], encounter.time)
@@ -1248,7 +1393,7 @@ print(json.dumps({'time':e.time,'receipts':len(e._atomic_interval_history),
         at_300 = decode_save(at_300_wire)
         at_300_metrics = at_300["manifest"]["metrics"]
         from arena_history_segments import split as split_history
-        _, _, history_attribution = split_history(
+        _, _, _, history_attribution = split_history(
             at_300["decoded_native"], include_diagnostics=True)
         self.assertEqual(at_300["manifest"]["snapshot_cursor"], 300)
         self.assertEqual(at_300_metrics["snapshot_nodes"], at_65_metrics["snapshot_nodes"])
@@ -1293,6 +1438,10 @@ print(json.dumps({'load_and_resave_seconds':time.perf_counter()-started},sort_ke
                     "history_category_owned_rows"],
                 "t300_history_category_owned_row_bytes": history_attribution[
                     "history_category_owned_row_bytes"],
+                "t300_snapshot_category_rows": history_attribution[
+                    "snapshot_category_rows"],
+                "t300_snapshot_category_row_bytes": history_attribution[
+                    "snapshot_category_row_bytes"],
                 "t300_save_seconds": save_seconds,
                 "fresh_process_load_and_resave_seconds": load_metrics["load_and_resave_seconds"],
                 "process_peak_rss_platform_units": resource.getrusage(

@@ -12,13 +12,14 @@ import zipfile
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
 
-SCHEMA = 'universe.generated-arena-save/10'
-_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/9', 'universe.generated-arena-save/8', 'universe.generated-arena-save/7', 'universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
+SCHEMA = 'universe.generated-arena-save/11'
+_PREVIOUS_SCHEMAS = frozenset(('universe.generated-arena-save/10', 'universe.generated-arena-save/9', 'universe.generated-arena-save/8', 'universe.generated-arena-save/7', 'universe.generated-arena-save/6', 'universe.generated-arena-save/5', 'universe.generated-arena-save/4'))
 MAX_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 4098
 MAX_ARCHIVE_CONTENT_BYTES = 64 * 1024 * 1024
 _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
-_ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/1'
+_ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/2'
+_LEGACY_ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/1'
 
 
 class ArenaSaveRejected(ValueError):
@@ -123,13 +124,14 @@ def _session_record(session, native_wire):
 def encode(session, native_inventory):
     from arena_history_segments import split
     try:
-        snapshot, segments, metrics = split(native_inventory)
+        snapshot, definitions, segments, metrics = split(native_inventory)
     except (TypeError, ValueError) as exc:
         raise ArenaSaveRejected(f'native Arena state cannot be segmented: {exc}') from exc
     with session._lock:
         record=_session_record(session,b'')
         _tree(record)
-        entries={'session.json':_canonical(record), 'snapshot.json':snapshot}
+        entries={'session.json':_canonical(record), 'snapshot.json':snapshot,
+                 'definitions.json':definitions}
         for index, segment in enumerate(segments):
             entries[f'history/segment-{index:06d}.json']=segment
         _need_archive(len(entries) <= MAX_ARCHIVE_ENTRIES,
@@ -144,12 +146,16 @@ def encode(session, native_inventory):
             'entry_count':len(entries),'history_segment_count':len(segments),
             'snapshot_cursor':metrics['history_cursor'],
             'snapshot_sha256':hashlib.sha256(snapshot).hexdigest(),
+            'definitions_sha256':hashlib.sha256(definitions).hexdigest(),
             'entries':listing,
             'metrics':{'snapshot_bytes':metrics['snapshot_bytes'],
+                'definitions_bytes':metrics['definition_bytes'],
+                'definitions_nodes':metrics['definition_nodes'],
                 'history_bytes':metrics['history_bytes'],
                 'snapshot_nodes':metrics['snapshot_nodes'],
                 'snapshot_depth':metrics['snapshot_depth'],
                 'history_wire_nodes':metrics['history_wire_nodes'],
+                'aggregate_document_nodes':metrics['aggregate_document_nodes'],
                 'history_max_depth':metrics['history_max_depth'],
                 'history_segments':metrics['history_segment_count'],
                 'history_owned_nodes':metrics['history_owned_nodes'],
@@ -226,10 +232,17 @@ def _decode_archive(wire):
             raise ArenaSaveRejected(f'Arena archive {name} is not canonical')
         return value
     manifest=parse('manifest.json')
-    fields={'schema','save_schema','entry_count','history_segment_count',
+    legacy_archive = (type(manifest) is dict
+        and manifest.get('schema') == _LEGACY_ARCHIVE_SCHEMA
+        and manifest.get('save_schema') == 'universe.generated-arena-save/10')
+    current_fields={'schema','save_schema','entry_count','history_segment_count',
+            'snapshot_cursor','snapshot_sha256','definitions_sha256','entries','metrics','sha256'}
+    legacy_fields={'schema','save_schema','entry_count','history_segment_count',
             'snapshot_cursor','snapshot_sha256','entries','metrics','sha256'}
-    _need_archive(type(manifest) is dict and set(manifest)==fields
-        and manifest['schema']==_ARCHIVE_SCHEMA and manifest['save_schema']==SCHEMA,
+    _need_archive(type(manifest) is dict
+        and ((set(manifest)==current_fields and manifest['schema']==_ARCHIVE_SCHEMA
+              and manifest['save_schema']==SCHEMA)
+             or (legacy_archive and set(manifest)==legacy_fields)),
         'Arena archive manifest schema is unknown or malformed')
     payload={key:value for key,value in manifest.items() if key!='sha256'}
     _need_archive(type(manifest['sha256']) is str and hashlib.sha256(_canonical(payload)).hexdigest()==manifest['sha256'],
@@ -238,6 +251,9 @@ def _decode_archive(wire):
                    'snapshot_depth','history_wire_nodes','history_max_depth',
                    'history_segments','history_owned_nodes',
                    'total_inventory_nodes','history_field_entries'}
+    if not legacy_archive:
+        metric_fields |= {'definitions_bytes','definitions_nodes',
+                          'aggregate_document_nodes'}
     metrics=manifest['metrics']
     history_field_entries=metrics.get('history_field_entries') if type(metrics) is dict else None
     _need_archive(type(metrics) is dict and set(metrics)==metric_fields
@@ -268,11 +284,15 @@ def _decode_archive(wire):
     segment_names=sorted(name for name in raw if name.startswith('history/'))
     expected_names=[f'history/segment-{index:06d}.json'
                     for index in range(len(segment_names))]
+    fixed_entries={'snapshot.json','session.json'}
+    if not legacy_archive:
+        fixed_entries.add('definitions.json')
     _need_archive(segment_names==expected_names
         and manifest['history_segment_count']==len(segment_names)
-        and set(raw)-{'manifest.json'}=={'snapshot.json','session.json',*segment_names},
+        and set(raw)-{'manifest.json'}==fixed_entries | set(segment_names),
         'Arena archive history segments are missing, duplicated or unordered')
     snapshot_wire=raw['snapshot.json']
+    definitions_wire=None if legacy_archive else raw['definitions.json']
     snapshot_value=parse('snapshot.json')
     expected_field_entries={}
     for descriptor in snapshot_value['history_fields']:
@@ -286,9 +306,19 @@ def _decode_archive(wire):
                   'Arena archive history field counts disagree with its snapshot')
     _need_archive(hashlib.sha256(snapshot_wire).hexdigest()==manifest['snapshot_sha256'],
                   'Arena resumable snapshot digest does not match')
+    _need_archive(legacy_archive or
+        hashlib.sha256(definitions_wire).hexdigest()==manifest['definitions_sha256'],
+        'Arena immutable definition digest does not match')
     inventory,archive_metrics=reassemble(snapshot_wire,
         tuple(raw[name] for name in segment_names),snapshot_value=snapshot_value,
+        definitions_wire=definitions_wire,
         include_metrics=True)
+    if legacy_archive:
+        try:
+            from arena_native_snapshot import _migrate_legacy_v5_inventory
+            inventory = _migrate_legacy_v5_inventory(inventory)
+        except (TypeError, ValueError) as exc:
+            raise ArenaSaveRejected(f'legacy /10 Arena native graph was refused: {exc}') from exc
     sections={row[0]:row[1:] for row in inventory[1][1:]}
     nodes=sections['nodes'][0]
     encounter_rows=[row for row in nodes if row[1]=='encounter.Encounter']
@@ -298,9 +328,13 @@ def _decode_archive(wire):
         and cursor[1].isdigit() and int(cursor[1])==manifest['snapshot_cursor'],
         'Arena history cursor disagrees with native Encounter state')
     _need_archive(metrics['snapshot_bytes']==len(snapshot_wire)
+        and (legacy_archive or metrics['definitions_bytes']==len(definitions_wire))
         and metrics['history_bytes']==sum(len(raw[name]) for name in segment_names)
         and metrics['snapshot_nodes']==archive_metrics['snapshot_nodes']
+        and (legacy_archive or metrics['definitions_nodes']==archive_metrics['definition_nodes'])
         and metrics['history_wire_nodes']==archive_metrics['history_wire_nodes']
+        and (legacy_archive or metrics['aggregate_document_nodes']
+             ==archive_metrics['aggregate_document_nodes'])
         and metrics['snapshot_depth']==archive_metrics['snapshot_depth']
         and metrics['history_max_depth']==archive_metrics['history_max_depth']
         and metrics['history_owned_nodes']==archive_metrics['history_owned_nodes']
@@ -308,7 +342,7 @@ def _decode_archive(wire):
         and metrics['history_segments']==len(segment_names),
         'Arena archive measured content does not match its manifest')
     session=parse('session.json')
-    return {'schema':SCHEMA,'session':session,'decoded_native':inventory,
+    return {'schema':manifest['save_schema'],'session':session,'decoded_native':inventory,
             'native_wire':None,'manifest':manifest}
 
 
@@ -346,7 +380,8 @@ def decode(wire):
         'map','world_premise','display_names','movement_plan_base64','movement_sequence',
         'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
         'initial_equipment_provenance','equipment_mode'}
-    if data['schema'] in (SCHEMA, 'universe.generated-arena-save/8',
+    if data['schema'] in (SCHEMA, 'universe.generated-arena-save/10',
+                           'universe.generated-arena-save/8',
                            'universe.generated-arena-save/7'):
         required.update(('opponent_strategy', 'authored_scenario_id', 'encounter_mode', 'arena_strategies'))
     elif data['schema'] == 'universe.generated-arena-save/6':

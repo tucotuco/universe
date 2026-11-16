@@ -580,6 +580,27 @@ for _tag, _fields in _ARENA_TYPED_FIELDS.items():
     FIELD_ADAPTERS[_tag] = {'allowed': list(_fields), 'required': list(_fields)}
 del _ACTION_ALLOWED, _ACTION_REQUIRED, _ACTION_ADDITIONS, _ARENA_TYPED_FIELDS, _tag, _additions, _fields
 
+# These Arena fields are reconstructed from authoritative saved state or
+# process binding after strict Load. No other required native field may be
+# omitted from a restored Arena snapshot.
+ARENA_REBUILT_FIELDS = frozenset({
+    ('universe.Universe', '_schedule_lock'),
+    ('universe.Universe', '_reproduction_group_registry'),
+    ('action_choice.ChoiceBook', 'lock'),
+    ('action_choice.ChoiceBook', '_drafts'),
+    ('action_choice.ChoiceBook', '_closed_drafts'),
+    ('action_choice.ChoiceBook', '_tokens'),
+    ('encounter.Encounter', '_transactional_mode'),
+    ('encounter.Encounter', '_active_fatigue_frame'),
+    ('encounter.Encounter', '_boundary_context'),
+    ('encounter.Encounter', '_advancing'),
+    ('encounter.Encounter', '_running'),
+    ('encounter.Encounter', '_dispatching'),
+    ('encounter.Encounter', '_coordinator_time'),
+    ('encounter.Encounter', '_interval_start'),
+    ('encounter.Encounter', '_physiology_registry'),
+})
+
 # Semantic scope certified by 5D2C3.  FIELD_ADAPTERS supplies the reviewed
 # closed field vocabulary; this table adds role-specific treatment for the
 # native Run/Spot dependency graph.  It deliberately does not claim closure

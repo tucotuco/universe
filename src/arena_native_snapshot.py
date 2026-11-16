@@ -43,6 +43,16 @@ _LEGACY_V4_COMPATIBILITY = (
     ('python-native-rng', 'MT19937-state-v3'),
     ('restore-adapters', 'not-implemented'),
 )
+_LEGACY_V5_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', '4fa06efaeaa44fff5a929d5220c24a517603adc0df578ea260de09df0a3a0982'),
+    ('rule-kernel-source', '6133094b36bdb6e5fdd6e9d3890046b93fe6519ac7abbc931d26918c7b5fdb91'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
 
 # Exact native type closure exercised by the current Arena UI: generated
 # Beings, typed ground/carry Objects, Run, Pick up, Draw, Dagger strikes, their Choice and
@@ -147,7 +157,8 @@ def _tree(value, depth=0, count=None):
     raise ArenaNativeSnapshotRejected('native Arena state has unsupported JSON data')
 
 
-def _validate_arena_field_schema(inventory, *, require_required=True):
+def _validate_arena_field_schema(inventory, *, require_required=True,
+                                allow_rebuilt_fields=False):
     """Admit only the reviewed per-type field vocabulary for Arena state."""
     from checkpoint_fields import FIELD_ADAPTERS
     _need(type(inventory) is tuple and len(inventory) == 2,
@@ -180,6 +191,9 @@ def _validate_arena_field_schema(inventory, *, require_required=True):
         fields = set(names)
         allowed = set(adapter['allowed'])
         required = set(adapter['required'])
+        if allow_rebuilt_fields:
+            from checkpoint_fields import ARENA_REBUILT_FIELDS
+            required -= {name for owner, name in ARENA_REBUILT_FIELDS if owner == tag}
         _need(fields <= allowed,
               f'native Arena node has unreviewed fields: {tag}: '
               + ', '.join(sorted(fields - allowed)))
@@ -187,6 +201,20 @@ def _validate_arena_field_schema(inventory, *, require_required=True):
             _need(required <= fields,
                   f'native Arena node is missing required fields: {tag}: '
                   + ', '.join(sorted(required - fields)))
+
+
+def _migrate_legacy_v5_inventory(inventory):
+    """Migrate the last accepted /10 graph fingerprint without re-simulation."""
+    from checkpoint_inventory import _compatibility
+    _need(type(inventory) is tuple and len(inventory) == 2
+          and inventory[0] == _LEGACY_V5_COMPATIBILITY,
+          'legacy v5 native inventory compatibility mismatch')
+    _validate_inventory(inventory, expected_compatibility=_LEGACY_V5_COMPATIBILITY)
+    _validate_arena_field_schema(inventory, require_required=False)
+    migrated = (_compatibility(), inventory[1])
+    _validate_arena_field_schema(migrated)
+    _validate_inventory(migrated)
+    return migrated
 
 
 def capture(world, encounter, rng_owner):
@@ -242,7 +270,9 @@ def decode(wire):
     legacy_schema = data['schema'] if data['schema'] in _LEGACY_SCHEMAS else None
     expected_compatibility = (_LEGACY_COMPATIBILITY
         if legacy_schema == 'universe.generated-arena-native-state/3' else
-        _LEGACY_V4_COMPATIBILITY if legacy_schema else _compatibility())
+        _LEGACY_V4_COMPATIBILITY if legacy_schema else
+        _LEGACY_V5_COMPATIBILITY if saved_compatibility == _LEGACY_V5_COMPATIBILITY
+        else _compatibility())
     _need(saved_compatibility == expected_compatibility,
           'saved native Arena implementation/rules differ from this runtime')
     try:
@@ -266,6 +296,9 @@ def decode(wire):
                             expected_compatibility=_LEGACY_V4_COMPATIBILITY)
         _validate_arena_field_schema(inventory, require_required=False)
         inventory = (_compatibility(), inventory[1])
+    elif saved_compatibility == _LEGACY_V5_COMPATIBILITY:
+        inventory = _expand_compact_inventory(inventory)
+        inventory = _migrate_legacy_v5_inventory(inventory)
     else:
         inventory = _expand_compact_inventory(inventory)
         _validate_arena_field_schema(inventory)
@@ -517,7 +550,8 @@ def restore(envelope):
         _unbind_restored_arena_progression)
 
     _validate_inventory(envelope)
-    _validate_arena_field_schema(envelope, require_required=False)
+    _validate_arena_field_schema(envelope, require_required=True,
+                                 allow_rebuilt_fields=True)
     body = envelope[1]
     sections = {row[0]: row[1:] for row in body[1:]}
     nodes = sections['nodes'][0]
@@ -641,6 +675,12 @@ def restore(envelope):
     encounter._active_fatigue_frame = None
     encounter._boundary_context = None
     encounter._advancing = encounter._running = encounter._dispatching = False
+    if '_coordinator_time' not in encounter.__dict__:
+        encounter._coordinator_time = encounter.time
+    if '_interval_start' not in encounter.__dict__:
+        encounter._interval_start = encounter.time
+    if '_physiology_registry' not in encounter.__dict__:
+        encounter._physiology_registry = None
     if '_atomic_interval_history' not in encounter.__dict__:
         encounter._atomic_interval_history = []
     book = encounter._choice_book

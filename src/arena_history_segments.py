@@ -13,6 +13,7 @@ import json
 
 SCHEMA = 'universe.generated-arena-history-segment/1'
 SNAPSHOT_SCHEMA = 'universe.generated-arena-resumable-snapshot/1'
+DEFINITION_SCHEMA = 'universe.generated-arena-definition-table/1'
 MAX_SNAPSHOT_NODES = 1_000_000
 MAX_SEGMENT_NODES = 1_000_000
 MAX_TOTAL_NODES = 10_000_000
@@ -33,6 +34,48 @@ _HISTORY_FIELDS = frozenset({
     ('armor.ArmorInstance', '_atomic_target_history'),
     ('arena_perception.ArenaPerceptionLedger', '_history'),
 })
+
+# Immutable Library definitions are stored once in a separate checked table.
+# Their descendants (for example nested defense maps) travel with them unless
+# a live snapshot or historical receipt independently owns the same node.
+_DEFINITION_TAGS = frozenset({
+    'actiondictionary.ActionDefinition',
+    'armor.ArmorDefinition',
+    'being.BeingDefinition',
+    'object.ObjectDefinition',
+    'skill.SkillDefinition',
+    'weapon.WeaponDefinition',
+})
+
+# Runtime locks/transaction markers are rebuilt by Arena restore. Remove their
+# marker rows from the portable resume snapshot. Coordinator clocks are
+# omitted only when they exactly match authoritative Encounter.time.
+_REBUILT_MARKERS = {
+    ('universe.Universe', '_schedule_lock'): ('excluded-transient', '_schedule_lock'),
+    ('universe.Universe', '_reproduction_group_registry'):
+        ('excluded-out-of-scope-empty-registry', 0),
+    ('action_choice.ChoiceBook', 'lock'): ('excluded-transient', 'lock'),
+    ('action_choice.ChoiceBook', '_drafts'):
+        ('excluded-transient', '_drafts'),
+    ('action_choice.ChoiceBook', '_closed_drafts'):
+        ('excluded-transient', '_closed_drafts'),
+    ('action_choice.ChoiceBook', '_tokens'):
+        ('excluded-transient', '_tokens'),
+    ('encounter.Encounter', '_transactional_mode'):
+        ('excluded-transient', '_transactional_mode'),
+    ('encounter.Encounter', '_active_fatigue_frame'):
+        ('excluded-transient', '_active_fatigue_frame'),
+    ('encounter.Encounter', '_boundary_context'):
+        ('excluded-transient', '_boundary_context'),
+    ('encounter.Encounter', '_advancing'): ('excluded-transient', '_advancing'),
+    ('encounter.Encounter', '_running'): ('excluded-transient', '_running'),
+    ('encounter.Encounter', '_dispatching'): ('excluded-transient', '_dispatching'),
+}
+_REBUILT_NULL_FIELDS = {('encounter.Encounter', '_physiology_registry')}
+_DERIVED_CLOCK_FIELDS = {
+    ('encounter.Encounter', '_coordinator_time'),
+    ('encounter.Encounter', '_interval_start'),
+}
 
 
 class ArenaHistorySegmentsRejected(ValueError):
@@ -129,11 +172,54 @@ def _references(value):
             yield from _references(item)
 
 
+def _omit_rebuilt_runtime_fields(rows):
+    from checkpoint_fields import ARENA_REBUILT_FIELDS
+    _need(frozenset(_REBUILT_MARKERS) | _REBUILT_NULL_FIELDS
+          | _DERIVED_CLOCK_FIELDS == ARENA_REBUILT_FIELDS,
+          'Arena rebuilt-field contract differs from native field schema')
+    encounter_rows = [row for row in rows if row[1] == 'encounter.Encounter']
+    _need(len(encounter_rows) == 1, 'native checkpoint must have one Encounter')
+    encounter_fields = dict(encounter_rows[0][2])
+    authoritative_time = encounter_fields.get('time')
+    _need(authoritative_time is not None, 'Encounter authoritative time is missing')
+    omitted = []
+    result = []
+    for ref, tag, content in rows:
+        if tag in ('ordered-map', 'list', 'tuple', 'set', 'frozenset'):
+            result.append((ref, tag, content))
+            continue
+        kept = []
+        for field, value in content:
+            key = (tag, field)
+            if key in _REBUILT_MARKERS:
+                _need(value == _REBUILT_MARKERS[key],
+                      f'{tag}.{field} has an unexpected runtime marker')
+                omitted.append(key)
+                continue
+            if key in _REBUILT_NULL_FIELDS:
+                _need(value == ('null',),
+                      f'{tag}.{field} contains unsupported external state')
+                omitted.append(key)
+                continue
+            if key in _DERIVED_CLOCK_FIELDS:
+                _need(value == authoritative_time,
+                      f'{tag}.{field} disagrees with authoritative Encounter time')
+                omitted.append(key)
+                continue
+            kept.append((field, value))
+        result.append((ref, tag, tuple(kept)))
+    return tuple(result), tuple(omitted)
+
+
 def split(inventory, *, include_diagnostics=False):
     """Return compact snapshot bytes, ordered segment bytes and metrics."""
     from arena_native_snapshot import _compact_inventory
 
     compatibility, body, rows, by_ref = _read_rows(inventory)
+    rows, omitted_runtime_fields = _omit_rebuilt_runtime_fields(rows)
+    by_ref = {row[0]: row for row in rows}
+    definition_refs = {ref for ref, tag, _content in rows
+                       if tag in _DEFINITION_TAGS}
     history_lists = {}
     for ref, tag, content in rows:
         if tag in ('ordered-map', 'list', 'tuple', 'set', 'frozenset'):
@@ -160,6 +246,8 @@ def split(inventory, *, include_diagnostics=False):
             snapshot_node(ref)
 
     def snapshot_node(ref):
+        if ref in definition_refs:
+            return
         if ref in snapshot_refs:
             return
         row = by_ref.get(ref)
@@ -209,6 +297,8 @@ def split(inventory, *, include_diagnostics=False):
             stack = list(_references(item))
             while stack:
                 ref = stack.pop()
+                if ref in definition_refs:
+                    continue
                 if ref in snapshot_refs or ref in reached:
                     continue
                 row = by_ref.get(ref)
@@ -227,9 +317,43 @@ def split(inventory, *, include_diagnostics=False):
             first_owner.setdefault(ref, ordinal)
         segment_reach.append(reached)
 
+    definition_closure = set()
+    def definition_node(ref):
+        if ref in definition_closure:
+            return
+        row = by_ref.get(ref)
+        _need(row is not None, 'immutable definition references a missing graph node')
+        definition_closure.add(ref)
+        _ref, tag, content = row
+        if tag in ('ordered-map', 'list', 'tuple', 'set', 'frozenset'):
+            stack = list(_references(content))
+        else:
+            stack = [child for _field, value in content
+                     for child in _references(value)]
+        for child in stack:
+            definition_node(child)
+
+    for ref in definition_refs:
+        definition_node(ref)
+
+    definition_owned_refs = ((definition_closure - snapshot_refs - set(first_owner))
+                             | definition_refs)
+    definition_roots = tuple(sorted(
+        ((ref, by_ref[ref][1]) for ref in definition_refs), key=lambda row: repr(row[0])))
+    definition_rows = [row for row in rows if row[0] in definition_owned_refs]
+    definition_rows.sort(key=lambda row: _canonical(_json(row[0])))
+    definition_value = {'schema': DEFINITION_SCHEMA,
+        'compatibility': _json(compatibility), 'roots': _json(definition_roots),
+        'nodes': _json(tuple(definition_rows))}
+    definition_wire = _canonical(definition_value)
+    definition_node_count, definition_depth = _measure(
+        definition_value, max_nodes=MAX_SEGMENT_NODES)
+
     snapshot_nodes = []
     for row in rows:
         if row[0] not in snapshot_refs:
+            continue
+        if row[0] in definition_owned_refs:
             continue
         if row[0] in history_refs:
             row = (row[0], row[1], ())
@@ -257,12 +381,21 @@ def split(inventory, *, include_diagnostics=False):
     snapshot_wire = _canonical(snapshot_value)
     snapshot_nodes_count, snapshot_depth = _measure(
         snapshot_value, max_nodes=MAX_SNAPSHOT_NODES)
+    # Group owned history rows in one pass. The old comprehension scanned the
+    # complete native inventory once per committed boundary, making export
+    # work proportional to history_length * inventory_size even though each
+    # row belongs to at most one segment.
+    rows_by_segment = [[] for _ in segment_roots]
+    for row in rows:
+        ordinal = first_owner.get(row[0])
+        if ordinal is not None:
+            rows_by_segment[ordinal].append(row)
+
     segments = []
     segment_metrics = []
     all_segment_nodes = 0
-    for ordinal, roots in enumerate(segment_roots):
-        node_rows = tuple(sorted((row for row in rows
-                          if first_owner.get(row[0]) == ordinal),
+    for ordinal, (roots, owned_rows) in enumerate(zip(segment_roots, rows_by_segment)):
+        node_rows = tuple(sorted(owned_rows,
                           key=lambda row: _canonical(_json(row[0]))))
         all_segment_nodes += len(node_rows)
         segment = {'schema': SCHEMA, 'ordinal': ordinal,
@@ -271,18 +404,26 @@ def split(inventory, *, include_diagnostics=False):
         wire = _canonical(segment_value)
         segment_metrics.append(_measure(segment_value, max_nodes=MAX_SEGMENT_NODES))
         segments.append(wire)
-    aggregate = len(snapshot_wire) + sum(map(len, segments))
+    aggregate = len(snapshot_wire) + len(definition_wire) + sum(map(len, segments))
     _need(aggregate <= MAX_TOTAL_BYTES,
           'segmented native state exceeds aggregate uncompressed byte limit')
-    _need(len(snapshot_nodes) + all_segment_nodes == len(rows),
+    aggregate_nodes = (snapshot_nodes_count + definition_node_count
+        + sum(count for count, _depth in segment_metrics))
+    _need(aggregate_nodes <= MAX_TOTAL_NODES,
+          'segmented native state exceeds aggregate structural limit')
+    _need(len(snapshot_nodes) + all_segment_nodes + len(definition_rows) == len(rows),
           'segmented graph accounting is inconsistent')
     metrics = {'snapshot_bytes': len(snapshot_wire),
         'snapshot_nodes': snapshot_nodes_count,
         'snapshot_depth': snapshot_depth,
+        'definition_bytes': len(definition_wire),
+        'definition_nodes': definition_node_count,
+        'definition_depth': definition_depth,
         'history_segment_count': len(segments),
         'history_bytes': sum(map(len, segments)),
         'history_owned_nodes': all_segment_nodes,
         'history_wire_nodes': sum(count for count, _depth in segment_metrics),
+        'aggregate_document_nodes': aggregate_nodes,
         'history_max_depth': max((depth for _count, depth in segment_metrics), default=0),
         'aggregate_bytes': aggregate, 'total_inventory_nodes': len(rows),
         'history_field_entries': {f'{tag}.{field}': sum(len(value['items'])
@@ -308,11 +449,22 @@ def split(inventory, *, include_diagnostics=False):
             category_bytes[name] = category_bytes.get(name, 0) + len(_canonical(_json(row)))
         metrics['history_category_owned_rows'] = category_rows
         metrics['history_category_owned_row_bytes'] = category_bytes
-    return snapshot_wire, tuple(segments), metrics
+        snapshot_rows = {}
+        snapshot_bytes = {}
+        for row in rows:
+            if row[0] not in snapshot_refs:
+                continue
+            tag = row[1]
+            snapshot_rows[tag] = snapshot_rows.get(tag, 0) + 1
+            snapshot_bytes[tag] = snapshot_bytes.get(tag, 0) + len(
+                _canonical(_json(row)))
+        metrics['snapshot_category_rows'] = snapshot_rows
+        metrics['snapshot_category_row_bytes'] = snapshot_bytes
+    return snapshot_wire, definition_wire, tuple(segments), metrics
 
 
 def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
-               include_metrics=False):
+               definitions_wire=None, include_metrics=False):
     """Validate independently bounded documents, then restore exact inventory."""
     if snapshot_value is None:
         try:
@@ -347,6 +499,44 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
         _need(type(row) is tuple and len(row) == 3 and row[0] not in by_ref,
               'snapshot graph has duplicate or malformed nodes')
         by_ref[row[0]] = row
+    definition_wire_nodes = definition_depth = 0
+    definition_node_refs = []
+    if definitions_wire is not None:
+        try:
+            definition_data = json.loads(definitions_wire.decode('ascii'))
+        except (AttributeError, UnicodeError, ValueError, RecursionError) as exc:
+            raise ArenaHistorySegmentsRejected('immutable definition table is invalid JSON') from exc
+        _need(_canonical(definition_data) == definitions_wire,
+              'immutable definition table is not canonical')
+        definition_wire_nodes, definition_depth = _measure(
+            definition_data, max_nodes=MAX_SEGMENT_NODES)
+        _need(type(definition_data) is dict and set(definition_data) ==
+              {'schema', 'compatibility', 'roots', 'nodes'}
+              and definition_data['schema'] == DEFINITION_SCHEMA,
+              'immutable definition table schema or fields are invalid')
+        definition_compatibility = _tuples(definition_data['compatibility'])
+        roots = _tuples(definition_data['roots'])
+        definition_rows = _tuples(definition_data['nodes'])
+        _need(definition_compatibility == expected_compatibility
+              and type(roots) is tuple and type(definition_rows) is tuple,
+              'immutable definition table compatibility/content is invalid')
+        root_refs = set()
+        for root in roots:
+            _need(type(root) is tuple and len(root) == 2
+                  and root[1] in _DEFINITION_TAGS and root[0] not in root_refs,
+                  'immutable definition root is malformed or duplicated')
+            root_refs.add(root[0])
+        for row in definition_rows:
+            _need(type(row) is tuple and len(row) == 3 and row[0] not in by_ref,
+                  'definition graph has duplicate or malformed nodes')
+            by_ref[row[0]] = row
+            definition_node_refs.append(row[0])
+        _need(root_refs and all(by_ref.get(ref, (None, None))[1] == tag
+              for ref, tag in roots),
+              'immutable definition root is missing or has a different type')
+        _need(all(not (ref in by_ref and tag in _DEFINITION_TAGS and ref not in root_refs)
+              for ref, tag, _content in definition_rows),
+              'immutable definition table omits a registered definition root')
     expected_attachments = {}
     for row in history_fields:
         _need(type(row) is tuple and len(row) == 5
@@ -366,8 +556,8 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
               'snapshot history field does not reference its declared list')
 
     node_owners = {}
-    aggregate_bytes = len(snapshot_wire)
-    total_nodes = snapshot_nodes
+    aggregate_bytes = len(snapshot_wire) + (0 if definitions_wire is None else len(definitions_wire))
+    total_nodes = snapshot_nodes + definition_wire_nodes
     history_wire_nodes = history_max_depth = history_owned_nodes = 0
     for expected_ordinal, wire in enumerate(segment_wires):
         aggregate_bytes += len(wire)
@@ -414,15 +604,18 @@ def reassemble(snapshot_wire, segment_wires, *, snapshot_value=None,
         row = by_ref[list_ref]
         by_ref[list_ref] = (row[0], row[1], tuple(state['items'][i]
                                                   for i in range(state['length'])))
-    rows = tuple(by_ref[row[0]] for row in snapshot_rows) + tuple(
-        by_ref[ref] for ref in node_owners)
+    rows = (tuple(by_ref[row[0]] for row in snapshot_rows)
+        + tuple(by_ref[ref] for ref in definition_node_refs)
+        + tuple(by_ref[ref] for ref in node_owners))
     rebuilt_body = tuple(('nodes', rows) if section[0] == 'nodes' else section
                          for section in body[1:])
     result = (compatibility, (body[0], *rebuilt_body))
     from arena_native_snapshot import _validate_inventory
-    _validate_inventory(result)
+    _validate_inventory(result, expected_compatibility=compatibility)
     metrics = {'snapshot_nodes': snapshot_nodes, 'snapshot_depth': snapshot_depth,
+        'definition_nodes': definition_wire_nodes, 'definition_depth': definition_depth,
         'history_wire_nodes': history_wire_nodes, 'history_max_depth': history_max_depth,
+        'aggregate_document_nodes': snapshot_nodes + definition_wire_nodes + history_wire_nodes,
         'history_owned_nodes': history_owned_nodes,
         'total_inventory_nodes': len(rows), 'history_segment_count': len(segment_wires),
         'aggregate_bytes': aggregate_bytes}
