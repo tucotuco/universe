@@ -1091,6 +1091,95 @@ print(json.dumps({'time':enc.time,'flight_outcome':flight.impact_outcome,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_pending_targeted_throw_choice_restores_before_release_and_impact(self):
+        """Initial-state Load resumes the accepted held-Weapon Throw declaration."""
+        import random
+        from being import BeingInstance
+        from activities import ThrowAction
+        from native_throw_arena import build_native_scene
+
+        world, encounter, actor, _stone, rng, original = build_native_scene(seed=116)
+        encounter._choice_book.undo(encounter._choice_book.for_action(original.id).id)
+        target = BeingInstance(world.library.being_dictionary.get_object_definition("Human"),
+                               "Pending Throw target", id="native-persist/pending-throw-target")
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        world.add_object(target)
+        encounter.add_being(target.id)
+        encounter.mark_aware(actor.id, target.id)
+        weapon_id = world.make_weapon_for_being(actor.id, "Dagger", "Pending Throw Dagger")
+        world.arm_being(actor.id, weapon_id, "right hand")
+        encounter.add_object(weapon_id)
+        action = ThrowAction(world, actor.id, weapon_id, encounter.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id="native-persist/pending-throw")
+        encounter.schedule_choice((action,))
+        rng.state = random.Random(116).getstate()
+        wire = export_save(encounter)
+        self.assertEqual(json.loads(wire)["history"], None)
+
+        def finish(enc, saved_world, cursor):
+            victim = saved_world.get_object_by_id(target.id)
+            thrown = saved_world.get_object_by_id(weapon_id)
+            event = action
+            enc.step(8)
+            flight = thrown.__dict__["_projectile_flight"]
+            log = native_history.capture(enc)
+            query = native_history.NativeHistoryQuery(log)
+            for boundary in range(1, enc.last_processed_boundary + 1):
+                inspection = enc.inspect_committed(boundary)
+                committed = query.committed_actions_at(boundary)
+                self.assertEqual(committed["actions"], native_history._plain(inspection.actions))
+                self.assertEqual(committed["effects"], native_history._plain(inspection.effects))
+                self.assertEqual(query.timeline_at(boundary),
+                                 native_history._plain(inspection.timeline))
+            return {
+                "time": enc.time,
+                "action_id": event.id,
+                "action_outcome": event.resolution.outcome,
+                "flight_outcome": flight.impact_outcome,
+                "flight_status": flight.status,
+                "target_hp": victim.get_hit_points(),
+                "weapon_position": thrown.get_position().as_tuple(),
+                "rng": cursor.state,
+                "history": hashlib.sha256(native_history.encode(log)).hexdigest(),
+            }
+
+        expected = finish(encounter, world, rng)
+        self.assertEqual(expected["action_outcome"], "released")
+        self.assertEqual(expected["flight_outcome"], "hit")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-pending-throw.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+victim=world.get_object_by_id(sys.argv[2]);thrown=world.get_object_by_id(sys.argv[3])
+choice=enc.choice_for_action(sys.argv[4])
+event=next(member.action for member in enc._choice_book._choices[choice.id].members
+ if member.action.id==sys.argv[4])
+assert choice.state=='accepted' and event.resolution is None
+enc.step(8);flight=thrown.__dict__['_projectile_flight']
+log=native_history.capture(enc);query=native_history.NativeHistoryQuery(log)
+for boundary in range(1,enc.last_processed_boundary+1):
+ inspection=enc.inspect_committed(boundary);committed=query.committed_actions_at(boundary)
+ assert committed['actions']==native_history._plain(inspection.actions)
+ assert committed['effects']==native_history._plain(inspection.effects)
+ assert query.timeline_at(boundary)==native_history._plain(inspection.timeline)
+print(json.dumps({'time':enc.time,'action_id':event.id,
+ 'action_outcome':event.resolution.outcome,'flight_outcome':flight.impact_outcome,
+ 'flight_status':flight.status,'target_hp':victim.get_hit_points(),
+ 'weapon_position':thrown.get_position().as_tuple(),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(log)).hexdigest()},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id,
+                 weapon_id, action.id], cwd=directory,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_strict_outer_integrity_and_duplicate_keys_are_rejected(self):
         demo = encounter_delta_headless.build_demo(until=4)
         wire = export_save(demo["encounter"])
