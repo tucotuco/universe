@@ -1719,3 +1719,18 @@ Added `test_native_local_frame_movement_resumes_in_fresh_process`: a native Enco
 - `git diff --check` — passed.
 
 The matrix now cites this evidence. Remaining spatial geometry concerns include historical query support for every LocalFrame-bearing context and all legal frame transitions; this scenario proves exact current-frame restoration and continuation only. Commit `74a5b60` is the verified observer-history baseline. This local-frame test and report/TASKS/matrix updates remain pending a scoped commit. No ordinary Arena Save path was changed; U-PER-SCALE-001 remains ACTIVE.
+
+
+## Problems-first — objective fact/provenance restoration and historical queries
+
+### Gap and correction
+
+Several matrix rows for objective facts and atomic provenance still said there was no native restore path. Existing coverage did restore Group Reality and PersonalHistory ledgers, but it did not compare the historical objective query surfaces at each committed boundary or assert the restored literal AskAboutPast declaration recipe. This left a real evidence gap between current graph restoration and the facts-only history API.
+
+Extended the two-root Group observer test to compare owner-independent `objective_at()` and `objective_use_at()` at boundaries 0/1/2 against the uninterrupted controls, along with every `ObjectiveCommitProvenance` field (Encounter/boundary/key/revision/origins/requesters/consumers). Extended the separate multi-listener AskAboutPast case to verify strict Load reconstructs the exact `EpisodeFacts` and `DeclaredObjectiveFact` types, key/value/origin, and the same historical objective-fact/use projections at boundaries 0/1/2. Updated the matrix for these tested contracts, including `ObjectiveFact`, `SubjectRealityCandidate`, `RealityLedger`, `Fact`, `FactKey`, and `CommittedFact`, with source/test citations.
+
+- Targeted Group-belief + AskAboutPast continuation and executable matrix gate: **5 passed / 8.398s**.
+- Complete `test_native_history`: **31 passed / 25.886s**, including authoritative Group objective fact/use query parity and PersonalHistory boundary visibility.
+- `git diff --check` — passed.
+
+The independent rotated-frame continuation and matrix gate were committed as `a42c44b`. This objective-family extension is pending scoped commit. It does not close all native field families or historical consumers; application Save/Load cutover, broad security/compatibility gates, other reader parity, receipt-backed inquiry/reassessment integration and durable journal recovery remain open. U-PER-SCALE-001 remains ACTIVE; no rule-choice blocker was found.

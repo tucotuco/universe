@@ -2978,6 +2978,12 @@ print(json.dumps({'times':[row[0].time for row in rows],
                     for name,report in value.reports.items()),
                 sorted(value.rejected_candidates.items())]
 
+        def project_provenance(ledger):
+            return [[entry.encounter_id,entry.boundary,entry.key.entity_id,
+                entry.key.attribute,entry.key.detail,entry.key.time,entry.revision,
+                list(entry.origins),list(entry.requesters),list(entry.consumers)]
+                for entry in ledger._atomic_provenance]
+
         def project():
             return {'times':[row[0].time for row in rows],
                 'outcomes':[row[4].resolution.outcome for row in rows],
@@ -2991,6 +2997,14 @@ print(json.dumps({'times':[row[0].time for row in rows],
                     item.trigger_observation_id] for item in row[5].belief_history] for row in rows],
                 'rng':[row[3].state for row in rows],
                 'facts':[row[2]._composition_reality.to_jsonable() for row in rows],
+                'objective_provenance':[project_provenance(row[2]._composition_reality)
+                    for row in rows],
+                'objective_history':[[native_history.NativeHistoryQuery(
+                    native_history.capture(row[0])).objective_at(boundary)
+                    for boundary in (0,1,2)] for row in rows],
+                'objective_use_history':[[native_history.NativeHistoryQuery(
+                    native_history.capture(row[0])).objective_use_at(boundary)
+                    for boundary in (0,1,2)] for row in rows],
                 'observer_history':[[native_history.NativeHistoryQuery(
                     native_history.capture(row[0])).observer_facts_at(boundary,
                     row[1].id) for boundary in (0,1,2)] for row in rows],
@@ -3013,6 +3027,11 @@ def interpretation(value):
  return [value.observation_id,value.observer_id,value.skill_name,value.skill_level,
   sorted((name,report.estimate,report.uncertainty) for name,report in value.reports.items()),
   sorted(value.rejected_candidates.items())]
+def provenance(ledger):
+ return [[entry.encounter_id,entry.boundary,entry.key.entity_id,
+  entry.key.attribute,entry.key.detail,entry.key.time,entry.revision,
+  list(entry.origins),list(entry.requesters),list(entry.consumers)]
+  for entry in ledger._atomic_provenance]
 world,selected,selected_rng=load_path(sys.argv[1])
 encounters={event.id:event for event in world.event_history.values() if type(event)is Encounter}
 assert len(encounters)==2
@@ -3052,6 +3071,13 @@ print(json.dumps({'times':[r[0].time for r in rows],
   i.time,i.disputed,i.trigger_observation_id] for i in r[2].belief_history] for r in rows],
  'rng':[r[3].state for r in rows],
  'facts':[r[4]._composition_reality.to_jsonable() for r in rows],
+ 'objective_provenance':[provenance(r[4]._composition_reality) for r in rows],
+ 'objective_history':[[native_history.NativeHistoryQuery(
+  native_history.capture(r[0])).objective_at(boundary)
+  for boundary in (0,1,2)] for r in rows],
+ 'objective_use_history':[[native_history.NativeHistoryQuery(
+  native_history.capture(r[0])).objective_use_at(boundary)
+  for boundary in (0,1,2)] for r in rows],
  'observer_history':[[native_history.NativeHistoryQuery(
   native_history.capture(r[0])).observer_facts_at(boundary,r[1].actor_id)
   for boundary in (0,1,2)] for r in rows],
@@ -3125,7 +3151,16 @@ print(json.dumps({'times':[r[0].time for r in rows],
         expected={'times':[row[0].time for row in rows],
             'outcomes':[row[4].resolution.outcome for row in rows],
             'accounts':[row[5][0].to_dict() for row in rows],
+            'declared_facts':[[[fact.key.entity_id,fact.key.attribute,fact.key.detail,
+                fact.key.time,dict(fact.value),fact.origin] for fact in row[4].generate.facts]
+                for row in rows],
             'facts':[row[2].personal_history.to_jsonable() for row in rows],
+            'objective_history':[[native_history.NativeHistoryQuery(
+                native_history.capture(row[0])).objective_at(boundary)
+                for boundary in (0,1,2)] for row in rows],
+            'objective_use_history':[[native_history.NativeHistoryQuery(
+                native_history.capture(row[0])).objective_use_at(boundary)
+                for boundary in (0,1,2)] for row in rows],
             'rng':[row[3].state for row in rows],
             'histories':[hashlib.sha256(native_history.encode(
                 native_history.capture(row[0]))).hexdigest() for row in rows]}
@@ -3135,6 +3170,7 @@ print(json.dumps({'times':[r[0].time for r in rows],
 from encounter import Encounter
 from activities import DelayAction
 import native_history
+from objective_reality import EpisodeFacts,DeclaredObjectiveFact
 from native_persistence import load_path,rng_owner_for
 world,selected,selected_rng=load_path(sys.argv[1])
 encounters={event.id:event for event in world.event_history.values() if type(event)is Encounter}
@@ -3143,6 +3179,8 @@ for index in range(2):
  enc=encounters[f'native-multi-accounts-encounter-{index}']
  action=world.get_event_by_id(sys.argv[index+2])
  assert action.resolution.outcome=='heard' and len(action.received_accounts)==1
+ assert type(action.generate)is EpisodeFacts
+ assert all(type(fact)is DeclaredObjectiveFact for fact in action.generate.facts)
  speaker=world.get_object_by_id(action.target_id)
  enc.schedule_action(DelayAction(enc,action.actor_id,defense=0,start_time=enc.time,
   id=f'{enc.id}-continuation'))
@@ -3150,7 +3188,16 @@ for index in range(2):
 print(json.dumps({'times':[r[0].time for r in rows],
  'outcomes':[r[1].resolution.outcome for r in rows],
  'accounts':[r[1].received_accounts[0].to_dict() for r in rows],
+ 'declared_facts':[[[fact.key.entity_id,fact.key.attribute,fact.key.detail,
+  fact.key.time,dict(fact.value),fact.origin] for fact in r[1].generate.facts]
+  for r in rows],
  'facts':[r[2].personal_history.to_jsonable() for r in rows],
+ 'objective_history':[[native_history.NativeHistoryQuery(
+  native_history.capture(r[0])).objective_at(boundary)
+  for boundary in (0,1,2)] for r in rows],
+ 'objective_use_history':[[native_history.NativeHistoryQuery(
+  native_history.capture(r[0])).objective_use_at(boundary)
+  for boundary in (0,1,2)] for r in rows],
  'rng':[r[3].state for r in rows],
  'histories':[hashlib.sha256(native_history.encode(native_history.capture(r[0]))).hexdigest()
   for r in rows]},sort_keys=True))'''
