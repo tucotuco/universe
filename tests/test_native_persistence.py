@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import encounter_delta_headless
 import native_history
+import native_persistence
 import test_encounter_inspection as inspection_fixtures
 import test_action_evaluation as action_fixtures
 from native_history import NativeHistoryRecorder
@@ -69,28 +70,68 @@ class NativePersistenceTests(unittest.TestCase):
         current = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
         current.generate({"starting_experience": "10000", "width_cells": "5",
                          "height_cells": "5"})
+        current.choose_run()
+        current.advance_one_second()
+        candidate = current.active_candidate
+        run_action = next(action for action in candidate.universe.event_history.values()
+                          if type(action).__name__ == "RunAction")
+        actor_id = run_action.actor_id
+        continuation = (candidate.encounter, candidate.universe, current._rng_cursor,
+                        actor_id, run_action.id)
         cases = [
-            ("v10", (ROOT / "tests/fixtures/arena/legacy-per-scale-010-v10.uarena").read_bytes()),
-            ("v11", (ROOT / "tests/fixtures/arena/legacy-per-scale-011-v11.uarena").read_bytes()),
-            ("v12", current.save_encounter_bytes()),
+            ("v10", (ROOT / "tests/fixtures/arena/legacy-per-scale-010-v10.uarena").read_bytes(), None),
+            ("v11", (ROOT / "tests/fixtures/arena/legacy-per-scale-011-v11.uarena").read_bytes(), None),
+            ("v12", current.save_encounter_bytes(), continuation),
         ]
         script = r'''import json,sys
+import hashlib
+import native_history
 from native_persistence import load_legacy_arena_save
 world,enc,rng=load_legacy_arena_save(open(sys.argv[1],'rb').read())
 assert world.event_history.get(enc.id) is enc
 assert enc.universe is world
+continued=False
+if len(sys.argv)==4:
+ actor=world.get_object_by_id(sys.argv[2]); action=world.get_event_by_id(sys.argv[3])
+ assert actor.id==action.actor_id and action.resolution is not None
+ enc.step(1)
+ continued=True
 assert not (set(__import__('sys').modules) & {
  'arena_browser_session','arena_server','npcgen'})
 print(json.dumps({'universe':world.id,'encounter':enc.id,
  'boundary':enc.last_processed_boundary,'time':enc.time,
- 'registry':len(world.object_registry.object_instances)},sort_keys=True))'''
+ 'registry':len(world.object_registry.object_instances),'continued':continued,
+ 'action_outcome':None if not continued else action.resolution.outcome,
+ 'actor_position':None if not continued else actor.get_position().as_tuple(),
+ 'rng':None if not continued else rng.state,
+ 'history':None if not continued else hashlib.sha256(native_history.encode(
+  native_history.capture(enc))).hexdigest()},sort_keys=True))'''
         import os
-        for label, wire in cases:
+        for label, wire, control in cases:
             with self.subTest(version=label), tempfile.TemporaryDirectory() as directory:
                 source = Path(directory) / f"{label}.uarena"
                 source.write_bytes(wire)
+                arguments = [sys.executable, "-B", "-c", script, str(source)]
+                expected = None
+                if control is not None:
+                    control_encounter, control_world, control_rng, control_actor, control_action = control
+                    control_encounter.step(1)
+                    expected = {
+                        "universe": control_world.id,
+                        "encounter": control_encounter.id,
+                        "boundary": control_encounter.last_processed_boundary,
+                        "time": control_encounter.time,
+                        "registry": len(control_world.object_registry.object_instances),
+                        "continued": True,
+                        "action_outcome": control_world.get_event_by_id(control_action).resolution.outcome,
+                        "actor_position": control_world.get_object_by_id(control_actor).get_position().as_tuple(),
+                        "rng": control_rng.state,
+                        "history": hashlib.sha256(native_history.encode(
+                            native_history.capture(control_encounter))).hexdigest(),
+                    }
+                    arguments.extend((control_actor, control_action))
                 result = subprocess.run(
-                    [sys.executable, "-B", "-c", script, str(source)], cwd=ROOT,
+                    arguments, cwd=ROOT,
                     env={**os.environ,
                          "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                     text=True, capture_output=True, check=False, timeout=60)
@@ -99,6 +140,10 @@ print(json.dumps({'universe':world.id,'encounter':enc.id,
                 self.assertTrue(restored["universe"])
                 self.assertTrue(restored["encounter"])
                 self.assertGreater(restored["registry"], 0)
+                if expected is None:
+                    self.assertFalse(restored["continued"])
+                else:
+                    self.assertEqual(restored, json.loads(json.dumps(expected)))
 
     def test_fresh_process_restores_pending_action_and_continues_natively(self):
         demo = encounter_delta_headless.build_demo(until=4)
@@ -264,6 +309,25 @@ print(json.dumps({'time':enc.time,
         tampered = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         with self.assertRaisesRegex(NativeSaveRejected, "integrity"):
             load_save(tampered)
+
+        # Recompute both public digests after corrupting a valid property
+        # preimage. Integrity hashes are not a substitute for causal checks.
+        value = json.loads(wire)
+        history = value["history"]
+        delta = next(change for row in history["boundaries"]
+                     if row.get("kind") != "quiet_span"
+                     for change in row["changes"]
+                     if change.get("before") is True and "before_value" in change)
+        delta["before_value"] = {"forged": "but rehashed"}
+        history.pop("sha256")
+        history["sha256"] = hashlib.sha256(
+            native_persistence._canonical(history)).hexdigest()
+        value.pop("sha256")
+        value["sha256"] = hashlib.sha256(
+            native_persistence._canonical(value)).hexdigest()
+        rehashed = native_persistence._canonical(value)
+        with self.assertRaisesRegex(NativeSaveRejected, "preimage"):
+            load_save(rehashed)
         with self.assertRaisesRegex(NativeSaveRejected, "duplicate"):
             load_save(b'{"schema":"a","schema":"b"}')
 
@@ -575,9 +639,6 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         fixture.enc.schedule_action(first)
         fixture.enc.step(1)
         wire = export_save(fixture.enc)
-        self.assertEqual(history.inspect_episode(-1, "earlier-training").value,
-                         {"description": "practiced earlier"})
-        self.assertEqual(len(history.facts_at(-1)), 1)
 
         continuation_id = "native-group-continuation-delay"
         next_action = DelayAction(fixture.enc, fixture.a.id, defense=0,
@@ -710,6 +771,9 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         fixture.enc.schedule_action(first)
         fixture.enc.step(1)
         wire = export_save(fixture.enc)
+        self.assertEqual(history.inspect_episode(-1, "earlier-training").value,
+                         {"description": "practiced earlier"})
+        self.assertEqual(len(history.facts_at(-1)), 1)
 
         continuation = DelayAction(fixture.enc, fixture.a.id, defense=0,
                                    start_time=1, id="native-history-continuation")
