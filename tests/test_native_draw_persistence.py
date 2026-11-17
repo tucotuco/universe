@@ -1211,6 +1211,202 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_charge_and_bull_rush_continue_after_restore_without_guessing_displacement(self):
+        """Charge movement and its Bull Rush source survive native restore."""
+        builder = NativeScenarioBuilder(
+            "native-charge-rush", Library(config_dir=str(ROOT / "src/config")),
+            seed=5, encounter_id="native-charge-rush-encounter")
+        charger = builder.add_being("Human", "Charger", position=(0, 0, 0),
+                                    radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Charge Target", position=(8.5, 0, 0),
+                                   radius=.25, hit_points=100)
+        charger.set_hex_facing(0)
+        charger.set_ability("strength", 30)
+        target.set_ability("strength", 10)
+        charger.size_category = target.size_category = "medium"
+        charger.set_weapon_skill_level(
+            builder.world.get_weapon_dictionary(), "Dagger", 100)
+        builder.mark_aware(charger.id, target.id)
+        builder.mark_aware(target.id, charger.id)
+        weapon = builder.make_weapon(charger.id, "Dagger", "Charge Dagger",
+                                     hand="right hand")
+        builder.enable()
+
+        charge = MeleeStrike(
+            builder.encounter, charger.id, target.id, weapon.id, motion="thrust",
+            reach=2, strategy=Strategy(timing=3), charge=True)
+        builder.schedule(charge)
+        builder.encounter.step(2, velocities={charger.id: (4.0, 0.0, 0.0)})
+        charge_receipt = builder.encounter.inspect_committed(2).action(charge.id)
+        self.assertEqual(charge_receipt.facts.outcome, "critical")
+        self.assertEqual(charger.get_position(), CartesianPosition(8.0, 0.0, 0.0))
+        self.assertEqual(target.get_position(), CartesianPosition(8.5, 0.0, 0.0))
+
+        rush = Action(builder.world, 2, 3, "bull rush", charger.id, target.id,
+                      None, id="native-charge-bull-rush")
+        rush.charge_continuation_source_id = charge.id
+        builder.schedule(rush)
+        pending = export_save(builder.encounter)
+        builder.step(1)
+        rush_receipt = builder.encounter.inspect_committed(3).action(rush.id)
+        self.assertEqual(rush_receipt.facts.outcome, "success_pending_displacement")
+        self.assertEqual(target.get_position(), CartesianPosition(8.5, 0.0, 0.0))
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [charger.id, target.id],
+            "weapon_id": weapon.id,
+            "charge_id": charge.id,
+            "rush_id": rush.id,
+            "charge_outcome": charge_receipt.facts.outcome,
+            "rush_outcome": rush_receipt.facts.outcome,
+            "positions": [charger.get_position().as_tuple(),
+                          target.get_position().as_tuple()],
+            "hp": [charger.get_hit_points(), target.get_hit_points()],
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+            "history_rows": [hashlib.sha256(json.dumps(row, sort_keys=True,
+                separators=(",", ":")).encode()).hexdigest()
+                for row in capture(builder.encounter)["boundaries"]],
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+charger_id,target_id,weapon_id,charge_id,rush_id=sys.argv[2:]
+assert enc.time==2 and enc.progression_mode=='transactional'
+assert enc.inspect_committed(2).action(charge_id).facts.outcome=='critical'
+choice=enc.choice_for_action(rush_id);assert choice.state=='accepted'
+rush=next(m.action for m in enc._choice_book._choices[choice.id].members
+          if m.action.id==rush_id)
+assert rush.actor_id==charger_id and rush.target_id==target_id
+assert rush.charge_continuation_source_id==charge_id
+charger=world.get_object_by_id(charger_id);target=world.get_object_by_id(target_id)
+assert charger.get_position().as_tuple()==(8.0,0.0,0.0)
+assert target.get_position().as_tuple()==(8.5,0.0,0.0)
+enc.step(1);receipt=enc.inspect_committed(3).action(rush_id)
+assert receipt.facts.outcome=='success_pending_displacement'
+assert target.get_position().as_tuple()==(8.5,0.0,0.0)
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[charger_id,target_id],'weapon_id':weapon_id,
+ 'charge_id':charge_id,'rush_id':rush_id,
+ 'charge_outcome':enc.inspect_committed(2).action(charge_id).facts.outcome,
+ 'rush_outcome':receipt.facts.outcome,
+ 'positions':[charger.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'hp':[charger.get_hit_points(),target.get_hit_points()],
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest(),
+ 'history_rows':[hashlib.sha256(json.dumps(row,sort_keys=True,
+ separators=(',',':')).encode()).hexdigest()
+                 for row in history_log['boundaries']]},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-charge-rush.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), charger.id,
+                 target.id, weapon.id, charge.id, rush.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+    def test_headless_bull_rush_overrun_commits_adopted_prone_continuation_after_restore(self):
+        """The lawful Bull Rush→Overrun continuation restores without Arena."""
+        builder = NativeScenarioBuilder(
+            "native-rush-overrun", Library(config_dir=str(ROOT / "src/config")),
+            seed=3, encounter_id="native-rush-overrun-encounter")
+        actor = builder.add_being("Human", "Rusher", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Overrun Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        for being in (actor, target):
+            being.set_posture("standing")
+            being.size_category = "medium"
+            being.set_ability("strength", 10)
+            being.set_ability("dexterity", 10)
+        actor.set_hex_facing(0)
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.enable()
+
+        rush = Action(builder.world, 0, 1, "bull rush", actor.id, target.id,
+                      None, id="native-rush-overrun-rush")
+        builder.schedule(rush)
+        builder.step(1)
+        self.assertEqual(builder.encounter.inspect_committed(1).action(
+            rush.id).facts.outcome, "success_pending_displacement")
+
+        overrun = Action(builder.world, 1, 5, "overrun", actor.id, target.id,
+                         None, id="native-rush-overrun-overrun")
+        overrun.charge_continuation_source_id = rush.id
+        prepared = builder.encounter.prepare_action(overrun)
+        self.assertEqual(prepared.end_time, 7)
+        builder.schedule(overrun)
+        pending = export_save(builder.encounter)
+        builder.step(6)
+        receipt = builder.encounter.inspect_committed(7).action(overrun.id)
+        self.assertEqual(receipt.facts.outcome, "success")
+        self.assertEqual(target.get_posture(), "lying")
+        self.assertEqual(target.get_position(), CartesianPosition(.2, 0, 0))
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [actor.id, target.id],
+            "action_ids": [rush.id, overrun.id],
+            "outcomes": [builder.encounter.inspect_committed(1).action(
+                rush.id).facts.outcome, receipt.facts.outcome],
+            "posture": target.get_posture(),
+            "positions": [actor.get_position().as_tuple(),
+                          target.get_position().as_tuple()],
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+            "history_rows": [hashlib.sha256(json.dumps(row, sort_keys=True,
+                separators=(",", ":")).encode()).hexdigest()
+                for row in capture(builder.encounter)["boundaries"]],
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor_id,target_id,rush_id,overrun_id=sys.argv[2:]
+assert enc.time==1 and enc.progression_mode=='transactional'
+assert enc.inspect_committed(1).action(rush_id).facts.outcome=='success_pending_displacement'
+choice=enc.choice_for_action(overrun_id);assert choice.state=='accepted'
+overrun=next(m.action for m in enc._choice_book._choices[choice.id].members
+             if m.action.id==overrun_id)
+assert overrun.charge_continuation_source_id==rush_id
+assert overrun.start_time==1 and overrun.end_time==5
+enc.step(6);receipt=enc.inspect_committed(7).action(overrun_id)
+assert receipt.facts.outcome=='success'
+actor=world.get_object_by_id(actor_id);target=world.get_object_by_id(target_id)
+assert target.get_posture()=='lying'
+assert target.get_position().as_tuple()==(.2,0.0,0.0)
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[actor_id,target_id],'action_ids':[rush_id,overrun_id],
+ 'outcomes':[enc.inspect_committed(1).action(rush_id).facts.outcome,
+             receipt.facts.outcome],
+ 'posture':target.get_posture(),
+ 'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest(),
+ 'history_rows':[hashlib.sha256(json.dumps(row,sort_keys=True,
+ separators=(',',':')).encode()).hexdigest()
+                 for row in history_log['boundaries']]},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-rush-overrun.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), actor.id,
+                 target.id, rush.id, overrun.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_headless_break_weapon_failure_preserves_later_attack_after_restore(self):
         attacking = NativeScenarioBuilder(
             "native-break-weapon", Library(config_dir=str(ROOT / "src/config")),
