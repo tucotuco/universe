@@ -852,24 +852,36 @@ class NativeHistoryTests(unittest.TestCase):
         action = DelayAction(encounter, encounter.being_list[1], defense=0,
                              start_time=4, id="rolled-back-delay")
         encounter.schedule_action(action)
-        import atomic_publication
-        publish = atomic_publication.publish_interval_candidate
+        from native_persistence import export_save
+        complete_save_before = export_save(encounter)
+        rng_before = demo["rng_owner"].state
+        with tempfile.TemporaryDirectory() as directory:
+            prior_save = Path(directory) / "complete-before-fault.json"
+            prior_save.write_bytes(complete_save_before)
+            import atomic_publication
+            publish = atomic_publication.publish_interval_candidate
 
-        def fail_after_commit_marker(*args, **kwargs):
-            kwargs["_fail_after"] = "mark_committed"
-            return publish(*args, **kwargs)
+            def fail_after_commit_marker(*args, **kwargs):
+                kwargs["_fail_after"] = "mark_committed"
+                return publish(*args, **kwargs)
 
-        with patch.object(atomic_publication, "publish_interval_candidate",
-                          fail_after_commit_marker):
-            with self.assertRaises(atomic_publication.PublicationFailure):
-                encounter.step(1)
-        self.assertEqual(encounter.time, 4)
-        self.assertEqual(recorder.latest_boundary, 4)
-        self.assertIsNone(recorder.failure)
-        self.assertEqual(log["latest_boundary"], 4)
-        with self.assertRaisesRegex(NativeHistoryRejected,
-                                    "no next committed boundary"):
-            append_committed(log, encounter)
+            with patch.object(atomic_publication, "publish_interval_candidate",
+                              fail_after_commit_marker):
+                with self.assertRaises(atomic_publication.PublicationFailure):
+                    encounter.step(1)
+            self.assertEqual(encounter.time, 4)
+            self.assertEqual(recorder.latest_boundary, 4)
+            self.assertIsNone(recorder.failure)
+            self.assertEqual(demo["rng_owner"].state, rng_before)
+            self.assertEqual(prior_save.read_bytes(), complete_save_before)
+            self.assertEqual(log["latest_boundary"], 4)
+            from native_persistence import NativeSaveRejected
+            with self.assertRaisesRegex(NativeSaveRejected,
+                                        "faulted/incomplete interval"):
+                export_save(encounter)
+            with self.assertRaisesRegex(NativeHistoryRejected,
+                                        "no next committed boundary"):
+                append_committed(log, encounter)
 
     def test_attached_recorder_appends_only_after_native_commit_returns(self):
         demo = encounter_delta_headless.build_demo(until=4)
