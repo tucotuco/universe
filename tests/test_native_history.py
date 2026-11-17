@@ -16,7 +16,8 @@ import native_persistence_scale
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
-                            LEGACY_SCHEMA, PREVIOUS_SCHEMA, SAME_RNG, _seal,
+                            NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
+                            QUIET_SPAN_SCHEMA, SAME_RNG, _seal,
                             _plain, _expand_rows, _target_candidates)
 
 
@@ -44,6 +45,8 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(state_at(log, boundary)["entities"], _plain(expected))
             receipt = next(row for row in self.demo["encounter"]._atomic_interval_history
                            if row.boundary == boundary)
+            self.assertEqual(entity_context_at(log, boundary),
+                             _plain(receipt.inspection.entities))
             self.assertEqual(events_at(log, boundary)["action_ids"], list(receipt.action_ids))
 
     def test_scale_verifier_checks_action_and_quiet_span_receipts(self):
@@ -55,10 +58,38 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(sum(row.get("to_boundary", row.get("boundary", 0))
                              - row.get("from_boundary", row.get("boundary", 0)) + 1
                              for row in log["boundaries"]), 12)
-        with patch("native_persistence_scale.state_at",
-                   side_effect=lambda _log, boundary: {"boundary": boundary + 1}):
+        class MismatchedReader:
+            def __init__(self, _log):
+                pass
+
+            def state_at(self, boundary):
+                return {"boundary": boundary + 1}
+
+            def events_at(self, _boundary):
+                return {}
+
+            def entity_context_at(self, _boundary):
+                return None
+
+            def rng_state_at(self, _boundary):
+                return None
+
+        with patch("native_persistence_scale.NativeHistoryQuery", MismatchedReader):
             with self.assertRaisesRegex(RuntimeError, "receipt at 1"):
                 native_persistence_scale._verify_history_boundaries(encounter)
+
+    def test_validated_query_session_matches_single_queries_and_detaches_input(self):
+        source = copy.deepcopy(self.log)
+        reader = NativeHistoryQuery(source)
+        for boundary in range(1, self.log['latest_boundary'] + 1):
+            self.assertEqual(reader.state_at(boundary), state_at(self.log, boundary))
+            self.assertEqual(reader.events_at(boundary), events_at(self.log, boundary))
+            self.assertEqual(reader.rng_state_at(boundary), rng_state_at(self.log, boundary))
+            self.assertEqual(reader.entity_context_at(boundary),
+                             entity_context_at(self.log, boundary))
+        expected = reader.state_at(4)
+        source['initial']['encounter_id'] = 'mutated-after-validation'
+        self.assertEqual(reader.state_at(4), expected)
 
     def test_changes_are_presence_aware_and_reconstruct_each_native_target_boundary(self):
         for boundary, delta in enumerate(self.log["boundaries"], 1):
@@ -73,7 +104,7 @@ class NativeHistoryTests(unittest.TestCase):
 
     def test_unchanged_rng_cursor_is_referenced_and_legacy_history_upgrades(self):
         log = decode(self.wire)
-        self.assertEqual(log['schema'], 'universe.native-encounter-history/3')
+        self.assertEqual(log['schema'], 'universe.native-encounter-history/4')
         previous = None
         for boundary, row in enumerate(log['boundaries'], 1):
             current = rng_state_at(log, boundary)
@@ -83,7 +114,8 @@ class NativeHistoryTests(unittest.TestCase):
                 self.assertNotEqual(row['rng_after'], SAME_RNG)
             previous = current
 
-        legacy = copy.deepcopy(log)
+        legacy = {key: copy.deepcopy(value) for key, value in log.items()
+                  if key not in ('sha256', 'entity_context')}
         legacy['schema'] = LEGACY_SCHEMA
         previous = None
         for row in legacy['boundaries']:
@@ -93,9 +125,13 @@ class NativeHistoryTests(unittest.TestCase):
         legacy = _seal({key: value for key, value in legacy.items()
                         if key != 'sha256'})
         self.assertTrue(validate(legacy))
-        self.assertEqual(encode(upgrade(legacy)), self.wire)
+        upgraded_legacy = upgrade(legacy)
+        self.assertEqual(encode(upgraded_legacy),
+                         encode(__import__('native_history')._without_entity_context(log)))
+        self.assertIsNone(entity_context_at(upgraded_legacy, 4))
 
-        previous_schema = copy.deepcopy(log)
+        previous_schema = {key: copy.deepcopy(value) for key, value in log.items()
+                           if key not in ('sha256', 'entity_context')}
         previous_schema['schema'] = PREVIOUS_SCHEMA
         previous = None
         for row in previous_schema['boundaries']:
@@ -105,7 +141,15 @@ class NativeHistoryTests(unittest.TestCase):
         previous_schema = _seal({key: value for key, value in previous_schema.items()
                                   if key != 'sha256'})
         self.assertTrue(validate(previous_schema))
-        self.assertEqual(encode(upgrade(previous_schema)), self.wire)
+        self.assertEqual(encode(upgrade(previous_schema)),
+                         encode(__import__('native_history')._without_entity_context(log)))
+
+        quiet_schema = {key: copy.deepcopy(value) for key, value in log.items()
+                        if key not in ('sha256', 'entity_context')}
+        quiet_schema['schema'] = QUIET_SPAN_SCHEMA
+        quiet_schema = _seal(quiet_schema)
+        self.assertEqual(encode(upgrade(quiet_schema)),
+                         encode(__import__('native_history')._without_entity_context(log)))
 
         corrupt = copy.deepcopy(log)
         corrupt['boundaries'][0]['rng_after'] = dict(SAME_RNG)
@@ -120,13 +164,17 @@ class NativeHistoryTests(unittest.TestCase):
         log = capture(encounter)
         spans = [row for row in log['boundaries'] if row.get('kind') == 'quiet_span']
         self.assertTrue(spans)
+        query = NativeHistoryQuery(log)
+        self.assertEqual(len(query._segments), len(log['boundaries']))
+        self.assertLess(len(query._segments), log['latest_boundary'])
         expanded = dict(log)
         expanded['boundaries'] = _expand_rows(log)
         self.assertGreater(len(encode(_seal({key: value for key, value in expanded.items()
                                              if key != 'sha256'}))), len(encode(log)))
         self.assertLess(len(log['boundaries']), log['latest_boundary'])
         self.assertTrue(validate(decode(encode(log))))
-        previous_schema = dict(log)
+        previous_schema = {key: copy.deepcopy(value) for key, value in log.items()
+                           if key not in ('sha256', 'entity_context')}
         previous_schema['schema'] = PREVIOUS_SCHEMA
         previous_schema['boundaries'] = _expand_rows(log)
         for row in previous_schema['boundaries']:
@@ -134,7 +182,15 @@ class NativeHistoryTests(unittest.TestCase):
         previous_schema = _seal({key: value for key, value in previous_schema.items()
                                   if key != 'sha256'})
         self.assertTrue(validate(previous_schema))
-        self.assertEqual(encode(upgrade(previous_schema)), encode(log))
+        self.assertEqual(encode(upgrade(previous_schema)),
+                         encode(__import__('native_history')._without_entity_context(log)))
+        quiet_span_schema = {key: copy.deepcopy(value) for key, value in log.items()
+                             if key not in ('sha256', 'entity_context')}
+        quiet_span_schema['schema'] = QUIET_SPAN_SCHEMA
+        quiet_span_schema = _seal(quiet_span_schema)
+        self.assertTrue(validate(quiet_span_schema))
+        self.assertEqual(encode(upgrade(quiet_span_schema)),
+                         encode(__import__('native_history')._without_entity_context(log)))
         encounter.inspect_committed()
         receipts = {row.boundary: row for row in encounter._atomic_interval_history}
         for boundary in range(1, encounter.last_processed_boundary + 1):
@@ -175,8 +231,11 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(appended['latest_boundary'], encounter.last_processed_boundary)
         self.assertEqual(events_at(appended, appended['latest_boundary'])['action_ids'],
                          [action.id])
+        receipts = {row.boundary: row for row in encounter._atomic_interval_history}
         for boundary in range(1, encounter.last_processed_boundary + 1):
             self.assertEqual(state_at(appended, boundary)['boundary'], boundary)
+            self.assertEqual(entity_context_at(appended, boundary),
+                             _plain(receipts[boundary].inspection.entities))
         self.assertTrue(validate(decode(encode(appended))))
 
     def test_wire_omits_process_pointer_anchors(self):
@@ -226,6 +285,12 @@ class NativeHistoryTests(unittest.TestCase):
         ).encode("ascii")).hexdigest()
         with self.assertRaises(NativeHistoryRejected):
             validate(unsigned)
+        bad_entity_context = copy.deepcopy(self.log)
+        self.assertTrue(bad_entity_context['entity_context']['changes'])
+        bad_entity_context['entity_context']['changes'][0]['state_sha256'] = '0' * 64
+        with self.assertRaisesRegex(NativeHistoryRejected, 'EntityInspection state digest'):
+            validate(_seal({key: value for key, value in bad_entity_context.items()
+                            if key != 'sha256'}))
         reordered = copy.deepcopy(self.log)
         reordered["boundaries"][0], reordered["boundaries"][1] = (
             reordered["boundaries"][1], reordered["boundaries"][0])

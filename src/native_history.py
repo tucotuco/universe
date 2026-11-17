@@ -1,13 +1,15 @@
 """Arena-session-independent, fact-only native Encounter history records.
 
 The history wire stores an initial committed-boundary projection, atomic
-state changes, and the native Action/Effect/observation facts for each commit.
-It never evaluates an Action. This module is an implementation component of
-native persistence; it does not replace the current production Save/Load path.
+state changes, sparse EntityInspection context changes, and native
+Action/Effect/observation facts for each commit. ``NativeHistoryQuery`` provides
+validated repeated historical reads without re-expanding quiet spans or
+evaluating Actions. This module does not yet replace production Save/Load.
 """
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
+from bisect import bisect_right
 import hashlib
 import json
 import math
@@ -23,8 +25,9 @@ from checkpoint_fields import FIELD_ADAPTERS
 
 LEGACY_SCHEMA = "universe.native-encounter-history/1"
 PREVIOUS_SCHEMA = "universe.native-encounter-history/2"
-SCHEMA = "universe.native-encounter-history/3"
-LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA)
+QUIET_SPAN_SCHEMA = "universe.native-encounter-history/3"
+SCHEMA = "universe.native-encounter-history/4"
+LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
@@ -249,6 +252,7 @@ def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
         "actions": _plain(actions),
         "effects": _plain(effects),
         "target_states": _plain(targets),
+        "entity_context": _plain(meta.entities),
         "objective": _plain(meta.objective),
         "objective_use": _plain(meta.objective_use),
         "recipients": _stable_recipients(meta.recipients),
@@ -512,15 +516,16 @@ def rng_state_at(log, boundary):
 
 
 def upgrade(log):
-    """Upgrade legacy repeated-cursor history to the compact current schema."""
+    """Upgrade legacy history without inventing unrecorded EntityInspection facts."""
     validate(log)
     if log["schema"] == SCHEMA:
         return decode(encode(log))
     previous = None
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["schema"] = SCHEMA
+    body["entity_context"] = _unavailable_entity_context()
     rows = []
-    for original in log["boundaries"]:
+    for original in _expand_rows(log):
         row = dict(original)
         encoded_rng = original["rng_after"]
         actual_rng = previous if encoded_rng == SAME_RNG else encoded_rng
@@ -535,10 +540,99 @@ def upgrade(log):
     return result
 
 
+def _without_entity_context(log):
+    """Normalize a current recording only for an authenticated legacy migration check."""
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["entity_context"] = _unavailable_entity_context()
+    result = _seal(body)
+    validate(result)
+    return result
+
+
 def _seal(body):
     value = dict(body)
     value["sha256"] = hashlib.sha256(_canonical(value)).hexdigest()
     return value
+
+
+def _unavailable_entity_context():
+    # Older histories did not retain these per-boundary inspection facts.
+    # Preserve that limitation explicitly; never infer it from current state.
+    return {"available": False, "initial": None, "changes": []}
+
+
+def _validate_plain_record(value, depth=0):
+    """Validate tagged values used by sparse historical EntityInspection facts."""
+    if depth > MAX_DEPTH:
+        raise NativeHistoryRejected("native EntityInspection nesting limit exceeded")
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is list:
+        for item in value:
+            _validate_plain_record(item, depth + 1)
+        return
+    if type(value) is not dict:
+        raise NativeHistoryRejected("native EntityInspection contains an invalid value")
+    if set(value) == {"$number"}:
+        number = value["$number"]
+        if type(number) is not str:
+            raise NativeHistoryRejected("native EntityInspection number is malformed")
+        try:
+            parsed = float.fromhex(number)
+        except ValueError as exc:
+            raise NativeHistoryRejected("native EntityInspection number is malformed") from exc
+        if not math.isfinite(parsed) or parsed.hex() != number:
+            raise NativeHistoryRejected("native EntityInspection number is noncanonical")
+        return
+    if "$record" in value:
+        if set(value) != {"$record", "fields"} or type(value["$record"]) is not str or type(value["fields"]) is not dict:
+            raise NativeHistoryRejected("native EntityInspection record is malformed")
+        tag = value["$record"]
+        adapter = FIELD_ADAPTERS.get(tag)
+        if adapter is None and tag == "encounter_inspection.EntityInspection":
+            allowed = {"category", "obj_type", "name", "position", "pre_action"}
+            required = allowed
+        elif adapter is not None:
+            allowed, required = set(adapter["allowed"]), set(adapter["required"])
+        else:
+            raise NativeHistoryRejected("native EntityInspection record type is unreviewed")
+        fields_value = value["fields"]
+        if (not set(fields_value) <= allowed or not required <= set(fields_value)
+                or "target_anchors" in fields_value or "action_anchors" in fields_value):
+            raise NativeHistoryRejected("native EntityInspection fields differ from the closed schema")
+        for item in fields_value.values():
+            _validate_plain_record(item, depth + 1)
+        return
+    if any(key in value for key in ("$tuple", "$list", "$set", "$frozenset")):
+        if len(value) != 1:
+            raise NativeHistoryRejected("native EntityInspection sequence tag is ambiguous")
+        key, items = next(iter(value.items()))
+        if key not in ("$tuple", "$list", "$set", "$frozenset") or type(items) is not list:
+            raise NativeHistoryRejected("native EntityInspection sequence is malformed")
+        if key in ("$set", "$frozenset"):
+            encoded = [_canonical(item) for item in items]
+            if encoded != sorted(set(encoded)):
+                raise NativeHistoryRejected("native EntityInspection set is noncanonical")
+        for item in items:
+            _validate_plain_record(item, depth + 1)
+        return
+    if "$map" in value:
+        if set(value) != {"$map"} or type(value["$map"]) is not list:
+            raise NativeHistoryRejected("native EntityInspection map is malformed")
+        encoded_keys = []
+        for pair in value["$map"]:
+            if type(pair) is not list or len(pair) != 2:
+                raise NativeHistoryRejected("native EntityInspection map entry is malformed")
+            encoded_keys.append(_canonical(pair[0]))
+            _validate_plain_record(pair[0], depth + 1)
+            _validate_plain_record(pair[1], depth + 1)
+        if encoded_keys != sorted(set(encoded_keys)):
+            raise NativeHistoryRejected("native EntityInspection map is noncanonical")
+        return
+    if not all(type(key) is str for key in value):
+        raise NativeHistoryRejected("native EntityInspection mapping keys are malformed")
+    for item in value.values():
+        _validate_plain_record(item, depth + 1)
 
 
 def capture(encounter):
@@ -566,6 +660,9 @@ def capture(encounter):
         "participants": _plain(initial_receipt.inspection.participants),
         "initial_schedule": _plain(initial_receipt.inspection.schedule),
     }
+    initial_entity_context = _plain(initial_receipt.inspection.entities)
+    entity_context_state = initial_entity_context
+    entity_context_changes = []
     prior = _initial_state(initial)
     boundaries = []
     previous_boundary = None
@@ -577,6 +674,15 @@ def capture(encounter):
             raise NativeHistoryRejected("native boundary order or owner identity is invalid")
         payload = _boundary_payload(encounter, receipt, view,
                                     targets_by_boundary)
+        if payload["entity_context"] != entity_context_state:
+            context_changes = _diff(entity_context_state, payload["entity_context"])
+            entity_context_state = payload["entity_context"]
+            entity_context_changes.append({
+                "boundary": receipt.boundary,
+                "changes": context_changes,
+                "state_sha256": hashlib.sha256(
+                    _canonical(entity_context_state)).hexdigest(),
+            })
         state = {
             "boundary": payload["boundary"],
             "time": payload["end"],
@@ -606,7 +712,10 @@ def capture(encounter):
         previous_boundary = receipt.boundary
     body = {"schema": SCHEMA, "initial": initial,
             "boundaries": _compact_quiet_rows(boundaries),
-            "latest_boundary": previous_boundary}
+            "latest_boundary": previous_boundary,
+            "entity_context": {"available": True,
+                               "initial": initial_entity_context,
+                               "changes": entity_context_changes}}
     _measure(body)
     return _seal(body)
 
@@ -739,6 +848,18 @@ def append_committed(log, encounter):
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["boundaries"] = _append_compact_row(log["boundaries"], row)
     body["latest_boundary"] = expected
+    entity_context = json.loads(_canonical(log["entity_context"]).decode("ascii"))
+    if entity_context["available"]:
+        prior_context = entity_context_at(log, log["latest_boundary"])
+        if prior_context != payload["entity_context"]:
+            changes = _diff(prior_context, payload["entity_context"])
+            entity_context["changes"].append({
+                "boundary": expected,
+                "changes": changes,
+                "state_sha256": hashlib.sha256(
+                    _canonical(payload["entity_context"])).hexdigest(),
+            })
+    body["entity_context"] = entity_context
     _measure(body)
     result = _seal(body)
     validate(result)
@@ -853,8 +974,10 @@ def record_committed_boundary(encounter):
 
 def validate(log):
     """Strictly validate identity, chronology, atomic deltas, and integrity."""
-    if type(log) is not dict or set(log) != {
-            "schema", "initial", "boundaries", "latest_boundary", "sha256"}:
+    base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
+    current_keys = base_keys | {"entity_context"}
+    if (type(log) is not dict
+            or set(log) != (current_keys if log.get("schema") == SCHEMA else base_keys)):
         raise NativeHistoryRejected("native history envelope schema differs")
     unsigned = dict(log)
     digest = unsigned.pop("sha256")
@@ -879,7 +1002,7 @@ def validate(log):
     covered = 0
     for row in boundaries:
         if type(row) is dict and row.get("kind") == "quiet_span":
-            if log["schema"] != SCHEMA:
+            if log["schema"] not in (QUIET_SPAN_SCHEMA, SCHEMA):
                 raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
             if row.get("rng_after") != SAME_RNG or prior_rng is None:
                 raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
@@ -897,7 +1020,7 @@ def validate(log):
                 or row["boundary"] != expected):
             raise NativeHistoryRejected("native history boundary is missing, repeated, or malformed")
         if row["rng_after"] == SAME_RNG:
-            if log["schema"] != SCHEMA or prior_rng is None:
+            if log["schema"] not in (QUIET_SPAN_SCHEMA, SCHEMA) or prior_rng is None:
                 raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
         else:
             if (type(row["rng_after"]) is not dict
@@ -941,7 +1064,36 @@ def validate(log):
             or not 0 <= log["latest_boundary"] <= MAX_BOUNDARIES
             or log["latest_boundary"] != covered):
         raise NativeHistoryRejected("native history latest boundary differs")
+    if log["schema"] == SCHEMA:
+        _validate_entity_context(log["entity_context"], log["latest_boundary"])
     return True
+
+
+def _validate_entity_context(context, latest_boundary):
+    if (type(context) is not dict or set(context) != {"available", "initial", "changes"}
+            or type(context["available"]) is not bool or type(context["changes"]) is not list):
+        raise NativeHistoryRejected("native EntityInspection history schema differs")
+    if not context["available"]:
+        if context["initial"] is not None or context["changes"]:
+            raise NativeHistoryRejected("legacy EntityInspection history marker is inconsistent")
+        return
+    if type(context["initial"]) is not dict:
+        raise NativeHistoryRejected("native EntityInspection initial state is missing")
+    _validate_plain_record(context["initial"])
+    state = context["initial"]
+    previous = 0
+    for row in context["changes"]:
+        if (type(row) is not dict or set(row) != {"boundary", "changes", "state_sha256"}
+                or type(row["boundary"]) is not int
+                or not previous < row["boundary"] <= latest_boundary
+                or type(row["changes"]) is not list or not row["changes"]
+                or type(row["state_sha256"]) is not str):
+            raise NativeHistoryRejected("native EntityInspection change chronology differs")
+        state = _apply(state, row["changes"])
+        _validate_plain_record(state)
+        if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
+            raise NativeHistoryRejected("native EntityInspection state digest differs")
+        previous = row["boundary"]
 
 
 def state_at(log, boundary):
@@ -961,6 +1113,144 @@ def state_at(log, boundary):
             if row["boundary"] == boundary:
                 return state
     return state
+
+
+def entity_context_at(log, boundary):
+    """Return committed EntityInspection facts at a boundary without re-resolving Actions.
+
+    Legacy history remains readable but returns ``None`` because its schema did
+    not record these context projections. Current histories store only changed
+    context, with the initial context retained once.
+    """
+    validate(log)
+    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
+        raise NativeHistoryRejected("requested native boundary is not committed")
+    context = log.get("entity_context", _unavailable_entity_context())
+    if not context["available"]:
+        return None
+    state = json.loads(_canonical(context["initial"]).decode("ascii"))
+    for row in context["changes"]:
+        if row["boundary"] > boundary:
+            break
+        state = _apply(state, row["changes"])
+        if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
+            raise NativeHistoryRejected("native EntityInspection query digest differs")
+    return state
+
+
+class NativeHistoryQuery:
+    """Validated, detached query session for repeated history reads.
+
+    The input is validated and copied once. State queries in increasing time
+    apply only the intervening deltas; no per-boundary state snapshots are
+    added to the persisted artifact. Returned values are detached JSON data.
+    """
+
+    def __init__(self, log):
+        self._log = decode(encode(log))
+        self._latest = self._log["latest_boundary"]
+        self._segments = []
+        self._segment_starts = []
+        self._segment_ends = []
+        self._segment_rng = []
+        cursor = None
+        for row in self._log["boundaries"]:
+            if row.get("kind") == "quiet_span":
+                start, end = row["from_boundary"], row["to_boundary"]
+            else:
+                start = end = row["boundary"]
+                cursor = cursor if row["rng_after"] == SAME_RNG else row["rng_after"]
+            self._segments.append(row)
+            self._segment_starts.append(start)
+            self._segment_ends.append(end)
+            self._segment_rng.append(cursor)
+        self._state_boundary = 0
+        self._state = _initial_state(self._log["initial"])
+        context = self._log.get("entity_context", _unavailable_entity_context())
+        self._context_available = context["available"]
+        self._context_boundary = 0
+        self._context = (json.loads(_canonical(context["initial"]).decode("ascii"))
+                         if self._context_available else None)
+        self._context_changes = {row["boundary"]: row
+                                 for row in context["changes"]}
+
+    def _boundary(self, boundary):
+        if type(boundary) is not int or not 1 <= boundary <= self._latest:
+            raise NativeHistoryRejected("requested native boundary is not committed")
+
+    def _segment(self, boundary):
+        index = bisect_right(self._segment_starts, boundary) - 1
+        if index < 0 or boundary > self._segment_ends[index]:
+            raise NativeHistoryRejected("requested native boundary is not committed")
+        return index, self._segments[index]
+
+    @staticmethod
+    def _copy(value):
+        return json.loads(_canonical(value).decode("ascii"))
+
+    def state_at(self, boundary):
+        self._boundary(boundary)
+        if boundary < self._state_boundary:
+            state = _initial_state(self._log["initial"])
+            first = 1
+        else:
+            state = self._state
+            first = self._state_boundary + 1
+        for current in range(first, boundary + 1):
+            _index, row = self._segment(current)
+            if row.get("kind") == "quiet_span":
+                state = _apply_quiet_span(state, row, current)
+            else:
+                state = _apply(state, row["changes"])
+            if current == boundary or row.get("kind") == "quiet_span":
+                if (row.get("kind") != "quiet_span" and current == boundary
+                        and hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]):
+                    raise NativeHistoryRejected("native history query state digest differs")
+        if boundary >= self._state_boundary:
+            self._state = state
+            self._state_boundary = boundary
+        return self._copy(state)
+
+    def events_at(self, boundary):
+        self._boundary(boundary)
+        _index, row = self._segment(boundary)
+        if row.get("kind") == "quiet_span":
+            events = {"action_ids": [], "effect_ids": [], "actions": {},
+                      "effects": {}, "starts": row["quiet_events"]["starts"],
+                      "participants": row["quiet_events"]["participants"]}
+        else:
+            events = row["events"]
+        return self._copy(events)
+
+    def rng_state_at(self, boundary):
+        self._boundary(boundary)
+        index, _row = self._segment(boundary)
+        cursor = self._segment_rng[index]
+        if cursor is None:
+            raise NativeHistoryRejected("native RNG state is absent")
+        return self._copy(cursor)
+
+    def entity_context_at(self, boundary):
+        self._boundary(boundary)
+        if not self._context_available:
+            return None
+        if boundary < self._context_boundary:
+            context = json.loads(_canonical(
+                self._log["entity_context"]["initial"]).decode("ascii"))
+            first = 1
+        else:
+            context = self._context
+            first = self._context_boundary + 1
+        for current in range(first, boundary + 1):
+            row = self._context_changes.get(current)
+            if row is not None:
+                context = _apply(context, row["changes"])
+                if hashlib.sha256(_canonical(context)).hexdigest() != row["state_sha256"]:
+                    raise NativeHistoryRejected("native EntityInspection query digest differs")
+        if boundary >= self._context_boundary:
+            self._context = context
+            self._context_boundary = boundary
+        return self._copy(context)
 
 
 def events_at(log, boundary):

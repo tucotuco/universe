@@ -128,13 +128,19 @@ def load_save(wire):
         expected_history = native_history.encode(native_history.upgrade(value["history"]))
         world, encounter, rng_owner = restore_graph(
             decode_graph(graph_wire, native=True), native=True)
-        actual_history = native_history.encode(native_history.capture(encounter))
+        actual_log = native_history.capture(encounter)
+        actual_history = native_history.encode(actual_log)
         if actual_history != expected_history:
-            raise NativeSaveRejected("restored native graph disagrees with saved history")
+            legacy_source = value["history"]["schema"] in native_history.LEGACY_SCHEMAS
+            contextless_actual = (native_history.encode(
+                native_history._without_entity_context(actual_log))
+                if legacy_source else None)
+            if contextless_actual != expected_history:
+                raise NativeSaveRejected("restored native graph disagrees with saved history")
         if encounter.id != value["history"]["initial"]["encounter_id"]:
             raise NativeSaveRejected("restored Encounter logical identity differs")
         native_history.NativeHistoryRecorder.restore(
-            encounter, value["history"], current_history=actual_history)
+            encounter, actual_log, current_history=actual_history)
         return world, encounter, rng_owner
     except NativeSaveRejected:
         raise

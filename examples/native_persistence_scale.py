@@ -1,4 +1,4 @@
-"""Measure and verify a 64-Action headless native Save/Load continuation.
+"""Measure native continuation and every-boundary history fidelity.
 
 Run from the repository root:
     .venv/bin/python -B examples/native_persistence_scale.py
@@ -33,7 +33,7 @@ from encounter import Encounter
 from library import Library
 from melee_combat import effective_melee_reach_meters
 from native_history import (encode as encode_history, capture as capture_history,
-                            state_at, events_at, rng_state_at, _plain,
+                            NativeHistoryQuery, _plain,
                             _target_candidates)
 from native_persistence import export_save, load_path
 from spatial import CartesianPosition, Sphere
@@ -48,13 +48,14 @@ def _being_count(world):
 def _verify_history_boundaries(encounter):
     """Compare reconstructed history with every authoritative native receipt."""
     log = capture_history(encounter)
+    history = NativeHistoryQuery(log)
     candidates = _target_candidates(encounter)
     receipts = {row.boundary: row for row in encounter._atomic_interval_history}
     if set(receipts) != set(range(1, encounter.last_processed_boundary + 1)):
         raise RuntimeError('native receipt boundaries are not contiguous')
     for boundary, receipt in receipts.items():
-        state = state_at(log, boundary)
-        events = events_at(log, boundary)
+        state = history.state_at(boundary)
+        events = history.events_at(boundary)
         meta = receipt.inspection
         if (state['boundary'] != boundary
                 or state['time'] != meta.end
@@ -63,9 +64,10 @@ def _verify_history_boundaries(encounter):
                 or state['objective'] != _plain(meta.objective)
                 or state['objective_use'] != _plain(meta.objective_use)
                 or state['projectile_states'] != _plain(meta.projectile_states)
+                or history.entity_context_at(boundary) != _plain(meta.entities)
                 or events['action_ids'] != list(receipt.action_ids)
                 or events['effect_ids'] != [_plain(item) for item in receipt.effect_ids]
-                or rng_state_at(log, boundary) != _plain(receipt.rng_state)):
+                or history.rng_state_at(boundary) != _plain(receipt.rng_state)):
             raise RuntimeError(f'native history differs from committed receipt at {boundary}')
     return log
 

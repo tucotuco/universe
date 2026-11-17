@@ -54,6 +54,9 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
         self.assertIn('not a general native persistence API', text)
         self.assertIn('no production native restore path', text)
         self.assertIn('**Open**', text)
+        import native_history
+        self.assertTrue(callable(native_history.entity_context_at))
+        self.assertTrue(callable(native_history.NativeHistoryQuery))
 
 
 if __name__ == '__main__':

@@ -920,7 +920,8 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         original = demo['encounter']
         wire = export_save(original)
         body = json.loads(wire)
-        legacy = body['history']
+        legacy = {key: value for key, value in body['history'].items()
+                  if key not in ('sha256', 'entity_context')}
         legacy['schema'] = LEGACY_SCHEMA
         previous = None
         for row in legacy['boundaries']:
@@ -934,7 +935,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         migrated_world, migrated, _ = load_save(_canonical(body))
         self.assertEqual(migrated.id, original.id)
         self.assertEqual(native_history.current_recording(migrated)['schema'],
-                         'universe.native-encounter-history/3')
+                         'universe.native-encounter-history/4')
         action_id = 'native-history-v1-migrated-delay'
         actor_id = original.being_list[1]
         for encounter in (original, migrated):
