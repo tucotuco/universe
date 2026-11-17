@@ -39,6 +39,12 @@ The native recipe previously had no direct fresh-process continuation fixture fo
 
 Verification: `PYTHONPATH=tests:src:../examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_progressive_reproduction_history_restores_and_continues_in_fresh_process -v` — **1 passed / 1.702s**; combined progressive + capability-matrix/API command — **4 passed / 1.706s**. Compilation and `git diff --check` pass. U-PER-SCALE-001 remains ACTIVE; history/query parity across these world-owned records and overall persistence cutover are still open.
 
+### One-shot statistical reproduction outcomes
+
+The portable reproduction registry also contains the V1 one-shot statistical outcome branch. A new headless fixture publishes a positive result and a separate zero-offspring result before creating the Encounter, then Saves after a native Delay. Fresh-process strict restore preserves each request's exact scope/provenance, seed, distribution schema/version and algorithm, positive generated IDs and origin ticks, the zero result with no Group/offspring, the parent-set scopes and idempotency keys. Canonical Save→Load→Save is byte-identical. The child continues another native Delay and matches the uninterrupted result, RNG and native-history digest.
+
+Verification: `PYTHONPATH=tests:src:../examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_statistical_reproduction_outcomes_resume_with_positive_and_zero_results -v` — **1 passed / 1.676s**; both reproduction cases plus matrix/API gate — **5 passed / 3.383s**. A first child-process assertion compared a Python tuple to the JSON-list shape before JSON normalization; correcting this test-only comparison made the strict regression pass. No reproductive rule was changed. U-PER-SCALE-001 remains ACTIVE.
+
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 

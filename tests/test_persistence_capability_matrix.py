@@ -55,6 +55,7 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
         self.assertIn('no production native restore path', text)
         self.assertIn('**Open**', text)
         self.assertIn('test_progressive_reproduction_history_restores_and_continues_in_fresh_process', text)
+        self.assertIn('test_statistical_reproduction_outcomes_resume_with_positive_and_zero_results', text)
         import native_history
         self.assertEqual(native_history.RECIPIENT_HISTORY_SCHEMA,
                          'universe.native-encounter-history/9')

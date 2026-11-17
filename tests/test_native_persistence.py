@@ -2422,6 +2422,125 @@ print(json.dumps({'registry':registry,'time':enc.time,
         self.assertEqual(json.loads(result.stdout),
                          json.loads(json.dumps(expected)))
 
+    def test_statistical_reproduction_outcomes_resume_with_positive_and_zero_results(self):
+        import os
+        import random
+        from dataclasses import asdict
+        from reproduction_generation import (
+            StatisticalReproductionRequest,
+            TestOnlyOffspringCountDistribution,
+            prepare_statistical_reproduction,
+        )
+
+        world = Universe('native-statistical-reproduction', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        distribution = TestOnlyOffspringCountDistribution(
+            'native-persistence-counts', '1', ((0, 1), (1, 2), (2, 3)))
+        for parents, seed, request_key in (
+                (('P-A', 'P-B'), 5, 'native-generation-positive'),
+                (('P-ZERO',), 2, 'native-generation-zero')):
+            request = StatisticalReproductionRequest(
+                parents, seed, 8, (1, 3, 5, 8), distribution)
+            candidate = prepare_statistical_reproduction(world, request)
+            world.publish_statistical_reproduction(
+                candidate, request_key=request_key,
+                expected_revision=candidate.base_revision)
+
+        actor_id = world.make_being('Human', 'Statistical history runner')
+        encounter = Encounter(world, 10, 0, initiated=True,
+                              id='native-statistical-reproduction-encounter')
+        encounter.add_being(actor_id)
+        world.add_event(encounter)
+        rng = RNGCursor(random.Random(445).getstate())
+        encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
+        first = DelayAction(encounter, actor_id, defense=0, start_time=0,
+                            id='native-statistical-reproduction-initial')
+        encounter.schedule_action(first)
+        encounter.step(1)
+        wire = export_save(encounter)
+
+        def registry_projection(registry_world):
+            snapshot = registry_world.reproduction_group_snapshot()
+            outcomes = []
+            for row in snapshot.generation_outcomes:
+                value = asdict(row)
+                value.pop('world_identity')
+                outcomes.append(value)
+            groups = []
+            for row in snapshot.groups:
+                value = asdict(row)
+                value.pop('world_identity')
+                groups.append(value)
+            return {
+                'revision': snapshot.revision,
+                'outcomes': outcomes,
+                'groups': groups,
+                'parent_scopes': [[list(parents), scope]
+                                  for parents, scope in snapshot.generation_parent_set_scopes],
+                'origin_ticks': [list(row) for row in snapshot.offspring_origin_ticks],
+                'request_keys': list(snapshot.request_keys),
+            }
+
+        positive = world.reproduction_group_snapshot().generation_outcomes[0]
+        zero = world.reproduction_group_snapshot().generation_outcomes[1]
+        self.assertEqual(positive.count, 2)
+        self.assertIsNotNone(positive.group_id)
+        self.assertEqual(zero.count, 0)
+        self.assertIsNone(zero.group_id)
+        self.assertEqual(zero.offspring_ids, ())
+        continued = DelayAction(encounter, actor_id, defense=0, start_time=1,
+                                id='native-statistical-reproduction-continuation')
+        encounter.schedule_action(continued)
+        encounter.step(1)
+        expected = {
+            'registry': registry_projection(world),
+            'time': encounter.time,
+            'outcome': continued.resolution.outcome,
+            'rng': rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-statistical-reproduction.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+from dataclasses import asdict
+import native_history
+from activities import DelayAction
+from native_persistence import export_save,load_path
+world,enc,rng=load_path(sys.argv[1])
+assert enc.id=='native-statistical-reproduction-encounter'
+assert export_save(enc)==open(sys.argv[1],'rb').read()
+snapshot=world.reproduction_group_snapshot()
+outcomes=[]
+for row in snapshot.generation_outcomes:
+ value=asdict(row);value.pop('world_identity');outcomes.append(value)
+groups=[]
+for row in snapshot.groups:
+ value=asdict(row);value.pop('world_identity');groups.append(value)
+registry={'revision':snapshot.revision,'outcomes':outcomes,'groups':groups,
+ 'parent_scopes':[[list(parents),scope] for parents,scope in snapshot.generation_parent_set_scopes],
+ 'origin_ticks':[list(row) for row in snapshot.offspring_origin_ticks],
+ 'request_keys':list(snapshot.request_keys)}
+assert outcomes[0]['count']==2 and outcomes[0]['group_id'] is not None
+assert outcomes[1]['count']==0 and outcomes[1]['group_id'] is None
+assert outcomes[1]['offspring_ids']==()
+action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
+ id='native-statistical-reproduction-continuation')
+enc.schedule_action(action);enc.step(1)
+print(json.dumps({'registry':registry,'time':enc.time,
+ 'outcome':action.resolution.outcome,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=directory,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
+
     def test_completed_ask_about_past_and_listener_accounts_resume_with_binding(self):
         world, encounter, rng, listener, speaker, _weapon_id = self._combat_encounter()
         from personal_history import PersonalHistory
