@@ -575,6 +575,9 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         fixture.enc.schedule_action(first)
         fixture.enc.step(1)
         wire = export_save(fixture.enc)
+        self.assertEqual(history.inspect_episode(-1, "earlier-training").value,
+                         {"description": "practiced earlier"})
+        self.assertEqual(len(history.facts_at(-1)), 1)
 
         continuation_id = "native-group-continuation-delay"
         next_action = DelayAction(fixture.enc, fixture.a.id, defense=0,
@@ -735,6 +738,8 @@ world,enc,rng=load_path(sys.argv[1])
 being=world.get_object_by_id(enc.being_list[0])
 history=being.personal_history
 history._validate(history.reality.view())
+assert history.inspect_episode(-1,'earlier-training').value=={'description':'practiced earlier'}
+assert len(history.facts_at(-1))==1
 action=DelayAction(enc,being.id,defense=0,start_time=enc.time,
  id='native-history-continuation')
 enc.schedule_action(action)
