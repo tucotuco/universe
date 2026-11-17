@@ -352,4 +352,10 @@ Further affected regressions: the full Arena-independent Action continuation/his
 
 The correction is committed as `5a6447cac7d984087bc37caf0a6e5f17f99673db`. Staged publication safety passed with zero findings; the explicit-path commit excluded the unrelated staged archive operations.
 
+## Problems-first — timeline history reader and full Action-projection parity
+
+The stored native rows retained ordered boundary timing, starts, Actions and Effects but the query API had no equivalent for the native `EncounterInspection.timeline`. Added `timeline_at(boundary)` as a detached, address-free query. It expands validated quiet spans only for the caller's result; the persisted file and query index remain compressed. The 25-scenario Action test helper now compares each available committed cut's full timeline, Action/Effect IDs and facts, Target histories, EntityInspection context, objectives and uses, scheduler, recipients, projectile states and boundary receipt facts to the authoritative native inspection/receipt. It also queries the initial timeline explicitly as empty and compares every quiet-span cut.
+
+Verification: native Action continuation/history suite **25 passed / 119.286s** with all expanded comparisons; initial-boundary plus quiet-span timeline tests **2 passed / 5.098s**; capability matrix/API checks **3 passed / 0.027s**. Code/test/matrix commit `1f51349721ce8789647fd001e97fb912fd278812` passed the staged publication audit with zero findings and excluded the unrelated archive operations. This materially strengthens reader parity for the 25 implemented Action scenarios but does not make the old `inspect_committed` consumer graph-free or close all type families/application cutover.
+
 This resolves the identified cumulative-recipient defect and the tested single/shared-list listener attribution paths only. Full family history/query parity, receipt/Target graph removal, durable append journal, broad security/scale, and application Save/Load cutover remain open. No rules or external blocker is identified.

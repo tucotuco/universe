@@ -26,7 +26,7 @@
 | Full native bridge continuation | 2026-11-17T06:10:55Z | Not recorded in the prior closeout | Elapsed unavailable; no estimate added |
 | Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | IN PROGRESS | End and elapsed recorded at closeout |
 
-## Problems-first — cumulative observer-recipient history and `/9` migration
+## Problems-first — cumulative observer-recipient history in `/10`, with strict `/9` migration
 
 ### Gap
 
@@ -78,6 +78,12 @@ Regression verification after the correction:
 The history and adapter suites were run as separate processes to avoid their known test import isolation interaction.
 
 Implementation commit: `5a6447cac7d984087bc37caf0a6e5f17f99673db` (restore validator, regression, matrix, TASKS and findings). Before commit, `git diff --cached --check` passed and `python3 tools/check_publication_safety.py --staged` reported `files=12 findings=0 result=PASS`; `git commit --only` named six reviewed paths, so the five unrelated pre-staged archival operations were excluded.
+
+## Problems-first — missing ordered timeline query
+
+The history format retained boundary starts, Action/Effect identities and start fences, but offered no API to reconstruct the ordered `EncounterInspection.timeline` view without reading the runtime receipt graph. This was a missing historical reader, not missing source facts. Added `NativeHistoryQuery.timeline_at()` and its module-level API. It returns detached tagged `BoundaryInspection` rows in exact order; a quiet span is expanded only in the returned query and remains compact in storage. The Action-family comparison helper now checks timeline plus full target-history, entity, objective/use, scheduler, recipient, projectile, receipt, Action and Effect projections at each checked native boundary.
+
+Evidence: the 25-scenario native Action Save/Load suite passed with the expanded per-boundary comparisons (**25 / 119.286s**). The initial-boundary and quiet-span timeline cases passed **2 / 5.098s**. Capability-matrix/API validation passed **3 / 0.027s**. The comparison verifies the query result against `_plain(Encounter.inspect_committed(boundary).timeline)` for all available committed boundaries; boundary zero is explicitly the empty tuple because the native inspector has no committed receipt there. Code/test/matrix commit: `1f51349721ce8789647fd001e97fb912fd278812`. Before commit, staged check and publication safety passed (`files=11 findings=0`); explicit commit paths excluded all unrelated pre-staged archival changes. This closes a specific query/API gap, not graph-free `Encounter.inspect_committed`, complete family coverage, durable journaling, or production cutover.
 
 
 ## Native action-family continuation — contact history and Break Weapon
