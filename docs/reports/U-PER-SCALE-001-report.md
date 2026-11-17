@@ -16,11 +16,31 @@
 | Exact serialized-field diagnostic audit | 2026-11-16T04:16:02-08:00 | 2026-11-16T04:24:43-08:00 | PT8M41S |
 | Headless initial/delta proof | 2026-11-16T04:59:08-08:00 | 2026-11-16T05:13:46-08:00 | PT14M38S |
 | Full native-history capability continuation | 2026-11-16T18:34:14-08:00 | IN PROGRESS | Recorded at closeout |
+| Native action-family breadth continuation | 2026-11-16T21:04:56-08:00 | IN PROGRESS | Recorded at closeout |
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
 | Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:58-08:00 | PT39M8S |
 | Native history bridge continuation | 2026-11-16T13:49:14-08:00 | IN PROGRESS | Recorded at closeout |
+
+## Native action-family continuation — contact history and Break Weapon
+
+### Problems first
+
+- U-PER-SCALE-001 remains ACTIVE. Native history `/5` still represents the selected historical inspection families, while the resumable Save contains the separate full receipt/Target graph. The historical read model is not yet equivalent for every currently implemented Action, state family or consumer; graph-free reconstruction, native-format legacy migration/resave, durable journal recovery, and ordinary application Save/Load cutover are still open.
+- No rule ambiguity or external dependency was found in this increment. It adds fresh-process evidence for native contact state and Break Weapon failure handling; it does not claim that remaining Action variants or full matrix rows are complete.
+
+### Contact sequence and dependent Action continuation
+
+`tests/test_native_draw_persistence.py::NativeDrawPersistenceTests.test_headless_touch_grab_trip_history_continues_after_fresh_process_load` uses the Arena-independent `NativeScenarioBuilder`, ordinary seed 7, represented positions/radii, explicit awareness, standing posture, and medium size categories. The engine commits Touch at t=1 and Being Grab at t=2; the Trip declaration cites the exact Grab Action ID and remains accepted when the Save is made. The uninterrupted run and a fresh OS process both resolve the Trip at t=4 as successful and set the target's posture to lying. The test compares literal Action/source IDs, each outcome, posture, RNG, and the complete canonical native-history digest. No roll is injected and no contact or body-geometry rule is altered.
+
+### Break Weapon failure and later Action
+
+`tests/test_native_draw_persistence.py::NativeDrawPersistenceTests.test_headless_break_weapon_failure_preserves_later_attack_after_restore` uses standard configured Dagger definitions, ordinary seed 1, a represented pending attack by the weapon holder, and a scheduled Break Weapon resolved in the preceding second. The native Break Weapon roll is a miss; neither Dagger changes durability. Both accepted Choices are in the initial Save. A fresh OS process restores them, resolves the same Break Weapon result, and then resolves the holder's later Strike with the same outcome as uninterrupted execution; it is not `weapon_unavailable`. The comparison covers logical Action/weapon IDs, weapon HP, RNG and full history digest. This is intentionally a failure-path continuation; no success was manufactured by changing weapon hardness/HP or scripting rolls. The adopted successful-break rule still has separate rule tests, including their test-authored low-durability fixture; a fresh-process success with an unmodified standard definition remains unproven.
+
+### Focused result
+
+`.venv/bin/python -B tests/test_native_draw_persistence.py -v` — **10 passed in 57.164s**, covering native Draw, shield Don/Remove, Ready/consumption, simultaneous pickup contention, Object strike and simultaneous durability, Subdue, Feint/follow-up, Touch→Grab→Trip, and Break Weapon failure/later attack. The Touch→Grab→Trip case also passed alone in **3.280s**. Python compilation and `git diff --check` passed for the current changes. These results are incremental; the report's architectural and acceptance status remains incomplete.
 
 ## Latest continuation — native observer evidence and Search/Listen
 

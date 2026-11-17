@@ -743,6 +743,184 @@ print(json.dumps({'time':enc.time,'feint_id':feint.id,'strike_id':strike.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_touch_grab_trip_history_continues_after_fresh_process_load(self):
+        builder = NativeScenarioBuilder(
+            "native-touch-trip", Library(config_dir=str(ROOT / "src/config")),
+            seed=7, encounter_id="native-touch-trip-encounter")
+        actor = builder.add_being("Human", "Contact Actor", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Contact Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        actor.set_posture("standing")
+        target.set_posture("standing")
+        actor.size_category = target.size_category = "medium"
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.enable()
+        touch = Action(builder.world, 0, 1, "touch", actor.id, target.id, None,
+                       id="native-touch-trip-touch")
+        touch.end_time = 1
+        builder.schedule(touch)
+        builder.step(1)
+        touch_receipt = builder.encounter.inspect_committed(1).action(touch.id)
+        self.assertEqual(touch_receipt.facts.outcome, "touched")
+        self.assertEqual(target.get_posture(), "standing")
+        grab = Action(builder.world, 1, 2, "grab", actor.id, target.id, None,
+                      id="native-touch-trip-grab")
+        grab.touch_action_id = touch.id
+        grab.grab_hand = "left hand"
+        grab.end_time = 2
+        builder.schedule(grab)
+        builder.step(1)
+        grab_receipt = builder.encounter.inspect_committed(2).action(grab.id)
+        self.assertEqual(grab_receipt.facts.outcome, "success")
+        trip = Action(builder.world, 2, 4, "trip", actor.id, target.id, None,
+                      id="native-touch-trip-trip")
+        trip.trip_source_action_id = grab.id
+        trip.trip_defender_ability = "DEX"
+        trip.end_time = 4
+        builder.schedule(trip)
+        pending = export_save(builder.encounter)
+
+        builder.step(2)
+        trip_receipt = builder.encounter.inspect_committed(4).action(trip.id)
+        self.assertEqual(trip_receipt.facts.outcome, "success")
+        self.assertEqual(target.get_posture(), "lying")
+        expected = {
+            "time": builder.encounter.time,
+            "touch_id": touch.id,
+            "touch_outcome": touch_receipt.facts.outcome,
+            "grab_id": grab.id,
+            "grab_outcome": grab_receipt.facts.outcome,
+            "trip_id": trip.id,
+            "trip_source": trip.trip_source_action_id,
+            "trip_outcome": trip_receipt.facts.outcome,
+            "posture": target.get_posture(),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+touch_id,grab_id,trip_id,target_id=sys.argv[2:]
+choice=enc.choice_for_action(trip_id)
+assert choice.state=='accepted'
+trip=next(m.action for m in enc._choice_book._choices[choice.id].members
+          if m.action.id==trip_id)
+assert trip.trip_source_action_id==grab_id
+target=world.get_object_by_id(target_id)
+assert enc.inspect_committed(1).action(touch_id).facts.outcome=='touched'
+assert enc.inspect_committed(2).action(grab_id).facts.outcome=='success'
+assert trip.trip_source_action_id==grab_id
+assert target.get_posture()=='standing'
+enc.step(2);receipt=enc.inspect_committed(4).action(trip_id)
+assert receipt.facts.outcome=='success' and target.get_posture()=='lying'
+print(json.dumps({'time':enc.time,'touch_id':touch_id,
+ 'touch_outcome':enc.inspect_committed(1).action(touch_id).facts.outcome,
+ 'grab_id':grab_id,'grab_outcome':enc.inspect_committed(2).action(grab_id).facts.outcome,
+ 'trip_id':trip.id,'trip_source':trip.trip_source_action_id,
+ 'trip_outcome':receipt.facts.outcome,'posture':target.get_posture(),
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+ native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-touch-trip.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), touch.id,
+                 grab.id, trip.id, target.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+    def test_headless_break_weapon_failure_preserves_later_attack_after_restore(self):
+        attacking = NativeScenarioBuilder(
+            "native-break-weapon", Library(config_dir=str(ROOT / "src/config")),
+            seed=1, encounter_id="native-break-weapon-encounter")
+        breaker = attacking.add_being("Human", "Weapon Breaker", position=(0, 0, 0),
+                                      radius=.25, hit_points=100)
+        defender = attacking.add_being("Human", "Weapon Holder", position=(.2, 0, 0),
+                                       radius=.25, hit_points=100)
+        attack_weapon = attacking.make_weapon(breaker.id, "Dagger", "Breaker Dagger",
+                                              hand="right hand")
+        target_weapon = attacking.make_weapon(defender.id, "Dagger", "Defender Dagger",
+                                              hand="right hand")
+        breaker.current.skills.weapon_skills["Dagger"] = 2
+        attacking.mark_aware(breaker.id, defender.id)
+        attacking.mark_aware(defender.id, breaker.id)
+        attacking.enable()
+        duration = max(1, math.ceil(attack_weapon.St()))
+        followup = MeleeStrike(attacking.encounter, defender.id, breaker.id,
+                               target_weapon.id, motion="thrust", reach=2)
+        followup.end_time = duration + 1
+        attacking.schedule(followup)
+        action = Action(attacking.world, 0, 1, "break weapon", breaker.id,
+                        defender.id, attack_weapon.id,
+                        id="native-break-weapon-action")
+        action.break_weapon_id = target_weapon.id
+        action.break_motion = "swing"
+        action.reach = effective_melee_reach_meters(breaker.current,
+                                                    attack_weapon.current)
+        action.end_time = duration
+        attacking.schedule(action)
+        initial = export_save(attacking.encounter)
+        attacking.step(duration)
+        first_receipt = attacking.encounter.inspect_committed(duration)
+        self.assertEqual(first_receipt.action(action.id).facts.outcome, "miss")
+        original_target_weapon_hp = target_weapon.hit_points()
+        attacking.step(1)
+        second_receipt = attacking.encounter.inspect_committed(duration + 1)
+        self.assertNotEqual(second_receipt.action(followup.id).facts.outcome,
+                            "weapon_unavailable")
+        expected = {
+            "time": attacking.encounter.time,
+            "break_id": action.id,
+            "followup_id": followup.id,
+            "break_outcome": first_receipt.action(action.id).facts.outcome,
+            "followup_outcome": second_receipt.action(followup.id).facts.outcome,
+            "target_weapon_id": target_weapon.id,
+            "target_weapon_hp": target_weapon.hit_points(),
+            "original_target_weapon_hp": original_target_weapon_hp,
+            "rng": attacking.rng.state,
+            "history": hashlib.sha256(encode(capture(attacking.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+break_id,follow_id,weapon_id=sys.argv[2:]
+break_choice=enc.choice_for_action(break_id);follow_choice=enc.choice_for_action(follow_id)
+assert break_choice.state=='accepted' and follow_choice.state=='accepted'
+break_action=next(m.action for m in enc._choice_book._choices[break_choice.id].members
+                  if m.action.id==break_id)
+followup=next(m.action for m in enc._choice_book._choices[follow_choice.id].members
+              if m.action.id==follow_id)
+enc.step(int(break_action.end_time-enc.time))
+first=enc.inspect_committed(int(enc.time))
+target_weapon=world.get_object_by_id(weapon_id)
+initial_hp=target_weapon.hit_points()
+enc.step(1);second=enc.inspect_committed(int(enc.time))
+print(json.dumps({'time':enc.time,'break_id':break_action.id,'followup_id':followup.id,
+ 'break_outcome':first.action(break_id).facts.outcome,
+ 'followup_outcome':second.action(follow_id).facts.outcome,
+ 'target_weapon_id':target_weapon.id,'target_weapon_hp':target_weapon.hit_points(),
+ 'original_target_weapon_hp':initial_hp,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-break-weapon.json"
+            path.write_bytes(initial)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), action.id,
+                 followup.id, target_weapon.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()
