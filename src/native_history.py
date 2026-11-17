@@ -471,6 +471,36 @@ class NativeHistoryRecorder:
             _RECORDERS[encounter] = recorder
             return recorder
 
+    @classmethod
+    def ensure_attached(cls, encounter):
+        """Idempotently start or retrieve the recorder for a saved Encounter."""
+        with _RECORDER_LOCK:
+            recorder = _RECORDERS.get(encounter)
+            if recorder is None:
+                recorder = cls(encounter, capture(encounter))
+                _RECORDERS[encounter] = recorder
+            return recorder
+
+    @classmethod
+    def restore(cls, encounter, log, *, current_history=None):
+        """Resume recording from an authenticated Save history after Load."""
+        validate(log)
+        actual_history = (encode(capture(encounter)) if current_history is None
+                          else current_history)
+        if (log['initial']['encounter_id'] != encounter.id
+                or log['initial']['universe_id'] != encounter.universe.id
+                or log['latest_boundary'] != encounter.last_processed_boundary
+                or actual_history != encode(log)):
+            raise NativeHistoryRejected(
+                'restored Encounter does not match the saved native history')
+        with _RECORDER_LOCK:
+            if encounter in _RECORDERS:
+                raise NativeHistoryRejected(
+                    'a native history recorder is already attached')
+            recorder = cls(encounter, decode(encode(log)))
+            _RECORDERS[encounter] = recorder
+            return recorder
+
     @property
     def latest_boundary(self):
         return self._log["latest_boundary"]

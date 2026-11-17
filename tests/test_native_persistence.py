@@ -771,7 +771,9 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
                             sense='listen', id='native-listen-failure')
         encounter.schedule_action(listen)
         wire = export_save(encounter)
+        self.assertEqual(native_history.current_recording(encounter)['latest_boundary'], 6)
         encounter.step(6)
+        self.assertEqual(native_history.current_recording(encounter)['latest_boundary'], 12)
         expected = {
             'time': encounter.time, 'rng': rng.state,
             'history': hashlib.sha256(native_history.encode(
@@ -784,8 +786,10 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
             path.write_bytes(wire)
             child = r'''import hashlib,json,sys
 import native_history
-from native_persistence import load_path
+from native_persistence import load_path,export_save
+from native_history import current_recording
 world,enc,rng=load_path(sys.argv[1])
+assert export_save(enc)==open(sys.argv[1],'rb').read()
 search=world.get_event_by_id('native-search-success')
 choice=next(row for row in enc._choice_book._choices.values()
  if row.view.action_ids==('native-listen-failure',))
@@ -793,6 +797,10 @@ listen=choice.members[0].action
 assert search.resolution.outcome=='success'
 assert listen.resolution is None
 enc.step(6)
+recorded=current_recording(enc)
+assert recorded['latest_boundary']==enc.last_processed_boundary
+resaved=json.loads(export_save(enc))
+assert resaved['history']==recorded
 print(json.dumps({'time':enc.time,'rng':rng.state,
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
  'outcomes':[search.resolution.outcome,listen.resolution.outcome],
@@ -810,6 +818,88 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         self.assertEqual(actual['history'], expected['history'])
         self.assertEqual(actual['outcomes'], expected['outcomes'])
         self.assertEqual(actual['awareness'], expected['awareness'])
+
+    def test_simultaneous_native_melee_batch_restores_causal_effects_and_continues(self):
+        from melee_combat import MeleeStrike, effective_melee_reach_meters
+        world, encounter, rng, first, second, first_weapon_id = self._combat_encounter()
+        victim_id = world.make_being('Human', 'Native Batch Victim')
+        victim = world.get_object_by_id(victim_id)
+        victim.set_position(CartesianPosition(.4, 0, 0))
+        victim.set_geometry(Sphere(.25))
+        victim.set_hit_points(100)
+        encounter.add_being(victim_id)
+        encounter.mark_aware(first.id, victim_id)
+        encounter.mark_aware(second.id, victim_id)
+        second_weapon_id = world.make_weapon_for_being(second.id, 'Dagger',
+                                                       'Native Batch Dagger')
+        world.arm_being(second.id, second_weapon_id, 'right hand')
+        first.current.skills.weapon_skills['Dagger'] = 3
+        second.current.skills.weapon_skills['Dagger'] = 3
+        first_reach = effective_melee_reach_meters(
+            first.current, world.get_object_by_id(first_weapon_id).current)
+        second_reach = effective_melee_reach_meters(
+            second.current, world.get_object_by_id(second_weapon_id).current)
+        strikes = (
+            MeleeStrike(encounter, first.id, victim_id, first_weapon_id,
+                        motion='thrust', reach=max(2.0, first_reach)),
+            MeleeStrike(encounter, second.id, victim_id, second_weapon_id,
+                        motion='thrust', reach=max(2.0, second_reach)),
+        )
+        encounter.schedule_choice(strikes)
+        encounter.step(max(action.end_time for action in strikes))
+        receipt = next(row for row in reversed(encounter._atomic_interval_history)
+                       if len(row.action_ids) == 2)
+        self.assertEqual(len(receipt.action_ids), 2)
+        self.assertTrue(receipt.effect_ids)
+        self.assertLess(victim.get_hit_points(), 100)
+        wire = export_save(encounter)
+        encounter.schedule_action(DelayAction(
+            encounter, first.id, defense=0, start_time=encounter.time,
+            id='native-batch-continuation'))
+        encounter.step(1)
+        expected = {
+            'time': encounter.time, 'rng': rng.state,
+            'hp': victim.get_hit_points(),
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'actions': list(receipt.action_ids),
+            'effects': [str(identity) for identity in receipt.effect_ids],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-simultaneous-melee-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+victim=world.get_object_by_id(sys.argv[2])
+receipt=next(row for row in reversed(enc._atomic_interval_history)
+ if len(row.action_ids)==2)
+assert len(receipt.action_ids)==2
+assert victim.get_hit_points()<100
+actor=world.get_event_by_id(receipt.action_ids[0]).actor_id
+enc.schedule_action(DelayAction(enc,actor,defense=0,
+ start_time=enc.time,id='native-batch-continuation'))
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'actions':list(receipt.action_ids),
+ 'effects':[str(identity) for identity in receipt.effect_ids]},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path), victim_id], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['time'], expected['time'])
+        self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
+        self.assertEqual(actual['hp'], expected['hp'])
+        self.assertEqual(actual['history'], expected['history'])
+        self.assertEqual(actual['actions'], expected['actions'])
+        self.assertEqual(actual['effects'], expected['effects'])
 
 
 if __name__ == "__main__":

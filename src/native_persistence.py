@@ -50,7 +50,8 @@ def export_save(encounter, *, recipient_bindings=()):
     is included once in the graph; no external process handle is serialized.
     """
     try:
-        from checkpoint_inventory import capture_checkpoint_candidate
+        from checkpoint_inventory import (capture_checkpoint_candidate,
+                                          validate_checkpoint_candidate)
         from native_graph_snapshot import encode as encode_graph
         candidate = capture_checkpoint_candidate(
             encounter.universe, encounter, quiescent=True,
@@ -63,7 +64,12 @@ def export_save(encounter, *, recipient_bindings=()):
         graph = encode_graph(candidate.envelope, native=True)
         history = native_history.current_recording(encounter)
         if history is None:
-            history = native_history.capture(encounter)
+            history = native_history.NativeHistoryRecorder.ensure_attached(encounter).export()
+        # Bind the detached history copy to the exact graph candidate. A
+        # commit racing Save between graph capture and recorder export must
+        # refuse this bundle rather than mix two valid but different cuts.
+        validate_checkpoint_candidate(
+            encounter.universe, encounter, candidate, quiescent=True)
         body = {"schema": SCHEMA, "graph_b64": base64.b64encode(graph).decode("ascii"),
                 "history": history}
         body["sha256"] = hashlib.sha256(_canonical(body)).hexdigest()
@@ -122,6 +128,8 @@ def load_save(wire):
             raise NativeSaveRejected("restored native graph disagrees with saved history")
         if encounter.id != value["history"]["initial"]["encounter_id"]:
             raise NativeSaveRejected("restored Encounter logical identity differs")
+        native_history.NativeHistoryRecorder.restore(
+            encounter, value["history"], current_history=actual_history)
         return world, encounter, rng_owner
     except NativeSaveRejected:
         raise
