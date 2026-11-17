@@ -2935,6 +2935,9 @@ print(json.dumps({'times':[row[0].time for row in rows],
                     item.trigger_observation_id] for item in row[5].belief_history] for row in rows],
                 'rng':[row[3].state for row in rows],
                 'facts':[row[2]._composition_reality.to_jsonable() for row in rows],
+                'observer_history':[[native_history.NativeHistoryQuery(
+                    native_history.capture(row[0])).observer_facts_at(boundary,
+                    row[1].id) for boundary in (0,1,2)] for row in rows],
                 'histories':[hashlib.sha256(native_history.encode(
                     native_history.capture(row[0]))).hexdigest() for row in rows]}
 
@@ -2993,6 +2996,9 @@ print(json.dumps({'times':[r[0].time for r in rows],
   i.time,i.disputed,i.trigger_observation_id] for i in r[2].belief_history] for r in rows],
  'rng':[r[3].state for r in rows],
  'facts':[r[4]._composition_reality.to_jsonable() for r in rows],
+ 'observer_history':[[native_history.NativeHistoryQuery(
+  native_history.capture(r[0])).observer_facts_at(boundary,r[1].actor_id)
+  for boundary in (0,1,2)] for r in rows],
  'histories':[hashlib.sha256(native_history.encode(native_history.capture(r[0]))).hexdigest()
   for r in rows]},sort_keys=True))'''
             result=subprocess.run([sys.executable,'-B','-c',child,str(path),

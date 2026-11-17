@@ -1701,4 +1701,7 @@ Extended `test_native_save_restores_distinct_group_beliefs_across_encounters` to
 
 The field-level evidence is corrected; the full assignment remains incomplete. In particular, receipt-backed reassessment/inquiry Actions do not exist, and general historical query parity, remaining state families, strict corruption/security breadth, durable append-journal recovery, broad migration coverage and ordinary application Save/Load cutover still require implementation. No rule or external blocker is established. U-PER-SCALE-001 remains the sole ACTIVE program.
 
-**Current worktree commit basis:** `a0d1bd3` before this uncommitted test/matrix/report/TASKS increment. The scoped increment requires its normal staged diff review, publication-safety audit and local commit; no push.
+**Commit:** `8bc4540` (`Verify native observer interpretation restoration`) records the initial test/matrix/report/TASKS increment. A subsequent focused regression now also compares owner-filtered `observer_facts_at()` at boundaries 0, 1, and 2 against the uninterrupted controls, testing historical as well as restored current ledger values.
+
+
+The historical recipient query comparison was added after the initial commit: `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_restores_distinct_group_beliefs_across_encounters test_persistence_capability_matrix -v` (from `tests/`) — **4 passed / 4.213s**. This checks each observer-owned Group BeliefLedger view at boundaries 0/1/2, including no evidence before observation, the owner-only committed projection at boundary 1, and the unchanged projection through boundary 2. The follow-up documentation/test diff is pending scoped commit.
