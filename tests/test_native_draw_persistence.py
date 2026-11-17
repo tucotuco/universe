@@ -546,6 +546,123 @@ print(json.dumps({'time':enc.time,'object_id':target.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_subdual_burden_and_continuation_restore_exactly(self):
+        from activities import DelayAction, declare_subdue
+
+        builder = NativeScenarioBuilder(
+            "native-subdual", Library(config_dir=str(ROOT / "src/config")),
+            seed=5, encounter_id="native-subdual-encounter")
+        actor = builder.add_being("Human", "Subduer", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Subdual target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        club = builder.make_weapon(actor.id, "Club", "Subdual Club",
+                                   hand="right hand")
+        actor.set_weapon_skill_level(builder.world.get_skill_dictionary(), "Club", 3)
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.encounter.difficulty_class = 1
+        builder.enable()
+        subdue = declare_subdue(builder.world, builder.encounter, actor.id, target.id,
+                                club.id, motion="swing", strategy=Strategy(),
+                                id="native-subdue-action")
+        builder.schedule(subdue)
+        initial = export_save(builder.encounter)
+        builder.step(int(subdue.end_time - subdue.start_time))
+        receipt = builder.encounter.inspect_committed(int(builder.encounter.time))
+        subdual = next(effect for effect in receipt.action(subdue.id).facts.effects
+                       if type(effect).__name__ == "SubdualEffect")
+        body_damage = next(effect.amount for effect in receipt.action(subdue.id).facts.effects
+                           if getattr(effect, "component", None) == "body")
+        self.assertEqual(receipt.action(subdue.id).facts.outcome, "critical")
+        self.assertEqual((body_damage, subdual.amount, target.get_hit_points()), (4, 9, 96))
+        self.assertEqual(target.current.states.states["subdual_damage"], 9)
+        self.assertEqual(target.current.states.states["subdual_recovery_anchor"],
+                         builder.encounter.time)
+        self.assertFalse(target.current.states.states["subdual_unconscious"])
+        expected_subdue = {
+            "time": builder.encounter.time,
+            "action_id": subdue.id,
+            "outcome": receipt.action(subdue.id).facts.outcome,
+            "body_damage": body_damage,
+            "subdual_amount": subdual.amount,
+            "hp": target.get_hit_points(),
+            "states": dict(target.current.states.states),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        initial_child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor=world.get_object_by_id(sys.argv[2]);target=world.get_object_by_id(sys.argv[3])
+action_id=sys.argv[4];choice=enc.choice_for_action(action_id)
+assert choice.state=='accepted'
+action=next(m.action for m in enc._choice_book._choices[choice.id].members
+            if m.action.id==action_id)
+enc.step(int(action.end_time-enc.time))
+receipt=enc.inspect_committed(int(enc.time)).action(action.id)
+subdual=next(effect for effect in receipt.facts.effects if type(effect).__name__=='SubdualEffect')
+body_damage=next(effect.amount for effect in receipt.facts.effects
+                 if getattr(effect,'component',None)=='body')
+print(json.dumps({'time':enc.time,'action_id':action.id,'outcome':receipt.facts.outcome,
+ 'body_damage':body_damage,'subdual_amount':subdual.amount,
+ 'hp':target.get_hit_points(),'states':dict(target.current.states.states),
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+  native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-subdual-initial.json"
+            path.write_bytes(initial)
+            restored = subprocess.run(
+                [sys.executable, "-B", "-c", initial_child, str(path), actor.id,
+                 target.id, subdue.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertEqual(json.loads(restored.stdout),
+                         json.loads(json.dumps(expected_subdue)))
+
+        delay = DelayAction(builder.encounter, target.id, defense=0,
+                            start_time=builder.encounter.time,
+                            id="native-subdual-delay")
+        builder.schedule(delay)
+        pending = export_save(builder.encounter)
+        builder.step(1)
+        expected_continue = {
+            "time": builder.encounter.time,
+            "delay_id": delay.id,
+            "hp": target.get_hit_points(),
+            "states": dict(target.current.states.states),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        continuation_child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+target=world.get_object_by_id(sys.argv[2]);action_id=sys.argv[3]
+choice=enc.choice_for_action(action_id);assert choice.state=='accepted'
+action=next(m.action for m in enc._choice_book._choices[choice.id].members
+            if m.action.id==action_id)
+enc.step(1)
+print(json.dumps({'time':enc.time,'delay_id':action.id,
+ 'hp':target.get_hit_points(),'states':dict(target.current.states.states),
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+  native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-subdual-continuation.json"
+            path.write_bytes(pending)
+            continued = subprocess.run(
+                [sys.executable, "-B", "-c", continuation_child, str(path),
+                 target.id, delay.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+        self.assertEqual(json.loads(continued.stdout),
+                         json.loads(json.dumps(expected_continue)))
+
 
 if __name__ == "__main__":
     unittest.main()

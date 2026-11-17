@@ -82,6 +82,8 @@ Native Object-strike persistence now has a consequential path as well. With ordi
 
 Two simultaneous seeded Object strikes against one shared low-durability target now restore from the initial Save and resolve as one atomic boundary. The two per-action Object damage facts (5 and 6 after hardness), final -8 HP, same Object ID, RNG and history match the uninterrupted control. This verifies multiplicity/causality and same-snapshot durability for this Action profile only, not every DamageEffect subtype or event family.
 
+Native Subdue now has fresh-process continuation evidence for its separate condition state. Ordinary seed-5 resolution records 4 body damage plus a distinct Subdual burden of 9 and a t=5 recovery anchor. Restoring the accepted initial Action reproduces the facts, then a separate Save after the committed Subdue and with a pending Delay continues with equal burden/state/HP/RNG/history. Stun remains a separate condition and no recovery or interruption mechanics were changed. The matrix/report retain the uncovered hour-boundary recovery and broader Subdual query cases.
+
 
 ## 2026-11-16 continuation addendum
 
