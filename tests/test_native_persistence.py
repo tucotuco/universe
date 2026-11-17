@@ -1010,6 +1010,19 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         with self.assertRaises(NativeSaveRejected):
             export_save(fixture.enc)
         group.membership_history[1] = original_membership
+        group._departed_member_ids.add(realized_member.id)
+        with self.assertRaises(NativeSaveRejected):
+            export_save(fixture.enc)
+        group._departed_member_ids.remove(realized_member.id)
+        attached = set(group._motion_attached_native_ids)
+        group._motion_attached_native_ids.remove(realized_member.id)
+        with self.assertRaises(NativeSaveRejected):
+            export_save(fixture.enc)
+        group._motion_attached_native_ids = attached
+        incoming = group._incoming_beings.pop(fixture.a.id)
+        with self.assertRaises(NativeSaveRejected):
+            export_save(fixture.enc)
+        group._incoming_beings[fixture.a.id] = incoming
         member_key = (first_adult[0], "adults", first_adult[1])
         original_group_member = group._members[member_key]
         group._members[member_key] = GroupMember(

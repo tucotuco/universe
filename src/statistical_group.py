@@ -271,12 +271,16 @@ def validate_membership_history(group, objects):
         previous_time = record.time
         touched.add(identity)
 
-    for identity in touched:
-        if active[identity] != (identity in current):
+    for identity in initial_members | set(incoming) | touched:
+        if active.get(identity, identity in initial_members) != (identity in current):
             raise ValueError("native Group membership history disagrees with current membership")
     if not (set(departed) <= initial_members and set(departed) <= touched
             and set(incoming) <= touched):
         raise ValueError("native Group membership state lacks matching history")
+    ever_departed = {record.being_id for record in records
+                     if record.action == "leave"}
+    if attached != initial_members - ever_departed:
+        raise ValueError("native Group motion attachment disagrees with membership history")
 
 
 class StatisticalGroup(ObjectInstance):
