@@ -1257,6 +1257,137 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         self.assertEqual(actual['actions'], expected['actions'])
         self.assertEqual(actual['effects'], expected['effects'])
 
+    def test_simultaneous_three_being_wrest_coholding_restores_and_continues(self):
+        """Native Save retains one Object identity shared by concurrent holders."""
+        from action import Action
+        from physical_contact import shared_object_holders
+        from native_scenario import NativeScenarioBuilder
+        from action_evaluation import _ProvisionalRandom, RandomDraw
+        from unittest.mock import patch
+        builder = NativeScenarioBuilder(
+            'Native simultaneous co-holding',
+            Library(config_dir=str(ROOT / 'src/config')), seed=17)
+        actor = builder.add_being('Human', 'First challenger',
+            position=(0, 0, 0), radius=.1, hit_points=100)
+        holder = builder.add_being('Human', 'Object holder',
+            position=(.3, 0, 0), radius=.1, hit_points=100)
+        third = builder.add_being('Human', 'Second challenger',
+            position=(.3, .3, 0), radius=.1, hit_points=100)
+        world, encounter = builder.world, builder.encounter
+        for being in (actor, holder, third):
+            being.size_category = 'medium'
+            being.set_posture('standing')
+            for other in (actor, holder, third):
+                if other.id != being.id:
+                    encounter.mark_aware(being.id, other.id)
+        obj = builder.make_weapon(holder.id, 'Dagger', 'One shared Dagger')
+        object_id = obj.id
+        builder.arm(holder.id, object_id, 'right hand')
+        obj.parent_container_id = holder.id
+        builder.add_object(object_id)
+        builder.mark_aware(actor.id, object_id)
+        builder.mark_aware(holder.id, object_id)
+        builder.mark_aware(third.id, object_id)
+        builder.enable()
+
+        def scripted_step(rolls):
+            values = iter(rolls)
+            def scripted(context, dice):
+                value = next(values)
+                context.trace.append(RandomDraw(
+                    context.action_id, dice, int(dice[2:].split('+')[0]), value))
+                return value
+            with patch.object(_ProvisionalRandom, 'roll', scripted):
+                encounter.step(1)
+
+        actor.current.abilities.abilities['STR'] = 30
+        third.current.abilities.abilities['STR'] = 30
+        holder.current.abilities.abilities['STR'] = 3
+
+        grabs = []
+        for challenger in (actor, third):
+            grab = Action(world, 0, 1, 'grab object', challenger.id,
+                          object_id, None)
+            grab.holder_id = holder.id
+            grab.holder_hand = 'right hand'
+            grab.grab_hand = 'left hand'
+            grabs.append(grab)
+        encounter.schedule_choice(tuple(grabs))
+        scripted_step([20, 20])
+        grips = __import__('physical_contact').active_object_grip_state(encounter)
+        grip_by_actor = {row[2]: row for row in grips}
+        wrests = []
+        for challenger in (actor, third):
+            wrest = Action(world, 2, 3, 'wrest', challenger.id,
+                           object_id, None)
+            wrest.holder_id = holder.id
+            wrest.holder_hand = 'right hand'
+            wrest.grab_hand = 'left hand'
+            wrest.object_grip_id = grip_by_actor[challenger.id][1]
+            wrests.append(wrest)
+        encounter.schedule_choice(tuple(wrests))
+        encounter.step(1)  # Activate the simultaneous contests at their common fence.
+        scripted_step([6, 6, 6, 1, 1, 1, 6, 6, 6, 1, 1, 1])
+        self.assertEqual([row.resolution.outcome for row in wrests],
+                         ['success', 'success'])
+        self.assertEqual(set(shared_object_holders(encounter, object_id)),
+                         {(actor.id, 'left hand'), (third.id, 'left hand')})
+
+        wire = export_save(encounter)
+        actor_id, third_id = actor.id, third.id
+        from transactional_progression import _BINDINGS
+        rng_owner = _BINDINGS[id(encounter)].rng_owner
+        def rng_digest(owner):
+            return hashlib.sha256(json.dumps(owner.state).encode()).hexdigest()
+        delay_id = 'native-coholding-continuation'
+        encounter.schedule_action(DelayAction(
+            encounter, actor_id, defense=0, start_time=encounter.time,
+            id=delay_id))
+        encounter.step(1)
+        expected = {
+            'time': encounter.time,
+            'rng': rng_digest(rng_owner),
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'holders': [[identity, 'left hand']
+                        for identity in sorted((actor_id, third_id))],
+            'action_ids': sorted(row.id for row in wrests),
+            'object_id': object_id,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-coholding.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+from physical_contact import shared_object_holders
+def rng_digest(rng): return hashlib.sha256(json.dumps(rng.state).encode()).hexdigest()
+world,enc,rng=load_path(sys.argv[1])
+oid,actor,third,delay=sys.argv[2:]
+holders=[list(row) for row in shared_object_holders(enc,oid)]
+assert holders==[[identity,'left hand'] for identity in sorted((actor,third))]
+obj=world.get_object_by_id(oid)
+assert obj.id==oid and obj.parent_container_id==min(actor,third)
+assert sum(world.get_object_by_id(x).current.body_parts.get('left hand')==oid
+ for x in enc.being_list)==2
+actions=[world.get_event_by_id(x) for x in enc.finished_action_list
+ if getattr(world.get_event_by_id(x),'event_type',None)=='wrest']
+assert len(actions)==2 and all(row.resolution.outcome=='success' for row in actions)
+enc.schedule_action(DelayAction(enc,actor,defense=0,start_time=enc.time,id=delay))
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng_digest(rng),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'holders':holders,'action_ids':sorted(row.id for row in actions),'object_id':obj.id},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path), object_id,
+                 actor_id, third_id, delay_id], cwd=ROOT,
+                env={**os.environ, 'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
+
     def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
         from native_history import LEGACY_SCHEMA, SAME_RNG, _seal
         from native_persistence import _canonical
