@@ -2259,6 +2259,14 @@ print(json.dumps({'encounter_id':encounter.id,'time':encounter.time,
         actor.set_state(state_list,'prone',True)
         actor.set_posture('lying')
         encounter.step(1)
+        history_query=native_history.NativeHistoryQuery(
+            native_history.capture(encounter))
+        for boundary in (0,1):
+            historical=history_query.entity_at(actor.id,boundary)['fields']['pre_action']
+            self.assertEqual(historical['abilities']['STR'],13)
+            self.assertEqual(historical['abilities']['FIT'],9)
+            self.assertTrue(historical['states']['prone'])
+            self.assertEqual(historical['posture'],'lying')
         wire=export_save(encounter)
         continuation=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
             id='native-being-fields-continuation')
