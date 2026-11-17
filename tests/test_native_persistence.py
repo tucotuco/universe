@@ -965,6 +965,28 @@ print(json.dumps({'time':enc.time,
             validate_checkpoint_candidate(encounter.universe, encounter,
                                           candidate, quiescent=True)
 
+    def test_compacted_publication_facts_reject_altered_source_receipt(self):
+        """Compact Action/Event identity rows remain sealed to their receipt."""
+        from checkpoint_inventory import (CheckpointRejected,
+                                          capture_checkpoint_candidate,
+                                          validate_checkpoint_candidate)
+        from encounter_inspection import InspectionRejected
+
+        encounter = encounter_delta_headless.build_demo(until=2)["encounter"]
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=True,
+            compact_native_receipt_facts=True,
+            compact_native_publication_facts=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        receipt = encounter._atomic_interval_history[-1]
+        object.__setattr__(receipt, "action_ids", ("forged-action-id",))
+        with self.assertRaises((CheckpointRejected, InspectionRejected)):
+            validate_checkpoint_candidate(encounter.universe, encounter,
+                                          candidate, quiescent=True)
+
     def test_uncompacted_native_graph_v1_from_last_writer_migrates_strictly(self):
         """The immediately previous accepted /1 graph rewrites to compact /2."""
         import base64
