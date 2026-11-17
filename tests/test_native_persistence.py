@@ -1388,6 +1388,122 @@ print(json.dumps({'time':enc.time,'rng':rng_digest(rng),
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
+    def test_pending_disarm_landing_choice_restores_and_commits_same_weapon(self):
+        """A post-roll landing Choice remains actionable after native restore."""
+        from action import Action
+        from action_evaluation import _ProvisionalRandom, RandomDraw
+        from arena_hex_map import ArenaHexLayout, HexAddress, encounter_map_descriptor
+        from atomic_publication import disarm_landing_options, choose_disarm_landing
+        from melee_combat import effective_melee_reach_meters
+        from native_scenario import NativeScenarioBuilder
+        from unittest.mock import patch
+        builder = NativeScenarioBuilder(
+            'Native Disarm landing continuation',
+            Library(config_dir=str(ROOT / 'src/config')), seed=41)
+        attacker = builder.add_being('Human', 'Disarmer', radius=.25,
+            hit_points=100)
+        defender = builder.add_being('Human', 'Weapon holder', radius=.25,
+            hit_points=100)
+        world, encounter = builder.world, builder.encounter
+        layout = ArenaHexLayout.rectangle(10, 10)
+        encounter.map = encounter_map_descriptor(layout)
+        source = layout.center_position(HexAddress(5, 5))
+        target = layout.center_position(HexAddress(6, 5))
+        attacker.set_position(source)
+        defender.set_position(target)
+        from hex_facing import nearest_facing
+        attacker.set_hex_facing(nearest_facing(
+            (target.x-source.x, target.y-source.y, 0.0)))
+        defender.set_hex_facing(6)
+        for being in (attacker, defender):
+            being.set_posture('standing')
+            being.size_category = 'medium'
+        builder.mark_aware(attacker.id, defender.id)
+        builder.mark_aware(defender.id, attacker.id)
+        instrument = builder.make_weapon(attacker.id, 'Dagger', 'Disarming Dagger')
+        target_weapon = builder.make_weapon(defender.id, 'Dagger', 'Target Dagger')
+        builder.arm(attacker.id, instrument.id, 'right hand')
+        builder.arm(defender.id, target_weapon.id, 'right hand')
+        attacker.current.skills.weapon_skills['Dagger'] = 2
+        builder.enable()
+        action = Action(world, 0, 1, 'disarm', attacker.id, defender.id,
+                        instrument.id)
+        action.disarm_weapon_id = target_weapon.id
+        action.disarm_motion = 'thrust'
+        action.reach = effective_melee_reach_meters(
+            attacker.current, instrument.current)
+        action.end_time = instrument.Tt()
+        builder.schedule(action)
+        values = iter((20, 1))
+        def scripted(context, dice):
+            value = next(values)
+            context.trace.append(RandomDraw(context.action_id, dice,
+                int(dice[2:].split('+')[0]), value))
+            return value
+        with patch.object(_ProvisionalRandom, 'roll', scripted):
+            encounter.step(action.end_time)
+        self.assertEqual(action.resolution.outcome, 'landing_choice_pending')
+        self.assertTrue(disarm_landing_options(encounter, target_weapon.id))
+        wire = export_save(encounter)
+        actor_id, object_id, action_id = attacker.id, target_weapon.id, action.id
+        saved_options = disarm_landing_options(encounter, object_id)
+        chosen = saved_options[0]
+        choose_disarm_landing(encounter, object_id, chosen.column, chosen.row)
+        encounter.schedule_action(DelayAction(
+            encounter, actor_id, defense=0, start_time=encounter.time,
+            id='native-disarm-landing-continuation'))
+        encounter.step(1)
+        expected = {
+            'time': encounter.time,
+            'rng': hashlib.sha256(json.dumps(builder.rng.state).encode()).hexdigest(),
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'object_id': object_id,
+            'position': list(world.get_object_by_id(object_id).get_position().as_tuple()),
+            'parent': world.get_object_by_id(object_id).parent_container_id,
+            'holder_hand': defender.current.body_parts.get('right hand'),
+            'action_id': action_id,
+            'outcome': action.resolution.outcome,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-disarm-pending.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from atomic_publication import disarm_landing_options,choose_disarm_landing
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+object_id,actor_id,action_id=sys.argv[2:]
+action=world.get_event_by_id(action_id)
+assert action.resolution.outcome=='landing_choice_pending'
+weapon=world.get_object_by_id(object_id)
+from weapon import native_pending_disarm_landing
+assert native_pending_disarm_landing(weapon) is not None
+options=disarm_landing_options(enc,object_id)
+assert options
+cell=options[0]
+choose_disarm_landing(enc,object_id,cell.column,cell.row)
+enc.schedule_action(DelayAction(enc,actor_id,defense=0,start_time=enc.time,
+ id='native-disarm-landing-continuation'))
+enc.step(1)
+holder=world.get_object_by_id(action.target_id)
+print(json.dumps({'time':enc.time,
+ 'rng':hashlib.sha256(json.dumps(rng.state).encode()).hexdigest(),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'object_id':weapon.id,'position':weapon.get_position().as_tuple(),
+ 'parent':weapon.parent_container_id,
+ 'holder_hand':holder.current.body_parts.get('right hand'),
+ 'action_id':action.id,'outcome':action.resolution.outcome},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path), object_id,
+                 actor_id, action_id], cwd=ROOT,
+                env={**os.environ, 'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
+
     def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
         from native_history import LEGACY_SCHEMA, SAME_RNG, _seal
         from native_persistence import _canonical
