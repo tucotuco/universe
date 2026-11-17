@@ -63,11 +63,17 @@ def export_save(encounter, *, recipient_bindings=()):
             raise NativeSaveRejected("native semantic closure refused: " + codes)
         graph = encode_graph(candidate.envelope, native=True)
         history = native_history.current_recording(encounter)
-        if history is None:
+        receipt_chain = encounter.__dict__.get("_atomic_interval_history")
+        if history is None and receipt_chain:
             # Build the first history copy locally. Do not mutate the weak
             # recorder registry until every graph/history check and portable
             # size check has succeeded for this Save cut.
             history = native_history.capture(encounter)
+        elif history is None:
+            # Before the first committed boundary the complete authoritative
+            # state is the graph snapshot. History begins from that boundary's
+            # receipt.start projection when the native publisher commits it.
+            history = None
         # Bind the detached history copy to the exact graph candidate. A
         # commit racing Save between graph capture and recorder export must
         # refuse this bundle rather than mix two valid but different cuts.
@@ -80,7 +86,10 @@ def export_save(encounter, *, recipient_bindings=()):
         if len(wire) > MAX_BYTES:
             raise NativeSaveRejected("native Save exceeds the portable size limit")
         if native_history.current_recording(encounter) is None:
-            native_history.NativeHistoryRecorder.ensure_attached(encounter, log=history)
+            if history is None:
+                native_history.NativeHistoryRecorder.ensure_pending_attached(encounter)
+            else:
+                native_history.NativeHistoryRecorder.ensure_attached(encounter, log=history)
         return wire
     except NativeSaveRejected:
         raise
@@ -124,10 +133,19 @@ def load_save(wire):
         if base64.b64encode(graph_wire).decode("ascii") != value["graph_b64"]:
             raise NativeSaveRejected("native graph payload is not canonical base64")
         from native_graph_snapshot import decode as decode_graph, restore as restore_graph
-        native_history.validate(value["history"])
-        expected_history = native_history.encode(native_history.upgrade(value["history"]))
+        if value["history"] is not None:
+            native_history.validate(value["history"])
+            expected_history = native_history.encode(native_history.upgrade(value["history"]))
         world, encounter, rng_owner = restore_graph(
             decode_graph(graph_wire, native=True), native=True)
+        if value["history"] is None:
+            if (encounter.__dict__.get("_atomic_interval_history")
+                    or encounter.time != encounter.start_time
+                    or encounter.last_processed_boundary != encounter.time):
+                raise NativeSaveRejected(
+                    "history-free native Save is not at the initial committed boundary")
+            native_history.NativeHistoryRecorder.restore_pending(encounter)
+            return world, encounter, rng_owner
         actual_log = native_history.capture(encounter)
         actual_history = native_history.encode(actual_log)
         if actual_history != expected_history:

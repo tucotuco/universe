@@ -1504,6 +1504,96 @@ print(json.dumps({'time':enc.time,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
+    def test_multiple_action_choice_and_simultaneous_touch_resume_from_initial_save(self):
+        """An initial Save restores accepted composition and its first commits."""
+        from action_choice import ChoiceMember
+        from action import Action
+        from native_scenario import NativeScenarioBuilder
+        builder = NativeScenarioBuilder(
+            'Native multiple-Action persistence',
+            Library(config_dir=str(ROOT / 'src/config')), end_time=1, seed=53)
+        actor = builder.add_being('Human', 'Composing Being',
+            position=(0, 0, 0), radius=.2, hit_points=100)
+        first_target = builder.add_being('Human', 'First Search target',
+            position=(.3, 0, 0), radius=.2, hit_points=100)
+        second_target = builder.add_being('Human', 'Second Search target',
+            position=(0, .3, 0), radius=.2, hit_points=100)
+        for target in (first_target, second_target):
+            builder.mark_aware(actor.id, target.id)
+        actor.set_skill_level(builder.world.get_skill_dictionary(), 'multi-action', 1)
+        builder.enable()
+        actions = []
+        for identity, target in (('first', first_target), ('second', second_target)):
+            action = Action(builder.world, 0, 1, 'touch', actor.id, target.id, None,
+                            id=f'native-multi-touch-{identity}')
+            action.touch_willing = True
+            actions.append(action)
+        actions = tuple(actions)
+        builder.schedule_choice((
+            ChoiceMember('first', actions[0], priority_penalty=0),
+            ChoiceMember('second', actions[1], priority_penalty=3),
+        ))
+        choice = builder.encounter.choice_for_action(actions[0].id)
+        self.assertEqual(choice.state, 'accepted')
+        choice_record = builder.encounter._choice_book._choices[choice.id]
+        self.assertEqual(tuple(row.priority_penalty for row in choice_record.members), (0, 3))
+        self.assertFalse(native_history.has_recorder(builder.encounter))
+        with patch('native_persistence.MAX_BYTES', 1):
+            with self.assertRaisesRegex(NativeSaveRejected, 'portable size limit'):
+                export_save(builder.encounter)
+        self.assertFalse(native_history.has_recorder(builder.encounter))
+        wire = export_save(builder.encounter)
+        self.assertIsNone(native_history.current_recording(builder.encounter))
+        builder.step(1)
+        rows = builder.encounter._atomic_interval_history
+        first_receipt = next(row for row in rows if row.boundary == 1)
+        self.assertEqual(set(first_receipt.action_ids), {row.id for row in actions})
+        expected = {
+            'time': builder.encounter.time,
+            'rng': hashlib.sha256(json.dumps(builder.rng.state).encode()).hexdigest(),
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(builder.encounter))).hexdigest(),
+            'choice_id': choice.id,
+            'action_ids': [row.id for row in actions],
+            'outcomes': [row.resolution.outcome for row in actions],
+            'priority_penalties': [0, 3],
+            'receipt_action_ids': list(first_receipt.action_ids),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-multiple-action.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+assert not (set(sys.modules)&{'arena_browser_session','arena_server','npcgen'})
+choice_id,first_id,second_id=sys.argv[2:]
+choice=enc.get_choice(choice_id)
+assert choice.state=='accepted'
+record=enc._choice_book._choices[choice_id]
+assert [member.action.id for member in record.members]==[first_id,second_id]
+assert [member.priority_penalty for member in record.members]==[0,3]
+enc.step(1)
+rows=enc._atomic_interval_history
+first_receipt=next(row for row in rows if row.boundary==1)
+assert set(first_receipt.action_ids)=={first_id,second_id}
+actions=[world.get_event_by_id(identity) for identity in (first_id,second_id)]
+print(json.dumps({'time':enc.time,
+ 'rng':hashlib.sha256(json.dumps(rng.state).encode()).hexdigest(),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'choice_id':choice.id,'action_ids':[row.id for row in actions],
+ 'outcomes':[row.resolution.outcome for row in actions],
+ 'priority_penalties':[member.priority_penalty for member in record.members],
+ 'receipt_action_ids':list(first_receipt.action_ids)},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path), choice.id,
+                 actions[0].id, actions[1].id], cwd=ROOT,
+                env={**os.environ, 'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
+
     def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
         from native_history import LEGACY_SCHEMA, SAME_RNG, _seal
         from native_persistence import _canonical

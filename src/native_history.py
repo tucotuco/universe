@@ -955,6 +955,28 @@ class NativeHistoryRecorder:
             return recorder
 
     @classmethod
+    def ensure_pending_attached(cls, encounter):
+        """Attach a deferred recorder at an exact pre-first-boundary Save cut."""
+        from encounter import Encounter
+        from transactional_progression import mode_of
+        if (type(encounter) is not Encounter
+                or mode_of(encounter) != 'transactional'
+                or encounter.__dict__.get("_atomic_interval_history")
+                or encounter.time != encounter.start_time
+                or encounter.last_processed_boundary != encounter.time):
+            raise NativeHistoryRejected(
+                "deferred history recorder requires an uncommitted initial state")
+        with _RECORDER_LOCK:
+            recorder = _RECORDERS.get(encounter)
+            if recorder is None:
+                recorder = cls(encounter, None)
+                _RECORDERS[encounter] = recorder
+            elif recorder._log is not None:
+                raise NativeHistoryRejected(
+                    "committed history recorder differs from the initial Save cut")
+            return recorder
+
+    @classmethod
     def restore(cls, encounter, log, *, current_history=None):
         """Resume recording from an authenticated Save history after Load."""
         log = upgrade(log)
@@ -974,14 +996,21 @@ class NativeHistoryRecorder:
             _RECORDERS[encounter] = recorder
             return recorder
 
+    @classmethod
+    def restore_pending(cls, encounter):
+        """Bind a validated initial graph to begin history at its first commit."""
+        return cls.ensure_pending_attached(encounter)
+
     @property
     def latest_boundary(self):
-        return self._log["latest_boundary"]
+        return None if self._log is None else self._log["latest_boundary"]
 
     def export(self):
         with _RECORDER_LOCK:
             if self.failure is not None:
                 raise NativeHistoryRejected("native history recorder failed: " + self.failure)
+            if self._log is None:
+                raise NativeHistoryRejected("native history has no committed boundary yet")
             if self.encounter.last_processed_boundary != self.latest_boundary:
                 raise NativeHistoryRejected("native history recorder is behind the Encounter")
             return decode(encode(self._log))
@@ -995,7 +1024,11 @@ def has_recorder(encounter):
 def current_recording(encounter):
     with _RECORDER_LOCK:
         recorder = _RECORDERS.get(encounter)
-    return None if recorder is None else recorder.export()
+    if recorder is None:
+        return None
+    if recorder.failure is not None:
+        return recorder.export()
+    return None if recorder._log is None else recorder.export()
 
 
 def record_committed_boundary(encounter):
@@ -1005,7 +1038,8 @@ def record_committed_boundary(encounter):
     if recorder is None:
         return
     try:
-        updated = append_committed(recorder._log, encounter)
+        updated = (capture(encounter) if recorder._log is None
+                   else append_committed(recorder._log, encounter))
         with _RECORDER_LOCK:
             recorder._log = updated
     except Exception as exc:
