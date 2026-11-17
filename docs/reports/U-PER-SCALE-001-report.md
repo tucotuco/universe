@@ -12,7 +12,9 @@ Verified results:
 
 - `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence -v` — **59 passed / 193.085s**, including old `/1`, `/4`, `/5`, `/6`, `/9` history upgrades, accepted graph-writer fingerprints and `/10`–`/12` Arena readers.
 - `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history test_native_scenario -v` — **33 passed / 26.101s**. The movement regression proves boundary 0 at `(0,0,0)`, boundary 1 at `(1,0,0)`, and the same facts after strict Load in a fresh OS process.
-- Native Draw-family, checkpoint-adapter and capability-matrix suites are prior evidence; the `/11` change does not alter their contracts. They remain part of subsequent integration gates.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_draw_persistence -v` — **25 passed / 136.261s**, including all-boundary native Action family and continuation comparisons under history `/11`.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_persistence_capability_matrix -v` — **3 passed / 0.006s** after updating the schema assertion and source-matrix Arena classification.
+- `.venv/bin/python -m py_compile src/native_history.py src/native_persistence.py src/transactional_progression.py tests/test_native_history.py tests/test_native_persistence.py tests/test_native_scenario.py` — passed. Initial safety audit for implementation commit `577b34c` reported **0 findings**; the commit was scoped to the listed source/tests/docs and preserved all five unrelated staged archive paths.
 
 Remaining acceptance is not met: complete family/query parity, durable independently recoverable history, broad adversarial security and legacy migration coverage, and normal application Save/Load cutover remain open. The matrix and native integration findings need to distinguish proven `/11` initial-state behavior from unavailable pre-`/11` boundary-zero facts. This is a verified implementation increment, not assignment completion.
 

@@ -56,10 +56,11 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
         self.assertIn('**Open**', text)
         self.assertIn('test_progressive_reproduction_history_restores_and_continues_in_fresh_process', text)
         self.assertIn('test_statistical_reproduction_outcomes_resume_with_positive_and_zero_results', text)
+        self.assertIn('test_initial_history_precedes_first_boundary_movement_and_survives_fresh_load', text)
         import native_history
         self.assertEqual(native_history.RECIPIENT_HISTORY_SCHEMA,
                          'universe.native-encounter-history/9')
-        self.assertEqual(native_history.SCHEMA, 'universe.native-encounter-history/10')
+        self.assertEqual(native_history.SCHEMA, 'universe.native-encounter-history/11')
         self.assertTrue(callable(native_history.entity_context_at))
         self.assertTrue(callable(native_history.entity_at))
         self.assertTrue(callable(native_history.entity_history_at))
