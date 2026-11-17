@@ -990,6 +990,9 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             for index in range(group.household(household)["adults"]))
         realized_member = group.realize_being(
             fixture.world, first_adult[0], 'adults', first_adult[1])
+        unrealized_members = tuple(
+            group.member(0, category, 0)
+            for category in ('children', 'livestock', 'dogs'))
         expected_voice = group.formation_attribute(first_adult[0], "adults",
             first_adult[1], "voice")
         fixture.enable()
@@ -1050,6 +1053,9 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             "member_position": fixture.a.get_position().as_tuple(),
             "realized_member_id": realized_member.id,
             "realized_member_position": realized_member.get_position().as_tuple(),
+            "unrealized_members": [[member.id, member.category,
+                member.offset, group.member_position(member).as_tuple()]
+                for member in unrealized_members],
         }
 
         continuation_id = "native-group-continuation-delay"
@@ -1084,6 +1090,9 @@ assert export_save(enc)==open(sys.argv[1],'rb').read()
 group=world.object_registry.object_instances['group-one']
 realized_member=world.get_object_by_id(sys.argv[7])
 assert group._realized_beings[realized_member.id] is realized_member
+unrealized_members=[group._members[(0,category,0)]
+ for category in ('children','livestock','dogs')]
+assert all(world.get_object_by_id(member.id) is None for member in unrealized_members)
 membership={str(time):group.state_at(time) for time in (0,0.5,1,2,3)}
 assert [row.action for row in group.membership_history]==['join','leave','join']
 assert [row.time for row in group.membership_history]==[0.0,1.0,3.0]
@@ -1093,7 +1102,9 @@ group_continuation={'time':group.time,'position':group.get_position().as_tuple()
  'member_position':world.object_registry.object_instances[
   group.membership_history[0].being_id].get_position().as_tuple(),
  'realized_member_id':realized_member.id,
- 'realized_member_position':realized_member.get_position().as_tuple()}
+ 'realized_member_position':realized_member.get_position().as_tuple(),
+ 'unrealized_members':[[member.id,member.category,member.offset,
+  group.member_position(member).as_tuple()] for member in unrealized_members]}
 assert group.household_count == int(sys.argv[2])
 assert group.household(0) == json.loads(sys.argv[3])
 household,index=int(sys.argv[4]),int(sys.argv[5])
