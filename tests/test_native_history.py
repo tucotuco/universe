@@ -156,6 +156,51 @@ class NativeHistoryTests(unittest.TestCase):
         detached.clear()
         self.assertTrue(query.objective_at(1))
 
+    def test_personal_history_fact_is_visible_only_after_its_committed_action(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        fixture.enable()
+        from history_conversation import AskAboutPastAction
+        from objective_reality import EpisodeFacts
+        from personal_history import PersonalHistory
+        from realization import Fact
+
+        subject = fixture.c
+        subject.personal_history = PersonalHistory(
+            subject, earliest=-10, known_through=0, nondeclining_skills=())
+        key = subject.personal_history.episode_key(-1, "native-history-boundary")
+        declaration = AskAboutPastAction(
+            fixture.world, fixture.a.id, subject.id, 0, episode_time=-1,
+            topic="native-history-boundary", duration=1,
+            generate=EpisodeFacts((Fact(
+                key, {"description": "one recorded past event"},
+                origin="native-history-boundary-test"),)),
+            received_accounts=[])
+        fixture.enc.schedule_action(declaration)
+        fixture.enc.step(1)
+
+        log = capture(fixture.enc)
+        query = NativeHistoryQuery(log)
+        self.assertNotIn(subject.id, query.objective_at(0))
+        initial = query.state_at(0)
+        self.assertNotIn(subject.id, initial["objective"])
+        expected = _plain(fixture.enc._atomic_interval_history[-1]
+                          .inspection.objective)
+        current = query.objective_at(1)
+        self.assertEqual(current, expected)
+        self.assertIn(subject.id, current)
+        self.assertEqual(current[subject.id]["$record"],
+                         "objective_reality.SubjectRealityCandidate")
+        self.assertTrue(current[subject.id]["fields"]["facts"]["$map"])
+        self.assertIsNotNone(subject.personal_history.inspect_episode(
+            -1, "native-history-boundary"))
+        use = query.objective_use_at(1)
+        self.assertTrue(use["$tuple"])
+        # The standalone reader uses only the captured history. It does not
+        # consult or realize the live PersonalHistory/Reality ledger.
+        del fixture
+        self.assertEqual(query.objective_at(1), current)
+
     def test_schedule_query_preserves_finished_and_future_accepted_choice_states(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()

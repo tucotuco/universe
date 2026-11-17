@@ -2008,6 +2008,21 @@ class NativeHistoryQuery:
             raise NativeHistoryRejected("requested Target is absent at this boundary")
         return target
 
+    def projectile_state_at(self, object_id, boundary):
+        """Return the recorded trajectory state for one Object at a boundary.
+
+        Absence means no projectile state was recorded for that Object at the
+        selected boundary; the query never infers flight from current custody
+        or position.
+        """
+        self._boundary(boundary)
+        if type(object_id) is not str or not object_id:
+            raise NativeHistoryRejected("projectile history requires a stable Object identity")
+        states = self.state_at(boundary)["projectile_states"]
+        if type(states) is not dict:
+            raise NativeHistoryRejected("native projectile-state projection is malformed")
+        return states.get(object_id)
+
     def objective_at(self, boundary):
         """Return detached committed objective-reality inspection facts."""
         self._boundary(boundary)
@@ -2338,6 +2353,11 @@ def committed_action_at(log, action_id, boundary):
 def target_at(log, target_id, boundary):
     """Return one detached historical TargetCandidate."""
     return NativeHistoryQuery(log).target_at(target_id, boundary)
+
+
+def projectile_state_at(log, object_id, boundary):
+    """Return a detached recorded projectile state, or None when absent."""
+    return NativeHistoryQuery(log).projectile_state_at(object_id, boundary)
 
 
 def objective_at(log, boundary):

@@ -576,6 +576,19 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                         native_history.capture(enc))).hexdigest()}
 
         expected = run_to_impact(encounter, world, rng)
+        history_log = native_history.capture(encounter)
+        history_query = native_history.NativeHistoryQuery(history_log)
+        receipt_by_boundary = {
+            receipt.boundary: receipt
+            for receipt in encounter._atomic_interval_history}
+        for boundary in range(encounter.last_processed_boundary + 1):
+            receipt = receipt_by_boundary.get(boundary)
+            states = ({} if receipt is None else
+                      receipt.inspection.projectile_states)
+            recorded = states.get(projectile.id)
+            self.assertEqual(
+                history_query.projectile_state_at(projectile.id, boundary),
+                None if recorded is None else native_history._plain(recorded))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "native-shielded-projectile.json"
             path.write_bytes(wire)

@@ -1102,3 +1102,13 @@ Schema `/9` adds `initial.initial_schedule_available` and validates the exact cl
 - Commit hashes, final HEAD/tree state and exact execution interval will be recorded at the next closeout update.
 
 This closes the initial scheduler-history gap only. The current Save still serializes runtime receipt/Target history beside fact history, and significant field-family query parity, durable journal recovery, and the ordinary application Save/Load cutover remain open. U-PER-SCALE-001 stays ACTIVE; no rule or external blocker has been found.
+
+### Native historical projection follow-through
+
+**Problems first.** The current history reader exposed projectile trajectory records only through the broad `state_at()` mapping, and the matrix did not demonstrate that an AskAboutPast-created PersonalHistory fact-use projection was absent before its committed Action. These are query/coverage gaps; they do not require a rule change or Arena dependency.
+
+`NativeHistoryQuery.projectile_state_at(object_id, boundary)` and its module-level wrapper now return the exact detached trajectory fact recorded at that boundary, or `None` if the history did not record a projectile there. The shielded-flight regression checks every committed boundary from pre-flight through interception against the source `CommittedBoundaryRecord`, then retains the existing fresh-process continuation comparison. A second history fixture commits `AskAboutPastAction` with a literal `EpisodeFacts` source: the PersonalHistory subject candidate is absent at boundary 0, appears at boundary 1, and its objective-use rows match the native receipt. The query remains usable after the fixture scope is released; it does not call the live Reality ledger.
+
+Verification: `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — **27 passed / 20.604s**; the focused `test_projectile_shield_interception_continues_after_native_fresh_process_load` — **1 passed / 4.069s** (two consecutive runs). The first PersonalHistory assertion initially assumed the inspection candidate's revision field; source inspection showed the closed fact is a `SubjectRealityCandidate` with nested `ObjectiveFact` rows, so the regression now compares the full detached projection to the authoritative receipt rather than asserting a nonexistent field. The full PersonalHistory/reproduction and timed-projectile families remain partial/open; this does not establish graph-free historical view parity or production cutover.
+
+The preceding schema `/9` initial scheduler correction is committed as `6eedac71055c69c5f18a3f674549355478795049`. The follow-through is being committed separately after explicit-path staging and the publication-safety audit; U-PER-SCALE-001 remains ACTIVE.
