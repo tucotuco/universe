@@ -1771,6 +1771,184 @@ print(json.dumps({'times':[r[0].time for r in rows],
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
 
+    def test_native_save_combines_object_and_location_recipients(self):
+        """A /2 Save restores heterogeneous owner bindings in one graph."""
+        import os
+        import random
+        from object import ObjectDefinition, ObjectInstance
+        from object_observation import ObjectObservationLedger
+        from spatial.occlusion import VisualOcclusion
+
+        world = Universe('native-mixed-observer-recipients', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        rows = []
+        bindings = []
+        for index, role, seed in ((0, 'object', 71), (1, 'location', 72)):
+            observer_id = world.make_being('Human', f'Mixed observer {index}')
+            observer = world.get_object_by_id(observer_id)
+            observer.set_position(CartesianPosition(0, index * 5, 0))
+            observer.set_geometry(Sphere(.25))
+            if role == 'object':
+                target_id = f'native-mixed-target-{index}'
+                target = ObjectInstance(
+                    ObjectDefinition(f'Mixed object {index}', 1, 1, .2, .2,
+                                     1, 0, 0), f'Mixed object {index}',
+                    id=target_id)
+                world.add_object(target)
+                target.set_position(CartesianPosition(1.5, index * 5, 0))
+                target.set_geometry(Sphere(.1))
+                target.set_visual_occlusion(VisualOcclusion(0))
+                target.current.discovery_dc = 15
+                ledger = ObjectObservationLedger(observer_id)
+                action = SpotAction(world, observer_id, target_id, 0,
+                                    object_ledger=ledger,
+                                    id=f'native-mixed-action-{index}')
+                binding_role = 'observer_object_evidence'
+            else:
+                target_id = world.make_being('Human', f'Mixed target {index}')
+                target = world.get_object_by_id(target_id)
+                target.set_position(CartesianPosition(1.5, index * 5, 0))
+                target.set_geometry(Sphere(.25))
+                ledger = LocationEvidenceLedger(observer_id)
+                action = SpotAction(world, observer_id, target_id, 0,
+                                    die_roll=20, location_ledger=ledger,
+                                    id=f'native-mixed-action-{index}')
+                binding_role = 'observer_location_evidence'
+            encounter = Encounter(world, 10, 0, initiated=True,
+                                  id=f'native-mixed-encounter-{index}')
+            encounter.add_being(observer_id)
+            if role == 'object':
+                encounter.add_object(target_id)
+            else:
+                encounter.add_being(target_id)
+                encounter.mark_aware(observer_id, target_id)
+                encounter.mark_aware(target_id, observer_id)
+            world.add_event(encounter)
+            rng = RNGCursor(random.Random(seed).getstate())
+            encounter.enable_transactional_progression(quiescent=True,
+                                                       rng_owner=rng)
+            encounter.schedule_action(action)
+            encounter.step(1)
+            rows.append((encounter, rng, action, ledger))
+            bindings.append(RecipientBinding(
+                world, 'native-mixed-recipients', f'ledger-{index}',
+                binding_role, (observer_id,), ledger))
+
+        listener_id = world.make_being('Human', 'Mixed listener')
+        speaker_id = world.make_being('Human', 'Mixed speaker')
+        listener = world.get_object_by_id(listener_id)
+        speaker = world.get_object_by_id(speaker_id)
+        listener.set_position(CartesianPosition(0, 10, 0))
+        speaker.set_position(CartesianPosition(1.5, 10, 0))
+        encounter = Encounter(world, 10, 0, initiated=True,
+                              id='native-mixed-encounter-2')
+        encounter.add_being(listener_id)
+        encounter.add_being(speaker_id)
+        encounter.mark_aware(listener_id, speaker_id)
+        world.add_event(encounter)
+        rng = RNGCursor(random.Random(73).getstate())
+        encounter.enable_transactional_progression(quiescent=True,
+                                                   rng_owner=rng)
+        from personal_history import PersonalHistory
+        from realization import Fact
+        from objective_reality import EpisodeFacts
+        speaker.personal_history = PersonalHistory(
+            speaker, earliest=-10, known_through=0, nondeclining_skills=())
+        key = speaker.personal_history.episode_key(-1, 'mixed-testimony')
+        facts = EpisodeFacts((Fact(
+            key, {'description': 'mixed testimony'},
+            origin='declared-testimony'),))
+        accounts = []
+        action = AskAboutPastAction(
+            world, listener_id, speaker_id, 0, episode_time=-1,
+            topic='mixed-testimony', generate=facts, duration=1,
+            received_accounts=accounts)
+        encounter.schedule_action(action)
+        encounter.step(1)
+        self.assertEqual(action.resolution.outcome, 'heard')
+        rows.append((encounter, rng, action, accounts))
+        bindings.append(RecipientBinding(
+            world, 'native-mixed-recipients', 'listener-accounts',
+            'in_world_received_accounts', (listener_id,), accounts))
+
+        wire = export_save(rows[1][0], recipient_bindings=tuple(bindings))
+        for encounter, *_ in rows:
+            while encounter.time < 6:
+                encounter.step(1)
+
+        def expected_projection():
+            output = []
+            for row in rows:
+                encounter, rng, action, recipient = row[:4]
+                if type(recipient) is list:
+                    observations = recipient[0].to_dict()
+                    target = encounter.universe.get_object_by_id(action.target_id)
+                    facts = target.personal_history.to_jsonable()
+                else:
+                    observations = [[value.id, value.observer_id,
+                        getattr(value, 'object_id', None),
+                        getattr(value, 'being_id', None), value.source_action_id,
+                        value.encounter_id, value.boundary, value.time,
+                        list(value.position.as_tuple()), value.basis]
+                        for value in recipient.observations]
+                    facts = native_history.NativeHistoryQuery(
+                        native_history.capture(encounter)).observer_facts_at(
+                            encounter.last_processed_boundary, action.actor_id)
+                query = native_history.NativeHistoryQuery(
+                    native_history.capture(encounter))
+                historical_facts = [
+                    query.observer_facts_at(boundary, action.actor_id)
+                    for boundary in (0, 1, 6)]
+                output.append([encounter.time, action.resolution.outcome,
+                    observations, facts, historical_facts, rng.state,
+                    hashlib.sha256(native_history.encode(
+                        native_history.capture(encounter))).hexdigest()])
+            return output
+
+        expected = expected_projection()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-mixed-recipients.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from encounter import Encounter
+from native_persistence import load_path,rng_owner_for
+world,selected,_rng=load_path(sys.argv[1])
+encounters={event.id:event for event in world.event_history.values()
+ if type(event) is Encounter}
+output=[]
+for index in range(3):
+ enc=encounters[f'native-mixed-encounter-{index}']
+ action=world.get_event_by_id(sys.argv[index+2])
+ ledger=(action.object_ledger if index==0 else action.location_ledger) if index<2 else action.received_accounts
+ while enc.time<6: enc.step(1)
+ if index<2:
+  observations=[[o.id,o.observer_id,getattr(o,'object_id',None),
+   getattr(o,'being_id',None),o.source_action_id,o.encounter_id,o.boundary,
+   o.time,list(o.position.as_tuple()),o.basis] for o in ledger.observations]
+  facts=native_history.NativeHistoryQuery(native_history.capture(enc)).observer_facts_at(
+   enc.last_processed_boundary,action.actor_id)
+ else:
+  observations=ledger[0].to_dict()
+  facts=world.get_object_by_id(action.target_id).personal_history.to_jsonable()
+ query=native_history.NativeHistoryQuery(native_history.capture(enc))
+ historical_facts=[query.observer_facts_at(boundary,action.actor_id)
+  for boundary in (0,1,6)]
+ output.append([enc.time,action.resolution.outcome,observations,facts,historical_facts,
+  rng_owner_for(enc).state,hashlib.sha256(native_history.encode(
+   native_history.capture(enc))).hexdigest()])
+print(json.dumps(output,sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path),
+                 *(row[2].id for row in rows)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=90)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))
