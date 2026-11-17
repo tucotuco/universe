@@ -1180,6 +1180,118 @@ print(json.dumps({'time':enc.time,'action_id':event.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_simultaneous_projectile_arrivals_restore_as_one_native_boundary(self):
+        """A saved in-flight batch keeps both causal arrivals in one atomic cut."""
+        import random
+        from being import BeingInstance
+        from activities import ThrowAction
+        from native_throw_arena import build_native_scene
+
+        world, encounter, first_actor, first_projectile, rng, original = \
+            build_native_scene(seed=422)
+        encounter._choice_book.undo(encounter._choice_book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition("Human")
+        target = BeingInstance(definition, "Shared target",
+                               id="native-persist/simultaneous-projectile-target")
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        second_actor = BeingInstance(definition, "Second thrower",
+                                     id="native-persist/second-thrower")
+        second_actor.set_position(CartesianPosition(16.0, 0.0, 0.0))
+        world.add_object(target)
+        world.add_object(second_actor)
+        encounter.add_being(target.id)
+        encounter.add_being(second_actor.id)
+        second_projectile_id = world.make_object_for_being(
+            second_actor.id, "Rock", "Second projectile")
+        encounter.add_object(second_projectile_id)
+        first = ThrowAction(world, first_actor.id, first_projectile.id,
+            encounter.time, heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id="native-persist/simultaneous-first-throw")
+        second = ThrowAction(world, second_actor.id, second_projectile_id,
+            encounter.time, heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id="native-persist/simultaneous-second-throw")
+        encounter.schedule_choice((first, second))
+        # The established seed gives this represented target one native hit
+        # while both projectiles resolve from the same integer-boundary cut.
+        rng.state = random.Random(116).getstate()
+        encounter.step(4)
+        self.assertTrue(all(world.get_object_by_id(object_id).__dict__.get(
+            "_projectile_flight") is not None
+            for object_id in (first_projectile.id, second_projectile_id)))
+        wire = export_save(encounter)
+
+        def continue_batch(enc, saved_world, cursor):
+            victim = saved_world.get_object_by_id(target.id)
+            enc.step(3)
+            flights = [saved_world.get_object_by_id(object_id).__dict__["_projectile_flight"]
+                       for object_id in (first_projectile.id, second_projectile_id)]
+            log = native_history.capture(enc)
+            query = native_history.NativeHistoryQuery(log)
+            for boundary in range(1, enc.last_processed_boundary + 1):
+                receipt = enc.inspect_committed(boundary)
+                committed = query.committed_actions_at(boundary)
+                self.assertEqual(committed["actions"], native_history._plain(receipt.actions))
+                self.assertEqual(committed["effects"], native_history._plain(receipt.effects))
+                self.assertEqual(query.timeline_at(boundary),
+                                 native_history._plain(receipt.timeline))
+            impact = next(row for row in enc._atomic_interval_history
+                          if row.boundary == 7)
+            impact_states = [saved_world.get_object_by_id(object_id).__dict__[
+                "_atomic_projectile_history"][-1]
+                for object_id in (first_projectile.id, second_projectile_id)]
+            return {
+                "time": enc.time,
+                "last_boundary": enc.last_processed_boundary,
+                "outcomes": [flight.impact_outcome for flight in flights],
+                "damages": [state.impact_damage for state in impact_states],
+                "target_hp": victim.get_hit_points(),
+                "impact_actions": [row.action_id for row in impact.inspection.actions],
+                "impact_projectiles": sorted(impact.inspection.projectile_states),
+                "impact_effects": [native_history._plain(row)
+                                    for row in impact.inspection.effects],
+                "rng": native_history._plain(cursor.state),
+                "history": hashlib.sha256(native_history.encode(log)).hexdigest(),
+            }
+
+        expected = continue_batch(encounter, world, rng)
+        self.assertIn("hit", expected["outcomes"])
+        self.assertEqual(len(expected["impact_projectiles"]), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-simultaneous-projectiles.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1]);target=world.get_object_by_id(sys.argv[2])
+objects=json.loads(sys.argv[3]);enc.step(3)
+flights=[world.get_object_by_id(key).__dict__['_projectile_flight'] for key in objects]
+log=native_history.capture(enc);query=native_history.NativeHistoryQuery(log)
+for boundary in range(1,enc.last_processed_boundary+1):
+ receipt=enc.inspect_committed(boundary);committed=query.committed_actions_at(boundary)
+ assert committed['actions']==native_history._plain(receipt.actions)
+ assert committed['effects']==native_history._plain(receipt.effects)
+ assert query.timeline_at(boundary)==native_history._plain(receipt.timeline)
+impact=next(row for row in enc._atomic_interval_history if row.boundary==7)
+states=[world.get_object_by_id(key).__dict__['_atomic_projectile_history'][-1]
+ for key in objects]
+print(json.dumps({'time':enc.time,'last_boundary':enc.last_processed_boundary,
+ 'outcomes':[flight.impact_outcome for flight in flights],
+ 'damages':[state.impact_damage for state in states],
+ 'target_hp':target.get_hit_points(),
+ 'impact_actions':[row.action_id for row in impact.inspection.actions],
+ 'impact_projectiles':sorted(impact.inspection.projectile_states),
+ 'impact_effects':[native_history._plain(row) for row in impact.inspection.effects],
+ 'rng':native_history._plain(rng.state),
+ 'history':hashlib.sha256(native_history.encode(log)).hexdigest()},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id,
+                 json.dumps([first_projectile.id, second_projectile_id])], cwd=directory,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_strict_outer_integrity_and_duplicate_keys_are_rejected(self):
         demo = encounter_delta_headless.build_demo(until=4)
         wire = export_save(demo["encounter"])
