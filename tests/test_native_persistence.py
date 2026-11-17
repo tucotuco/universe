@@ -3015,6 +3015,20 @@ print(json.dumps({'times':[r[0].time for r in rows],
             bindings.append(RecipientBinding(world,'native-multi-accounts',
                 f'accounts-{index}','in_world_received_accounts',(listener_id,),accounts))
         wire=export_save(rows[1][0],recipient_bindings=tuple(bindings))
+        import base64
+        from native_graph_snapshot import decode as decode_graph
+        graph = decode_graph(base64.b64decode(
+            json.loads(wire)["graph_b64"], validate=True), native=True)
+        nodes = next(row[1] for row in graph[1] if row[0] == "nodes")
+        tags = [tag for _reference, tag, _content in nodes]
+        self.assertNotIn("action_settlement.TargetIntervalRecord", tags)
+        self.assertNotIn("encounter_inspection.EntityInspection", tags)
+        self.assertIn("encounter_inspection.CommittedBoundaryRecord", tags)
+        self.assertIn("atomic_publication.PublishedInterval", tags)
+        markers = next(row[1:] for row in graph[1]
+                       if row[0] == "native-adapters")
+        self.assertIn("committed-receipt-facts/1", markers)
+        self.assertNotIn("committed-boundary-history/1", markers)
         for encounter,*_ in rows:
             encounter.schedule_action(DelayAction(encounter,encounter.being_list[0],
                 defense=0,start_time=encounter.time,id=f'{encounter.id}-continuation'))
