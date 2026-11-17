@@ -835,6 +835,147 @@ print(json.dumps({'time':enc.time,'touch_id':touch_id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_grapple_control_takedown_and_history_continue_after_restore(self):
+        """A committed Grapple control and pending Takedown restore natively."""
+        from physical_contact import active_contact_state
+
+        builder = NativeScenarioBuilder(
+            "native-grapple-control", Library(config_dir=str(ROOT / "src/config")),
+            seed=5, encounter_id="native-grapple-control-encounter")
+        actor = builder.add_being("Human", "Grappler", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        actor.set_posture("standing")
+        target.set_posture("standing")
+        actor.size_category = target.size_category = "medium"
+        actor.current.skills.skills["improved grapple"] = 10
+        target.current.skills.skills["improved grapple"] = 0
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.enable()
+
+        touch = Action(builder.world, 0, 1, "touch", actor.id, target.id, None,
+                       id="native-grapple-touch")
+        touch.end_time = 1
+        builder.schedule(touch)
+        builder.step(1)
+        self.assertEqual(builder.encounter.inspect_committed(1).action(
+            touch.id).facts.outcome, "touched")
+        grab = Action(builder.world, 1, 2, "grab", actor.id, target.id, None,
+                      id="native-grapple-grab")
+        grab.touch_action_id = touch.id
+        grab.grab_hand = "left hand"
+        grab.end_time = 2
+        builder.schedule(grab)
+        builder.step(1)
+        self.assertEqual(builder.encounter.inspect_committed(2).action(
+            grab.id).facts.outcome, "success")
+        grapple = Action(builder.world, 2, 8, "grapple", actor.id, target.id,
+                          None, id="native-grapple-control")
+        grapple.grip_id = grab.id
+        grapple.end_time = 8
+        builder.schedule(grapple)
+        builder.step(6)
+        grapple_receipt = builder.encounter.inspect_committed(8).action(grapple.id)
+        self.assertEqual(grapple_receipt.facts.outcome, "success")
+        self.assertEqual(len(active_contact_state(builder.encounter)[0]), 1)
+        self.assertEqual(tuple(row[0] for row in active_contact_state(
+            builder.encounter)[1]), (grapple.id,))
+
+        takedown = Action(builder.world, 8, 14, "takedown", actor.id, target.id,
+                          None, id="native-grapple-takedown")
+        takedown.grapple_id = grapple.id
+        takedown.grapple_position = "prone"
+        takedown.end_time = 14
+        builder.schedule(takedown)
+        pending = export_save(builder.encounter)
+        builder.step(6)
+        takedown_receipt = builder.encounter.inspect_committed(14).action(takedown.id)
+        self.assertEqual(takedown_receipt.facts.outcome, "success")
+        self.assertEqual(target.get_posture(), "lying")
+        controls = active_contact_state(builder.encounter)[1]
+        self.assertEqual(controls[0][0], grapple.id)
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [actor.id, target.id],
+            "touch_id": touch.id,
+            "grab_id": grab.id,
+            "grapple_id": grapple.id,
+            "takedown_id": takedown.id,
+            "takedown_source": takedown.grapple_id,
+            "time": builder.encounter.time,
+            "outcome": takedown_receipt.facts.outcome,
+            "posture": target.get_posture(),
+            "grips": active_contact_state(builder.encounter)[0],
+            "controls": controls,
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+            "history_rows": [hashlib.sha256(json.dumps(row, sort_keys=True,
+                separators=(",", ":")).encode()).hexdigest()
+                for row in capture(builder.encounter)["boundaries"]],
+            "history_last_row": capture(builder.encounter)["boundaries"][-1],
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+from physical_contact import active_contact_state
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+touch_id,grab_id,grapple_id,takedown_id,actor_id,target_id=sys.argv[2:]
+assert enc.time==8 and enc.progression_mode=='transactional'
+assert enc.inspect_committed(1).action(touch_id).facts.outcome=='touched'
+assert enc.inspect_committed(2).action(grab_id).facts.outcome=='success'
+assert enc.inspect_committed(8).action(grapple_id).facts.outcome=='success'
+choice=enc.choice_for_action(takedown_id);assert choice.state=='accepted'
+takedown=next(m.action for m in enc._choice_book._choices[choice.id].members
+              if m.action.id==takedown_id)
+assert takedown.grapple_id==grapple_id and takedown.grapple_position=='prone'
+target=world.get_object_by_id(target_id)
+assert target.get_posture()=='standing'
+assert tuple(row[0] for row in active_contact_state(enc)[1])==(grapple_id,)
+enc.step(6);receipt=enc.inspect_committed(14).action(takedown_id)
+assert receipt.facts.outcome=='success' and target.get_posture()=='lying'
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[actor_id,target_id],'touch_id':touch_id,'grab_id':grab_id,
+ 'grapple_id':grapple_id,'takedown_id':takedown.id,
+ 'takedown_source':takedown.grapple_id,'time':enc.time,
+ 'outcome':receipt.facts.outcome,'posture':target.get_posture(),
+ 'grips':active_contact_state(enc)[0],'controls':active_contact_state(enc)[1],
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+ history_log)).hexdigest(),
+ 'history_rows':[hashlib.sha256(json.dumps(row,sort_keys=True,
+ separators=(',',':')).encode()).hexdigest()
+                 for row in history_log['boundaries']],
+ 'history_last_row':history_log['boundaries'][-1]},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-grapple-control.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), touch.id, grab.id,
+                 grapple.id, takedown.id, actor.id, target.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        expected_json = json.loads(json.dumps(expected))
+        def leaf_differences(left, right, path=()):
+            if isinstance(left, dict) and isinstance(right, dict):
+                for key in sorted(set(left) | set(right)):
+                    yield from leaf_differences(left.get(key), right.get(key), path + (key,))
+            elif isinstance(left, list) and isinstance(right, list):
+                for index, (left_item, right_item) in enumerate(zip(left, right)):
+                    yield from leaf_differences(left_item, right_item, path + (index,))
+                if len(left) != len(right):
+                    yield path + ("length",), len(left), len(right)
+            elif left != right:
+                yield path, left, right
+
+        differing = list(leaf_differences(actual, expected_json))
+        self.assertEqual(differing, [], repr(differing[:25]))
+
     def test_headless_break_weapon_failure_preserves_later_attack_after_restore(self):
         attacking = NativeScenarioBuilder(
             "native-break-weapon", Library(config_dir=str(ROOT / "src/config")),

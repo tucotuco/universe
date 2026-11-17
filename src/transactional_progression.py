@@ -7,6 +7,7 @@ Control bindings are process-local and never an authoritative save format.
 from dataclasses import dataclass
 import math
 import threading
+import uuid
 import weakref
 from contextlib import contextmanager
 
@@ -98,8 +99,14 @@ def _schedule_automatic_hold_check(encounter, boundary):
             if any(action.event_type == 'hold'
                    and getattr(action, 'grip_id', None) == grip_id for action in same_check):
                 continue
+            # System maintenance is a logical Action identified by its owner,
+            # Grip and due boundary. A random constructor UUID changes on a
+            # fresh-process continuation and corrupts the native history even
+            # when the same check and result are reproduced.
+            action_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                f"universe:automatic-hold:{encounter.id}:{grip_id}:{boundary}"))
             action = Action(encounter.universe, encounter.time, boundary, 'hold',
-                            actor_id, target_id, None)
+                            actor_id, target_id, None, id=action_id)
             action.grip_id = grip_id
             key = (id(encounter), id(action))
             _AUTOMATIC_HOLD_SCHEDULES.add(key)

@@ -1,6 +1,6 @@
 # Native history bridge — current findings
 
-**Status: U-PER-SCALE-001 remains ACTIVE and incomplete.** Native Save/Load now preserves logical ReproductionGroup records and registered Being bindings by stable ID, alongside prior selected Group, PersonalHistory-fact, observation, combat, and pending-Action slices. The newest focused cases include observer-owned successful Being/Object Spot evidence and native Search/Listen continuation. The architecture and family matrix remain far from the full acceptance gate.
+**Status: U-PER-SCALE-001 remains ACTIVE and incomplete.** Native Save/Load now preserves logical ReproductionGroup records and registered Being bindings by stable ID, selected Group, PersonalHistory, observation, combat, movement, pending Actions, `/10`–`/12` migration slices and generated Arena activation. A new native initial-Grapple→Takedown continuation exposed and fixed random automatic-Hold Action identity across fresh-process restore. These are still selected capabilities: the architecture and family matrix remain far from the full acceptance gate.
 
 ## Problems first
 
@@ -9,6 +9,10 @@
 - `export_save()` can persist external observer recipients only when the host passes explicit `RecipientBinding` values. Missing bindings fail closed. Ordinary app/Arena Save/Load has not been cut over to this API; `/12` behavior remains unchanged.
 - The portable graph is source-compatible and includes Library definitions through its graph, but the new native schema has not yet demonstrated legacy `/10`–`/12` migration, the complete adversarial/corruption portfolio, or crash recovery for an incremental durable journal.
 - There is no adopted-rule ambiguity or external dependency blocking this work. The remaining scope is engineering: expand safe family adapters/tests, normalize history without losing inspection semantics, prove scale and compatibility, then integrate behind the existing reader.
+
+### Latest problems-first result — Grapple continuation
+
+The uninterrupted Grapple/Takedown boundary and the strict fresh-process continuation initially had identical state and RNG but different last-row history. A diagnostic leaf comparison isolated every difference to a UUIDv4 automatic maintenance Hold created while advancing the pending Takedown. This was not a rules gap: the logical system Action is fully determined by its Encounter, Grip and due boundary. The scheduler now derives its UUIDv5 from those stable inputs; the Action still resolves through the ordinary native scheduler and publisher. The Arena-independent regression confirms identical Action/Event/Effect references, all history boundary digests, current state and RNG after Save/Load. Automatic Hold maintenance, Multiple Grapple plus Break-hold, native physical-work, 12 native action-family tests, native persistence, history, checkpoint adapters and the 157-row matrix are green. One broader Touch/Grab/Grapple Action-evaluation regression remains `out_of_reach`; it reproduces unchanged from committed baseline `79f6ead` and is recorded in the active report. This fix closes only same-Encounter automatic-Hold identity; Grapple escape/recovery coverage, full history parity, graph-free reconstruction, durable journal, broad migration and app cutover remain open.
 
 ## Current architecture and verified behavior
 
