@@ -29,7 +29,7 @@ from spatial.state import CartesianPosition
 from strategy import Strategy
 from universe import Universe
 from native_persistence import (NativeSaveRejected, export_save, load_path,
-                                load_save, write_save)
+                                load_save, load_legacy_arena_save, write_save)
 from checkpoint_adapters import RecipientBinding
 from reproduction_group import ReproductionGroupProposal, prepare_reproduction_group
 from being import BeingDefinition
@@ -61,6 +61,44 @@ class NativePersistenceTests(unittest.TestCase):
         rng = RNGCursor(__import__("random").Random(9).getstate())
         encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
         return world, encounter, rng, attacker, defender, weapon_id
+
+    def test_legacy_arena_v10_v11_v12_read_through_native_graph_api(self):
+        """The native consumer can strictly coexist with all accepted old Saves."""
+        from arena_browser_session import GeneratedArenaSession
+
+        current = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
+        current.generate({"starting_experience": "10000", "width_cells": "5",
+                         "height_cells": "5"})
+        cases = [
+            ("v10", (ROOT / "tests/fixtures/arena/legacy-per-scale-010-v10.uarena").read_bytes()),
+            ("v11", (ROOT / "tests/fixtures/arena/legacy-per-scale-011-v11.uarena").read_bytes()),
+            ("v12", current.save_encounter_bytes()),
+        ]
+        script = r'''import json,sys
+from native_persistence import load_legacy_arena_save
+world,enc,rng=load_legacy_arena_save(open(sys.argv[1],'rb').read())
+assert world.event_history.get(enc.id) is enc
+assert enc.universe is world
+assert not (set(__import__('sys').modules) & {
+ 'arena_browser_session','arena_server','npcgen'})
+print(json.dumps({'universe':world.id,'encounter':enc.id,
+ 'boundary':enc.last_processed_boundary,'time':enc.time,
+ 'registry':len(world.object_registry.object_instances)},sort_keys=True))'''
+        import os
+        for label, wire in cases:
+            with self.subTest(version=label), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory) / f"{label}.uarena"
+                source.write_bytes(wire)
+                result = subprocess.run(
+                    [sys.executable, "-B", "-c", script, str(source)], cwd=ROOT,
+                    env={**os.environ,
+                         "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                    text=True, capture_output=True, check=False, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                restored = json.loads(result.stdout)
+                self.assertTrue(restored["universe"])
+                self.assertTrue(restored["encounter"])
+                self.assertGreater(restored["registry"], 0)
 
     def test_fresh_process_restores_pending_action_and_continues_natively(self):
         demo = encounter_delta_headless.build_demo(until=4)

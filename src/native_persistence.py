@@ -154,6 +154,41 @@ def load_save(wire):
         raise NativeSaveRejected(f"native Save restoration refused: {exc}") from exc
 
 
+def load_legacy_arena_save(wire):
+    """Strictly read an accepted generated-Arena /10–/12 archive as native state.
+
+    This compatibility entry point delegates archive/version validation to the
+    existing portable reader, then uses the closed graph restorer. It does not
+    create an Arena session or import the browser/server or npcgen. New writes
+    should use :func:`export_save`; this reader never modifies its input.
+    """
+    if type(wire) is not bytes or not wire or len(wire) > MAX_BYTES:
+        raise NativeSaveRejected(
+            "legacy native Save is empty or exceeds the portable size limit")
+    try:
+        from arena_persistence import decode as decode_legacy
+        from native_graph_snapshot import restore as restore_graph
+        decoded = decode_legacy(wire)
+        schema = (decoded.get("schema")
+                  or decoded.get("manifest", {}).get("save_schema"))
+        if schema not in {
+                "universe.generated-arena-save/10",
+                "universe.generated-arena-save/11",
+                "universe.generated-arena-save/12"}:
+            raise NativeSaveRejected("legacy native Save version is outside /10–/12")
+        world, encounter, rng_owner = restore_graph(
+            decoded["decoded_native"], native=False)
+        if (encounter.universe is not world
+                or world.event_history.get(encounter.id) is not encounter):
+            raise NativeSaveRejected("legacy native roots or Encounter identity differ")
+        return world, encounter, rng_owner
+    except NativeSaveRejected:
+        raise
+    except Exception as exc:
+        raise NativeSaveRejected(
+            f"legacy generated-Arena Save restoration refused: {exc}") from exc
+
+
 def write_save(encounter, path, *, recipient_bindings=()):
     """Durably publish one new Save without replacing an existing path."""
     wire = export_save(encounter, recipient_bindings=recipient_bindings)
