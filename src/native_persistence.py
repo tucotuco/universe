@@ -64,7 +64,10 @@ def export_save(encounter, *, recipient_bindings=()):
         graph = encode_graph(candidate.envelope, native=True)
         history = native_history.current_recording(encounter)
         if history is None:
-            history = native_history.NativeHistoryRecorder.ensure_attached(encounter).export()
+            # Build the first history copy locally. Do not mutate the weak
+            # recorder registry until every graph/history check and portable
+            # size check has succeeded for this Save cut.
+            history = native_history.capture(encounter)
         # Bind the detached history copy to the exact graph candidate. A
         # commit racing Save between graph capture and recorder export must
         # refuse this bundle rather than mix two valid but different cuts.
@@ -76,6 +79,8 @@ def export_save(encounter, *, recipient_bindings=()):
         wire = _canonical(body)
         if len(wire) > MAX_BYTES:
             raise NativeSaveRejected("native Save exceeds the portable size limit")
+        if native_history.current_recording(encounter) is None:
+            native_history.NativeHistoryRecorder.ensure_attached(encounter, log=history)
         return wire
     except NativeSaveRejected:
         raise

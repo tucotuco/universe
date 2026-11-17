@@ -752,13 +752,22 @@ class NativeHistoryRecorder:
             return recorder
 
     @classmethod
-    def ensure_attached(cls, encounter):
-        """Idempotently start or retrieve the recorder for a saved Encounter."""
+    def ensure_attached(cls, encounter, *, log=None):
+        """Idempotently attach only a verified log for a completed Save cut."""
         with _RECORDER_LOCK:
             recorder = _RECORDERS.get(encounter)
             if recorder is None:
-                recorder = cls(encounter, capture(encounter))
+                candidate = capture(encounter) if log is None else upgrade(log)
+                if (candidate["initial"]["encounter_id"] != encounter.id
+                        or candidate["initial"]["universe_id"] != encounter.universe.id
+                        or candidate["latest_boundary"] != encounter.last_processed_boundary):
+                    raise NativeHistoryRejected(
+                        "native history does not match the completed Save cut")
+                recorder = cls(encounter, candidate)
                 _RECORDERS[encounter] = recorder
+            elif log is not None and encode(recorder._log) != encode(upgrade(log)):
+                raise NativeHistoryRejected(
+                    "native history recorder differs from the completed Save cut")
             return recorder
 
     @classmethod

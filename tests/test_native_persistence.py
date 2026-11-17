@@ -139,6 +139,18 @@ print(json.dumps({'world':world.id,'encounter':encounter.id,'time':encounter.tim
         with self.assertRaisesRegex(NativeSaveRejected, "duplicate"):
             load_save(b'{"schema":"a","schema":"b"}')
 
+    def test_rejected_first_export_does_not_attach_history_recorder(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo['encounter']
+        self.assertFalse(native_history.has_recorder(encounter))
+        with patch('native_persistence.MAX_BYTES', 1):
+            with self.assertRaisesRegex(NativeSaveRejected, 'portable size limit'):
+                export_save(encounter)
+        self.assertFalse(native_history.has_recorder(encounter))
+        accepted = export_save(encounter)
+        self.assertTrue(native_history.has_recorder(encounter))
+        self.assertEqual(load_save(accepted)[1].id, encounter.id)
+
     def test_native_melee_damage_history_and_fresh_process_continuation(self):
         world, encounter, rng, attacker, defender, weapon_id = self._combat_encounter()
         first = MeleeStrike(encounter, attacker.id, defender.id, weapon_id,
