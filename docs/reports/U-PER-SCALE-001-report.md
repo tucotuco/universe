@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native History `/10` is paired with strict native graph `/2`, which now reconstructs duplicate `TargetIntervalRecord` rows and exact committed `EntityInspection` maps from authenticated history. The remaining receipt projection graph, other historical families, complete current-state/domain coverage, durable history journal recovery, production application cutover, broad corruption/security coverage, and some native recipient/query combinations remain incomplete. Native Save `/2` preserves independent RNG/history for multiple progressing Encounters. Prior scale and accepted Arena `/10`–`/12` compatibility evidence remain relevant, not sufficient for the revised all-or-nothing assignment. No unresolved rule or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
+**Problems first — status ACTIVE and incomplete.** Native History `/10` is paired with strict native graph `/2`, which reconstructs Target rows, EntityInspection contexts and Action/Effect/objective/use/start/participant/scheduler/projectile receipt projections from authenticated facts. The graph still retains Objective-recipient projections, receipt envelopes and complete current state; the 159-type capability matrix and application/history-reader coverage are not closed. Durable journal recovery, broad corruption/security testing and ordinary application Save/Load cutover also remain incomplete. Native Save `/2` preserves independent RNG/history for multiple progressing Encounters. Prior accepted Arena `/10`–`/12` compatibility evidence remains relevant, not sufficient for the revised all-or-nothing assignment. No unresolved rule or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
 
 ## Current problems-first addendum — Group-owned membership continuation
 
@@ -1500,3 +1500,37 @@ Current focused verification for the integrated implementation: native persisten
 Two receipt projections (Target and Entity) are now deduplicated, but Actions/Effects, Objective, schedule, projectile, recipient and other recorded receipt facts remain copied in graph receipts. The full capability matrix still contains open family and query/rehydration rows. Durable append-journal recovery, complete corruption/security coverage, native `/10`–`/12` migration breadth and ordinary application Save/Load cutover have not passed. These are remaining implementable acceptance work, not a genuine rule or external blocker. U-PER-SCALE-001 remains ACTIVE.
 
 **Commit evidence:** this section and the verified Entity compaction implementation are pending the current scoped local commit. Do not push.
+
+## Problems-first — compact native committed receipt facts in strict graph `/2`
+
+### Problem and correction
+
+The latest graph still serialized duplicate per-boundary Action declarations/results, identified Effects, Objective candidate facts and uses, scheduler/fence projections, participant lists, and projectile states, although the exact facts are present in authenticated native history. These were the next large repeated graph payload after Target and EntityInspection compaction. Restoration also requires binding process-local `RecipientIdentity`, scheduler `AuthorityReference`, and Objective ledger addresses to the exact restored owners; merely decoding address-free values would leave a superficially loadable but unusable graph.
+
+Native graph `/2` now omits those eight receipt projections under explicit `committed-receipt-facts/1`, only when complete EntityInspection history is also available. Capture validates each closed source shape and seals its canonical source digest against recapture. Strict restoration requires history for every Encounter, validates exact receipt-boundary coverage, reconstructs typed Actions, Effects, Objective candidate facts, uses, starts, participants, scheduler state and projectile maps, and rebinds the process-local identities from registered native owners. It then continues through existing anchor reconstruction and `inspect_encounter` validation; no prior Action is rerun. Older `/1` and `/2` writers without the marker keep their original receipt payloads and migrate strictly. The ordinary Arena `/12` writer is unchanged.
+
+An initial focused run exposed that Objective history contains `SubjectRealityCandidate`, not the derived public `ObjectiveInspection` view. The loader was corrected to restore and bind the candidate to its exact Group/PersonalHistory RealityLedger, preserving the candidate type expected by live receipt validation. Four fresh-process Objective and observer regressions then passed. A further stale-candidate regression changes an omitted receipt source after capture and confirms checkpoint revalidation refuses it.
+
+### Verification
+
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence -v` — **56 passed / 193.193s**. This includes strict Objective/observer restoration, pending and completed Action continuation, simultaneous combat, shared/independent owners, self-contained definitions, corruption checks, and accepted Arena `/10`–`/12` migration. The additional source-projection freshness regression passed separately (**1 / 1.298s**).
+- `... -m unittest test_native_history -v` — **30 passed / 25.659s**.
+- `... -m unittest test_checkpoint_adapters -v` — **50 passed / 22.021s**.
+- `... -m unittest test_persistence_capability_matrix -v` — **3 passed / 0.036s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_draw_persistence -v` — **25 passed / 138.110s** across native Action-family Save/Load and continuation cases.
+
+Scale uses 64 lawful Feint resolutions and checks all **129** committed boundaries against native receipts before exporting, then strictly loads in a fresh OS process, continues through ordinary Delay, and compares exact same-Encounter IDs, RNG, HP, time and full history digest with uninterrupted control. No Arena or npcgen module is imported by the child.
+
+| Registered Beings | Uncompacted graph | Target+Entity graph | Receipt facts saved | Final graph | Total graph reduction | History | Save | Sim / query / export / Load+continue (s) | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 4,853,595 B | 4,265,254 B | 716,774 B | 3,548,480 B | 26.89% | 1,193,015 B | 5,924,470 B | 67.227 / 2.480 / 11.493 / 9.243 | 203,685,888 |
+| 20 | 5,095,518 B | 4,507,430 B | 716,842 B | 3,790,588 B | 25.61% | 1,193,015 B | 6,247,282 B | 66.624 / 2.468 / 12.017 / 8.455 | 186,875,904 |
+| 200 | 7,527,736 B | 6,938,493 B | 727,605 B | 6,210,888 B | 17.49% | 1,193,015 B | 9,474,346 B | 66.044 / 2.684 / 14.068 / 9.317 | 248,184,832 |
+
+A current-code quiet-boundary rerun checked all **200** boundaries and matched fresh-process continuation: graph **4,580,680 B**, history **34,529 B**, Save **6,142,252 B**; simulation/query/export/Load+continue **47.547 / 0.988 / 3.578 / 3.943s**, peak RSS **175,390,720**. These graph-size improvements measure this repeated-receipt slice; they do not establish bounded total Save growth for arbitrary new state or complete history sufficiency.
+
+### Remaining work
+
+The graph still retains per-receipt Objective-recipient projections, the identity-bearing receipt shells and complete current simulation state. Some registered field families and historical readers still lack full native scenario evidence. Durable append-journal crash recovery, the broad adversarial/security portfolio, general production `/10`–`/12` cutover and the final application Save/Load path remain open. There is no adopted-rule or external blocker. U-PER-SCALE-001 remains ACTIVE.
+
+**Implementation commit:** `88e7d3f` (`Compact native committed receipt facts`). The scoped safety audit passed with zero findings; the five pre-staged historical archive paths were preserved and excluded from this commit.
