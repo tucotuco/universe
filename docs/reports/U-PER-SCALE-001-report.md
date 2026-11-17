@@ -23,6 +23,7 @@
 
 | Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:58-08:00 | PT39M8S |
 | Native history bridge continuation | 2026-11-16T13:49:14-08:00 | IN PROGRESS | Recorded at closeout |
+| Full native bridge continuation (current execution) | 2026-11-17T06:10:55Z | IN PROGRESS | End and elapsed recorded at closeout |
 
 ## Native action-family continuation — contact history and Break Weapon
 
@@ -1001,12 +1002,20 @@ The current strict validator checks closed record types, field allowlists, Actio
 
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — **21 passed / 22.622s**, including exact current receipt parity, `/6` history upgrade with RNG-origin preservation, and appending new known facts after an older boundary while keeping its unavailable marker.
 - `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` — **31 passed / 89.307s**, including strict native `/6` Save restoration and pending post-roll Disarm landing continuation with exact receipt parity.
-- Focused recheck of `/6` native Save and pending Disarm — **2 passed / 5.482s**.
+- Focused recheck of `/6` native Save and pending Disarm — **2 passed / 4.914s**; after stricter dangling-reference checks, the Disarm case passed again (**1 / 2.675s**).
 - The full field-family matrix and acceptance gate remain open; the matrix now identifies `/7` and links the new receipt evidence.
 
-This execution preserved the four unrelated staged historical archive paths and all pre-existing untracked assignments/saves. The three scale/history commits preceding this increment are `250cbc2`, `cfacad9`, and `110d862`; this receipt-fact increment is not yet committed.
+This execution preserved the four unrelated staged historical archive paths and all pre-existing untracked assignments/saves. Commits: `cad52c2` records schema `/7`, queries, tests, matrix and report; `9f13351` tightens receipt references and adds the dangling-Being refusal regression. Both passed explicit-path `git commit --only`; staged publication-safety audits reported 0 findings (14 and 8 staged files respectively), while preserving the five existing archive operations. HEAD after these increments is `9f13351`.
 
 
 ### Historical Target and Action queries
 
 `NativeHistoryQuery.target_at()` and `target_history_at()` expose the committed `TargetCandidate` facts directly from the validated delta reconstruction; `committed_action_at()` returns the latest committed `ActionInspection` through a selected boundary. These complement `state_at()` and cumulative Action/Effect history without consulting the current Encounter graph or resolving old Actions. The four-boundary native fixture now compares every Target fact and ordered Target history with the authenticated `TargetIntervalRecord` values, and compares each Action projection with `Encounter.inspect_committed()`. Focused checks: `test_native_inspection_boundaries_round_trip_as_atomic_history` and `test_committed_action_effect_read_model_matches_inspection_at_each_boundary` — **2 passed / 1.475s**. Full state-at-time and Action/Target consumer parity across the implemented matrix remains open.
+
+### Schema `/7` scale rerun
+
+The actual 64-Action seed scenario was rerun through the strict fresh-process path after the `/7` format change. It committed 64 Actions/129 boundaries and compared authoritative target, Event, Action, Effect, observer context and RNG views at every boundary; the child preserved same-Encounter IDs and matched uninterrupted continuation. Save **7,665,648 bytes** (graph **4,854,434**, history **1,192,921**), history verification **2.847s**, export **5.493s**, fresh-process load/continue **7.801s**, scenario **75.039s**, reported peak RSS **172,294,144 platform units**.
+
+The 200-quiet-boundary strict fresh-process rerun also matched uninterrupted continuation: Save **6,507,786 bytes** (graph **4,854,985**, history **34,323**), all 200 boundaries checked, history verification **1.026s**, export **2.892s**, fresh-process load/continue **3.282s**, scenario **53.235s**, peak RSS **158,449,664 platform units**.
+
+At 20 registered Beings the 64-Action strict fresh-process run passed with Save **7,994,376 bytes** (graph **5,100,981**, history **1,192,921**), all 129 boundaries checked, scenario **69.942s**, history verification **2.823s**, export **4.972s**, and load/continue **7.007s**. At 200 registered Beings it also passed with Save **11,229,788 bytes** (graph **7,527,538**, history **1,192,921**), all 129 boundaries checked, scenario **68.266s**, history verification **2.503s**, export **5.875s**, and load/continue **7.330s**; peak RSS **226,377,728 platform units**. The suite includes an ordinary native post-load Delay compared against uninterrupted execution. These measurements remain a combined graph+history save and do not establish the requested graph-free architecture.
