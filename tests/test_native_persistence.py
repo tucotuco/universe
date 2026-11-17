@@ -19,7 +19,7 @@ import native_history
 import test_encounter_inspection as inspection_fixtures
 import test_action_evaluation as action_fixtures
 from native_history import NativeHistoryRecorder
-from activities import DelayAction
+from activities import DelayAction, RunAction
 from atomic_publication import RNGCursor
 from encounter import Encounter
 from library import Library
@@ -195,6 +195,124 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                 text=True, capture_output=True, check=False, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
+
+    def test_running_action_history_and_pending_continuation_in_fresh_process(self):
+        """A real movement Action survives a mid-run native Save without replay."""
+        world, encounter, rng, actor, _defender, _weapon_id = self._combat_encounter()
+        from physiology_registry import PhysiologyRegistry, PhysiologyDefinition
+        registry = PhysiologyRegistry((PhysiologyDefinition(
+            "native-human@1", model="human-r4"),))
+        encounter.set_physiology_registry(registry)
+        for being_id in encounter.being_list:
+            encounter.get_being(being_id).set_physiology_id("native-human@1")
+        actor.set_physical_fatigue(.7, .8)
+        actor.exertion.set_activity_level("run")
+        actor.exertion.set_load_level("heavy")
+        actor.exertion.set_fatigue_level(1)
+        actor.exertion.set_accumulated_exertion(17)
+        action = RunAction(world, actor.id, encounter.time, 2, .75, 25,
+                           id="native-run-pending-continuation")
+        encounter.schedule_action(action)
+        encounter.step(1, velocities={actor.id: (.5, 0, 0)})
+        self.assertEqual(encounter.time, 1)
+        self.assertEqual(actor.get_position(), CartesianPosition(.5, 0, 0))
+        self.assertEqual(action.start_position, CartesianPosition(0, 0, 0))
+        self.assertIsNone(action.resolution)
+        saved_fatigue_view = encounter.last_fatigue_frame.view(actor.id).to_dict()
+        saved_physiology_version = encounter.last_fatigue_frame.physiology(
+            actor.id).version_hash
+
+        wire = export_save(encounter)
+        query = native_history.NativeHistoryQuery(
+            native_history.current_recording(encounter))
+        for boundary, expected_x in ((1, .5),):
+            position = query.entity_context_at(boundary)[actor.id]["fields"]["position"]["fields"]
+            self.assertEqual(float.fromhex(position["x"]["$number"]), expected_x)
+
+        encounter.step(1, velocities={actor.id: (.5, 0, 0)})
+        self.assertEqual(actor.get_position(), CartesianPosition(1, 0, 0))
+        self.assertEqual(actor.get_skill_experience("run"), 25)
+        committed_action = encounter.inspect_committed().action(action.id)
+        self.assertEqual(committed_action.facts.outcome, "success")
+        self.assertEqual(encounter._atomic_interval_history[-1].action_ids,
+                         (action.id,))
+        practice_effects = [row.effect for row in committed_action.effects
+                            if type(row.effect).__name__ == "PracticeEffect"]
+        self.assertEqual(len(practice_effects), 1)
+        self.assertEqual(practice_effects[0].source_action_id, action.id)
+        expected = {
+            "time": encounter.time,
+            "position": actor.get_position().as_tuple(),
+            "experience": actor.get_skill_experience("run"),
+            "skill_uses": [{"skill": row.skill_name, "experience": row.experience,
+                            "level_before": row.level_before,
+                            "level_after": row.level_after, "time": row.time,
+                            "exercise_experience": [use.experience for use in row.exercises]}
+                           for row in actor.skill_use_history],
+            "outcome": committed_action.facts.outcome,
+            "practice_effect_sources": [row.source_action_id for row in practice_effects],
+            "receipt_action_ids": list(encounter._atomic_interval_history[-1].action_ids),
+            "physical_fatigue": actor.get_physical_fatigue().to_dict(actor.physiology_id),
+            "fatigue_view": encounter.last_fatigue_frame.view(actor.id).to_dict(),
+            "physiology_version": encounter.last_fatigue_frame.physiology(
+                actor.id).version_hash,
+            "fatigue_frame_history": encounter.fatigue_frame_history,
+            "exertion": json.loads(actor.exertion.to_json()),
+            "rng": json.loads(json.dumps(rng.state)),
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+        }
+        query = native_history.NativeHistoryQuery(
+            native_history.current_recording(encounter))
+        position = query.entity_context_at(2)[actor.id]["fields"]["position"]["fields"]
+        self.assertEqual(float.fromhex(position["x"]["$number"]), 1.0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-run-pending-save.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from action_evaluation import PracticeEffect
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+action=world.event_history['native-run-pending-continuation']
+actor=world.get_object_by_id(action.actor_id)
+assert actor.physiology_id == 'native-human@1'
+assert encounter.last_fatigue_frame.view(actor.id).to_dict() == json.loads(sys.argv[2])
+assert encounter.last_fatigue_frame.physiology(actor.id).version_hash == sys.argv[3]
+assert encounter.time == 1 and action.start_position.as_tuple() == (0.0,0.0,0.0)
+assert action.resolution is None and actor.get_position().as_tuple() == (.5,0.0,0.0)
+encounter.step(1,velocities={actor.id:(.5,0,0)})
+committed=encounter.inspect_committed().action(action.id)
+facts=committed.facts
+practice=[row.effect for row in committed.effects if type(row.effect) is PracticeEffect]
+print(json.dumps({'time':encounter.time,'position':actor.get_position().as_tuple(),
+ 'experience':actor.get_skill_experience('run'),
+ 'skill_uses':[{'skill':row.skill_name,'experience':row.experience,
+  'level_before':row.level_before,'level_after':row.level_after,'time':row.time,
+  'exercise_experience':[use.experience for use in row.exercises]}
+  for row in actor.skill_use_history],
+ 'outcome':facts.outcome,
+ 'practice_effect_sources':[row.source_action_id for row in practice],
+ 'receipt_action_ids':list(encounter._atomic_interval_history[-1].action_ids),
+ 'physical_fatigue':actor.get_physical_fatigue().to_dict(actor.physiology_id),
+ 'fatigue_view':encounter.last_fatigue_frame.view(actor.id).to_dict(),
+ 'physiology_version':encounter.last_fatigue_frame.physiology(actor.id).version_hash,
+ 'fatigue_frame_history':encounter.fatigue_frame_history,
+ 'exertion':json.loads(actor.exertion.to_json()),
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(encounter))).hexdigest()},
+ sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path),
+                 json.dumps(saved_fatigue_view), saved_physiology_version], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
 
     def test_statistical_group_is_supported_and_unbound_observers_fail_closed(self):
         group_fixture = inspection_fixtures.InspectionFixture()
