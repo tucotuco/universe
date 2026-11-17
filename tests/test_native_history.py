@@ -18,7 +18,7 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
                             NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
                             QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA, SCHEMA, SAME_RNG, _seal,
-                            fatigue_context_at,
+                            fatigue_context_at, committed_actions_at,
                             _plain, _expand_rows, _target_candidates)
 
 
@@ -49,6 +49,31 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(entity_context_at(log, boundary),
                              _plain(receipt.inspection.entities))
             self.assertEqual(events_at(log, boundary)["action_ids"], list(receipt.action_ids))
+
+    def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
+        log = decode(self.wire)
+        query = NativeHistoryQuery(log)
+        for boundary in range(log["latest_boundary"] + 1):
+            actual = committed_actions_at(log, boundary)
+            self.assertEqual(query.committed_actions_at(boundary), actual)
+            if boundary == 0:
+                self.assertEqual(actual["action_ids"], [])
+                self.assertEqual(actual["effect_ids"], [])
+                self.assertEqual(actual["actions"], {})
+                self.assertEqual(actual["effects"], {})
+                continue
+            inspection = self.demo["encounter"].inspect_committed(boundary)
+            self.assertEqual(actual["actions"], _plain(inspection.actions))
+            self.assertEqual(actual["effects"], _plain(inspection.effects))
+            self.assertEqual(actual["action_ids"],
+                             [identity for row in inspection.timeline
+                              for identity in row.action_ids])
+            self.assertEqual(actual["effect_ids"],
+                             [_plain(identity) for row in inspection.timeline
+                              for identity in row.effect_ids])
+        detached = query.committed_actions_at(log["latest_boundary"])
+        detached["actions"].clear()
+        self.assertTrue(query.committed_actions_at(log["latest_boundary"])["actions"])
 
     def test_initial_native_state_and_entity_facts_are_queryable_at_boundary_zero(self):
         expected_state = {
@@ -262,6 +287,12 @@ class NativeHistoryTests(unittest.TestCase):
         corrupt['boundaries'][0]['rng_after'] = dict(SAME_RNG)
         with self.assertRaisesRegex(NativeHistoryRejected, 'RNG reference'):
             validate(_seal({key: value for key, value in corrupt.items()
+                            if key != 'sha256'}))
+
+        corrupt_origin = copy.deepcopy(log)
+        corrupt_origin['initial']['rng_before_first_commit']['$tuple'][0] = 99
+        with self.assertRaisesRegex(NativeHistoryRejected, 'RNG cursor is invalid'):
+            validate(_seal({key: value for key, value in corrupt_origin.items()
                             if key != 'sha256'}))
 
     def test_fatigue_history_is_versioned_and_strictly_validated(self):

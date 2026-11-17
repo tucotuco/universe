@@ -1472,6 +1472,50 @@ class NativeHistoryQuery:
             events = row["events"]
         return self._copy(events)
 
+    def committed_actions_at(self, boundary):
+        """Return cumulative committed Action/Event/Effect facts through a boundary.
+
+        This is a historical read model built only from committed event rows;
+        it never resolves an Action or consults the current Encounter graph.
+        Pending declarations remain part of the resumable snapshot, not this
+        committed-history view.
+        """
+        self._boundary(boundary)
+        action_ids = []
+        effect_ids = []
+        actions = {}
+        effect_rows = []
+        seen_actions = set()
+        seen_effects = set()
+        for row in self._segments:
+            if row.get("kind") == "quiet_span":
+                if row["from_boundary"] > boundary:
+                    break
+                continue
+            if row["boundary"] > boundary:
+                break
+            batch = row["events"]
+            for identity in batch["action_ids"]:
+                if identity not in seen_actions:
+                    seen_actions.add(identity)
+                    action_ids.append(identity)
+            for identity in batch["effect_ids"]:
+                key = _canonical(identity)
+                if key not in seen_effects:
+                    seen_effects.add(key)
+                    effect_ids.append(identity)
+            actions.update(batch["actions"])
+            encoded_effects = batch["effects"]
+            if type(encoded_effects) is dict and set(encoded_effects) == {"$map"}:
+                effect_rows.extend(encoded_effects["$map"])
+            else:
+                effect_rows.extend([[key, value]
+                                    for key, value in encoded_effects.items()])
+        effect_rows.sort(key=lambda row: _canonical(row[0]))
+        effects = {"$map": effect_rows} if effect_rows else {}
+        return self._copy({"action_ids": action_ids, "effect_ids": effect_ids,
+                           "actions": actions, "effects": effects})
+
     def rng_state_at(self, boundary):
         self._boundary(boundary)
         if boundary == 0:
@@ -1539,6 +1583,11 @@ def events_at(log, boundary):
         elif row["boundary"] == boundary:
             return row["events"]
     raise NativeHistoryRejected("requested native boundary is not committed")
+
+
+def committed_actions_at(log, boundary):
+    """Return detached cumulative committed Action/Event/Effect records."""
+    return NativeHistoryQuery(log).committed_actions_at(boundary)
 
 
 def encode(log):
