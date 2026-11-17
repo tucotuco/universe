@@ -1611,6 +1611,99 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_fatal_coup_preserves_fatal_effect_after_restore(self):
+        """FatalEffect is part of native history and same-Encounter restore."""
+        from states import StatesList
+
+        builder = NativeScenarioBuilder(
+            "native-fatal-coup", Library(config_dir=str(ROOT / "src/config")),
+            seed=1, encounter_id="native-fatal-coup-encounter")
+        attacker = builder.add_being("Human", "Attacker", position=(0, 0, 0),
+                                     radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Helpless Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        states = StatesList()
+        states.load_states(str(ROOT / "src/config/states.tsv"))
+        target.stun(states)
+        builder.mark_aware(attacker.id, target.id)
+        builder.mark_aware(target.id, attacker.id)
+        weapon = builder.make_weapon(attacker.id, "Dagger", "Coup Dagger",
+                                     hand="right hand")
+        builder.enable()
+
+        action = Action(builder.world, 0, 1, "coup de grace", attacker.id,
+                        target.id, weapon.id, id="native-fatal-coup-action")
+        action.coup_motion = "thrust"
+        action.reach = effective_melee_reach_meters(attacker.current, weapon.current)
+        action.end_time = math.ceil(weapon.Tt())
+        builder.schedule(action)
+        duration = math.ceil(action.end_time)
+        pending = export_save(builder.encounter)
+        builder.step(duration)
+        receipt = builder.encounter.inspect_committed(duration).action(action.id)
+        self.assertEqual(receipt.facts.outcome, "fatal")
+        self.assertIn(target.id, receipt.fatal_targets)
+        fatal_effects = [row for row in receipt.facts.effects
+                         if type(row).__name__ == "FatalEffect"]
+        self.assertEqual(len(fatal_effects), 1)
+        self.assertLessEqual(target.get_hit_points(), -10)
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [attacker.id, target.id],
+            "weapon_id": weapon.id,
+            "action_id": action.id,
+            "outcome": receipt.facts.outcome,
+            "fatal_targets": list(receipt.fatal_targets),
+            "effect_types": [type(row).__name__ for row in receipt.facts.effects],
+            "effects": [(row.identity.encounter_id, row.identity.boundary,
+                         row.identity.source_action_id, row.identity.channel,
+                         row.identity.slot, type(row.effect).__name__)
+                        for row in receipt.effects],
+            "hp": [attacker.get_hit_points(), target.get_hit_points()],
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+attacker_id,target_id,weapon_id,action_id=sys.argv[2:]
+choice=enc.choice_for_action(action_id);assert choice.state=='accepted'
+action=next(m.action for m in enc._choice_book._choices[choice.id].members
+            if m.action.id==action_id)
+assert action.actor_id==attacker_id and action.target_id==target_id
+assert action.instrument_id==weapon_id and action.event_type=='coup de grace'
+duration=enc._choice_book._choices[choice.id].members[0].action.end_time
+enc.step(int(duration))
+receipt=enc.inspect_committed(int(duration)).action(action_id)
+assert receipt.facts.outcome=='fatal' and target_id in receipt.fatal_targets
+assert sum(type(row).__name__=='FatalEffect' for row in receipt.facts.effects)==1
+target=world.get_object_by_id(target_id);attacker=world.get_object_by_id(attacker_id)
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[attacker_id,target_id],'weapon_id':weapon_id,'action_id':action_id,
+ 'outcome':receipt.facts.outcome,'fatal_targets':list(receipt.fatal_targets),
+ 'effect_types':[type(row).__name__ for row in receipt.facts.effects],
+ 'effects':[(row.identity.encounter_id,row.identity.boundary,
+             row.identity.source_action_id,row.identity.channel,
+             row.identity.slot,type(row.effect).__name__)
+            for row in receipt.effects],
+ 'hp':[attacker.get_hit_points(),target.get_hit_points()], 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-fatal-coup.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), attacker.id,
+                 target.id, weapon.id, action.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_headless_break_weapon_failure_preserves_later_attack_after_restore(self):
         attacking = NativeScenarioBuilder(
             "native-break-weapon", Library(config_dir=str(ROOT / "src/config")),
