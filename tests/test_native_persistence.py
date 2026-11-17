@@ -984,6 +984,113 @@ print(json.dumps({'time':enc.time,'outcome':flight.impact_outcome,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_thrown_coup_de_grace_fatal_outcome_restores_with_causal_damage(self):
+        """The fatal Fortitude branch keeps ordered damage and death causality."""
+        import random
+        from being import BeingInstance
+        from activities import ThrowAction
+        from atomic_publication import target_effects_from
+        from native_throw_arena import build_native_scene
+
+        world, encounter, actor, _stone, rng, original = build_native_scene(seed=0)
+        encounter._choice_book.undo(encounter._choice_book.for_action(original.id).id)
+        target = BeingInstance(world.library.being_dictionary.get_object_definition("Human"),
+                               "Fatal Coup target", id="native-persist/fatal-coup-target")
+        target.current.hit_points = 0
+        target.set_position(CartesianPosition(0.5, 0.0, 0.0))
+        world.add_object(target)
+        encounter.add_being(target.id)
+        encounter.mark_aware(actor.id, target.id)
+        weapon_id = world.make_weapon_for_being(actor.id, "Dagger", "Fatal Coup Dagger")
+        actor.set_body_part_holds_object("right hand", weapon_id)
+        encounter.add_object(weapon_id)
+        action = ThrowAction(world, actor.id, weapon_id, encounter.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, coup_de_grace=True,
+            id="native-persist/fatal-throw-coup")
+        encounter.schedule_choice((action,))
+        rng.state = random.Random(0).getstate()
+        encounter.step(4)
+        self.assertEqual(action.resolution.outcome, "released")
+        wire = export_save(encounter)
+
+        def continue_to_fatal(enc, saved_world, cursor):
+            victim = saved_world.get_object_by_id(target.id)
+            dagger = saved_world.get_object_by_id(weapon_id)
+            enc.step(4)
+            flight = dagger.__dict__["_projectile_flight"]
+            action_view = enc.inspect_committed(8).action(action.id)
+            effects = [row.effect for row in target_effects_from(victim, action.id)]
+            fatal_effects = [effect for effect in effects
+                if type(effect).__name__ == "FatalEffect"]
+            damage = [[effect.component, effect.amount] for effect in effects
+                if type(effect).__name__ == "DamageEffect"]
+            history = native_history.capture(enc)
+            query = native_history.NativeHistoryQuery(history)
+            for boundary in range(enc.last_processed_boundary + 1):
+                receipt = next((row for row in enc._atomic_interval_history
+                                if row.boundary == boundary), None)
+                recorded = (None if receipt is None else
+                            receipt.inspection.projectile_states.get(weapon_id))
+                self.assertEqual(query.projectile_state_at(weapon_id, boundary),
+                    None if recorded is None else native_history._plain(recorded))
+            return {
+                "time": enc.time,
+                "flight_outcome": flight.impact_outcome,
+                "flight_status": flight.status,
+                "action_outcome": action_view.facts.outcome,
+                "target_hp": victim.get_hit_points(),
+                "damage": damage,
+                "fatal_effects": [effect.target_id for effect in fatal_effects],
+                "fatal_effect_identity": [native_history._plain(row.identity)
+                    for row in target_effects_from(victim, action.id)
+                    if type(row.effect).__name__ == "FatalEffect"],
+                "rng": cursor.state,
+                "history": hashlib.sha256(native_history.encode(history)).hexdigest(),
+            }
+
+        expected = continue_to_fatal(encounter, world, rng)
+        self.assertEqual(expected["flight_outcome"], "fatal")
+        self.assertEqual(expected["flight_status"], "landed")
+        self.assertEqual(expected["action_outcome"], "released")
+        self.assertEqual(expected["fatal_effects"], [target.id])
+        self.assertEqual(expected["damage"], [["body", 4], ["critical_bypass", 4]])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-fatal-throw-coup.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from atomic_publication import target_effects_from
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+victim=world.get_object_by_id(sys.argv[2]);dagger=world.get_object_by_id(sys.argv[3])
+action=world.get_event_by_id(sys.argv[4]);enc.step(4)
+flight=dagger.__dict__['_projectile_flight'];action_view=enc.inspect_committed(8).action(action.id)
+effects=[row.effect for row in target_effects_from(victim,action.id)]
+fatal=[effect for effect in effects if type(effect).__name__=='FatalEffect']
+damage=[[effect.component,effect.amount] for effect in effects if type(effect).__name__=='DamageEffect']
+history=native_history.capture(enc);query=native_history.NativeHistoryQuery(history)
+for boundary in range(enc.last_processed_boundary+1):
+ receipt=next((row for row in enc._atomic_interval_history if row.boundary==boundary),None)
+ recorded=None if receipt is None else receipt.inspection.projectile_states.get(dagger.id)
+ assert query.projectile_state_at(dagger.id,boundary)==(None if recorded is None
+  else native_history._plain(recorded))
+print(json.dumps({'time':enc.time,'flight_outcome':flight.impact_outcome,
+ 'flight_status':flight.status,'action_outcome':action_view.facts.outcome,
+ 'target_hp':victim.get_hit_points(),'damage':damage,
+ 'fatal_effects':[effect.target_id for effect in fatal],
+ 'fatal_effect_identity':[native_history._plain(row.identity)
+  for row in target_effects_from(victim,action.id) if type(row.effect).__name__=='FatalEffect'],
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(history)).hexdigest()},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id,
+                 weapon_id, action.id], cwd=directory,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_strict_outer_integrity_and_duplicate_keys_are_rejected(self):
         demo = encounter_delta_headless.build_demo(until=4)
         wire = export_save(demo["encounter"])
