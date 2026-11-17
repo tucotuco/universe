@@ -1,48 +1,72 @@
-# Native history bridge — problems-first findings
+# Native history bridge — current findings
 
-**Status:** U-PER-SCALE-001 remains ACTIVE. This revised assignment requires the complete native capability, not the previously bounded experiment. No production save schema was changed during the first audit.
+**Status: U-PER-SCALE-001 remains ACTIVE and incomplete.** Native Save/Load now preserves logical ReproductionGroup records and registered Being bindings by stable ID, alongside prior selected Group, PersonalHistory-fact, observation, combat, and pending-Action slices. The newest focused cases include observer-owned successful Being/Object Spot evidence and native Search/Listen continuation. The architecture and family matrix remain far from the full acceptance gate.
 
 ## Problems first
 
-- Ordinary Universe persistence is not a native resumable Encounter API. `src/universe.py` explicitly refuses restoration when the file includes Encounter or Action history and rejects saving transactional Encounters.
-- Current portable `/12` is Arena-specific. `src/arena_persistence.py` requires `GeneratedArenaSession`; `src/arena_native_snapshot.py` validates against `_ARENA_TAGS`, requires the exclusive Arena RNG/Encounter form, and `restore()` binds Arena progression and reissues Arena receipt authority.
-- The native graph inventory is a draft, not a completed adapter. `src/checkpoint_inventory.py` always adds `semantic_closure_adapter_incomplete`, emits all readiness flags as false, and `CheckpointCandidate.require_complete()` refuses it. `src/checkpoint_adapters.py` records data recipes and caller-supplied recipient bindings; it has no portable writer or executable native restore.
-- Existing history remains a Python-object graph at the persistence boundary. `/12` segments selected append-only lists and completed Action roots, then reassembles them at Load. It does not provide a generic historical delta query API for existing inspection consumers.
-- The current field registry contains 152 native types; only 104 domain types are admitted by the Arena schema. A source-linked, exact field and family inventory is in [`persistence-capability-matrix.md`](persistence-capability-matrix.md). Every row still requires its own behavioral/restore evidence; field registration alone is not proof.
-- Committed recording needs a transaction-safe integration point. `publish_interval_candidate()` validates and atomically publishes the `WritePlan`, then returns the `PublishedInterval`; a recorder must only claim a commit after that publication succeeds and must not leave a journal fact on rollback. It also must preserve no-property-change Events and simultaneous grouping.
-- External observer recipient ledgers, reality validators, conditional-attribute RNG providers, reproduction-group registries, and multi-Encounter identity/RNG ownership have no general self-contained save/rehydration implementation. Their precise live field contracts and readers are listed in the matrix; they have not been called impossible or excused from the scope.
+- The new native Save still stores both a whole committed receipt/Target object graph and a fact-history log. It is functional but not the requested compact snapshot + lossless independent history architecture. The measured small Group/observer files are 1.03–1.22 MB; no proportional-growth or scale claim is made.
+- Family closure remains incomplete. The native tests cover pending Delay, Dagger MeleeStrike, Stun interruption/recovery, StatisticalGroup facts, two observer-owned Group observations, ReproductionGroup logical facts and ObjectRegistry-bound Being identity, one PersonalHistory fact/validator continuation, and literal `EpisodeFacts` plus a bound listener account for completed AskAboutPast. Reproduction linked-Being identity is preserved but has not yet continued through all supported realization workflows. Other supported Actions, movement/equipment variations, PersonalHistory mutation/query parity, Arena-perception observer APIs, cross-Encounter ownership and historical consumer parity remain unverified or unsupported. LocationEvidenceLedger and ObjectObservationLedger now have focused fresh-process tests.
+- `export_save()` can persist external observer recipients only when the host passes explicit `RecipientBinding` values. Missing bindings fail closed. Ordinary app/Arena Save/Load has not been cut over to this API; `/12` behavior remains unchanged.
+- The portable graph is source-compatible and includes Library definitions through its graph, but the new native schema has not yet demonstrated legacy `/10`–`/12` migration, the complete adversarial/corruption portfolio, or crash recovery for an incremental durable journal.
+- There is no adopted-rule ambiguity or external dependency blocking this work. The remaining scope is engineering: expand safe family adapters/tests, normalize history without losing inspection semantics, prove scale and compatibility, then integrate behind the existing reader.
 
-## Verified source boundary
+## Current architecture and verified behavior
 
-| Claim | Source evidence |
+`src/native_history.py` records an initial inspection projection, ordered atomic presence/value deltas, Action/Event/Effect causality, timing, RNG state, target/objective facts and observer projections. `NativeHistoryRecorder` appends after successful native publication only. It does not resolve Actions. Native query integrity, preimages, order, duplicate IDs, append ownership and rollback behavior have focused tests.
+
+`src/native_persistence.py` is a headless byte/file API. It uses `src/native_graph_snapshot.py` with schema `universe.native-encounter-graph/1`, not the Arena `/12` tag allowlist. It strictly checks the closed `FIELD_ADAPTERS` schema, graph references, portable callback recipe vocabulary, durable observer bindings, canonical bytes, duplicate keys, size/depth/node bounds and outer digest. Restore preserves logical IDs, reconstructs `StatisticalGroup` keyed RNG, `RealityLedger` validators, `PersonalHistory` validators, recipient identity anchors, ReproductionGroup facts and Being request bindings, native receipts and progression ownership without rerunning Actions. A separate combined Reproduction/Being checkpoint advances to v4 to represent the already implemented `BeingInstance.size_category` field while retaining strict v1–v3 readers. The old `src/arena_native_snapshot.py` import remains a compatibility shim for unchanged `/12` callers.
+
+### End-to-end scenarios
+
+| Scenario | Evidence |
 |---|---|
-| `/12` production entry is generated Arena only | `src/arena_persistence.py`: `encode(session, native_inventory)` validates exact `GeneratedArenaSession`; `src/arena_browser_session.py` owns the current caller. |
-| Arena tag and Encounter restriction | `src/arena_native_snapshot.py`: `_ARENA_TAGS`, `_validate_inventory()`, `capture()` and `restore()`. |
-| Native inventory remains not ready | `src/checkpoint_inventory.py`: false readiness fields, `semantic_closure_adapter_incomplete`, and candidate seal refuses readiness claims. |
-| Legacy Universe Encounter restore refusal | `src/universe.py`: `to_json()`, `save_to_file()` and `load_from_file()`. |
-| History list segmentation and eager reassembly | `src/arena_history_segments.py`: `split()` / `reassemble()`; `src/arena_persistence.py`: encode/decode archive path. |
-| Commit and rollback boundary | `src/atomic_publication.py`: `publish_interval_candidate()`, `_WritePlan`, and `PublishedInterval`. |
-| Historical inspection expects committed receipt graph | `src/encounter_inspection.py`: `inspect_encounter()`, `prepare_record()`; `src/atomic_publication.py`: Target history and receipt registration. |
+| Pending Delay Choice | Fresh process loads, checks the pending Choice and continues with `Encounter.step(1)`; time, RNG, HP, logical IDs, receipt and history digest match. |
+| Consequential Dagger MeleeStrike | Native damage commits; another strike remains pending; fresh process continues with matching HP, RNG, Action identity, receipt and history. |
+| Stun interruption/recovery | Seeded native Stun commits `stunned_until`, interrupts a later accepted strike, and strict fresh-process continuation reaches recovery with exact state/history match. |
+| StatisticalGroup | Captured committed household count and composition survive fresh-process Load; keyed queries return the same facts and a new native Delay continues with matching history and RNG. |
+| Two observers of a StatisticalGroup | Two separately bound `BeliefLedger`s retain distinct owner IDs, evidence and Action references. Fresh-process Load validates both private ledgers, then continues natively with exact receipt/history match. Process-local `ledger_identity` and `RecipientIdentity.object_identity` values are rebuilt, not persisted. |
+| AskAboutPast testimony | The adopted literal `EpisodeFacts` recipe is retained; one explicitly bound listener account carries its HeardAccount, owner ID and account-recipient Action identity through Save/Load. A fresh process continues with native Delay and matches RNG, account record and normalized native history. Arbitrary callback functions remain refused by the existing objective evaluator. |
+| ReproductionGroup and native Being binding | A world authors a logical group and exact-ID native Being before creating an Encounter. Native Save restores the group's parent/offspring facts, the same `C1` Object identity, and the materialization request keyed to that exact restored Being in a fresh OS process. Separate native Delay execution continues at the next boundary. |
+| PersonalHistory | A committed historical Fact and its owner validator survive a native Save and fresh-process Delay continuation. This does not establish PersonalHistory mutation-history/query parity. |
 
-## Current verification
+Group/observer acceptance was enabled by a narrow, exact recipe correction: the statistical-group RNG factory now has a stable reviewed closure code; native restore rebinds Group and PersonalHistory validators and the keyed provider, restores subject-ledger and recipient pointer anchors, and checks recipe multiplicity/owners against restored runtime objects. A historical projection had also retained `SubjectRealityCandidate.ledger_identity`, a process address; the projection now omits it and resolves the owner by stable subject ID. No Group sample or native Action was regenerated during Save/Load.
 
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_inventory.py'` — 30 passed.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` — 48 passed.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — 9 passed in 5.838s.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` — 4 passed in 9.444s.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` — 3 passed; exact `_TYPES`/`FIELD_ADAPTERS` coverage now includes all 152 registered types.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_inventory.py'` — 30 passed in 14.012s.
-- `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` — 48 passed in 20.816s.
-- `.venv/bin/python -B -m py_compile src/native_history.py src/native_persistence.py src/transactional_progression.py tests/test_native_history.py tests/test_native_persistence.py` — passed.
-- The combined attempt to run these by package module name plus `test_arena_persistence.py` was interrupted after early test markers, so it is not counted.
-- `PYTHONPATH=tests .venv/bin/python -B -m unittest test_arena_persistence.TestArenaPersistence.test_64_lawful_native_feint_resolutions_segment_history_and_resume` — 1 passed in 272.770s. This confirms the current `/12` path retains and resumes 64 lawful Actions, but the test spends over four minutes at export/fresh-process work and its graph-history storage remains the architecture being replaced. This is measured baseline, not acceptable completion of the new native history requirement.
-- `/12` production Save/Load has not been modified by this continuation. The new history API has an explicit append plus an opt-in in-memory post-publication recorder; the bundle below demonstrates pending-Choice and combat rehydrate/continue fixtures. What remains missing is durable crash-consistent append, a complete compact native current-state snapshot/restore closure, broader-family continuation, old-format integration through the new API, and historical consumer cutover. `/12`, old accepted saves, unrelated staged archive operations, and the untracked local Arena save remain intact.
-- The history component exposes a caller-invoked `append_committed(log, encounter)` API. It requires the exact next native receipt, validates process-local publication issuance and receipt fingerprint, and reads only after successful publication. A focused test injects failure after the native commit marker and proves native rollback leaves no appendable next receipt. The API alone is not a durable journal; the optional in-memory progression hook is described next.
-- An opt-in in-memory recorder now attaches to a committed prefix and transactional progression feeds it after successful publisher return, before repeat scheduling. Its regression covers automatic append and rollback non-append. It is not durable; an append failure after publication leaves the Encounter committed, marks the recorder failed, and blocks Save until recovery.
-- A headless `native_persistence` bundle now composes that fact history with the strict typed graph snapshot/restore API. In a fresh OS process, a four-boundary native Run/Delay Encounter with an accepted pending Delay Choice was restored using the same Universe/Encounter IDs and continued with matching time, RNG, HP, Action receipt, and history digest. The 1,247,342-byte output contains graph-resident old receipts/Target histories and still uses the existing limited graph adapter. Thus it proves a native API and continuation route for one fixture, but it also quantifies why the compact snapshot/current-state split and complete family adapters remain necessary; it is not production Save/Load integration or a completed capability gate.
-- A separate headless native fixture now resolves a real Dagger MeleeStrike with damage, saves while another MeleeStrike Choice is pending, restores in a fresh process, and continues to t=8. Another uses real seed-6 Stun, an accepted later MeleeStrike interrupted by the committed condition, and a fresh-process continuation through expiry. The uninterrupted and restored runs match RNG, HP, condition/cancellation state, Action receipt identities, and complete normalized history digest. These expand the exercised families but do not establish broad Action/equipment/state-family closure.
-- The same Save API gained an exclusive-temp/fsync/atomic no-overwrite file writer, bounded path reader, canonical-base64 enforcement, and fresh-process path-load coverage. Exact pending-choice fixture wire size is 1,247,342 bytes. The graph-plus-history duplicate representation remains a known architectural deficiency pending a lossless history rehydrator.
+## Production boundary and compatibility
 
-## Engineering conclusion
+`src/arena_persistence.py` remains production `/12` and still requires `GeneratedArenaSession`. Its decoder/restore imports the compatibility shim, which delegates its existing default Arena schema to `native_graph_snapshot`; the native schema is separate. The exact pre-bridge `/12` compatibility tuple is retained for migration into current code. Focused v10/v11 archive migration, compact graph corruption, and exact segmented archive tests pass after the refactor. This does not yet prove that the new native API accepts those legacy files or that ordinary Universe/Arena interfaces use it.
 
-There is no adopted-rules ambiguity preventing this work. The present implementation gaps are code and data-contract integration work, not user decisions. The acceptance target is the full matrix, native strict Save/Load/continue, native historical reader parity, portable integrity/legacy migration, and controlled breadth/scaling. The matrix and the current implementation provide the sequence and test boundaries; no partial adapter is presented as a finished bridge.
+## Verification in the current continuation
+
+| Command | Result |
+|---|---|
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` | 7 passed, 19.123 s. Includes Group facts, observer-owned evidence, three existing continuation families, duplicate-key/integrity and no-overwrite cases. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` | 10 passed, 6.507 s. Includes two distinct observer history projections. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` | 48 passed, 20.460 s. |
+| Five focused `test_arena_persistence` tests: compact native graph corruption; pinned v4 migration; v10 migration; v11 migration; exact segmented archive/partial-history refusal | 5 passed, 7.887 s. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` | 3 passed (previously verified; registry contents unchanged). |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_reproduction_checkpoint.py'` | 13 passed, 0.919 s. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_reproduction_being_bridge.py'` | 6 passed, 0.096 s. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_reproduction_being_checkpoint.py'` | 14 passed, 1.706 s, including legacy v1–v3 reader fixtures and subprocess continuation. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` | 10 passed, 22.258 s, including fresh-process ReproductionGroup facts and Being binding. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` | 10 passed, 6.632 s. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` | 48 passed, 19.587 s. |
+| `py_compile` across checkpoint adapters/inventory, native graph/history/persistence, statistical Group and affected tests | Passed in the final check for this code increment. |
+| `git diff --check` | Passed in the final check for this code increment. |
+
+The 48-test checkpoint adapter suite tests data recipes/refusals; it is not itself Save/Load evidence. The two Arena legacy migrations above exercise `/12`, not native schema migration. The combined Reproduction/Being v1–v3 tests are a separate legacy reader. The expensive full 64-Action baseline is prior evidence at 272.770 seconds; it was not rerun during this continuation.
+
+An adjacent observer regression run initially exposed a stale test fixture: two same-observer simultaneous Group observations had no adopted Multi-action skill/priority declarations, and a generic `Action(event_type='delay')` was still asserted unsupported after Delay became a native supported family. The fixture now declares the adopted skill and penalties and checks that Delay is captured without live resolution. `test_observer_lifecycle_proposals.py` then passed all 44 tests; no simulation or observer rules changed.
+
+## Next implementation gate
+
+1. Add the remaining currently supported state/action families with explicit closed validators/rehydration and native legal-action continuations; do not turn matrix rows green solely from type registration.
+2. Replace duplicate old receipt/Target graph persistence with lossless initial-state + commit/Event/Effect history and a complete resumable current snapshot. Reconstruct existing historical readers on demand and compare at each boundary.
+3. Expand corruption, crash-recovery, multi-Encounter/RNG and legacy migration tests; prove deterministic continued behavior and observer privacy.
+4. Measure quiet/action/registry scaling against `/12`, then integrate the new API into ordinary Save/Load behind a tested dual-reader strategy.
+
+No push or `/12` implementation change occurred in this continuation. Exact code commits and repository preservation/audit evidence are in `docs/reports/U-PER-SCALE-001-report.md`.
+
+
+## 2026-11-16 continuation addendum
+
+The exact field catalog's original 152-type count is a dated measurement of its audit fixture. Subsequent reviewed implementation added five closed schemas (ChoiceDraft, ObjectObservation, ObjectObservationLedger, ObjectObservationEffect, ObjectEvidenceProjection); the current `FIELD_ADAPTERS` and executable type registry contain 157 types. The live capability matrix was regenerated from that registry and is guarded by tests. LocationEvidenceLedger and ObjectObservationLedger each have a successful provenance-checked fresh-process restoration case; Object evidence tests distinct observer outcomes and continues a native projectile. A Search-success/Listen-failure sequence with adopted explicit accessibility/audibility tags saves with a pending Listen and resumes with exact Action outcomes, awareness, RNG and native history. Full persistence criteria remain unfulfilled; there is no identified rules or external blocker.

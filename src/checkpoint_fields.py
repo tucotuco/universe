@@ -18,6 +18,10 @@ FIELD_ADAPTERS = {
         "allowed": '_choices _closed_drafts _counter _drafts _paused _registered _reservations _states _tokens encounter lock revision'.split(),
         "required": '_choices _closed_drafts _counter _drafts _paused _registered _reservations _states _tokens encounter lock'.split(),
     },
+    'action_choice.ChoiceDraft': {
+        "allowed": 'id members version'.split(),
+        "required": 'id members version'.split(),
+    },
     'action_choice.ChoiceMember': {
         "allowed": 'action key priority_penalty target_action_key'.split(),
         "required": 'action key priority_penalty target_action_key'.split(),
@@ -123,7 +127,7 @@ FIELD_ADAPTERS = {
         "required": 'actor_id displacement end_time event_type instrument_id location minimum_distance name parent_event_id practice_experience resolution start_position start_time strategy target_id type universe'.split(),
     },
     'activities.SpotAction': {
-        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _encounter actor_id canceled_at cancellation_reason declared_roll end_time event_type group_fully_visible id instrument_id ledger location location_ledger name parent_event_id path_status resolution roll spotting_conditions start_position start_time strategy target_id threat_at_schedule type universe'.split(),
+        "allowed": '_activity_started _atomic_acknowledged_boundary _atomic_effect_ids _atomic_lifecycle _encounter actor_id canceled_at cancellation_reason declared_roll end_time event_type group_fully_visible id instrument_id ledger location location_ledger name object_ledger parent_event_id path_status resolution roll spotting_conditions start_position start_time strategy target_id threat_at_schedule type universe'.split(),
         "required": '_encounter actor_id declared_roll end_time event_type group_fully_visible instrument_id ledger location name parent_event_id path_status resolution roll spotting_conditions start_time strategy target_id type universe'.split(),
     },
     'armor.ArmorDefinition': {
@@ -354,6 +358,14 @@ FIELD_ADAPTERS = {
         "allowed": '_observations observer_id'.split(),
         "required": '_observations observer_id'.split(),
     },
+    'object_observation.ObjectObservation': {
+        "allowed": 'basis boundary encounter_id id object_id observer_id position projectile_status source_action_id time'.split(),
+        "required": 'basis boundary encounter_id id object_id observer_id position projectile_status source_action_id time'.split(),
+    },
+    'object_observation.ObjectObservationLedger': {
+        "allowed": '_observations observer_id'.split(),
+        "required": '_observations observer_id'.split(),
+    },
     'observer_proposals.AccountsProjection': {
         "allowed": 'accounts delivery_effect_ids identity'.split(),
         "required": 'accounts delivery_effect_ids identity'.split(),
@@ -378,7 +390,15 @@ FIELD_ADAPTERS = {
         "allowed": 'observation recipient source_action_id target_id'.split(),
         "required": 'observation recipient source_action_id target_id'.split(),
     },
+    'observer_proposals.ObjectObservationEffect': {
+        "allowed": 'observation recipient source_action_id target_id'.split(),
+        "required": 'observation recipient source_action_id target_id'.split(),
+    },
     'observer_proposals.LocationEvidenceProjection': {
+        "allowed": 'effect_ids identity observations observer_id'.split(),
+        "required": 'effect_ids identity observations observer_id'.split(),
+    },
+    'observer_proposals.ObjectEvidenceProjection': {
         "allowed": 'effect_ids identity observations observer_id'.split(),
         "required": 'effect_ids identity observations observer_id'.split(),
     },

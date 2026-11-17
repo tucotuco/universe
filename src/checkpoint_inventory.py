@@ -79,6 +79,7 @@ _CATALOG = {
     'speeds':'Speed', 'strategy':'Strategy', 'exertion':'Exertion',
     'spatial.state':'SpatialState CartesianPosition', 'spatial.frame':'LocalFrame',
     'location_observation':'LocationEvidenceLedger BeingLocationObservation LastSeenLocation',
+    'object_observation':'ObjectObservation ObjectObservationLedger',
     'spatial.geometry':'Sphere AxisAlignedBox', 'spatial.occlusion':'VisualOcclusion',
     'physical_fatigue':'PhysicalFatigueState',
     'arena_perception':'ArenaPerceptionLedger ArenaPerceptionEvidence',
@@ -91,12 +92,12 @@ _CATALOG = {
     'field_interpretation':'FieldInterpreter FieldInterpretation',
     'experience':'SkillUse BatchSkillUse ActionResolution SkillExercise', 'frozen_practice':'CandidatePracticeUse CandidateSkillTransition PracticeProjection',
     'objective_reality':'EpisodeFacts DeclaredObjectiveFact ObjectiveFact SubjectRealityCandidate',
-    'action_choice':'ChoiceBook ChoiceView ChoiceMember _Accepted Reservation',
+    'action_choice':'ChoiceBook ChoiceView ChoiceMember ChoiceDraft _Accepted Reservation',
     'scheduling':'PreparedSchedule', 'action_settlement':'TargetCandidate',
     'atomic_publication':'PublishedInterval TargetIntervalRecord ObjectiveCommitProvenance',
     'encounter_inspection':'CommittedBoundaryRecord EntityInspection DisarmLandingReceipt',
     'action_evaluation':'ActionView ActionProposal DamageEffect ProtectionEffect FatalEffect PracticeEffect AwarenessEffect DefenseEffect DelayDefenseEffect ProjectileReleaseEffect EffectIdentity IdentifiedEffect PickupEffect ReadyWeaponEffect ShieldEquipmentEffect ReadyPreparationEffect ReadyConsumptionEffect DropObjectEffect DisarmTakeEffect DisarmLandingPendingEffect GrappleStateEffect PositionEffect ObjectGripEffect StunEffect SubdualEffect',
-    'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection FrozenLocationEvidence ObjectiveUse',
+    'observer_proposals':'RecipientIdentity ObservationEffect InterpretationEffect BeliefAcquisitionEffect LocationObservationEffect ObjectObservationEffect TestimonyEffect AccountDeliveryEffect ActionOutcomeEffect LifecycleEffect ReservationReleaseEffect PostCommitNotificationIntent ObserverProjection BeliefProjection AccountsProjection LocationEvidenceProjection ObjectEvidenceProjection FrozenLocationEvidence ObjectiveUse',
     'interval_staging':'AuthorityReference StartFence RegistrationIntent QueueProjection',
 }
 _TYPES = frozenset(vars(importlib.import_module(module))[name]

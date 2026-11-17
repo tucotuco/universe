@@ -49,7 +49,7 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
 
     def test_matrix_states_arena_only_and_native_restore_boundary(self):
         text = MATRIX.read_text()
-        self.assertIn('152 types', text)
+        self.assertIn('157 types', text)
         self.assertIn('104 domain types plus five structural container types', text)
         self.assertIn('not a general native persistence API', text)
         self.assertIn('no production native restore path', text)

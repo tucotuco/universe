@@ -8,6 +8,7 @@
 - Portable layer: save `/12`, archive `/3`, resumable snapshot `/1`, immutable-definition table `/1`, history segment `/2`.
 - The Arena allowlist contains 109 graph tags: 104 typed native tags plus five structural containers (`ordered-map`, `list`, `tuple`, `set`, `frozenset`). Each typed node is checked against `checkpoint_fields.FIELD_ADAPTERS` for allowed and required properties. The shared field registry has 152 typed adapters; 48 are excluded by the Arena allowlist and cannot appear in a current Arena save. Those excluded tags are listed after the complete Arena table.
 - Field lists below are alphabetized for display. “Schema allowed” includes optional fields; “Schema required” is the subset required by strict current-schema capture/restore. “Present” lists fields found in the reassembled native graph for that saved Encounter; history/definition fields are included after strict archive decode.
+- This audit captured 152 adapters on 2026-11-16 before the native-history bridge continuation. The live catalog is now 157 after reviewed schemas for ChoiceDraft and Object-observation history records; see the current source-linked [capability matrix](persistence-capability-matrix.md). The 152-type table and measured Arena fixture remain a historical snapshot, not the present registry.
 
 ## Exact schema and representative Encounter fields
 

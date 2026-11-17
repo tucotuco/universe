@@ -566,7 +566,8 @@ def _validate_host_binding_descriptors(section):
           and type(section[0]) is tuple,
           'native host bindings are malformed')
     seen = set()
-    roles = {'in_world_belief_ledger', 'in_world_received_accounts'}
+    roles = {'in_world_belief_ledger', 'in_world_received_accounts',
+             'observer_location_evidence', 'observer_object_evidence'}
     for row in section[0]:
         _need(type(row) is tuple and len(row) == 5,
               'native host binding row is malformed')
@@ -904,6 +905,9 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     from field_observation import BeliefLedger
     from history_conversation import HeardAccount
     from history_conversation import AskAboutPastAction
+    from location_observation import (LocationEvidenceLedger,
+                                      BeingLocationObservation)
+    from object_observation import ObjectObservationLedger, ObjectObservation
     from checkpoint_adapters import NativeInventory
     from statistical_group import validate_composition_records
 
@@ -1031,12 +1035,54 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
             _need(type(recipient) is BeliefLedger
                   and observer_ids == (recipient.observer_id,),
                   'native Belief recipient identity/owner differs')
-        else:
+        elif role == 'in_world_received_accounts':
             _need(type(recipient) is list
                   and all(type(account) is HeardAccount
                           and account.listener_id in observer_ids
                           for account in recipient),
                   'native received-accounts binding is invalid')
+        elif role == 'observer_location_evidence':
+            _need(type(recipient) is LocationEvidenceLedger
+                  and observer_ids == (recipient.observer_id,),
+                  'native LocationEvidence binding owner differs')
+            observations=recipient._observations
+            _need(type(observations) is dict,
+                  'native LocationEvidence observations are not a mapping')
+            for observation_id, row in observations.items():
+                _need(type(row) is BeingLocationObservation
+                      and observation_id == row.id
+                      and row.observer_id == recipient.observer_id,
+                      'native location observation identity/owner differs')
+                source=world.event_history.get(row.source_action_id)
+                _need(type(source).__name__ == 'SpotAction'
+                      and source.actor_id == row.observer_id
+                      and source.target_id == row.being_id
+                      and source._encounter is not None
+                      and source._encounter.id == row.encounter_id
+                      and type(source.resolution).__name__ == 'ActionProposal'
+                      and source.resolution.outcome == 'success'
+                      and row.boundary <= source._encounter.last_processed_boundary,
+                      'native location observation has no successful Spot provenance')
+        elif role == 'observer_object_evidence':
+            _need(type(recipient) is ObjectObservationLedger
+                  and observer_ids == (recipient.observer_id,),
+                  'native ObjectEvidence binding owner differs')
+            for observation_id, row in recipient._observations.items():
+                _need(type(row) is ObjectObservation and observation_id == row.id
+                      and row.observer_id == recipient.observer_id,
+                      'native Object observation identity/owner differs')
+                source=world.event_history.get(row.source_action_id)
+                _need(type(source).__name__ == 'SpotAction'
+                      and source.actor_id == row.observer_id
+                      and source.target_id == row.object_id
+                      and source._encounter is not None
+                      and source._encounter.id == row.encounter_id
+                      and type(source.resolution).__name__ == 'ActionProposal'
+                      and source.resolution.outcome == 'success'
+                      and row.boundary <= source._encounter.last_processed_boundary,
+                      'native Object observation has no successful Spot provenance')
+        else:
+            _need(False, 'native host recipient role is unsupported')
         recipients[id(recipient)] = role
         from checkpoint_adapters import RecipientBinding, _portable_recipient_token
         token = _portable_recipient_token(RecipientBinding(

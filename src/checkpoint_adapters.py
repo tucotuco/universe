@@ -199,6 +199,55 @@ class NativeInventory(_Inventory):
                 for account in b.recipient:
                     _require(type(account) is HeardAccount,'opaque heard account');ad=_fields(account)
                     _require(ad['listener_id'] in b.observer_ids and ad['speaker_id'] in objects,'account binding owner/reference mismatch')
+            elif b.role=='observer_location_evidence':
+                from activities import SpotAction
+                from location_observation import (LocationEvidenceLedger,
+                                                  BeingLocationObservation)
+                _require(type(b.recipient) is LocationEvidenceLedger
+                         and b.observer_ids==(b.recipient.observer_id,),
+                         'mismatched location-evidence role/observer')
+                ledger_data=_fields(b.recipient)
+                observations=ledger_data['_observations']
+                _require(type(observations) is dict,
+                         'location observations must be a native mapping')
+                _require(id(observations) not in self.mutable_recipients,
+                         'shared mutable location recipient container')
+                self.mutable_recipients[id(observations)]=(id(b.recipient),'_observations')
+                for observation_id, row in observations.items():
+                    _require(type(row) is BeingLocationObservation
+                             and observation_id==row.id
+                             and row.observer_id==b.recipient.observer_id
+                             and type(objects.get(row.being_id)) is BeingInstance,
+                             'location observation owner/Being identity is inconsistent')
+                    source=world.event_history.get(row.source_action_id)
+                    _require(type(source) is SpotAction
+                             and source.actor_id==row.observer_id
+                             and source.target_id==row.being_id,
+                             'location observation has no matching native Spot Action')
+            elif b.role=='observer_object_evidence':
+                from activities import SpotAction
+                from object import ObjectInstance
+                from object_observation import (ObjectObservationLedger,
+                                                ObjectObservation)
+                _require(type(b.recipient) is ObjectObservationLedger
+                         and b.observer_ids==(b.recipient.observer_id,),
+                         'mismatched ObjectEvidence role/observer')
+                observations=_fields(b.recipient)['_observations']
+                _require(type(observations) is dict
+                         and id(observations) not in self.mutable_recipients,
+                         'Object observations must be a unique native mapping')
+                self.mutable_recipients[id(observations)]=(id(b.recipient),'_observations')
+                for observation_id, row in observations.items():
+                    _require(type(row) is ObjectObservation
+                             and observation_id==row.id
+                             and row.observer_id==b.recipient.observer_id
+                             and type(objects.get(row.object_id)) is ObjectInstance,
+                             'Object observation owner/Object identity is inconsistent')
+                    source=world.event_history.get(row.source_action_id)
+                    _require(type(source) is SpotAction
+                             and source.actor_id==row.observer_id
+                             and source.target_id==row.object_id,
+                             'Object observation has no matching native Spot Action')
             else: raise CheckpointRejected('unsupported recipient role')
             self.names.add(key);self.recipient_by_id[id(b.recipient)]=b
             self.anchor(b.recipient,('host-recipient',world.id,b.namespace,b.name))
@@ -256,6 +305,12 @@ class NativeInventory(_Inventory):
             _fields(value)
         if kind is BeliefLedger:
             _require(id(value) in self.recipient_by_id,'missing durable Belief binding')
+        if kind.__module__+'.'+kind.__name__ == 'location_observation.LocationEvidenceLedger':
+            _require(id(value) in self.recipient_by_id,
+                     'missing durable LocationEvidence binding')
+        if kind.__module__+'.'+kind.__name__ == 'object_observation.ObjectObservationLedger':
+            _require(id(value) in self.recipient_by_id,
+                     'missing durable ObjectEvidence binding')
         if kind in (dict,list,set):
             _require(id(value) not in self.stack, 'unsupported mutable container cycle at '+ '/'.join(path))
         self.stack.add(id(value))
@@ -345,9 +400,29 @@ class NativeInventory(_Inventory):
             _require(item['initial_total_experience'] == owner.original.experience,
                      'Arena initial profile XP differs from the registered Being original')
         if tag=='activities.SpotAction' and field=='location_ledger' and item is not None:
-            self.issue('unbound_location_evidence_recipient',ref,field,
-                'Observer-owned location evidence has no portable recipient binding contract; restoration remains refused.')
-            return ('unsupported-reference','observer-location-evidence')
+            if not self.full_native:
+                self.issue('unbound_location_evidence_recipient',ref,field,
+                    'Observer-owned location evidence recipient requires the full native Save binding.')
+                return ('unsupported-reference','observer-location-evidence')
+            binding=self.recipient_by_id.get(id(item))
+            owner=self._objects_by_identity.get(self._owner_identity(ref))
+            _require(binding is not None and binding.role=='observer_location_evidence'
+                     and type(owner).__name__=='SpotAction'
+                     and owner.actor_id in binding.observer_ids,
+                     'Spot location evidence requires its explicit observer-owned binding')
+            return self.value(item,path+(field,),depth+1)
+        if tag=='activities.SpotAction' and field=='object_ledger' and item is not None:
+            if not self.full_native:
+                self.issue('unbound_object_evidence_recipient',ref,field,
+                    'Observer-owned Object evidence recipient requires the full native Save binding.')
+                return ('unsupported-reference','observer-object-evidence')
+            binding=self.recipient_by_id.get(id(item))
+            owner=self._objects_by_identity.get(self._owner_identity(ref))
+            _require(binding is not None and binding.role=='observer_object_evidence'
+                     and type(owner).__name__=='SpotAction'
+                     and owner.actor_id in binding.observer_ids,
+                     'Spot Object evidence requires its explicit observer-owned binding')
+            return self.value(item,path+(field,),depth+1)
         if tag=='action_choice._Accepted' and field=='signatures':
             if self.full_native:
                 # Every accepted declaration is revalidated at capture and

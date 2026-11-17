@@ -35,6 +35,9 @@ from reproduction_group import ReproductionGroupProposal, prepare_reproduction_g
 from being import BeingDefinition
 from reproduction_being_bridge import materialize_reproductive_offspring
 from history_conversation import AskAboutPastAction
+from activities import SpotAction
+from location_observation import LocationEvidenceLedger
+from object_observation import ObjectObservationLedger
 
 
 class NativePersistenceTests(unittest.TestCase):
@@ -633,6 +636,180 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
         self.assertEqual(actual['history'], expected['history'])
         self.assertEqual(actual['account'], expected['account'])
+
+    def test_spot_location_evidence_restores_with_owner_and_provenance(self):
+        world, encounter, rng, observer, target, _weapon_id = self._combat_encounter()
+        ledger = LocationEvidenceLedger(observer.id)
+        spot = SpotAction(world, observer.id, target.id, 0, die_roll=20,
+                          location_ledger=ledger, id='native-location-spot')
+        encounter.schedule_action(spot)
+        encounter.step(6)
+        self.assertEqual(len(ledger.observations), 1)
+        binding = RecipientBinding(
+            world, 'perception', 'observer-location', 'observer_location_evidence',
+            (observer.id,), ledger)
+        wire = export_save(encounter, recipient_bindings=(binding,))
+        continuation = DelayAction(encounter, observer.id, defense=0,
+                                   start_time=6, id='native-location-continuation')
+        encounter.schedule_action(continuation)
+        encounter.step(1)
+        row = ledger.observations[0]
+        expected = {
+            'time': encounter.time, 'rng': rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'observation': [row.id, row.observer_id, row.being_id,
+                            row.source_action_id, row.encounter_id, row.boundary,
+                            row.time, list(row.position.as_tuple()), row.basis],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-location-evidence-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+spot=world.get_event_by_id('native-location-spot')
+ledger=spot.location_ledger
+row=ledger.observations[0]
+assert ledger.observer_id == spot.actor_id
+assert row.source_action_id == spot.id and row.being_id == spot.target_id
+action=DelayAction(enc,spot.actor_id,defense=0,start_time=enc.time,
+ id='native-location-continuation')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'observation':[row.id,row.observer_id,row.being_id,row.source_action_id,
+ row.encounter_id,row.boundary,row.time,list(row.position.as_tuple()),row.basis]},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['time'], expected['time'])
+        self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
+        self.assertEqual(actual['history'], expected['history'])
+        self.assertEqual(actual['observation'], expected['observation'])
+
+    def test_object_spot_ledgers_restore_distinct_evidence_and_projectile_continuation(self):
+        from native_throw_spot import build_spot_scene
+        scene = build_spot_scene(seed=5)
+        world, encounter, rng = scene['world'], scene['encounter'], scene['rng']
+        encounter.step(6)
+        self.assertEqual(len(scene['spotter_evidence'].observations), 1)
+        self.assertEqual(scene['second_evidence'].observations, ())
+        bindings = tuple(RecipientBinding(
+            world, 'object-evidence', name, 'observer_object_evidence',
+            (ledger.observer_id,), ledger)
+            for name, ledger in (('spotter', scene['spotter_evidence']),
+                                 ('second', scene['second_evidence'])))
+        wire = export_save(encounter, recipient_bindings=bindings)
+        encounter.step(1)
+        observation = scene['spotter_evidence'].observations[0]
+        expected = {
+            'time': encounter.time, 'rng': rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'observation': [observation.id, observation.observer_id,
+                            observation.object_id, observation.source_action_id,
+                            observation.encounter_id, observation.boundary,
+                            observation.time, list(observation.position.as_tuple()),
+                            observation.projectile_status, observation.basis],
+            'flight': scene['projectile'].__dict__['_projectile_flight'].status,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-object-observation-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+spot=world.get_event_by_id('throw-demo/spotter-object-spot')
+second=world.get_event_by_id('throw-demo/second-observer-object-spot')
+assert len(spot.object_ledger.observations)==1
+assert second.object_ledger.observations==()
+observation=spot.object_ledger.observations[0]
+enc.step(1)
+projectile=world.get_object_by_id(observation.object_id)
+flight=projectile.__dict__['_projectile_flight'].status
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'observation':[observation.id,observation.observer_id,observation.object_id,
+ observation.source_action_id,observation.encounter_id,observation.boundary,
+ observation.time,list(observation.position.as_tuple()),
+ observation.projectile_status,observation.basis], 'flight':flight},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['time'], expected['time'])
+        self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
+        self.assertEqual(actual['history'], expected['history'])
+        self.assertEqual(actual['observation'], expected['observation'])
+        self.assertEqual(actual['flight'], expected['flight'])
+
+    def test_native_search_success_and_listen_failure_resume_with_exact_history(self):
+        world, encounter, rng, observer, target, _weapon_id = self._combat_encounter()
+        target.current.tags['arena_search_accessible'] = True
+        target.current.tags['arena_audible'] = True
+        search = SpotAction(world, observer.id, target.id, 0, die_roll=20,
+                            sense='search', id='native-search-success')
+        encounter.schedule_action(search)
+        encounter.step(6)
+        self.assertEqual(search.resolution.outcome, 'success')
+        self.assertTrue(encounter.is_aware(observer.id, target.id))
+        listen = SpotAction(world, observer.id, target.id, 6, die_roll=1,
+                            sense='listen', id='native-listen-failure')
+        encounter.schedule_action(listen)
+        wire = export_save(encounter)
+        encounter.step(6)
+        expected = {
+            'time': encounter.time, 'rng': rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'outcomes': [search.resolution.outcome, listen.resolution.outcome],
+            'awareness': encounter.is_aware(observer.id, target.id),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-search-listen-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+search=world.get_event_by_id('native-search-success')
+choice=next(row for row in enc._choice_book._choices.values()
+ if row.view.action_ids==('native-listen-failure',))
+listen=choice.members[0].action
+assert search.resolution.outcome=='success'
+assert listen.resolution is None
+enc.step(6)
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'outcomes':[search.resolution.outcome,listen.resolution.outcome],
+ 'awareness':enc.is_aware(search.actor_id,search.target_id)},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['time'], expected['time'])
+        self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
+        self.assertEqual(actual['history'], expected['history'])
+        self.assertEqual(actual['outcomes'], expected['outcomes'])
+        self.assertEqual(actual['awareness'], expected['awareness'])
 
 
 if __name__ == "__main__":
