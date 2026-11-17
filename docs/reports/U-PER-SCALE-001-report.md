@@ -1337,3 +1337,22 @@ The 21 existing headless native continuation fixtures established same-Encounter
 `NativeDrawPersistenceTests._assert_history_matches_receipts()` now reconstructs a native fact log after each original uninterrupted scenario and walks every committed boundary. At each boundary it compares cumulative Action and Effect maps and their ordered logical identities to `Encounter.inspect_committed(boundary)`, boundary-local Action/Effect IDs to the `PublishedInterval`, TargetCandidate state to `TargetIntervalRecord`, EntityInspection context to the boundary receipt, and scheduler state to the same receipt. The check runs across all 21 native continuation scenarios: Draw; shield Don/Remove; Pick Up contention; Ready preparation and consumption; Object strikes including simultaneous durability; Subdual; Feint/follow-up; Touch→Grab→Trip; Grapple/Takedown and both Escape outcomes; Charge/Bull Rush/Overrun including successes and failures; Fatal Coup; and Break Weapon success/failure. These use existing ordinary native resolutions; no result is injected and no mechanics or production serialization changed.
 
 Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_draw_persistence -v` — **25 passed / 116.868s** after adding prepared/targeted Dodge, Parry, shield Block and Yield Save/Load cases. `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_scenario` — **1 passed / 0.939s** after the headless builder began forwarding movement/progression inputs. The source-linked matrix records this evidence while retaining OPEN status: the action inventory is not exhaustive, observer recipient and defined-record parity remains incomplete, the query still depends on the receipt graph, and production graph-free Save/Load has not been integrated. Test/report commit is pending scope-specific staged checks. U-PER-SCALE-001 remains the sole ACTIVE program.
+
+## Problems-first — unresolved native Throw miss continuation
+
+### Gap
+
+The native projectile matrix had fresh-process evidence for a shielded successful hit but not for the supported miss branch. Without a miss continuation, the preserved `miss_direction`, `miss_unresolved` status, and zero-damage consequence were not proven across Save/Load. No rules gap was involved: the ordinary projectile resolver already records these facts.
+
+### Correction and evidence
+
+Added `test_missed_projectile_continues_with_native_unresolved_destination`. It builds the existing Arena-independent native Throw scene, replaces only its accepted initial Choice with an ordinary targeted Throw, and sets the owned RNG to seed 0. The native action releases at t=4; the test saves with flight still in progress and both uninterrupted and fresh-process executions continue to impact. Both report `miss`, direction 7, status `miss_unresolved`, zero impact damage, the same Object position and landing projection, unchanged target HP, identical RNG, and identical complete native-history digest. At every committed boundary, `NativeHistoryQuery.projectile_state_at()` matches the corresponding committed receipt; no destination is synthesized from the miss direction.
+
+### Verification
+
+- `PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_missed_projectile_continues_with_native_unresolved_destination -v` — **1 passed / 3.861s**.
+- `.venv/bin/python -B tests/test_native_draw_persistence.py -v` — **25 passed / 118.781s**, with receipt-level historical query parity across every boundary in its Action-family continuation fixtures.
+- `PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py' -v` — **42 passed / 120.341s** before adding the new miss case; the added test passed separately as above.
+- `PYTHONPATH=src:examples .venv/bin/python -B tests/test_native_throw_arena.py -v` — **13 passed / 19.094s**; capability-matrix gates — **3 passed / 0.005s**; test-module `py_compile` and `git diff --check` passed.
+
+The projectile matrix now records supported hit and miss continuation. Target-moved/fatal projectile branches, other supported Action/state families, graph-free historical reconstruction, durable journal recovery, application Save/Load cutover, complete native migration/security/scale gates remain open. Commit evidence and the full final focused result will be added after scoped staging/audit. U-PER-SCALE-001 remains ACTIVE; no rules or external blocker is identified.

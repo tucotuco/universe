@@ -644,6 +644,108 @@ print(json.dumps({'time':enc.time,
         self.assertEqual(expected["outcome"], "hit")
         self.assertTrue(expected["intercepted"])
 
+    def test_missed_projectile_continues_with_native_unresolved_destination(self):
+        """A miss preserves its adopted direction and unresolved landing in Load."""
+        import random
+        from being import BeingInstance
+        from activities import ThrowAction
+        from native_throw_arena import build_native_scene
+
+        world, encounter, actor, projectile, rng, original = build_native_scene()
+        encounter._choice_book.undo(encounter._choice_book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition("Human")
+        target = BeingInstance(definition, "Native Miss Target",
+                              id="native-persist/miss-target")
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        world.add_object(target)
+        encounter.add_being(target.id)
+        encounter.mark_aware(actor.id, target.id)
+        action = ThrowAction(world, actor.id, projectile.id, encounter.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id="native-persist/missed-throw")
+        encounter.schedule_choice((action,))
+        rng.state = random.Random(0).getstate()
+        encounter.step(4)
+        self.assertEqual(action.resolution.outcome, "released")
+        self.assertIsNone(projectile.__dict__["_projectile_flight"].impact_outcome)
+        wire = export_save(encounter)
+
+        def continue_to_miss(enc, saved_world, cursor):
+            thrown = saved_world.get_object_by_id(projectile.id)
+            victim = saved_world.get_object_by_id(target.id)
+            for _ in range(6):
+                if thrown.__dict__["_projectile_flight"].impact_outcome is not None:
+                    break
+                enc.step(1)
+            flight = thrown.__dict__["_projectile_flight"]
+            state = thrown.__dict__["_atomic_projectile_history"][-1]
+            log = native_history.capture(enc)
+            query = native_history.NativeHistoryQuery(log)
+            for boundary in range(enc.last_processed_boundary + 1):
+                receipt = next((row for row in enc._atomic_interval_history
+                                if row.boundary == boundary), None)
+                recorded = (None if receipt is None else
+                            receipt.inspection.projectile_states.get(thrown.id))
+                self.assertEqual(query.projectile_state_at(thrown.id, boundary),
+                    None if recorded is None else native_history._plain(recorded))
+            return {
+                "time": enc.time,
+                "outcome": flight.impact_outcome,
+                "status": flight.status,
+                "miss_direction": flight.miss_direction,
+                "position": thrown.get_position().as_tuple(),
+                "landing_position": flight.landing_position.as_tuple(),
+                "impact_damage": state.impact_damage,
+                "state_status": state.status,
+                "state_direction": state.miss_direction,
+                "target_hp": victim.get_hit_points(),
+                "rng": cursor.state,
+                "history": hashlib.sha256(native_history.encode(log)).hexdigest(),
+            }
+
+        expected = continue_to_miss(encounter, world, rng)
+        self.assertEqual(expected["outcome"], "miss")
+        self.assertIn(expected["miss_direction"], range(1, 9))
+        self.assertEqual(expected["state_status"], "miss_unresolved")
+        self.assertEqual(expected["state_direction"], expected["miss_direction"])
+        self.assertEqual(expected["impact_damage"], 0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-missed-projectile.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+thrown=world.get_object_by_id(sys.argv[2]); victim=world.get_object_by_id(sys.argv[3])
+for _ in range(6):
+ if thrown.__dict__['_projectile_flight'].impact_outcome is not None: break
+ enc.step(1)
+flight=thrown.__dict__['_projectile_flight']
+state=thrown.__dict__['_atomic_projectile_history'][-1]
+log=native_history.capture(enc); query=native_history.NativeHistoryQuery(log)
+for boundary in range(enc.last_processed_boundary+1):
+ receipt=next((row for row in enc._atomic_interval_history
+  if row.boundary==boundary),None)
+ recorded=None if receipt is None else receipt.inspection.projectile_states.get(thrown.id)
+ assert query.projectile_state_at(thrown.id,boundary)==(None if recorded is None
+  else native_history._plain(recorded))
+print(json.dumps({'time':enc.time,'outcome':flight.impact_outcome,
+ 'status':flight.status,'miss_direction':flight.miss_direction,
+ 'position':thrown.get_position().as_tuple(),
+ 'landing_position':flight.landing_position.as_tuple(),
+ 'impact_damage':state.impact_damage,'state_status':state.status,
+ 'state_direction':state.miss_direction,'target_hp':victim.get_hit_points(),
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(log)).hexdigest()},
+ sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), projectile.id, target.id],
+                cwd=directory,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_strict_outer_integrity_and_duplicate_keys_are_rejected(self):
         demo = encounter_delta_headless.build_demo(until=4)
         wire = export_save(demo["encounter"])
