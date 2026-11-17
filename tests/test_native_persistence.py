@@ -4658,6 +4658,65 @@ print(json.dumps({'time':enc.time,
             with self.subTest(field=key):
                 self.assertEqual(actual[key], value)
 
+    def test_native_history_v10_save_migrates_without_inventing_initial_entities(self):
+        """Pre-/11 Saves keep their first-receipt anchor and continue natively."""
+        from native_history import PUBLICATION_FACT_SCHEMA, NativeHistoryQuery, _seal
+        from native_persistence import _canonical
+        demo = encounter_delta_headless.build_demo(until=4)
+        original = demo['encounter']
+        body = json.loads(export_save(original))
+        legacy = _legacy_initial_entity_anchor(
+            {key: value for key, value in body['history'].items()
+             if key != 'sha256'}, original)
+        legacy['schema'] = PUBLICATION_FACT_SCHEMA
+        legacy['initial'].pop('initial_entities_available')
+        body['history'] = _seal(legacy)
+        unsigned = {key: value for key, value in body.items() if key != 'sha256'}
+        body['sha256'] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+        wire = _canonical(body)
+
+        action_id = 'native-history-v10-migrated-delay'
+        original.schedule_action(DelayAction(
+            original, original.being_list[1], defense=0, start_time=4,
+            id=action_id))
+        original.step(1)
+        original_query = NativeHistoryQuery(native_history.capture(original))
+        expected = {
+            'time': original.time,
+            'rng': demo['rng_owner'].state,
+            'boundaries': [original_query.boundary_facts_at(boundary)
+                for boundary in range(1, original.last_processed_boundary + 1)],
+        }
+
+        child = r'''import json,sys
+from activities import DelayAction
+from native_history import NativeHistoryQuery,current_recording
+from native_persistence import export_save,load_path,load_save
+world,enc,rng=load_path(sys.argv[1]); log=current_recording(enc)
+assert log['schema']=='universe.native-encounter-history/11'
+assert log['initial']['initial_entities_available'] is False
+query=NativeHistoryQuery(log)
+assert query.state_at(0)['entities'] is None
+assert query.entity_context_at(0) is None
+enc.schedule_action(DelayAction(enc,enc.being_list[1],defense=0,
+ start_time=4,id='native-history-v10-migrated-delay'))
+enc.step(1); log=current_recording(enc); query=NativeHistoryQuery(log)
+wire=export_save(enc)
+assert export_save(load_save(wire)[1])==wire
+print(json.dumps({'time':enc.time,'rng':rng.state,'boundaries':[
+ query.boundary_facts_at(boundary) for boundary in
+ range(1,enc.last_processed_boundary+1)]},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-history-v10-save.json'
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=directory,
+                env={**__import__('os').environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
         import base64
         from checkpoint_inventory import capture_checkpoint_candidate

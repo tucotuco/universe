@@ -42,6 +42,13 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
             source = ROOT / 'src' / (tag.rsplit('.', 1)[0].replace('.', '/') + '.py')
             self.assertTrue(source.is_file(), (tag, source))
             self.assertIn('Arena snapshot schema', cells[3]) if tag in _ARENA_TAGS else self.assertIn('Outside Arena snapshot schema', cells[3])
+            evidence_links = re.findall(r'\[[^\]]+\]\(([^)]+)\)', cells[4])
+            self.assertTrue(evidence_links, f'{tag}: no source/test evidence links')
+            for link in evidence_links:
+                if '://' in link:
+                    continue
+                evidence_path = (MATRIX.parent / link.split('#', 1)[0]).resolve()
+                self.assertTrue(evidence_path.is_file(), (tag, link))
 
     def test_executable_native_type_registry_matches_all_reviewed_field_adapters(self):
         tags = {f'{cls.__module__}.{cls.__name__}' for cls in _TYPES}
