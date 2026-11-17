@@ -1407,6 +1407,84 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_failed_bull_rush_restores_the_resisted_contest_without_movement(self):
+        """A real resisted contest failure remains failure after native Load."""
+        builder = NativeScenarioBuilder(
+            "native-bull-rush-failure",
+            Library(config_dir=str(ROOT / "src/config")), seed=1,
+            encounter_id="native-bull-rush-failure-encounter")
+        actor = builder.add_being("Human", "Rusher", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Resisting Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        for being in (actor, target):
+            being.set_posture("standing")
+            being.size_category = "medium"
+            being.set_ability("strength", 10)
+            being.set_ability("dexterity", 10)
+        actor.set_hex_facing(0)
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.enable()
+
+        rush = Action(builder.world, 0, 1, "bull rush", actor.id, target.id,
+                      None, id="native-bull-rush-failed-action")
+        builder.schedule(rush)
+        pending = export_save(builder.encounter)
+        before_positions = [actor.get_position().as_tuple(),
+                            target.get_position().as_tuple()]
+        builder.step(1)
+        receipt = builder.encounter.inspect_committed(1).action(rush.id)
+        self.assertEqual(receipt.facts.outcome, "failed")
+        self.assertEqual([actor.get_position().as_tuple(), target.get_position().as_tuple()],
+                         before_positions)
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [actor.id, target.id],
+            "action_id": rush.id,
+            "outcome": receipt.facts.outcome,
+            "positions": [actor.get_position().as_tuple(),
+                          target.get_position().as_tuple()],
+            "hp": [actor.get_hit_points(), target.get_hit_points()],
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor_id,target_id,rush_id=sys.argv[2:]
+assert enc.time==0 and enc.progression_mode=='transactional'
+choice=enc.choice_for_action(rush_id);assert choice.state=='accepted'
+rush=next(m.action for m in enc._choice_book._choices[choice.id].members
+          if m.action.id==rush_id)
+assert rush.actor_id==actor_id and rush.target_id==target_id
+actor=world.get_object_by_id(actor_id);target=world.get_object_by_id(target_id)
+before=[actor.get_position().as_tuple(),target.get_position().as_tuple()]
+enc.step(1);receipt=enc.inspect_committed(1).action(rush_id)
+assert receipt.facts.outcome=='failed'
+assert [actor.get_position().as_tuple(),target.get_position().as_tuple()]==before
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[actor_id,target_id],'action_id':rush_id,
+ 'outcome':receipt.facts.outcome,
+ 'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'hp':[actor.get_hit_points(),target.get_hit_points()], 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-bull-rush-failure.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), actor.id,
+                 target.id, rush.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_headless_charge_overrun_restores_and_commits_represented_forward_hex(self):
         """An adopted one-hex landing survives continuation in a new process."""
         from arena_hex_map import encounter_map_descriptor
