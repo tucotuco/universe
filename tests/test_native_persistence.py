@@ -548,7 +548,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         from activities import ThrowAction
         from native_throw_arena import build_native_scene
 
-        world, encounter, actor, projectile, rng, original = build_native_scene(seed=116)
+        world, encounter, actor, _stone, rng, original = build_native_scene(seed=116)
         encounter._choice_book.undo(encounter._choice_book.for_action(original.id).id)
         definition = world.library.being_dictionary.get_object_definition("Human")
         target = BeingInstance(definition, "Native Shielded Target",
@@ -556,10 +556,18 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         target.set_position(CartesianPosition(8.0, 0.0, 0.0))
         world.add_object(target)
         encounter.add_being(target.id)
+        armor_id = world.make_armor_for_being(target.id, "Leather armor",
+                                              "Native target armor")
+        encounter.add_object(armor_id)
         shield_id = world.make_weapon_for_being(target.id, "Small shield",
                                                "Native target shield")
         world.arm_being(target.id, shield_id, "shield hand")
         encounter.add_object(shield_id)
+        weapon_id = world.make_weapon_for_being(actor.id, "Dagger",
+                                                "Native thrown Dagger")
+        world.arm_being(actor.id, weapon_id, "right hand")
+        encounter.add_object(weapon_id)
+        projectile = world.get_object_by_id(weapon_id)
         action = ThrowAction(world, actor.id, projectile.id, encounter.time,
             heavy_load_reference_lb=100.0, elevation_degrees=45,
             target_id=target.id, id="native-persist/shielded-throw")
@@ -575,6 +583,8 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
             thrown = world.get_object_by_id(projectile.id)
             victim = world.get_object_by_id(target.id)
             shield = world.get_object_by_id(shield_id)
+            armor = world.get_object_by_id(armor_id)
+            initial_armor_hp = armor.hit_points()
             for _ in range(5):
                 if thrown.__dict__["_projectile_flight"].impact_outcome is not None:
                     break
@@ -586,12 +596,22 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
             durability = [effect.amount for effect in effects
                           if type(effect).__name__ == "DamageEffect"
                           and effect.component == "shield"]
+            armor_effects = [row.effect for row in target_effects_from(armor, action.id)]
+            armor_protection = next(effect for effect in armor_effects
+                if type(effect).__name__ == "ProtectionEffect" and effect.layer == "armor")
+            armor_durability = [effect.amount for effect in armor_effects
+                if type(effect).__name__ == "DamageEffect" and effect.component == "armor"]
             return {"time": enc.time,
                     "outcome": thrown.__dict__["_projectile_flight"].impact_outcome,
                     "hp": victim.get_hit_points(), "shield_hp": shield.hit_points(),
+                    "armor_hp": armor.hit_points(),
+                    "initial_armor_hp": initial_armor_hp,
                     "intercepted": protection.intercepted,
                     "incoming": protection.incoming, "passed": protection.passed,
                     "durability": durability,
+                    "armor_protection": [armor_protection.incoming,
+                        armor_protection.passed, armor_protection.intercepted],
+                    "armor_durability": armor_durability,
                     "rng": cursor.state,
                     "history": hashlib.sha256(native_history.encode(
                         native_history.capture(enc))).hexdigest()}
@@ -619,23 +639,30 @@ from atomic_publication import target_effects_from
 from native_persistence import load_path
 world,enc,rng=load_path(sys.argv[1])
 thrown=world.get_object_by_id(sys.argv[2]); victim=world.get_object_by_id(sys.argv[3])
-shield=world.get_object_by_id(sys.argv[4])
+shield=world.get_object_by_id(sys.argv[4]);armor=world.get_object_by_id(sys.argv[5])
+initial_armor_hp=armor.hit_points()
 for _ in range(5):
  if thrown.__dict__['_projectile_flight'].impact_outcome is not None: break
  enc.step(1)
-effects=[row.effect for row in target_effects_from(shield,sys.argv[5])]
+effects=[row.effect for row in target_effects_from(shield,sys.argv[6])]
 protection=next(effect for effect in effects if type(effect).__name__=='ProtectionEffect' and effect.layer=='shield')
 durability=[effect.amount for effect in effects if type(effect).__name__=='DamageEffect' and effect.component=='shield']
+armor_effects=[row.effect for row in target_effects_from(armor,sys.argv[6])]
+armor_protection=next(effect for effect in armor_effects if type(effect).__name__=='ProtectionEffect' and effect.layer=='armor')
+armor_durability=[effect.amount for effect in armor_effects if type(effect).__name__=='DamageEffect' and effect.component=='armor']
 print(json.dumps({'time':enc.time,
  'outcome':thrown.__dict__['_projectile_flight'].impact_outcome,
- 'hp':victim.get_hit_points(),'shield_hp':shield.hit_points(),
+ 'hp':victim.get_hit_points(),'shield_hp':shield.hit_points(),'armor_hp':armor.hit_points(),
+ 'initial_armor_hp':initial_armor_hp,
  'intercepted':protection.intercepted,'incoming':protection.incoming,
- 'passed':protection.passed,'durability':durability,'rng':rng.state,
+ 'passed':protection.passed,'durability':durability,
+ 'armor_protection':[armor_protection.incoming,armor_protection.passed,armor_protection.intercepted],
+ 'armor_durability':armor_durability,'rng':rng.state,
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},sort_keys=True))'''
             import os
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path), projectile.id,
-                 target.id, shield_id, action.id], cwd=ROOT,
+                 target.id, shield_id, armor_id, action.id], cwd=ROOT,
                 env={**os.environ,
                      "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=60)
@@ -643,6 +670,10 @@ print(json.dumps({'time':enc.time,
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
         self.assertEqual(expected["outcome"], "hit")
         self.assertTrue(expected["intercepted"])
+        self.assertEqual(len(expected["armor_protection"]), 3)
+        self.assertEqual(expected["armor_protection"], [1, 0, True])
+        self.assertEqual(expected["armor_durability"], [1])
+        self.assertEqual(expected["armor_hp"], expected["initial_armor_hp"] - 1)
 
     def test_missed_projectile_continues_with_native_unresolved_destination(self):
         """A miss preserves its adopted direction and unresolved landing in Load."""
