@@ -1,6 +1,6 @@
 # Native history bridge — current findings
 
-**Status: U-PER-SCALE-001 remains ACTIVE and incomplete.** The current native `/2` graph reconstructs Target and EntityInspection streams plus duplicated publication and Disarm receipts from validated `/10` history. A no-time Disarm landing is appended to the existing cut without changing time, prior facts, event order or RNG. Current focused suites and 2/20/200 scale profiles pass. This is not acceptance: complete 159-type family coverage, some historical consumer/state parity, the assignment-wide corruption/compatibility matrix and ordinary application Save/Load cutover remain open engineering gates. No unresolved rule or external dependency currently blocks them.
+**Problems first — U-PER-SCALE-001 remains ACTIVE and incomplete.** Native history `/11` is paired with strict native graph `/2`; the complete family/query matrix and ordinary application Save/Load cutover have not passed. A confirmed bug in the former `/10` writer recorded the first post-movement receipt as boundary-zero Entity state. `/11` now captures the validated pre-action transaction snapshot before first-boundary movement. Strict `/1`–`/10` migration keeps the historical first-receipt delta anchor and explicitly marks true initial Entity facts unavailable. The 159-type matrix still identifies many families without direct end-to-end history/query/restore evidence; broad adversarial coverage and application integration remain engineering gates. No rule or external dependency blocks these requirements.
 
 ## Problems first — current acceptance gaps
 
@@ -9,6 +9,14 @@
 - `export_save()` requires host-supplied `RecipientBinding` values for external recipient containers; omission fails closed. Generated Arena `/12` writing is intentionally unchanged until the general native acceptance gate and migration suite pass. Thus ordinary application Save/Load integration is still open, not accepted by implication from native API tests.
 - The closed native history schema and accepted Arena `/10`–`/12` readers have focused compatibility coverage, and canonical file publication has injected pre/post-link fault cases. The complete assignment-wide corruption/adversarial matrix and resource limits across all currently supported archive combinations still require coverage. There is no implemented persistence change proposed to disable strict validation or alter production `/12` behavior.
 - No adopted-rule ambiguity or external dependency blocks these remaining items. Continue the bounded implementation and verification of each reachable family; do not convert the open matrix or application cutover into a blocker label.
+
+## Problems first — history `/11` initial Entity provenance
+
+`NativeHistoryQuery.state_at(0)` previously returned the first committed receipt's EntityInspection projection, which can already include movement performed within the first second. A focused native scenario established the divergence: authored position `(0,0,0)`, first receipt `(1,0,0)`, but old history boundary zero also reported `(1,0,0)`. The native resolver and rules were correct; the persistence recorder lacked the pre-movement baseline.
+
+`step_transactionally()` now detaches the exact validated pre-action `EvaluationSnapshot` at the first transaction fence and passes its EntityInspection state to the history recorder after successful publication. The adapter recalculates time-derived stun/subdual status at the Encounter's actual start. Schema `/11` records strict `initial_entities_available`; strict older `/1`–`/10` migrations preserve the first-receipt delta anchor internally and return `None` for unavailable boundary-zero entity/context queries. They do not infer past facts from the restored graph. A `/10` Save migration test checks this behavior, committed boundary fact parity, fresh-process native continuation and canonical migrated Save→Load→Save.
+
+Verification in this increment: native persistence **59 passed / 193.085s**; history plus scenario **33 passed / 26.101s**; 25 Action continuations **25 passed / 136.261s**; source-linked capability matrix **3 passed / 0.042s**; dedicated `/10` migration **1 passed / 4.911s**; compile check passed. Commits: `577b34c` (true initial boundary), `27a44ac` (matrix/schema reconciliation), `51f8486` (`/10` strict native migration). No push. This closes one initial-history correctness and migration gap only.
 
 ## Problems first — StatisticalGroup membership history adapter
 
