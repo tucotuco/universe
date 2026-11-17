@@ -1987,6 +1987,44 @@ class NativeHistoryQuery:
             self._context_boundary = boundary
         return self._copy(context)
 
+    def entity_at(self, entity_id, boundary):
+        """Return one committed EntityInspection projection, or ``None``.
+
+        This is deliberately an inspection projection, not a claim that every
+        mutable runtime field is represented in native history. Older history
+        schemas return ``None`` for the whole family instead of deriving past
+        values from the current graph.
+        """
+        self._boundary(boundary)
+        if type(entity_id) is not str or not entity_id:
+            raise NativeHistoryRejected("entity history requires a stable identity")
+        context = self.entity_context_at(boundary)
+        if context is None:
+            return None
+        return context.get(entity_id)
+
+    def entity_history_at(self, entity_id, boundary=None):
+        """Return committed per-Entity inspection projections through a boundary.
+
+        Every row is sourced from the validated sparse EntityInspection stream.
+        Entities absent at a boundary have no row; unavailable legacy history
+        returns ``None`` rather than an empty history that could be mistaken
+        for a recorded absence.
+        """
+        if boundary is None:
+            boundary = self._latest
+        self._boundary(boundary)
+        if type(entity_id) is not str or not entity_id:
+            raise NativeHistoryRejected("entity history requires a stable identity")
+        if not self._context_available:
+            return None
+        rows = []
+        for current in range(boundary + 1):
+            value = self.entity_at(entity_id, current)
+            if value is not None:
+                rows.append({"boundary": current, "entity": value})
+        return rows
+
     def fatigue_context_at(self, boundary):
         self._boundary(boundary)
         if not self._context_available or not self._fatigue_available:
@@ -2086,6 +2124,16 @@ def target_at(log, target_id, boundary):
 def target_history_at(log, target_id, boundary=None):
     """Return detached ordered TargetCandidate rows through a boundary."""
     return NativeHistoryQuery(log).target_history_at(target_id, boundary)
+
+
+def entity_at(log, entity_id, boundary):
+    """Return one detached historical EntityInspection projection, if known."""
+    return NativeHistoryQuery(log).entity_at(entity_id, boundary)
+
+
+def entity_history_at(log, entity_id, boundary=None):
+    """Return detached EntityInspection projections through a boundary."""
+    return NativeHistoryQuery(log).entity_history_at(entity_id, boundary)
 
 
 def observer_facts_at(log, boundary, observer_id):

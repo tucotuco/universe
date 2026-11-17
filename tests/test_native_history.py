@@ -33,7 +33,8 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
                             INITIAL_RNG_SCHEMA, SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
-                            _plain, _expand_rows, _target_candidates)
+                            entity_at, entity_history_at, _plain, _expand_rows,
+                            _target_candidates)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -75,6 +76,47 @@ class NativeHistoryTests(unittest.TestCase):
                 {"boundary": boundary, "state": _plain(rows[target_id])}
                 for boundary, rows in target_rows.items() if target_id in rows]
             self.assertEqual(query.target_history_at(target_id), expected_history)
+
+    def test_per_entity_inspection_history_matches_each_native_receipt(self):
+        query = NativeHistoryQuery(self.log)
+        entity_ids = set(self.log["entity_context"]["initial"])
+        for boundary in range(self.log["latest_boundary"] + 1):
+            actual = query.entity_context_at(boundary)
+            receipts = self.demo["encounter"]._atomic_interval_history
+            expected = _plain(receipts[max(0, boundary - 1)].inspection.entities)
+            self.assertEqual(actual, expected)
+            self.assertEqual(set(actual), entity_ids)
+            for entity_id in entity_ids:
+                self.assertEqual(query.entity_at(entity_id, boundary), actual[entity_id])
+                self.assertEqual(entity_at(self.log, entity_id, boundary), actual[entity_id])
+        entity_id = sorted(entity_ids)[0]
+        expected_history = [
+            {"boundary": boundary, "entity": query.entity_at(entity_id, boundary)}
+            for boundary in range(self.log["latest_boundary"] + 1)]
+        self.assertEqual(query.entity_history_at(entity_id), expected_history)
+        self.assertEqual(entity_history_at(self.log, entity_id), expected_history)
+        detached = query.entity_at(entity_id, 0)
+        detached.clear()
+        self.assertTrue(query.entity_at(entity_id, 0))
+        self.assertIsNone(query.entity_at("unregistered-entity", 0))
+
+    def test_legacy_entity_history_is_unavailable_not_inferred(self):
+        legacy = _legacy_shape({key: copy.deepcopy(value) for key, value in self.log.items()
+                                if key not in ("sha256", "entity_context")})
+        legacy["schema"] = LEGACY_SCHEMA
+        legacy["initial"].pop("rng_before_first_commit")
+        previous = None
+        for row in legacy["boundaries"]:
+            if row["rng_after"] == SAME_RNG:
+                row["rng_after"] = (rng_state_at(self.log, row["boundary"])
+                                    if previous is None else previous)
+            previous = row["rng_after"]
+        legacy = _seal({key: value for key, value in legacy.items() if key != "sha256"})
+        legacy = upgrade(legacy)
+        query = NativeHistoryQuery(legacy)
+        identity = next(iter(self.log["entity_context"]["initial"]))
+        self.assertIsNone(query.entity_at(identity, 0))
+        self.assertIsNone(query.entity_history_at(identity))
 
     def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
         log = decode(self.wire)
