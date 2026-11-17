@@ -1332,8 +1332,12 @@ def validate(log):
                                 if type(intent) is dict else {})
                 if (type(intent) is not dict
                         or intent.get("$record") != "observer_proposals.PostCommitNotificationIntent"
+                        or set(fields_value) != {"source_action_id", "action_id", "topic", "after_commit"}
                         or fields_value.get("source_action_id") not in seen_actions
-                        or fields_value.get("action_id") not in seen_actions):
+                        or fields_value.get("action_id") not in seen_actions
+                        or type(fields_value.get("topic")) is not str
+                        or not fields_value["topic"]
+                        or fields_value.get("after_commit") is not True):
                     raise NativeHistoryRejected("post-commit notification references an unknown Action")
             for landing in row["disarm_landings"]["$tuple"]:
                 if (type(landing) is not dict
@@ -1341,7 +1345,11 @@ def validate(log):
                         or landing.get("fields", {}).get("boundary") != expected):
                     raise NativeHistoryRejected("Disarm landing receipt boundary or type differs")
                 fields_value = landing["fields"]
-                if (any(type(fields_value.get(key)) is not str or not fields_value[key]
+                if (set(fields_value) != {"source_action_id", "target_id", "owner_id",
+                                          "actor_id", "boundary", "origin_cell",
+                                          "landing_cell", "margin", "maximum_landing_hexes",
+                                          "position"}
+                        or any(type(fields_value.get(key)) is not str or not fields_value[key]
                         for key in ("source_action_id", "target_id", "owner_id", "actor_id"))
                         or fields_value["source_action_id"] not in seen_actions
                         or any(type(fields_value.get(key)) is not int
@@ -1355,6 +1363,21 @@ def validate(log):
                                       for part in fields_value[key]["$tuple"])
                                for key in ("origin_cell", "landing_cell"))):
                     raise NativeHistoryRejected("Disarm landing receipt fields are malformed")
+                for identity, expected_category in ((fields_value["target_id"], "weapon"),
+                                                     (fields_value["owner_id"], "being"),
+                                                     (fields_value["actor_id"], "being")):
+                    target = state["entities"].get(identity)
+                    if (type(target) is not dict
+                            or target.get("$record") != "action_settlement.TargetCandidate"
+                            or target.get("fields", {}).get("category") != expected_category):
+                        raise NativeHistoryRejected("Disarm landing receipt has a dangling Entity reference")
+                position = fields_value["position"]
+                if (type(position) is not dict or set(position) != {"$tuple"}
+                        or type(position["$tuple"]) is not list
+                        or len(position["$tuple"]) != 3
+                        or any(type(part) is not dict or set(part) != {"$number"}
+                               for part in position["$tuple"])):
+                    raise NativeHistoryRejected("Disarm landing position is malformed")
         covered = expected
     if (type(log["latest_boundary"]) is not int
             or not 0 <= log["latest_boundary"] <= MAX_BOUNDARIES

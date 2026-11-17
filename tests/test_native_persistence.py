@@ -1678,6 +1678,15 @@ print(json.dumps({'time':enc.time,'rng':rng_digest(rng),
             native_history.NativeHistoryQuery(committed_history).disarm_landings_at(
                 landing_receipt.boundary),
             native_history._plain((landing_receipt,)))
+        from native_history import NativeHistoryRejected, _seal
+        corrupted = json.loads(json.dumps(committed_history))
+        landing_row = next(row for row in corrupted["boundaries"]
+                           if row.get("boundary") == landing_receipt.boundary)
+        landing_row["disarm_landings"]["$tuple"][0]["fields"]["actor_id"] = "missing-being"
+        corrupted = _seal({key: value for key, value in corrupted.items()
+                           if key != "sha256"})
+        with self.assertRaisesRegex(NativeHistoryRejected, "dangling Entity reference"):
+            native_history.validate(corrupted)
         expected = {
             'time': encounter.time,
             'rng': hashlib.sha256(json.dumps(builder.rng.state).encode()).hexdigest(),
