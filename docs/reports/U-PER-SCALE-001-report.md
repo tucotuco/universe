@@ -1772,3 +1772,22 @@ Added `test_native_spatial_primitives_round_trip_and_continue`, which explicitly
 - `git diff --check` — passed.
 
 Fatigue/physiology matrix reconciliation is committed as `08dee4c`. The geometry test and matrix/report/TASKS update are pending scoped commit. LocalFrame continuation remains separately tested under `a42c44b`; U-PER-SCALE-001 remains ACTIVE.
+
+
+## Problems-first — Being abilities, state flags, speed and posture
+
+The live field catalog admits ability maps, per-Being state flags, movement speeds, and posture, but the native scenario coverage did not demonstrate those state families across a strict process boundary. A generic graph round-trip was insufficient evidence that legal, future-relevant state survives native rehydration and continuation.
+
+Added `test_native_being_abilities_states_speed_and_posture_restore`. It authors explicit STR 13/FIT 9, integer ambulation speed 5, the configured `prone` state and consistent `lying` posture before the first committed boundary; strict native Save is loaded in a fresh OS process; the child checks exact values and continues with ordinary native Delay. Uninterrupted and restored outcomes compare exact Encounter identity/time, complete ability/state/posture/speed projection, RNG, Action identity and native-history digest. A first fixture attempt used fractional speed 4.75; source normalization showed supported speeds are integer-valued, so the fixture was corrected to 5 without changing implementation or semantics.
+
+- From `src/`, `.venv/bin/python -m unittest discover -s ../tests -p 'test_native_persistence.py' -k native_being_abilities_states_speed_and_posture_restore` — **1 passed / 1.689s**.
+- From `src/`, `.venv/bin/python -m unittest discover -s ../tests -p 'test_persistence_capability_matrix.py'` — **3 passed / 0.022s**.
+- `git diff --check` — passed.
+
+The field rows now cite the focused source and test. This verifies these configured Being fields for native restoration and continuation; it does not establish every legal combination or reconstruct these projections from historical deltas. The complete capability matrix, all-family historical read parity, durable journal recovery, compatibility/security breadth and production application Save/Load cutover remain open implementation work. U-PER-SCALE-001 remains ACTIVE with no rules or external blocker identified. The current test/matrix/report/TASKS changes await scoped audit and commit.
+
+### Execution interval
+
+- Start: `2026-11-17T22:55:59Z`.
+- End: to be recorded immediately before this execution interval's closeout.
+- Elapsed: to be calculated from the recorded timestamps.

@@ -2250,6 +2250,54 @@ print(json.dumps({'encounter_id':encounter.id,'time':encounter.time,
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
 
+    def test_native_being_abilities_states_speed_and_posture_restore(self):
+        world,encounter,rng,actor,_target,_weapon_id=self._combat_encounter()
+        from states import StatesList
+        state_list=StatesList();state_list.load_states(str(ROOT/'src/config/states.tsv'))
+        actor.set_ability('STR',13);actor.set_ability('FIT',9)
+        actor.set_max_speed('ambulate',5)
+        actor.set_state(state_list,'prone',True)
+        actor.set_posture('lying')
+        encounter.step(1)
+        wire=export_save(encounter)
+        continuation=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
+            id='native-being-fields-continuation')
+        encounter.schedule_action(continuation);encounter.step(1)
+        def projection(being):
+            return {'abilities':dict(being.get_abilities()),'states':being.get_states(),
+                'posture':being.get_posture(),'ambulate':being.sprint()}
+        expected={'encounter_id':encounter.id,'time':encounter.time,
+            'being':projection(actor),'rng':rng.state,
+            'history':hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'actions':list(encounter._atomic_interval_history[-1].action_ids)}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-being-fields.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+actor=encounter.get_being(encounter.being_list[0])
+assert actor.STR()==13 and actor.FIT()==9
+assert actor.get_state('prone') is True and actor.get_posture()=='lying'
+assert actor.sprint()==5
+action=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
+ id='native-being-fields-continuation')
+encounter.schedule_action(action);encounter.step(1)
+print(json.dumps({'encounter_id':encounter.id,'time':encounter.time,
+ 'being':{'abilities':dict(actor.get_abilities()),'states':actor.get_states(),
+  'posture':actor.get_posture(),'ambulate':actor.sprint()},'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(
+  native_history.capture(encounter))).hexdigest(),
+ 'actions':list(encounter._atomic_interval_history[-1].action_ids)},sort_keys=True))'''
+            import os
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path)],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=45)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
+
     def test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()
