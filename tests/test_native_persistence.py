@@ -589,6 +589,14 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 if thrown.__dict__["_projectile_flight"].impact_outcome is not None:
                     break
                 enc.step(1)
+            history_query = native_history.NativeHistoryQuery(
+                native_history.capture(enc))
+            for entity in (thrown, shield, armor, victim):
+                for record in getattr(entity, "_atomic_target_history", ()):
+                    if record.encounter_id == enc.id:
+                        self.assertEqual(history_query.target_at(
+                            entity.id, record.boundary),
+                            native_history._plain(record.state))
             effects = [row.effect for row in target_effects_from(shield, action.id)]
             protection = next(effect for effect in effects
                               if type(effect).__name__ == "ProtectionEffect"
@@ -644,6 +652,11 @@ initial_armor_hp=armor.hit_points()
 for _ in range(5):
  if thrown.__dict__['_projectile_flight'].impact_outcome is not None: break
  enc.step(1)
+history_query=native_history.NativeHistoryQuery(native_history.capture(enc))
+for entity in (thrown,shield,armor,victim):
+ for record in getattr(entity,'_atomic_target_history',()):
+  if record.encounter_id==enc.id:
+   assert history_query.target_at(entity.id,record.boundary)==native_history._plain(record.state)
 effects=[row.effect for row in target_effects_from(shield,sys.argv[6])]
 protection=next(effect for effect in effects if type(effect).__name__=='ProtectionEffect' and effect.layer=='shield')
 durability=[effect.amount for effect in effects if type(effect).__name__=='DamageEffect' and effect.component=='shield']
