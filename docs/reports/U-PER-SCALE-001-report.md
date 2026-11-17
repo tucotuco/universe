@@ -33,6 +33,12 @@ The existing ReproductionGroup fresh-process fixture restored the logical Group 
 
 The PersonalHistory continuation now stores two dated rank facts: rank 1 at t=-5, then an Episode and rank 2 at t=-1 in one RealityLedger transaction. It queries exact-date facts and the episode, reruns the validator in a new process, then continues Delay with equal PersonalHistory bytes, RNG and native history. Exact focused results: ReproductionGroup logical registry plus binding continuation **2 passed / 2.544s**; PersonalHistory multi-fact continuation **1 passed / 1.720s**. These close selected current-snapshot facts, not all Group/Reproduction/PersonalHistory mutation histories or graph-free history reconstruction.
 
+### Progressive ReproductionGroup history round-trip
+
+The native recipe previously had no direct fresh-process continuation fixture for the implemented progressive-history branch. The new case uses the existing explicit test-only interval profile, publishes an initial two-period prefix and its one-period extension using the ordinary Universe registry APIs before Encounter creation, then Saves after a native Delay. Canonical Load→Save equality and an independently launched OS process preserve the complete semantic registry projection: seed/profile/schema/algorithm/scope digest, contiguous periods and stable generated Person IDs, Group identity/parent/offspring/source/revision, request keys, and progressive scope. The child then commits the next native Delay; logical Encounter/Action IDs, result, RNG and complete native history digest match uninterrupted execution. This is strictly persistence of existing test-profile-generated facts; it does not introduce or claim a production reproduction profile.
+
+Verification: `PYTHONPATH=tests:src:../examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_progressive_reproduction_history_restores_and_continues_in_fresh_process -v` — **1 passed / 1.702s**; combined progressive + capability-matrix/API command — **4 passed / 1.706s**. Compilation and `git diff --check` pass. U-PER-SCALE-001 remains ACTIVE; history/query parity across these world-owned records and overall persistence cutover are still open.
+
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 

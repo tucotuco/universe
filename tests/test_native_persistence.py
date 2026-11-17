@@ -2316,6 +2316,112 @@ print(json.dumps({'being_id':being.id,'name':being.name,'request':record.request
         self.assertEqual(restored['request'], 'native-binding-materialize')
         self.assertEqual(restored, json.loads(json.dumps(expected)))
 
+    def test_progressive_reproduction_history_restores_and_continues_in_fresh_process(self):
+        import os
+        import random
+        from reproduction_generation import (
+            ProgressiveReproductionRequest,
+            TestOnlyIntervalReproductionProfile,
+        )
+
+        world = Universe('native-progressive-reproduction', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        profile = TestOnlyIntervalReproductionProfile(
+            'native-persistence-progressive', '1', ((2, 1),))
+        for target, key, revision in (
+                (1, 'native-progressive-first', 0),
+                (2, 'native-progressive-second', 1)):
+            world.resolve_progressive_reproduction(
+                ProgressiveReproductionRequest(('P1', 'P2'), 73, target, profile),
+                request_key=key, expected_revision=revision)
+
+        actor_id = world.make_being('Human', 'Progressive history runner')
+        actor = world.get_object_by_id(actor_id)
+        encounter = Encounter(world, 10, 0, initiated=True,
+                              id='native-progressive-encounter')
+        encounter.add_being(actor_id)
+        world.add_event(encounter)
+        rng = RNGCursor(random.Random(444).getstate())
+        encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
+        first = DelayAction(encounter, actor_id, defense=0, start_time=0,
+                            id='native-progressive-initial')
+        encounter.schedule_action(first)
+        encounter.step(1)
+        wire = export_save(encounter)
+
+        def registry_projection(registry_world):
+            snapshot = registry_world.reproduction_group_snapshot()
+            history = snapshot.progressive_histories[0]
+            group = next(row for row in snapshot.groups if row.group_id == history.group_id)
+            return {
+                'revision': snapshot.revision,
+                'history': [list(history.parent_ids), history.world_seed,
+                    history.profile_id, history.profile_version, history.profile_schema,
+                    [list(row) for row in history.weighted_counts_per_period],
+                    history.algorithm, history.scope_digest, history.through_period,
+                    history.group_id,
+                    [[row.period, row.count, list(row.offspring_ids)]
+                     for row in history.periods], history.revision,
+                    history.parent_global_history_complete],
+                'group': [group.group_id, list(group.parent_ids),
+                    list(group.offspring_ids), group.source_reference,
+                    group.revision, group.parents_complete],
+                'request_keys': list(snapshot.progressive_request_keys),
+                'scope': [[list(parents), scope]
+                          for parents, scope in snapshot.progressive_parent_set_scopes],
+            }
+
+        continued = DelayAction(encounter, actor_id, defense=0, start_time=1,
+                                id='native-progressive-continuation')
+        encounter.schedule_action(continued)
+        encounter.step(1)
+        expected = {
+            'registry': registry_projection(world),
+            'time': encounter.time,
+            'outcome': continued.resolution.outcome,
+            'rng': rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-progressive-reproduction.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import export_save,load_path
+world,enc,rng=load_path(sys.argv[1])
+assert enc.id=='native-progressive-encounter'
+assert export_save(enc)==open(sys.argv[1],'rb').read()
+snapshot=world.reproduction_group_snapshot();history=snapshot.progressive_histories[0]
+group=next(row for row in snapshot.groups if row.group_id==history.group_id)
+registry={'revision':snapshot.revision,
+ 'history':[list(history.parent_ids),history.world_seed,history.profile_id,
+  history.profile_version,history.profile_schema,
+  [list(row) for row in history.weighted_counts_per_period],history.algorithm,
+  history.scope_digest,history.through_period,history.group_id,
+  [[row.period,row.count,list(row.offspring_ids)] for row in history.periods],
+  history.revision,history.parent_global_history_complete],
+ 'group':[group.group_id,list(group.parent_ids),list(group.offspring_ids),
+  group.source_reference,group.revision,group.parents_complete],
+ 'request_keys':list(snapshot.progressive_request_keys),
+ 'scope':[[list(parents),scope] for parents,scope in snapshot.progressive_parent_set_scopes]}
+action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
+ id='native-progressive-continuation')
+enc.schedule_action(action);enc.step(1)
+print(json.dumps({'registry':registry,'time':enc.time,
+ 'outcome':action.resolution.outcome,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path)], cwd=directory,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
+
     def test_completed_ask_about_past_and_listener_accounts_resume_with_binding(self):
         world, encounter, rng, listener, speaker, _weapon_id = self._combat_encounter()
         from personal_history import PersonalHistory
