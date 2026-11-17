@@ -1582,6 +1582,112 @@ print(json.dumps({'times':[row[0].time for row in rows],
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
 
+    def test_native_save_restores_distinct_group_beliefs_across_encounters(self):
+        import os
+        import random
+        from field_observation import BeliefLedger
+        from group_observation import ObserveGroupAction
+
+        world=Universe('native-multi-group-beliefs',library=Library(
+            config_dir=str(ROOT/'src/config')))
+        rows=[];bindings=[]
+        skills=world.get_skill_dictionary()
+        for index,seed in ((0,41),(1,42)):
+            config=json.loads((ROOT/'examples/nomadic_group.json').read_text())
+            config['motion']['position']=[1.5,index*5,0]
+            group=StatisticalGroup(f'Objective Group {index}',
+                f'native-group-{index}',config,81)
+            world.add_object(group)
+            actor_id=world.make_being('Human',f'Group observer {index}')
+            actor=world.get_object_by_id(actor_id)
+            actor.set_position(CartesianPosition(0,index*5,0))
+            actor.set_geometry(Sphere(.25))
+            actor.set_skill_level(skills,'spot',10)
+            encounter=Encounter(world,10,0,initiated=True,
+                id=f'native-multi-group-encounter-{index}')
+            encounter.add_being(actor_id);encounter.add_object(group.id)
+            world.add_event(encounter)
+            rng=RNGCursor(random.Random(seed).getstate())
+            encounter.enable_transactional_progression(quiescent=True,rng_owner=rng)
+            ledger=BeliefLedger(actor_id)
+            action=ObserveGroupAction(world,actor_id,group.id,0,seed=seed,
+                observation={'coarse_range_m':100,'detailed_range_m':50},
+                ledger=ledger)
+            encounter.schedule_action(action);encounter.step(1)
+            rows.append((encounter,actor,group,rng,action,ledger))
+            bindings.append(RecipientBinding(world,'native-multi-group',f'belief-{index}',
+                'in_world_belief_ledger',(actor_id,),ledger))
+        self.assertTrue(all(row[4].resolution.outcome=='success' for row in rows))
+        wire=export_save(rows[1][0],recipient_bindings=tuple(bindings))
+
+        def project_observation(observation):
+            return [observation.id,observation.observer_id,observation.group_id,
+                observation.time,
+                None if observation.reported_position is None else list(observation.reported_position.as_tuple()),
+                sorted((name,value.estimate,value.uncertainty)
+                    for name,value in observation.reports.items()),
+                observation.mode,sorted(observation.dubious_candidates.items()),
+                observation.focus_category]
+
+        def project():
+            return {'times':[row[0].time for row in rows],
+                'outcomes':[row[4].resolution.outcome for row in rows],
+                'evidence':[[project_observation(ob) for ob in row[5].evidence] for row in rows],
+                'belief_history':[[[item.group_id,item.category,item.estimate,
+                    list(item.evidence_ids),item.trigger,item.time,item.disputed,
+                    item.trigger_observation_id] for item in row[5].belief_history] for row in rows],
+                'rng':[row[3].state for row in rows],
+                'facts':[row[2]._composition_reality.to_jsonable() for row in rows],
+                'histories':[hashlib.sha256(native_history.encode(
+                    native_history.capture(row[0]))).hexdigest() for row in rows]}
+
+        for encounter,*_ in rows:
+            encounter.schedule_action(DelayAction(encounter,encounter.being_list[0],
+                defense=0,start_time=encounter.time,id=f'{encounter.id}-continuation'))
+            encounter.step(1)
+        expected=project()
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-multi-group-beliefs.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+from encounter import Encounter
+from activities import DelayAction
+import native_history
+from native_persistence import load_path,rng_owner_for
+world,selected,selected_rng=load_path(sys.argv[1])
+encounters={event.id:event for event in world.event_history.values() if type(event)is Encounter}
+assert len(encounters)==2
+rows=[]
+for index in range(2):
+ enc=encounters[f'native-multi-group-encounter-{index}']
+ action=world.get_event_by_id(sys.argv[index+2])
+ group=world.get_object_by_id(f'native-group-{index}')
+ ledger=action.ledger
+ assert ledger.observer_id==action.actor_id and len(ledger.evidence)==1
+ actor=world.get_object_by_id(action.actor_id)
+ enc.schedule_action(DelayAction(enc,actor.id,defense=0,start_time=enc.time,
+  id=f'{enc.id}-continuation'))
+ enc.step(1);rows.append((enc,action,ledger,rng_owner_for(enc),group))
+def obs(o):
+ return [o.id,o.observer_id,o.group_id,o.time,
+  None if o.reported_position is None else list(o.reported_position.as_tuple()),
+  sorted((name,value.estimate,value.uncertainty) for name,value in o.reports.items()),
+  o.mode,sorted(o.dubious_candidates.items()),o.focus_category]
+print(json.dumps({'times':[r[0].time for r in rows],
+ 'outcomes':[r[1].resolution.outcome for r in rows],
+ 'evidence':[[obs(o) for o in r[2].evidence] for r in rows],
+ 'belief_history':[[[i.group_id,i.category,i.estimate,list(i.evidence_ids),i.trigger,
+  i.time,i.disputed,i.trigger_observation_id] for i in r[2].belief_history] for r in rows],
+ 'rng':[r[3].state for r in rows],
+ 'facts':[r[4]._composition_reality.to_jsonable() for r in rows],
+ 'histories':[hashlib.sha256(native_history.encode(native_history.capture(r[0]))).hexdigest()
+  for r in rows]},sort_keys=True))'''
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path),
+                rows[0][4].id,rows[1][4].id],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=60)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))
