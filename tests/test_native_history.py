@@ -48,6 +48,7 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             objective_use_at, schedule_at, action_state_at,
                             choice_state_at, capture_initial_schedule,
                             _plain, _expand_rows, _target_candidates)
+from native_history import _boundary_payload
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -124,6 +125,21 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertTrue(query.entity_at(entity_id, 0))
         self.assertIsNone(query.entity_at("unregistered-entity", 0))
 
+    def test_boundary_facts_reconstruct_all_portable_receipt_fields(self):
+        encounter = self.demo["encounter"]
+        view = encounter.inspect_committed()
+        targets = _target_candidates(encounter)
+        query = NativeHistoryQuery(decode(self.wire))
+        receipts = encounter.__dict__["_atomic_interval_history"]
+        for receipt in receipts:
+            expected = _boundary_payload(encounter, receipt, view, targets)
+            actual = query.boundary_facts_at(receipt.boundary)
+            for field, value in expected.items():
+                with self.subTest(boundary=receipt.boundary, field=field):
+                    self.assertEqual(actual[field], value)
+            self.assertIsNotNone(actual["observer_knowledge"])
+            self.assertIsNotNone(actual["fatigue_context"])
+
     def test_legacy_entity_history_is_unavailable_not_inferred(self):
         legacy = _legacy_shape({key: copy.deepcopy(value) for key, value in self.log.items()
                                 if key not in ("sha256", "entity_context")})
@@ -141,6 +157,11 @@ class NativeHistoryTests(unittest.TestCase):
         identity = next(iter(self.log["entity_context"]["initial"]))
         self.assertIsNone(query.entity_at(identity, 0))
         self.assertIsNone(query.entity_history_at(identity))
+        portable = query.boundary_facts_at(legacy["latest_boundary"])
+        self.assertIsNone(portable["entity_context"])
+        self.assertIsNone(portable["fatigue_context"])
+        self.assertIsNone(portable["observer_knowledge"])
+        self.assertIsNone(portable["notification_intents"])
 
     def test_objective_fact_and_use_queries_match_committed_group_observation(self):
         fixture = inspection_fixtures.InspectionFixture()
@@ -371,6 +392,11 @@ class NativeHistoryTests(unittest.TestCase):
                          self.log["entity_context"]["initial"])
         self.assertEqual(query.entity_context_at(0),
                          self.log["entity_context"]["initial"])
+        initial_facts = query.boundary_facts_at(0)
+        self.assertEqual(initial_facts["entity_context"],
+                         self.log["entity_context"]["initial"])
+        self.assertEqual(initial_facts["action_ids"], [])
+        self.assertEqual(initial_facts["target_states"], {})
         self.assertEqual(fatigue_context_at(self.log, 0),
                          query.fatigue_context_at(0))
         self.assertEqual(events_at(self.log, 0), expected_events)

@@ -18,7 +18,8 @@ from activities import PickUpAction, ReadyWeaponAction
 from library import Library
 from arena_hex_map import ArenaHexLayout, HexAddress
 from melee_combat import MeleeStrike
-from native_history import NativeHistoryQuery, _plain, capture, decode, encode
+from native_history import (NativeHistoryQuery, _boundary_payload, _plain,
+                            capture, decode, encode)
 from native_persistence import export_save
 from native_scenario import NativeScenarioBuilder
 from object import ObjectDefinition, ObjectInstance
@@ -45,6 +46,12 @@ class NativeDrawPersistenceTests(unittest.TestCase):
         for boundary in range(1, log['latest_boundary'] + 1):
             receipt = receipts[boundary]
             inspection = encounter.inspect_committed(boundary)
+            expected_facts = _boundary_payload(encounter, receipt, inspection,
+                                               targets)
+            actual_facts = query.boundary_facts_at(boundary)
+            for field, expected in expected_facts.items():
+                self.assertEqual(actual_facts[field], expected,
+                                 (boundary, field))
             self.assertEqual(query.timeline_at(boundary), _plain(inspection.timeline))
             actual = query.committed_actions_at(boundary)
             self.assertEqual(actual['actions'], _plain(inspection.actions))

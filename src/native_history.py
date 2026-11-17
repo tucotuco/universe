@@ -2366,6 +2366,68 @@ class NativeHistoryQuery:
                      "disarm_landings": row["disarm_landings"]}
         return self._copy(facts)
 
+    def boundary_facts_at(self, boundary):
+        """Reconstruct the complete portable fact row for one committed cut.
+
+        This is the graph-independent counterpart to the fields collected by
+        ``_boundary_payload`` during capture. It contains only stable recorded
+        facts; process-local Target/Action anchors and live runtime objects are
+        deliberately absent. Legacy history returns ``None`` for families it
+        did not record rather than deriving them from a later state.
+        """
+        self._boundary(boundary)
+        state = self.state_at(boundary)
+        events = self.events_at(boundary)
+        receipt_facts = self.receipt_facts_at(boundary)
+        if boundary == 0:
+            start = self._log["initial"]["start"]
+            end = state["time"]
+        else:
+            _index, row = self._segment(boundary)
+            if row.get("kind") == "quiet_span":
+                start = _plain(
+                    _number_value(row["start"])
+                    + (boundary - row["from_boundary"])
+                    * _number_value(row["step"]))
+            else:
+                start = row["start"]
+            end = state["time"]
+        entities = self.entity_context_at(boundary)
+        candidates = state["entities"]
+        target_states = {
+            identity: value for identity, value in candidates.items()
+            if type(value) is dict
+            and value.get("$record") == "action_settlement.TargetCandidate"
+        }
+        rng_after = (None if boundary == 0
+                     and self._log["initial"].get("rng_before_first_commit") is None
+                     else self.rng_state_at(boundary))
+        return self._copy({
+            "boundary": boundary,
+            "start": start,
+            "end": end,
+            "action_ids": events["action_ids"],
+            "effect_ids": events["effect_ids"],
+            "notification_intents": (None if receipt_facts is None else
+                                      receipt_facts["notification_intents"]),
+            "disarm_landings": (None if receipt_facts is None else
+                                receipt_facts["disarm_landings"]),
+            "actions": events["actions"],
+            "effects": events["effects"],
+            "target_states": target_states,
+            "entity_context": entities,
+            "objective": state["objective"],
+            "objective_use": state["objective_use"],
+            "recipients": state["recipients"],
+            "schedule": state["schedule"],
+            "starts": events["starts"],
+            "participants": events["participants"],
+            "projectile_states": state["projectile_states"],
+            "rng_after": rng_after,
+            "observer_knowledge": self.observer_knowledge_at(boundary),
+            "fatigue_context": self.fatigue_context_at(boundary),
+        })
+
     def disarm_landings_at(self, boundary):
         facts = self.receipt_facts_at(boundary)
         return None if facts is None else facts["disarm_landings"]
