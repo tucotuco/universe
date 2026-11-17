@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -77,11 +78,68 @@ def _legacy_history_shape(value):
     value.pop("receipt_facts_complete", None)
     value.pop("observer_knowledge", None)
     value.get("initial", {}).pop("initial_schedule_available", None)
+    value.get("initial", {}).pop("initial_entities_available", None)
     for row in value.get("boundaries", ()):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
         row.pop("receipt_facts_available", None)
     return value
+
+
+def _legacy_initial_entity_anchor(value, encounter):
+    """Model pre-/11 history whose initial projection was the first receipt."""
+    body = copy.deepcopy({key: item for key, item in value.items()
+                          if key != "sha256"})
+    initial_entities = native_history._plain(
+        encounter._atomic_interval_history[0].inspection.entities)
+    old_state = native_history._initial_state(body["initial"])
+    committed_states = []
+    for row in native_history._expand_rows(body):
+        old_state = native_history._apply(old_state, row["changes"])
+        committed_states.append(old_state)
+    body["initial"]["entities"] = initial_entities
+    body["initial"]["initial_entities_available"] = False
+    prior = native_history._initial_state(body["initial"])
+    rows = []
+    for original, state in zip(native_history._expand_rows(value), committed_states):
+        row = dict(original)
+        row["changes"] = native_history._diff(prior, state)
+        row["state_sha256"] = hashlib.sha256(
+            native_history._canonical(state)).hexdigest()
+        rows.append(row)
+        prior = state
+    body["boundaries"] = native_history._compact_quiet_rows(rows)
+    context = body.get("entity_context")
+    if type(context) is dict and context.get("available") is True:
+        first_boundary = encounter._atomic_interval_history[0].boundary
+        strip_fatigue = context.get("fatigue_available") is False
+
+        def legacy_context(entities):
+            result = copy.deepcopy(entities)
+            if strip_fatigue:
+                for entity in result.values():
+                    pre_action = entity.get("fields", {}).get("pre_action", {})
+                    pre_action.pop("physical_fatigue", None)
+                    pre_action.pop("physiology", None)
+            return result
+
+        context_initial = legacy_context(initial_entities)
+        context["initial"] = context_initial
+        prior_context = context_initial
+        changes = []
+        for receipt in encounter._atomic_interval_history[1:]:
+            boundary = receipt.boundary
+            current = legacy_context(native_history._plain(
+                receipt.inspection.entities))
+            delta = native_history._diff(prior_context, current)
+            if delta:
+                changes.append({"boundary": boundary,
+                    "changes": delta,
+                    "state_sha256": hashlib.sha256(
+                        native_history._canonical(current)).hexdigest()})
+            prior_context = current
+        context["changes"] = changes
+    return body
 
 
 class NativePersistenceTests(unittest.TestCase):
@@ -231,6 +289,7 @@ print(json.dumps({'encounter':encounter.id,
                           if key != "sha256"}
         legacy_history.pop("observer_knowledge")
         legacy_history["initial"].pop("initial_schedule_available")
+        legacy_history["initial"].pop("initial_entities_available")
         legacy_history["schema"] = native_history.RECEIPT_FACT_SCHEMA
         legacy_payload["history"] = native_history._seal(legacy_history)
         legacy_unsigned = {key: value for key, value in legacy_payload.items()
@@ -3143,9 +3202,11 @@ print(json.dumps({'times':[r[0].time for r in rows],
                             patch("native_history._merge_recipient_rows",
                                   side_effect=lambda _old, touched: touched):
                         old_log = native_history.capture(encounter)
+                    old_log = _legacy_initial_entity_anchor(old_log, encounter)
                     unsigned = {key: value for key, value in old_log.items()
                                 if key != "sha256"}
                     unsigned["schema"] = native_history.RECIPIENT_HISTORY_SCHEMA
+                    unsigned["initial"].pop("initial_entities_available")
                     old_log = native_history._seal(unsigned)
                     upgraded = native_history.upgrade(old_log)
                     upgraded_query = native_history.NativeHistoryQuery(upgraded)
@@ -3691,7 +3752,9 @@ print(json.dumps({'registry':registry,'time':enc.time,
         document = json.loads(wire)
         legacy_history = {key: value for key, value in document['history'].items()
                           if key != 'sha256'}
+        legacy_history = _legacy_initial_entity_anchor(legacy_history, encounter)
         legacy_history['schema'] = native_history.RECIPIENT_HISTORY_SCHEMA
+        legacy_history['initial'].pop('initial_entities_available')
         history_state = native_history._initial_state(legacy_history['initial'])
         for history_row in legacy_history['boundaries']:
             for change in history_row['changes']:
@@ -3714,10 +3777,15 @@ print(json.dumps({'registry':registry,'time':enc.time,
                                   start_time=1, id='native-inquiry-continuation')
         encounter.schedule_action(next_action)
         encounter.step(1)
-        history_digest = hashlib.sha256(native_history.encode(
-            native_history.capture(encounter))).hexdigest()
+        original_query = native_history.NativeHistoryQuery(
+            native_history.capture(encounter))
+        history = {"boundaries": [
+            {"state": original_query.state_at(boundary),
+             "events": original_query.events_at(boundary),
+             "context": original_query.entity_context_at(boundary)}
+            for boundary in range(1, encounter.last_processed_boundary + 1)]}
         expected = {'time': encounter.time, 'rng': rng.state,
-                    'history': history_digest,
+                    'history': history,
                     'account': accounts[0].to_dict()}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'native-ask-about-past-save.json'
@@ -3739,8 +3807,12 @@ action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
  id='native-inquiry-continuation')
 enc.schedule_action(action)
 enc.step(1)
+log=native_history.current_recording(enc); q=native_history.NativeHistoryQuery(log)
+history={'boundaries':[{'state':q.state_at(boundary),
+ 'events':q.events_at(boundary),'context':q.entity_context_at(boundary)}
+ for boundary in range(1,enc.last_processed_boundary+1)]}
 print(json.dumps({'time':enc.time,'rng':rng.state,
- 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'history':history,'initial_entities_available':log['initial']['initial_entities_available'],
  'account':account},sort_keys=True))'''
             import os
             result = subprocess.run(
@@ -3750,6 +3822,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
                 text=True, capture_output=True, check=False, timeout=45)
         self.assertEqual(result.returncode, 0, result.stderr)
         actual = json.loads(result.stdout)
+        self.assertFalse(actual['initial_entities_available'])
         self.assertEqual(actual['time'], expected['time'])
         self.assertEqual(actual['rng'], json.loads(json.dumps(expected['rng'])))
         self.assertEqual(actual['history'], expected['history'])
@@ -4609,7 +4682,9 @@ print(json.dumps({'time':enc.time,
             for row in native_history._expand_rows(body['history'])}
         legacy = _legacy_history_shape({key: value for key, value in body['history'].items()
                   if key not in ('sha256', 'entity_context')})
+        legacy = _legacy_initial_entity_anchor(legacy, original)
         legacy['schema'] = LEGACY_SCHEMA
+        legacy['initial'].pop('initial_entities_available')
         legacy['initial'].pop('rng_before_first_commit')
         previous = None
         for row in legacy['boundaries']:
@@ -4664,7 +4739,9 @@ print(json.dumps({'time':enc.time,
         history = native_history._without_fatigue_context(body["history"])
         legacy = _legacy_history_shape({key: value for key, value in history.items()
                                         if key != "sha256"})
+        legacy = _legacy_initial_entity_anchor(legacy, original)
         legacy["schema"] = ENTITY_CONTEXT_SCHEMA
+        legacy["initial"].pop("initial_entities_available")
         legacy["entity_context"].pop("fatigue_available")
         legacy["initial"].pop("rng_before_first_commit")
         body["history"] = _seal(legacy)
@@ -4724,7 +4801,9 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         prior = native_history._without_initial_rng(body["history"])
         legacy = _legacy_history_shape({key: value for key, value in prior.items()
                                        if key != "sha256"})
+        legacy = _legacy_initial_entity_anchor(legacy, original)
         legacy["schema"] = FATIGUE_CONTEXT_SCHEMA
+        legacy["initial"].pop("initial_entities_available")
         legacy["initial"].pop("rng_before_first_commit")
         body["history"] = _seal(legacy)
         body["graph_b64"] = _previous_entity_compact_graph(original)
@@ -4747,9 +4826,11 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         body = json.loads(export_save(demo["encounter"]))
         history = {key: item for key, item in body["history"].items()
                    if key != "sha256"}
+        history = _legacy_initial_entity_anchor(history, demo["encounter"])
         history.pop("receipt_facts_complete")
         history.pop("observer_knowledge")
         history["initial"].pop("initial_schedule_available")
+        history["initial"].pop("initial_entities_available")
         history["schema"] = INITIAL_RNG_SCHEMA
         for row in history["boundaries"]:
             row.pop("notification_intents", None)

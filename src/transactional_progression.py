@@ -997,6 +997,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
     try:
         completed=[];motion=None;facing_updates=None;movement_stop_times=None;movement_targets=None;movement_decision_ids=[]
         first_initial_schedule=None
+        first_initial_entities=None
         while encounter.time<end:
             with publication_boundary(encounter,quiescent=True) as ownership:
                 # Reentrant entry checks are private control state, not timeline
@@ -1014,6 +1015,17 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
                         # the native Action's ordinary transaction outcome.
                         first_initial_schedule=None
                 context=_all_declarations(encounter,boundary,binding.rng_owner)
+                if (first_initial_entities is None
+                        and not encounter.__dict__.get('_atomic_interval_history')):
+                    from native_history import initial_entities_from_snapshot
+                    try:
+                        first_initial_entities=initial_entities_from_snapshot(
+                            encounter,context.snapshot)
+                    except Exception:
+                        # The simulation remains authoritative if an unreviewed
+                        # Entity family cannot be detached. Native history will
+                        # explicitly mark its initial projection unavailable.
+                        first_initial_entities=None
                 if motion is None:
                     positions={key:context.snapshot.entities[key].position for key in context.snapshot.participant_ids}
                     if movement_intents is not None:
@@ -1071,7 +1083,8 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
     # the full publisher and rollback boundary. It runs after the progression
     # lock is released because the inspector refuses reads during a step.
     from native_history import record_committed_boundary
-    record_committed_boundary(encounter, initial_schedule=first_initial_schedule)
+    record_committed_boundary(encounter, initial_schedule=first_initial_schedule,
+                              initial_entities=first_initial_entities)
     encounter._choice_book._repeat_completed_programs(encounter.last_processed_boundary)
     return result
 

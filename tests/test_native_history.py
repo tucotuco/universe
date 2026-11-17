@@ -21,6 +21,7 @@ def _legacy_shape(body):
     body.pop("receipt_facts_complete", None)
     body.pop("observer_knowledge", None)
     body.get("initial", {}).pop("initial_schedule_available", None)
+    body.get("initial", {}).pop("initial_entities_available", None)
     for row in body.get("boundaries", ()):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
@@ -36,13 +37,15 @@ def _legacy_initial_schedule(log, schedule=None):
     if schedule is not None:
         body["initial"]["initial_schedule"] = copy.deepcopy(schedule)
     body["initial"]["initial_schedule_available"] = False
+    body["initial"]["initial_entities_available"] = False
     return _seal(body)
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
                             NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
                             QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
-                            INITIAL_RNG_SCHEMA, SCHEMA, SAME_RNG, _seal,
+                            INITIAL_RNG_SCHEMA, PUBLICATION_FACT_SCHEMA,
+                            SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
                             entity_at, entity_history_at, objective_at,
                             objective_use_at, schedule_at, action_state_at,
@@ -105,10 +108,14 @@ class NativeHistoryTests(unittest.TestCase):
     def test_per_entity_inspection_history_matches_each_native_receipt(self):
         query = NativeHistoryQuery(self.log)
         entity_ids = set(self.log["entity_context"]["initial"])
+        initial_context = query.entity_context_at(0)
+        self.assertTrue(self.log["initial"]["initial_entities_available"])
+        self.assertEqual(initial_context, self.log["entity_context"]["initial"])
         for boundary in range(self.log["latest_boundary"] + 1):
             actual = query.entity_context_at(boundary)
             receipts = self.demo["encounter"]._atomic_interval_history
-            expected = _plain(receipts[max(0, boundary - 1)].inspection.entities)
+            expected = (initial_context if boundary == 0 else
+                        _plain(receipts[boundary - 1].inspection.entities))
             self.assertEqual(actual, expected)
             self.assertEqual(set(actual), entity_ids)
             for entity_id in entity_ids:
@@ -162,6 +169,22 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertIsNone(portable["fatigue_context"])
         self.assertIsNone(portable["observer_knowledge"])
         self.assertIsNone(portable["notification_intents"])
+
+    def test_schema_ten_keeps_committed_context_but_marks_initial_projection_unknown(self):
+        body = {key: copy.deepcopy(value) for key, value in self.log.items()
+                if key != "sha256"}
+        body["initial"].pop("initial_entities_available")
+        body["schema"] = PUBLICATION_FACT_SCHEMA
+        old = _seal(body)
+        self.assertTrue(validate(old))
+        upgraded = upgrade(old)
+        query = NativeHistoryQuery(upgraded)
+        self.assertFalse(upgraded["initial"]["initial_entities_available"])
+        self.assertIsNone(query.state_at(0)["entities"])
+        self.assertIsNone(query.entity_context_at(0))
+        for boundary in range(1, self.log["latest_boundary"] + 1):
+            self.assertEqual(query.entity_context_at(boundary),
+                             NativeHistoryQuery(self.log).entity_context_at(boundary))
 
     def test_objective_fact_and_use_queries_match_committed_group_observation(self):
         fixture = inspection_fixtures.InspectionFixture()
@@ -710,6 +733,7 @@ class NativeHistoryTests(unittest.TestCase):
         body.pop("receipt_facts_complete")
         body.pop("observer_knowledge")
         body["initial"].pop("initial_schedule_available")
+        body["initial"].pop("initial_entities_available")
         body["schema"] = INITIAL_RNG_SCHEMA
         for row in body["boundaries"]:
             row.pop("notification_intents", None)
@@ -734,6 +758,7 @@ class NativeHistoryTests(unittest.TestCase):
         body.pop("receipt_facts_complete")
         body.pop("observer_knowledge")
         body["initial"].pop("initial_schedule_available")
+        body["initial"].pop("initial_entities_available")
         body["schema"] = INITIAL_RNG_SCHEMA
         for row in body["boundaries"]:
             row.pop("notification_intents", None)

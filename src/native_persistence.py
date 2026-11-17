@@ -332,7 +332,11 @@ def _load_v2_save(wire, value):
             actual_log = native_history.capture(
                 saved, initial_schedule=initial["initial_schedule"],
                 initial_schedule_available=initial.get(
-                    "initial_schedule_available", False))
+                    "initial_schedule_available", False),
+                initial_entities=(native_history._materialize_plain(
+                    initial["entities"])
+                    if initial.get("initial_entities_available") is True
+                    else None))
             actual_wire = native_history.encode(actual_log)
             if actual_wire != expected_wire:
                 raise NativeSaveRejected(
@@ -392,11 +396,20 @@ def _load_v1_save(wire):
             native_history.NativeHistoryRecorder.restore_pending(encounter)
             return world, encounter, rng_owner
         saved_initial = expected_history_log["initial"]
-        actual_log = native_history.capture(
+        source_schema = value["history"]["schema"]
+        capture = (native_history.capture_legacy_entity_anchor
+                   if source_schema != native_history.SCHEMA
+                   else native_history.capture)
+        actual_log = capture(
             encounter,
             initial_schedule=saved_initial["initial_schedule"],
             initial_schedule_available=saved_initial.get(
-                "initial_schedule_available", False))
+                "initial_schedule_available", False),
+            **({} if source_schema != native_history.SCHEMA else {
+                "initial_entities": (native_history._materialize_plain(
+                    saved_initial["entities"])
+                    if saved_initial.get("initial_entities_available") is True
+                    else None)}))
         actual_history = native_history.encode(actual_log)
         if actual_history != expected_history:
             source_schema = value["history"]["schema"]
