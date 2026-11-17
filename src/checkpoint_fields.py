@@ -555,7 +555,7 @@ FIELD_ADAPTERS = {
         "required": 'object_categories objects'.split(),
     },
     'weapon.WeaponInstance': {
-        "allowed": '_atomic_target_history current front_facing geometry id name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
+        "allowed": '_atomic_projectile_history _atomic_target_history _projectile_flight current front_facing geometry id name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
         "required": 'current front_facing geometry name original parent_container_id spatial_state top_facing type visual_occlusion'.split(),
     },
     'arena_perception.ArenaPerceptionLedger': {
@@ -763,10 +763,16 @@ RUN_SPOT_FIELD_CLOSURE = {
     'weapon.WeaponInstance': {
         'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',
                           'top_facing', 'front_facing', 'spatial_state', 'geometry',
-                          'visual_occlusion', '_atomic_target_history'),
+                          'visual_occlusion', '_atomic_target_history',
+                          '_projectile_flight', '_atomic_projectile_history'),
         'derived': ('type',),
-        'optional_values': {'_atomic_target_history': ('absent-before-first-commit',
-                                                       'list-matching-receipts')},
+        'optional_values': {
+            '_atomic_target_history': ('absent-before-first-commit',
+                                       'list-matching-receipts'),
+            '_projectile_flight': ('absent-before-release', 'one-matching-flight'),
+            '_atomic_projectile_history': ('absent-before-first-commit',
+                                           'list-matching-receipts'),
+        },
     },
     'armor.ArmorInstance': {
         'authoritative': ('id', 'name', 'original', 'current', 'parent_container_id',

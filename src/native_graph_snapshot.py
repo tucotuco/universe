@@ -763,13 +763,15 @@ def restore(envelope, *, native=False, companion_rng_owners=None):
     # whose saved measured state was written with a different precision rule.
     from object import ObjectDefinition
     from object import ObjectInstance
+    from weapon import WeaponInstance
     from spatial.state import SpatialState
     from spatial.geometry import AxisAlignedBox, Sphere
     from throwing import ProjectileFlight
     from measured_values import is_truncated_measurement
     exact_projectile_spatial_ids = {
         id(obj.spatial_state) for obj in cache.values()
-        if type(obj) is ObjectInstance and type(obj.spatial_state) is SpatialState
+        if type(obj) in (ObjectInstance, WeaponInstance)
+        and type(obj.spatial_state) is SpatialState
         and type(obj.__dict__.get('_projectile_flight')) is ProjectileFlight
     }
     for obj in cache.values():

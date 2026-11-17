@@ -23,6 +23,32 @@ from throwing import ProjectileFlight, ProjectileBoundaryState
 
 
 class NativeThrowTests(unittest.TestCase):
+    def test_inspection_accepts_committed_weapon_projectile_release_transition(self):
+        world, enc, actor, _projectile, _rng, original = build_native_scene(seed=816)
+        enc._choice_book.undo(enc._choice_book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition('Human')
+        target = BeingInstance(definition, 'Helpless Target', id='throw-demo/fatal-target')
+        target.current.hit_points = 0
+        target.set_position(CartesianPosition(0.5, 0.0, 0.0))
+        world.add_object(target);enc.add_being(target.id)
+        enc.mark_aware(actor.id, target.id)
+        weapon_id = world.make_weapon_for_being(actor.id, 'Dagger', 'Coup Dagger')
+        actor.set_body_part_holds_object('right hand', weapon_id)
+        enc.add_object(weapon_id)
+        action = ThrowAction(world, actor.id, weapon_id, enc.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, coup_de_grace=True,
+            id='throw-demo/fatal-release-inspection')
+        enc.schedule_choice((action,))
+        enc.step(RELEASE_BOUNDARY)
+
+        committed = enc.inspect_committed(RELEASE_BOUNDARY)
+        self.assertEqual(committed.action(action.id).facts.outcome, 'released')
+        projectile_state = committed.target(weapon_id).projectile_state
+        self.assertEqual(projectile_state.status, 'in_flight')
+        self.assertEqual(projectile_state.source_action_id, action.id)
+        self.assertEqual(projectile_state.source_effect_identity[2], action.id)
+
     def test_held_four_second_dagger_throw_uses_native_range_damage_profile(self):
         world, enc, actor, _projectile, rng, original = build_native_scene()
         book = enc.__dict__['_choice_book']

@@ -69,6 +69,7 @@ Verification: `PYTHONPATH=tests:src:../examples:../npc-generator .venv/bin/pytho
 | Native history bridge continuation | 2026-11-16T13:49:14-08:00 | IN PROGRESS | Recorded at closeout |
 | Full native bridge continuation | 2026-11-17T06:10:55Z | Not recorded in the prior closeout | Elapsed unavailable; no estimate added |
 | Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | IN PROGRESS | End and elapsed recorded at closeout |
+| Native projectile-history integration continuation | 2026-11-17T15:34:30Z | IN PROGRESS | End and elapsed recorded at closeout |
 
 ## Problems-first — cumulative observer-recipient history in `/10`, with strict `/9` migration
 
@@ -1356,3 +1357,41 @@ Added `test_missed_projectile_continues_with_native_unresolved_destination`. It 
 - `PYTHONPATH=src:examples .venv/bin/python -B tests/test_native_throw_arena.py -v` — **13 passed / 19.094s**; capability-matrix gates — **3 passed / 0.005s**; test-module `py_compile` and `git diff --check` passed.
 
 The projectile matrix now records supported hit and miss continuation. Target-moved/fatal projectile branches, other supported Action/state families, graph-free historical reconstruction, durable journal recovery, application Save/Load cutover, complete native migration/security/scale gates remain open. Commit evidence and the full final focused result will be added after scoped staging/audit. U-PER-SCALE-001 remains ACTIVE; no rules or external blocker is identified.
+
+## Problems-first — target movement during saved projectile flight
+
+### Gap
+
+The new native miss case did not cover the distinct supported `target_moved` resolution. Directly setting a target's position after release would be an unreceipted mutation and could not establish a lawful persistence case. The native `Encounter.step()` already accepts committed movement inputs before each boundary, so the fixture can use ordinary represented movement without altering the attack rule.
+
+### Correction and evidence
+
+Added `test_target_movement_during_projectile_flight_restores_natively`. A targeted Throw is released at t=4 and saved while airborne. Both uninterrupted and fresh OS process paths move the target by the same native per-second velocity for boundaries 5–7, then advance to projectile arrival at t=8. The target ends at `(8.0, 0.6, 0.0)`; the ProjectileFlight records `target_moved`, `landed`, zero impact damage, no target HP change, and the unchanged projectile landing position. RNG and complete native-history digest match exactly. `projectile_state_at()` matches the receipt at every checked boundary.
+
+### Verification
+
+`PYTHONPATH=tests:src:examples .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_target_movement_during_projectile_flight_restores_natively -v` — **1 passed / 3.860s**. This adds target-moved continuation only; fatal Throw/Coup-de-grace continuation and the broad graph-free history, journal, security, scaling, migration and application cutover gates remain open. U-PER-SCALE-001 remains ACTIVE.
+
+## Problems-first — held-Weapon projectile release and Coup de grace
+
+### Root cause
+
+The fatal-Throw path exposed three native integration omissions. First, `Encounter.inspect_committed()` authorized spatial identity changes only for Pick Up, Drop and post-roll Disarm landing, even though a validated `ProjectileReleaseEffect` installs the held Weapon's release-position `SpatialState`. Second, `_expected_body_parts()` did not account for that same committed effect removing the released Weapon from its holder's hand. After those inspection checks were corrected, the native Save rejected the released `WeaponInstance`: its exact field adapter omitted the existing optional `_projectile_flight` and `_atomic_projectile_history` state, and the measured-projectile-position validation recognized only `ObjectInstance`. These were implementation/schema gaps, not undefined projectile rules.
+
+### Correction
+
+The inspector now authorizes release-position identity transitions only when backed by a committed `ProjectileReleaseEffect`, and reconstructs the actor's hand state by removing that released Object. The closed `WeaponInstance` adapter now admits the same two optional projectile fields as the already-supported `ObjectInstance`, with its strict optional-field contract. Native restore treats a released Weapon projectile as an exact trajectory position when validating represented spatial measurements. No object type or arbitrary runtime field was admitted.
+
+### End-to-end outcome
+
+`test_thrown_coup_de_grace_restores_critical_consequences` creates a lawful held Dagger Throw against an aware helpless Being at the represented one-yard range. At t=4, the committed release is inspectable and Saveable with the Weapon airborne. A fresh OS process restores the same Encounter and Action IDs, advances through impact, and matches uninterrupted flight status/outcome, HP, body and critical-bypass DamageEffects, release Effect identity, RNG and complete native-history digest. The target reaches -3 HP; the ordinary native resolution is `hit` with its committed Coup de grace critical-bypass consequence.
+
+### Verification
+
+- `test_native_throw_arena.NativeThrowTests.test_inspection_accepts_committed_weapon_projectile_release_transition` — **1 passed / 0.896s**.
+- `test_native_persistence.NativePersistenceTests.test_thrown_coup_de_grace_restores_critical_consequences` — **1 passed / 4.018s**.
+- `test_encounter_inspection` — **42 passed, 1 known failure / 23.828s**. The sole failure is `test_shield_can_be_negative_and_has_separate_causal_damage`, previously reproduced against baseline commit `a0062420c005820e1a2833adafffb2b6473723fd`; it is unrelated to projectile inspection and remains unchanged.
+
+Final affected-suite verification for this continuation: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py' -v` — **45 passed / 131.620s**; `PYTHONPATH=src:examples .venv/bin/python -B tests/test_native_throw_arena.py -v` — **14 passed / 20.779s**; `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py' -v` — **50 passed / 19.675s**; `.venv/bin/python -B tests/test_persistence_capability_matrix.py -v` — **3 passed / 0.006s**. The capability-matrix test confirms the documentation's exact closed-field inventories against the executable adapter registry. The existing inspection suite result above is the previously verified baseline failure, not a new failure. This continuation also retains the earlier 25-test Action-family historical receipt parity suite and its explicitly partial matrix assessment.
+
+This closes the held-Weapon release inspection and tested thrown Coup consequence path only. The broad family, graph-free history, durable journal, application cutover, full corruption/security/migration and scaling gates remain open. U-PER-SCALE-001 remains ACTIVE.

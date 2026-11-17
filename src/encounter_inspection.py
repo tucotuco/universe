@@ -211,6 +211,11 @@ def _expected_body_parts(meta, target_id, initial, disarm_landings=()):
             if effect.actor_id==target_id:expected[effect.actor_hand]=effect.target_id
             if effect.holder_id==target_id and expected.get(effect.holder_hand)==effect.target_id:
                 expected[effect.holder_hand]=None
+        elif (type(effect) is ProjectileReleaseEffect
+                and effect.attacker_id == target_id):
+            for slot, value in tuple(expected.items()):
+                if value == effect.target_id:
+                    expected[slot] = None
     for landing in disarm_landings:
         if landing.owner_id==target_id:
             for slot,value in tuple(expected.items()):
@@ -701,7 +706,8 @@ def inspect_encounter(encounter, boundary=None, *, receipt=None):
         authorized_spatial_transition_ids={
             row.effect.object_id if type(row.effect) is PickupEffect else row.effect.target_id
             for copied in copies for row in copied.inspection.effects.values()
-            if type(row.effect) in (PickupEffect, DropObjectEffect)}
+            if type(row.effect) in (PickupEffect, DropObjectEffect,
+                                    ProjectileReleaseEffect)}
         authorized_spatial_transition_ids.update(row.target_id for row in issued_landings)
         if boundary is not None:
             _require(type(boundary) is int, 'integer committed boundary required')
