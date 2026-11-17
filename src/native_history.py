@@ -1409,6 +1409,13 @@ class NativeHistoryQuery:
             self._segment_starts.append(start)
             self._segment_ends.append(end)
             self._segment_rng.append(cursor)
+        self._actions_boundary = 0
+        self._action_ids = []
+        self._seen_actions = set()
+        self._effect_ids = []
+        self._seen_effects = set()
+        self._actions = {}
+        self._effect_rows = {}
         self._state_boundary = 0
         self._state = _initial_state(self._log["initial"])
         context = self._log.get("entity_context", _unavailable_entity_context())
@@ -1481,40 +1488,50 @@ class NativeHistoryQuery:
         committed-history view.
         """
         self._boundary(boundary)
-        action_ids = []
-        effect_ids = []
-        actions = {}
-        effect_rows = []
-        seen_actions = set()
-        seen_effects = set()
+        if boundary < self._actions_boundary:
+            self._actions_boundary = 0
+            self._action_ids = []
+            self._seen_actions = set()
+            self._effect_ids = []
+            self._seen_effects = set()
+            self._actions = {}
+            self._effect_rows = {}
         for row in self._segments:
+            end = row.get("to_boundary", row.get("boundary"))
+            if end <= self._actions_boundary:
+                continue
+            if end > boundary:
+                break
             if row.get("kind") == "quiet_span":
-                if row["from_boundary"] > boundary:
-                    break
+                self._actions_boundary = end
                 continue
             if row["boundary"] > boundary:
                 break
             batch = row["events"]
             for identity in batch["action_ids"]:
-                if identity not in seen_actions:
-                    seen_actions.add(identity)
-                    action_ids.append(identity)
+                if identity not in self._seen_actions:
+                    self._seen_actions.add(identity)
+                    self._action_ids.append(identity)
             for identity in batch["effect_ids"]:
                 key = _canonical(identity)
-                if key not in seen_effects:
-                    seen_effects.add(key)
-                    effect_ids.append(identity)
-            actions.update(batch["actions"])
+                if key not in self._seen_effects:
+                    self._seen_effects.add(key)
+                    self._effect_ids.append(identity)
+            self._actions.update(batch["actions"])
             encoded_effects = batch["effects"]
             if type(encoded_effects) is dict and set(encoded_effects) == {"$map"}:
-                effect_rows.extend(encoded_effects["$map"])
+                rows = encoded_effects["$map"]
             else:
-                effect_rows.extend([[key, value]
-                                    for key, value in encoded_effects.items()])
-        effect_rows.sort(key=lambda row: _canonical(row[0]))
+                rows = [[key, value] for key, value in encoded_effects.items()]
+            for key, value in rows:
+                self._effect_rows[_canonical(key)] = [key, value]
+            self._actions_boundary = row["boundary"]
+        self._actions_boundary = boundary
+        effect_rows = [self._effect_rows[key] for key in sorted(self._effect_rows)]
         effects = {"$map": effect_rows} if effect_rows else {}
-        return self._copy({"action_ids": action_ids, "effect_ids": effect_ids,
-                           "actions": actions, "effects": effects})
+        return self._copy({"action_ids": self._action_ids,
+                           "effect_ids": self._effect_ids,
+                           "actions": self._actions, "effects": effects})
 
     def rng_state_at(self, boundary):
         self._boundary(boundary)

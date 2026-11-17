@@ -53,8 +53,10 @@ class NativeHistoryTests(unittest.TestCase):
     def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
         log = decode(self.wire)
         query = NativeHistoryQuery(log)
+        actual_by_boundary = {}
         for boundary in range(log["latest_boundary"] + 1):
             actual = committed_actions_at(log, boundary)
+            actual_by_boundary[boundary] = actual
             self.assertEqual(query.committed_actions_at(boundary), actual)
             if boundary == 0:
                 self.assertEqual(actual["action_ids"], [])
@@ -71,6 +73,10 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(actual["effect_ids"],
                              [_plain(identity) for row in inspection.timeline
                               for identity in row.effect_ids])
+        # Out-of-order queries reset the bounded fold and remain exact.
+        for boundary in reversed(range(log["latest_boundary"] + 1)):
+            self.assertEqual(query.committed_actions_at(boundary),
+                             actual_by_boundary[boundary])
         detached = query.committed_actions_at(log["latest_boundary"])
         detached["actions"].clear()
         self.assertTrue(query.committed_actions_at(log["latest_boundary"])["actions"])
