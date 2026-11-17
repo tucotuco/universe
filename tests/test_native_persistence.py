@@ -39,6 +39,7 @@ from history_conversation import AskAboutPastAction
 from activities import SpotAction
 from location_observation import LocationEvidenceLedger
 from object_observation import ObjectObservationLedger
+from statistical_group import StatisticalGroup
 
 
 def _legacy_history_shape(value):
@@ -952,9 +953,24 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
     def test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()
-        group = fixture.f.f.f.group()
+        group_config = json.loads((ROOT / "examples/nomadic_group.json").read_text())
+        group_config["formation_traits"] = {
+            "adults": {"trained_spotter": {"count": 0, "initial_skills": {}}}}
+        group_config["formation_attributes"] = {
+            "adults": {"voice": {"given": "trained_spotter", "conditional_cdfs": {
+                "true": [["formal", 1]], "false": [["casual", 1]]}}}}
+        group = StatisticalGroup("Native group", "group-one", group_config,
+                                 group_config["seed"])
+        fixture.world.add_object(group)
+        fixture.enc.add_object(group.id)
         expected_count = group.household_count
         expected_household = group.household(0)
+        group.counts()
+        first_adult = next((household, index)
+            for household in range(group.household_count)
+            for index in range(group.household(household)["adults"]))
+        expected_voice = group.formation_attribute(first_adult[0], "adults",
+            first_adult[1], "voice")
         fixture.enable()
         first = DelayAction(fixture.enc, fixture.a.id, defense=0,
                             start_time=0, id="native-group-delay")
@@ -972,6 +988,7 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             "time": fixture.enc.time, "rng": fixture.rng.state,
             "group_id": group.id, "count": group.household_count,
             "household": group.household(0),
+            "formation_attribute": expected_voice,
             "history": hashlib.sha256(native_history.encode(
                 native_history.capture(fixture.enc))).hexdigest(),
             "actions": list(fixture.enc._atomic_interval_history[-1].action_ids),
@@ -990,6 +1007,8 @@ world,enc,rng=load_path(sys.argv[1])
 group=world.object_registry.object_instances['group-one']
 assert group.household_count == int(sys.argv[2])
 assert group.household(0) == json.loads(sys.argv[3])
+household,index=int(sys.argv[4]),int(sys.argv[5])
+assert group.committed_formation_attributes(household,'adults',index)['voice']==sys.argv[6]
 action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
  id='native-group-continuation-delay')
 enc.schedule_action(action)
@@ -997,6 +1016,7 @@ enc.step(1)
 print(json.dumps({'world':world.id,'encounter':enc.id,'time':enc.time,
  'rng':rng.state,'group_id':group.id,'count':group.household_count,
  'household':group.household(0),
+ 'formation_attribute':group.committed_formation_attributes(household,'adults',index)['voice'],
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
  'actions':list(enc._atomic_interval_history[-1].action_ids),
  'arena_imports':sorted(set(sys.modules)&{'arena_browser_session','arena_native_snapshot',
@@ -1004,7 +1024,8 @@ print(json.dumps({'world':world.id,'encounter':enc.id,'time':enc.time,
             import os
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path),
-                 str(expected_count), json.dumps(expected_household)],
+                 str(expected_count), json.dumps(expected_household),
+                 str(first_adult[0]), str(first_adult[1]), expected_voice],
                 cwd=ROOT, env={**os.environ,
                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=45)

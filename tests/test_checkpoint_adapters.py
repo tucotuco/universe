@@ -45,7 +45,10 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
         return group,history,ledger,accounts,(self.binding(ledger,'belief'),self.binding(accounts,'testimony'))
 
     def test_initial_native_closed_vocabulary_is_partial_readonly(self):
-        self.enable();before=self.raw();c=self.capture();self.assert_partial(c)
+        self.enable();before=self.raw()
+        with patch.object(ConditionalAttributes,'resolve',side_effect=AssertionError('resolve during capture')):
+            c=self.capture()
+        self.assert_partial(c)
         self.assertEqual(before,self.raw());self.assertIn('native-closure-recipes/1',set(strings(c.envelope)))
 
     def test_unstarted_arena_opt_in_is_inventory_only_not_interval_authority(self):
@@ -141,12 +144,45 @@ class TestNativeCheckpointAdapters(fixtures.InspectionFixture):
         store._committed[identity]['tone']='impossible'
         with self.assertRaisesRegex(ValueError,'impossible'):self.capture()
 
-    def test_conditional_external_names_are_not_external_values(self):
-        g=self.group();g._formation_traits={'adults':{'trained':{}}};s=g._conditional_attributes;s._external={'trained'}
+    def test_conditional_external_names_are_exact_quota_assignments(self):
+        g=self.group();g.counts();adults=g.counts()['adults'];quota=adults//2
+        g._formation_traits={'adults':{'trained':{'count':quota,'initial_skills':{}}}}
+        s=g._conditional_attributes;s._external={'trained'}
         s.specifications={'color':{'given':'trained','conditional_cdfs':{'true':[['red',1]],'false':[['blue',1]]}}}
-        g.household_count;g.household(0);s._committed[g.id+'/0/adults/0']={'color':'red'}
-        self.enable();c=self.capture();self.assert_partial(c)
-        self.assertIn('conditional_external_assignment_validation_pending',{d.code for d in c.diagnostics})
+        assigned=g._adult_formation_assignments('trained')
+        self.assertGreaterEqual(len(assigned),1)
+        qualified=next(iter(assigned));unqualified=next(
+            f'{g.id}/{household}/adults/{index}'
+            for household in range(g.household_count)
+            for index in range(g.household(household)['adults'])
+            if f'{g.id}/{household}/adults/{index}' not in assigned)
+        s._committed[qualified]={'color':'red'};s._committed[unqualified]={'color':'blue'}
+        self.enable();before=self.raw()
+        with patch.object(ConditionalAttributes,'resolve',side_effect=AssertionError('resolve during capture')):
+            c=self.capture()
+        self.assert_partial(c)
+        self.assertEqual(before,self.raw())
+        self.assertNotIn('conditional_external_assignment_validation_pending',{d.code for d in c.diagnostics})
+
+    def test_conditional_external_assignment_refuses_incomplete_composition_without_sampling(self):
+        g=self.group();s=g._conditional_attributes
+        g._formation_traits={'adults':{'trained':{'count':0,'initial_skills':{}}}}
+        s._external={'trained'}
+        s.specifications={'color':{'given':'trained','conditional_cdfs':{'true':[['red',1]],'false':[['blue',1]]}}}
+        g.household_count;g.household(0)
+        s._committed[g.id+'/0/adults/0']={'color':'blue'}
+        self.enable();before=self.raw()
+        with self.assertRaisesRegex(ValueError,'complete household composition'):
+            self.capture()
+        self.assertEqual(before,self.raw())
+
+    def test_formation_trait_adapter_rejects_invalid_quota_without_mutation(self):
+        g=self.group();g._formation_traits={'adults':{'trained':{'count':True,'initial_skills':{}}}}
+        g._conditional_attributes._external={'trained'}
+        self.enable();before=self.raw()
+        with self.assertRaisesRegex(ValueError,'nonnegative integer'):
+            self.capture()
+        self.assertEqual(before,self.raw())
 
     def test_invalid_conditional_specs_and_cycles_refuse(self):
         g=self.group();self.enable()

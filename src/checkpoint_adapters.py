@@ -23,6 +23,10 @@ from frozen_practice import _copy_use, _capture_history
 ADAPTER_VERSION = 'native-closure-recipes/1'
 _ABSENT = object()
 _NATIVE_GROUP_RNG = StatisticalGroup._rng
+_NATIVE_ADULT_FORMATION_ASSIGNMENTS = StatisticalGroup._adult_formation_assignments
+_NATIVE_GROUP_HOUSEHOLD_COUNT = StatisticalGroup.household_count
+_NATIVE_GROUP_HOUSEHOLD = StatisticalGroup.household
+_NATIVE_FORMATION_TRAIT_ASSIGNMENTS = statistical_group._formation_trait_assignments
 _NATIVE_COMPOSITION_RNG = statistical_group.composition_rng
 _NATIVE_GROUP_CONSTRAINT = StatisticalGroup._validate_composition_facts
 _NATIVE_HISTORY_CONSTRAINT = PersonalHistory._validate
@@ -582,17 +586,56 @@ class NativeInventory(_Inventory):
         _require(type(store) is ConditionalAttributes,'conditional_attribute_adapter_missing: native store required')
         d=_fields(store)
         _data_tree(d['specifications']);_data_tree(d['_external']);_data_tree(d['_committed'])
-        _data_tree(group._formation_traits)
-        if group._formation_traits:
-            self.issue('formation_trait_semantics_adapter_pending',('object',group.id),'_formation_traits',
-                'Frozen quota/initial-skill data are preserved, but whole-cohort assignment and realization semantics have no complete checkpoint validation adapter; closure refused.')
+        traits=group._formation_traits
+        _data_tree(traits)
+        _require(type(traits)is dict and not (set(traits)-{'adults'}),
+            'only native adult formation traits are supported')
+        adult_traits=traits.get('adults',{})
+        _require(type(adult_traits)is dict,'adult formation traits must be a mapping')
+        for trait_name,spec in adult_traits.items():
+            _require(type(trait_name)is str and trait_name and type(spec)is dict,
+                'formation trait names and specifications must be valid')
+            quota=spec.get('count')
+            initial=spec.get('initial_skills',{})
+            _require(type(quota)is int and quota>=0,
+                'formation trait count must be a nonnegative integer')
+            _require(type(initial)is dict and all(type(name)is str and name
+                and type(level)is int and level>=0 for name,level in initial.items()),
+                'formation initial skills must be nonnegative integer levels')
         _require(type(d['_external']) is set and all(type(s)is str for s in d['_external'])
-            and d['_external']==set(group._formation_traits.get('adults',{})), 'conditional external dependencies mismatch')
+            and d['_external']==set(adult_traits), 'conditional external dependencies mismatch')
         # Native construction validates detached specifications only; it does not call rng_for.
         ConditionalAttributes(d['specifications'],None,d['_external'])
         _require(type(d['_committed']) is dict,'opaque conditional commitments')
         records=_ledger_records(group._composition_reality);facts={r.key:r.value for r in records}
         validate_composition_records(group.id,group.formation_time,records)
+        exact_adult_assignments={}
+        root_key=FactKey(group.id,'household_count',group.formation_time)
+        root=facts.get(root_key)
+        composition_complete=(type(root)is int and not isinstance(root,bool) and root>=0
+            and all(type(facts.get(FactKey(group.id,'household',group.formation_time,str(household))))is dict
+                    for household in range(root)))
+        if adult_traits:
+            _require(type(group)is StatisticalGroup
+                and StatisticalGroup._adult_formation_assignments is _NATIVE_ADULT_FORMATION_ASSIGNMENTS
+                and StatisticalGroup.household_count is _NATIVE_GROUP_HOUSEHOLD_COUNT
+                and StatisticalGroup.household is _NATIVE_GROUP_HOUSEHOLD
+                and StatisticalGroup._rng is _NATIVE_GROUP_RNG
+                and statistical_group._formation_trait_assignments is _NATIVE_FORMATION_TRAIT_ASSIGNMENTS
+                and statistical_group.composition_rng is _NATIVE_COMPOSITION_RNG
+                and type(group._composition_reality)is RealityLedger
+                and not any(name in object.__getattribute__(group,'__dict__')
+                    for name in ('household','household_count','_adult_formation_assignments','_rng')),
+                'unreviewed native formation-assignment provider')
+        if composition_complete and adult_traits:
+            candidates=[f'{group.id}/{household}/adults/{index}'
+                for household in range(root)
+                for index in range(facts[FactKey(group.id,'household',group.formation_time,str(household))]['adults'])]
+            for trait_name in sorted(adult_traits):
+                quota=adult_traits[trait_name]['count']
+                _require(quota<=len(candidates),'formation trait quota exceeds committed adult cohort')
+                exact_adult_assignments[trait_name]=_NATIVE_FORMATION_TRAIT_ASSIGNMENTS(
+                    group.seed,group.id,trait_name,candidates,quota)
         for identity,values in d['_committed'].items():
             _require(type(identity)is str and identity.startswith(group.id+'/'),'foreign conditional identity')
             parts=identity[len(group.id)+1:].split('/')
@@ -606,9 +649,14 @@ class NativeInventory(_Inventory):
                 spec=d['specifications'][name];parent=spec.get('given')
                 if parent is None: cdfs=[spec['cdf']]
                 elif parent in d['_external']:
-                    cdfs=list(spec['conditional_cdfs'].values())
-                    self.issue('conditional_external_assignment_validation_pending',('object',group.id),name,
-                        'Committed external quota assignment is keyed/derived, not stored; no draws permitted during capture. Recipe preserves dependencies but full branch-membership proof remains refused.')
+                    if parent not in exact_adult_assignments:
+                        _require(composition_complete,
+                            'conditional external assignment requires committed complete household composition')
+                        _require(parent in exact_adult_assignments,
+                            'formation assignment provider was not validated')
+                    branch='true' if identity in exact_adult_assignments[parent] else 'false'
+                    _require(branch in spec['conditional_cdfs'],'missing conditional external assignment branch')
+                    cdfs=[spec['conditional_cdfs'][branch]]
                 else:
                     _require(parent in values,'missing committed conditional parent')
                     p=values[parent]; branch=('true' if p else 'false') if type(p)is bool else str(p)

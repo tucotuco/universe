@@ -62,6 +62,15 @@ def composition_rng(seed, group_id, *parts):
     return random.Random(value)
 
 
+def _formation_trait_assignments(seed, group_id, trait_name, candidates, quota):
+    """Pure deterministic exact-quota selection over committed member IDs."""
+    ranked = sorted(candidates, key=lambda identifier: (
+        composition_rng(seed, group_id, "formation_trait", trait_name,
+                        identifier).random(), identifier
+    ))
+    return frozenset(ranked[:quota])
+
+
 def _formation_attribute_rng_provider(self):
     """Return the exact keyed provider rebound by the native Save adapter."""
     return lambda member_id, attribute: self._rng(
@@ -362,10 +371,8 @@ class StatisticalGroup(ObjectInstance):
         ]
         if quota > len(candidates):
             raise ValueError("formation trait quota exceeds committed adult cohort")
-        ranked = sorted(candidates, key=lambda identifier: (
-            self._rng("formation_trait", trait_name, identifier).random(), identifier
-        ))
-        return frozenset(ranked[:quota])
+        return _formation_trait_assignments(
+            self.seed, self.id, trait_name, candidates, quota)
 
     def formation_trait_state(self, trait_name):
         """Original adult trait quota conditioned on realized identities.
