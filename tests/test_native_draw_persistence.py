@@ -15,9 +15,11 @@ sys.path[:0] = [str(ROOT / "src"), str(ROOT / "examples")]
 from activities import PickUpAction, ReadyWeaponAction
 from library import Library
 from arena_hex_map import ArenaHexLayout, HexAddress
+from melee_combat import MeleeStrike
 from native_history import capture, encode
 from native_persistence import export_save
 from native_scenario import NativeScenarioBuilder
+from strategy import Strategy
 from weapon import author_worn_sheath_draw_location, native_weapon_draw_location
 
 
@@ -252,6 +254,121 @@ print(json.dumps({'time':enc.time,'action_ids':[a.id for a in actions],
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path), actors[0].id,
                  actors[1].id, obj.id, actions[0].id, actions[1].id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+    def test_headless_ready_preparation_is_consumed_after_restored_strike(self):
+        from activities import ReadyPreparationAction
+        from weapon import native_ready_preparation
+
+        builder = NativeScenarioBuilder(
+            "native-ready-and-strike", Library(config_dir=str(ROOT / "src/config")),
+            seed=8105, encounter_id="native-ready-encounter")
+        attacker = builder.add_being("Human", "Ready Attacker", position=(0, 0, 0),
+                                     radius=.25, hit_points=100)
+        defender = builder.add_being("Human", "Ready Defender", position=(1.5, 0, 0),
+                                     radius=.25, hit_points=100)
+        weapon = builder.make_weapon(attacker.id, "Longsword", "Readied native Longsword",
+                                     hand="right hand", participant=True)
+        builder.mark_aware(attacker.id, defender.id)
+        builder.mark_aware(defender.id, attacker.id)
+        builder.enable()
+        ready = ReadyPreparationAction(builder.encounter, attacker.id, weapon.id,
+                                       "swing", 0, strategy=Strategy(),
+                                       id="native-ready-action")
+        builder.schedule(ready)
+        initial = export_save(builder.encounter)
+        ready_seconds = ready.end_time - ready.start_time
+        builder.step(ready_seconds)
+        prepared = native_ready_preparation(weapon)
+        self.assertIsNotNone(prepared)
+        expected_ready = {
+            "time": builder.encounter.time,
+            "ready_id": ready.id,
+            "weapon_ready": prepared,
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        initial_child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+from weapon import native_ready_preparation
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor=world.get_object_by_id(sys.argv[2]);weapon=world.get_object_by_id(sys.argv[3])
+ready_id=sys.argv[4];choice=enc.choice_for_action(ready_id)
+assert choice.state=='accepted'
+ready=next(member.action for member in enc._choice_book._choices[choice.id].members
+           if member.action.id==ready_id)
+assert ready.id==ready_id and actor.current.body_parts['right hand']==weapon.id
+enc.step(int(ready.end_time-ready.start_time))
+print(json.dumps({'time':enc.time,'ready_id':ready.id,
+ 'weapon_ready':native_ready_preparation(weapon),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-ready-initial.json"
+            path.write_bytes(initial)
+            first_restore = subprocess.run(
+                [sys.executable, "-B", "-c", initial_child, str(path),
+                 attacker.id, weapon.id, ready.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(first_restore.returncode, 0, first_restore.stderr)
+        self.assertEqual(json.loads(first_restore.stdout),
+                         json.loads(json.dumps(expected_ready)))
+        strike = MeleeStrike(builder.encounter, attacker.id, defender.id, weapon.id,
+                             motion="swing", reach=2, strategy=Strategy())
+        builder.schedule(strike)
+        pending_strike = export_save(builder.encounter)
+        builder.step(strike.end_time - strike.start_time)
+        self.assertIn(strike.id, builder.encounter.finished_action_list)
+        self.assertIsNone(native_ready_preparation(weapon))
+        expected = {
+            "time": builder.encounter.time,
+            "ready_id": ready.id,
+            "strike_id": strike.id,
+            "strike_outcome": builder.encounter.inspect_committed(
+                int(builder.encounter.time)).action(strike.id).facts.outcome,
+            "attacker_hp": attacker.get_hit_points(),
+            "defender_hp": defender.get_hit_points(),
+            "weapon_ready": native_ready_preparation(weapon),
+            "weapon_parent": weapon.parent_container_id,
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+from weapon import native_ready_preparation
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor=world.get_object_by_id(sys.argv[2]);target=world.get_object_by_id(sys.argv[3])
+weapon=world.get_object_by_id(sys.argv[4]);ready_id=sys.argv[5];strike_id=sys.argv[6]
+assert native_ready_preparation(weapon)['ready_action_id']==ready_id
+choice=enc.choice_for_action(strike_id)
+assert choice.state=='accepted'
+strike=next(member.action for member in enc._choice_book._choices[choice.id].members
+            if member.action.id==strike_id)
+enc.step(int(strike.end_time-strike.start_time))
+receipt=enc.inspect_committed(int(enc.time))
+assert strike.id in enc.finished_action_list
+assert native_ready_preparation(weapon) is None
+print(json.dumps({'time':enc.time,'ready_id':ready_id,'strike_id':strike.id,
+ 'strike_outcome':receipt.action(strike.id).facts.outcome,
+ 'attacker_hp':actor.get_hit_points(),'defender_hp':target.get_hit_points(),
+ 'weapon_ready':native_ready_preparation(weapon),
+ 'weapon_parent':weapon.parent_container_id,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-ready-strike.json"
+            path.write_bytes(pending_strike)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), attacker.id,
+                 defender.id, weapon.id, ready.id, strike.id], cwd=directory,
                 env={**os.environ,
                      "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=60)

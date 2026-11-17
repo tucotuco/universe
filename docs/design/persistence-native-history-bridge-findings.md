@@ -76,6 +76,8 @@ The new `tests/test_native_draw_persistence.py` uses the reusable native scenari
 
 The same Arena gate was also unnecessary for `PickUpAction`: the native evaluator already has the complete supported one-second pickup check using explicit hex dimensions/positions, represented Object weight/capacity, and simultaneous common-snapshot contention. Its scheduling guard now admits a native transactional Encounter. The headless regression persists two accepted same-object pickup attempts from the initial cursor; both restore and resolve `contested`, with one unchanged ground Object and no duplicate custody. All nine existing `test_arena_ground_pickup.py` regressions pass. This adds native coverage without claiming more precise geometry than the adopted hex-cell convention.
 
+The readiness lifecycle also now has an Arena-independent proof. A fresh process restores a pending native Ready, commits its effect, and matches preparation/RNG/history; after that, another pending native Strike is restored and resolved, consuming the same preparation and matching the uninterrupted state. The source-linked `ReadyPreparationAction`, `ReadyPreparationEffect`, and `ReadyConsumptionEffect` rows point to this test. This remains selected evidence; all supported Action variants and query consumers are still not closed.
+
 
 ## 2026-11-16 continuation addendum
 
