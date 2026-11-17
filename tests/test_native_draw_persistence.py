@@ -29,6 +29,38 @@ from weapon import author_worn_sheath_draw_location, native_weapon_draw_location
 
 
 class NativeDrawPersistenceTests(unittest.TestCase):
+    def _assert_history_matches_receipts(self, encounter):
+        """Compare native historical projections with every source receipt."""
+        log = capture(encounter)
+        query = NativeHistoryQuery(log)
+        receipts = {row.boundary: row
+                    for row in encounter._atomic_interval_history}
+        targets = {}
+        for entity_id, entity in encounter.universe.object_registry.object_instances.items():
+            for record in getattr(entity, '_atomic_target_history', ()):
+                if record.encounter_id == encounter.id:
+                    targets.setdefault(record.boundary, {})[entity_id] = record.state
+        for boundary in range(1, log['latest_boundary'] + 1):
+            receipt = receipts[boundary]
+            inspection = encounter.inspect_committed(boundary)
+            actual = query.committed_actions_at(boundary)
+            self.assertEqual(actual['actions'], _plain(inspection.actions))
+            self.assertEqual(actual['effects'], _plain(inspection.effects))
+            self.assertEqual(actual['action_ids'],
+                [identity for row in inspection.timeline for identity in row.action_ids])
+            self.assertEqual(actual['effect_ids'],
+                [_plain(identity) for row in inspection.timeline for identity in row.effect_ids])
+            facts = query.events_at(boundary)
+            self.assertEqual(facts['action_ids'], list(receipt.action_ids))
+            self.assertEqual(facts['effect_ids'],
+                             [_plain(identity) for identity in receipt.effect_ids])
+            self.assertEqual(query.state_at(boundary)['entities'],
+                             _plain(targets.get(boundary, {})))
+            self.assertEqual(query.entity_context_at(boundary),
+                             _plain(receipt.inspection.entities))
+            self.assertEqual(query.schedule_at(boundary),
+                             _plain(receipt.inspection.schedule))
+
     def test_headless_draw_restores_and_commits_in_a_fresh_native_process(self):
         builder = NativeScenarioBuilder(
             "native-draw", Library(config_dir=str(ROOT / "src/config")),
@@ -106,6 +138,7 @@ print(json.dumps({'time':enc.time,'action_id':action.id,
                           if key not in ("rng", "history")})
         self.assertEqual(restored["rng"], expected["rng"])
         self.assertEqual(restored["history"], expected["history"])
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_shield_don_and_remove_restore_in_fresh_native_processes(self):
         from activities import ShieldEquipmentAction
@@ -193,6 +226,7 @@ print(json.dumps(result,sort_keys=True))'''
         self.assertNotIn(shield.id, expected_remove["weapons"])
         self.assertIn(shield.id, expected_remove["possessions"])
         self.assertEqual(fresh_continue(remove_wire, remove), expected_remove)
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_pickup_contention_restores_without_duplicate_custody(self):
         layout = ArenaHexLayout.rectangle(10, 5)
@@ -264,6 +298,7 @@ print(json.dumps({'time':enc.time,'action_ids':[a.id for a in actions],
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_ready_preparation_is_consumed_after_restored_strike(self):
         from activities import ReadyPreparationAction
@@ -379,6 +414,7 @@ print(json.dumps({'time':enc.time,'ready_id':ready_id,'strike_id':strike.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_object_strike_hit_and_damage_restore_with_exact_facts(self):
         builder = NativeScenarioBuilder(
@@ -457,6 +493,7 @@ print(json.dumps({'time':enc.time,'action_id':action.id,'object_id':target.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_simultaneous_object_strikes_preserve_common_snapshot_durability(self):
         builder = NativeScenarioBuilder(
@@ -556,6 +593,7 @@ print(json.dumps({'time':enc.time,'object_id':target.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_subdual_burden_and_continuation_restore_exactly(self):
         from activities import DelayAction, declare_subdue
@@ -673,6 +711,7 @@ print(json.dumps({'time':enc.time,'delay_id':action.id,
         self.assertEqual(continued.returncode, 0, continued.stderr)
         self.assertEqual(json.loads(continued.stdout),
                          json.loads(json.dumps(expected_continue)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_feint_and_one_followup_continue_with_original_action_identity(self):
         builder = NativeScenarioBuilder(
@@ -770,6 +809,7 @@ print(json.dumps({'time':enc.time,'feint_id':feint.id,'strike_id':strike.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_touch_grab_trip_history_continues_after_fresh_process_load(self):
         builder = NativeScenarioBuilder(
@@ -862,6 +902,7 @@ print(json.dumps({'time':enc.time,'touch_id':touch_id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_grapple_control_takedown_and_history_continue_after_restore(self):
         """A committed Grapple control and pending Takedown restore natively."""
@@ -1003,6 +1044,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
 
         differing = list(leaf_differences(actual, expected_json))
         self.assertEqual(differing, [], repr(differing[:25]))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_failed_grapple_escape_retains_control_after_restore(self):
         """A failed Escape maintains the exact control and advances its check."""
@@ -1127,6 +1169,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_successful_grapple_escape_releases_control_after_restore(self):
         """A successful standing Escape releases only its identified control."""
@@ -1238,6 +1281,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_charge_and_bull_rush_continue_after_restore_without_guessing_displacement(self):
         """Charge movement and its Bull Rush source survive native restore."""
@@ -1339,6 +1383,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_bull_rush_overrun_commits_adopted_prone_continuation_after_restore(self):
         """The lawful Bull Rush→Overrun continuation restores without Arena."""
@@ -1434,6 +1479,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_failed_bull_rush_restores_the_resisted_contest_without_movement(self):
         """A real resisted contest failure remains failure after native Load."""
@@ -1512,6 +1558,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_failed_overrun_restores_standing_without_displacement(self):
         """A failed four-second Overrun remains failed and non-displacing."""
@@ -1591,6 +1638,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_charge_overrun_restores_and_commits_represented_forward_hex(self):
         """An adopted one-hex landing survives continuation in a new process."""
@@ -1717,6 +1765,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_failed_charge_restores_pending_choice_and_speed_result(self):
         """A below-threshold Charge remains a failed native fact after Load."""
@@ -1795,6 +1844,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_fatal_coup_preserves_fatal_effect_after_restore(self):
         """FatalEffect is part of native history and same-Encounter restore."""
@@ -1888,6 +1938,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_break_weapon_failure_preserves_later_attack_after_restore(self):
         attacking = NativeScenarioBuilder(
@@ -1974,6 +2025,7 @@ print(json.dumps({'time':enc.time,'break_id':break_action.id,'followup_id':follo
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(attacking.encounter)
 
     def test_headless_standard_weapon_break_commits_and_disables_followup_after_restore(self):
         builder = NativeScenarioBuilder(
@@ -2059,6 +2111,7 @@ print(json.dumps({'time':enc.time,'break_id':action.id,
                 text=True, capture_output=True, check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
 
 if __name__ == "__main__":
