@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native history `/7` now records Q/B and resolved ordinary/running physiology versions plus per-boundary notification and Disarm landing receipts; `/10`–`/12` archives have a strict native graph reader; 64-Action / 2, 20 and 200 registry-Beings plus 200 quiet-boundary fresh-process runs pass. A pending projectile with a real shield interception also continues exactly after native restore. Generated `/10`/`/11` pristine fixtures now have an explicit no-Action native-mode migration and fresh-process first-Delay continuation; a generated `/12` first-Run Choice has native Save→Load→canonical-resave evidence with observer ledgers and IDs preserved. However this remains a selected-family graph plus duplicated receipt/Target history. The complete supported Action/state-family query matrix, graph-free historical reconstruction, durable history journal recovery, and ordinary application cutover are not complete. No rules or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
+**Problems first — status ACTIVE and incomplete.** Native history is now schema `/9`: it stores the exact pre-first-commit scheduler/Choice projection for new native captures and marks boundary zero unavailable for pre-`/9` histories and legacy Arena graphs that did not retain that fact. The earlier `/8` record includes Q/B and resolved physiology versions, notification and Disarm receipts, and passive Arena observer evidence. `/10`–`/12` archives have a strict native graph reader; selected 64-Action and 200-quiet-boundary fresh-process continuations pass. However this remains a selected-family graph plus duplicated receipt/Target history. The complete supported Action/state-family query matrix, graph-free historical reconstruction, durable history journal recovery, and ordinary application cutover are not complete. No rules or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
@@ -23,7 +23,9 @@
 
 | Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:58-08:00 | PT39M8S |
 | Native history bridge continuation | 2026-11-16T13:49:14-08:00 | IN PROGRESS | Recorded at closeout |
-| Full native bridge continuation (current execution) | 2026-11-17T06:10:55Z | IN PROGRESS | End and elapsed recorded at closeout |
+| Full native bridge continuation | 2026-11-17T06:10:55Z | Not recorded in the prior closeout | Elapsed unavailable; no estimate added |
+| Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | IN PROGRESS | End and elapsed recorded at closeout |
+
 
 ## Native action-family continuation — contact history and Break Weapon
 
@@ -1019,3 +1021,84 @@ The actual 64-Action seed scenario was rerun through the strict fresh-process pa
 The 200-quiet-boundary strict fresh-process rerun also matched uninterrupted continuation: Save **6,507,786 bytes** (graph **4,854,985**, history **34,323**), all 200 boundaries checked, history verification **1.026s**, export **2.892s**, fresh-process load/continue **3.282s**, scenario **53.235s**, peak RSS **158,449,664 platform units**.
 
 At 20 registered Beings the 64-Action strict fresh-process run passed with Save **7,994,376 bytes** (graph **5,100,981**, history **1,192,921**), all 129 boundaries checked, scenario **69.942s**, history verification **2.823s**, export **4.972s**, and load/continue **7.007s**. At 200 registered Beings it also passed with Save **11,229,788 bytes** (graph **7,527,538**, history **1,192,921**), all 129 boundaries checked, scenario **68.266s**, history verification **2.503s**, export **5.875s**, and load/continue **7.330s**; peak RSS **226,377,728 platform units**. The suite includes an ordinary native post-load Delay compared against uninterrupted execution. These measurements remain a combined graph+history save and do not establish the requested graph-free architecture.
+
+## Native history schema `/8` — passive Arena observer-knowledge reads
+
+### Problems first
+
+- Before this continuation, native history recorded observer-owned recipient projections, but passive `ArenaPerceptionLedger` evidence was only present in the resumable graph. A standalone history reader could not recover each participant's recorded view at a historical boundary.
+- This change closes only that passive Arena evidence stream. It does not close general perception history, all recipient combinations, graph-free Save/Load, durable journaling, multi-Encounter ownership, or ordinary application Save/Load cutover. U-PER-SCALE-001 remains ACTIVE; no adopted rule or external blocker was found.
+
+### Implemented capability
+
+Native history `/8` stores the initial passive Arena observer-evidence map once and sparse per-boundary changes from the native `ArenaPerceptionLedger._history`. The capture reads committed evidence rows and their recorded `visibility_boundary`; it does not infer observer knowledge from objective Entity state or redo sightline evaluation. Each change is keyed by logical observer and Entity ID. Repeated updates for the same observer/Entity/boundary, nonparticipant owners, dangling subjects, invalid record types and out-of-range boundaries are rejected. `NativeHistoryQuery.observer_knowledge_at(boundary, observer_id)` returns a detached owner-only view; the all-owner form is a data projection, not an access-control boundary.
+
+Schema `/1`–`/7` remains strictly readable. A history-only upgrade marks passive observer history unavailable (`None`) rather than inventing it. When a valid `/7` Save contains the previously authenticated graph ledger, strict native Load can compare the `/7` history against the graph, reconstruct `/8` from those actual retained ledger rows, and resave to the exact current canonical bytes. A pending recorder captures the first committed timeline, and an attached recorder appends subsequent committed observer changes only after native publication.
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` | **21 passed / 22.111s**, including strict legacy upgrades, unavailable-history behavior, atomic append, rollback and query checks. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` | **32 passed / 91.966s**, including generated `/12` two-observer parity at boundaries 0–2, fresh-process strict restore, `/7` graph-backed upgrade and byte-identical canonical resave. |
+| `.venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` | **3 passed / 0.007s**, including `/8` and the public query API. |
+| Focused attached-recorder test | **1 passed / 0.920s**; initial export, ordinary generated Arena Run, then a native Delay append match ledger evidence at each boundary. |
+| Focused `/6` Save and `/7` migration regressions | **2 passed / 3.877s** after correcting the `/6` historical fixture to remove the new `/8` field. |
+
+The first full native-persistence run exposed one stale `/6` fixture that retained the `/8` observer-history field. The fixture was corrected to construct the real old wire schema; the full 32-test suite then passed. Production `/12` was not edited. The existing 64-Action and 200-quiet scale results above were not rerun because this change only adds sparse Arena evidence history and the strict native persistence suite covers the affected migration and restore paths.
+
+The source-linked matrix and bridge findings describe this as partial observer-history capability. Remaining acceptance gaps include all-family current-state/receipt reconstruction, multi-Encounter support, durable history journal/crash recovery, graph/history de-duplication, comprehensive corruption/scaling tests for the new architecture, and production Save/Load integration. No whole-repository suite was run.
+
+## Native EntityInspection query API
+
+### Problems first
+
+Native history already stored sparse, digest-checked `EntityInspection` contexts, but callers could only retrieve the complete context map. There was no stable per-Entity query matching `entity_at`/history access patterns. Treating an absent row as historical absence would also be incorrect for schema `/1`–`/3`, which never recorded those contexts.
+
+### Result
+
+`NativeHistoryQuery.entity_at(entity_id, boundary)` and `entity_history_at(entity_id, boundary)` now return detached committed `EntityInspection` projections through the validated sparse context stream. Unknown Entity IDs return no row; legacy schemas without context return `None` for the family and are not filled from current state. The API explicitly limits its contract to recorded inspection fields; it does not claim every Being/Object runtime property is historically represented.
+
+### Verification
+
+The four-boundary fixture compares each per-Entity read with its exact native committed `EntityInspection` source, checks initial-boundary data, detached results, unknown identity handling and legacy-unavailable behavior. `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — **23 passed / 20.527s**. The first run exposed a test-only off-by-one in mapping logical boundary to stored receipt index; correcting that expectation made the full focused history suite pass. No production `/12`, combat rule, or application Save/Load path changed. Matrix status remains partial, and overall U-PER-SCALE-001 remains ACTIVE.
+
+## Native objective fact and fact-use query
+
+### Problems first
+
+The generic state delta retained committed `ObjectiveInspection` and fact-use records, but native readers had no direct APIs for those rows. That left the history/causality contract hidden inside a broad state mapping and lacked direct receipt parity for the resolution-on-demand family.
+
+### Result and evidence
+
+`NativeHistoryQuery.objective_at(boundary)` and `objective_use_at(boundary)` now return detached facts directly from validated history, without reading current Reality state or replaying a Group observation. A native `ObserveGroupAction` fixture checks both APIs at boundary 0 and the committed boundary against `CommittedBoundaryRecord.inspection.objective` and `.objective_use`; the non-empty committed rows are confirmed. `test_native_history.py`: **24 passed / 21.347s**, including this test plus per-Entity query and legacy-unavailable regressions. This is direct query coverage for one implemented Group-observation profile; all realization branches and graph-free reconstruction remain open.
+
+## Scheduler, Action-status and Choice-status history queries
+
+### Problems first
+
+History deltas already retained the native `QueueProjection`, but callers had no stable API to read committed schedule or status values. That made pending future Choices, registered Action lifecycle, and finished status harder to compare with the authoritative transaction receipt.
+
+### Result and verification
+
+`NativeHistoryQuery.schedule_at`, `action_state_at`, and `choice_state_at` now return detached committed lifecycle projections. A native scenario schedules simultaneous Run/Delay Actions plus a later accepted Run; after boundary 1, the first two are finished and the future Choice remains accepted. These reads match the committed `QueueProjection` while the future Action remains unregistered. Commands: full `test_native_history.py` — **25 passed / 24.180s**; `test_persistence_capability_matrix.py` — **3 passed / 0.025s**. The exact pre-first-commit gap is resolved for schema `/9` native captures; historical schemas `/1`–`/8` and legacy Arena graphs explicitly report the unavailable fact. Generic full-world/multiple-Encounter and production application gates remain open.
+
+## Native history `/9`: exact initial scheduler baseline
+
+### Problems first
+
+The initial scheduler query gap affected pending accepted Choices: a Save made before the first boundary could resume natively, but its first history commit needed to retain the exact time-zero pending/finished/cancelled queues, registrations, reservations, Action states, Choice states, and scheduler revision. A post-commit queue is not a substitute. The migration audit also found that pre-`/9` `initial_schedule` was sourced from the first committed receipt, so those versions cannot truthfully answer the pre-first-commit scheduler state. The first upgrade implementation also shallow-copied nested maps and could invalidate the authenticated input digest while adding fields.
+
+### Correction
+
+Schema `/9` adds `initial.initial_schedule_available` and validates the exact closed `QueueProjection` record when it is available. The first transactional progression captures that baseline within the publication boundary before the first commit; a pending native Save starts a resumed recorder from its authenticated pending queue. Upgrades deep-copy the authenticated history, preserve pre-`/9` scheduler data as an internal replay anchor for its existing delta rows, and mark boundary-zero scheduler availability false. Historical queries sanitize unavailable baseline fields, while later committed `schedule_at(n)` values continue to match native receipts. Imported `/10`–`/12` graphs that lack the pre-commit queue likewise return `None` at boundary zero; no later state is inferred.
+
+### Verification
+
+- `cd src && PYTHONPATH=../tests:../examples python -m unittest test_native_history` — **26 passed / 21.102s**. This covers exact initial accepted Choice state, unavailable legacy boundary zero, immutable upgrade input, quiet-span compatibility, and strict marker validation.
+- `cd src && PYTHONPATH=../tests:../examples:../../npc-generator python -m unittest test_native_persistence` — **32 passed / 79.060s**, including same-Encounter continuation, strict native Save/Load, `/1`–`/8` history migration, accepted `/10`–`/12` graph migration and the generated `/12` upgrade path.
+- `cd src && PYTHONPATH=../tests:../examples python -m unittest test_persistence_capability_matrix` — **3 passed / 0.026s**. `python3 -m py_compile` on the changed modules/tests and `git diff --check` passed.
+- The full integrated persistence run first had one subprocess fingerprint mismatch while the source file was being edited; with the source held fixed, the exact full suite reran green. The earlier missing sibling `npcgen` import path was also corrected for test setup only; the sibling repository remained read-only.
+- Commit hashes, final HEAD/tree state and exact execution interval will be recorded at the next closeout update.
+
+This closes the initial scheduler-history gap only. The current Save still serializes runtime receipt/Target history beside fact history, and significant field-family query parity, durable journal recovery, and the ordinary application Save/Load cutover remain open. U-PER-SCALE-001 stays ACTIVE; no rule or external blocker has been found.

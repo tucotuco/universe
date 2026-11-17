@@ -135,7 +135,8 @@ def load_save(wire):
         from native_graph_snapshot import decode as decode_graph, restore as restore_graph
         if value["history"] is not None:
             native_history.validate(value["history"])
-            expected_history = native_history.encode(native_history.upgrade(value["history"]))
+            expected_history_log = native_history.upgrade(value["history"])
+            expected_history = native_history.encode(expected_history_log)
         world, encounter, rng_owner = restore_graph(
             decode_graph(graph_wire, native=True), native=True)
         if value["history"] is None:
@@ -146,7 +147,12 @@ def load_save(wire):
                     "history-free native Save is not at the initial committed boundary")
             native_history.NativeHistoryRecorder.restore_pending(encounter)
             return world, encounter, rng_owner
-        actual_log = native_history.capture(encounter)
+        saved_initial = expected_history_log["initial"]
+        actual_log = native_history.capture(
+            encounter,
+            initial_schedule=saved_initial["initial_schedule"],
+            initial_schedule_available=saved_initial.get(
+                "initial_schedule_available", False))
         actual_history = native_history.encode(actual_log)
         if actual_history != expected_history:
             source_schema = value["history"]["schema"]

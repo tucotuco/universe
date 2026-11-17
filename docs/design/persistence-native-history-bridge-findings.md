@@ -230,3 +230,57 @@ Verification: `test_native_history.py` — **21 passed / 22.622s**; `test_native
 ## Schema `/7` scale and strict-continuation rerun
 
 The 64-Action native scale scenario was rerun at 2, 20 and 200 registered Beings. Each performed 64 lawful Feints across 129 committed boundaries, compared target/Event/Action/Effect/RNG/context records at every boundary, restored in a fresh OS process, and matched uninterrupted continuation with the same Encounter IDs. Save sizes were **7,665,648 / 7,994,376 / 11,229,788 bytes**; fact-history was **1,192,921 bytes** in each case and the graph was **4,854,434 / 5,100,981 / 7,527,538 bytes**. Fresh-process load and continuation took **7.801 / 7.007 / 7.330s**. The `/7` 200-quiet-boundary run also passed at **6,507,786 bytes** (history **34,323 bytes**) and fresh-process continuation took **3.282s**. At 2 Beings, history verification took **2.847s** and export **5.493s**; at 20, **2.823s / 4.972s**; at 200, **2.503s / 5.875s**. This confirms the schema extension preserves the prior bounded-growth/continuation behavior; it still includes the full runtime graph and is not the requested compact production architecture.
+
+## Native history schema `/8` — passive Arena observer knowledge
+
+### Problems first
+
+- Native history previously retained observer-owned Action recipient projections but omitted the passive `ArenaPerceptionLedger` timeline. Historical query could not answer what each participant had recorded at a committed boundary, although the current Save graph retained that ledger.
+- The new scope is deliberately limited to the implemented passive Arena evidence model. It does not synthesize general perception, infer from objective state, or claim universal observer-history parity.
+
+### Result
+
+Schema `/8` captures one initial evidence map and sparse owner/entity deltas from immutable `ArenaPerceptionEvidence` rows and their recorded visibility boundaries. `observer_knowledge_at()` reconstructs a detached owner-only view or returns the complete data projection. Strict validation enforces participant ownership, entity references, chronology, record type, duplicate-per-boundary rejection and state digests. Recorder append checks that prior evidence rows have not changed outside the newly appended native boundary.
+
+History `/1`–`/7` remains readable. A history-only upgrade reports passive knowledge unavailable; it never fills it from current simulation state. A strict `/7` native Save may recover the already serialized ledger from its authenticated graph and upgrade the history, then Save again to byte-identical `/8` output.
+
+### Verification
+
+- `test_native_history.py`: **21 passed / 22.111s**.
+- `test_native_persistence.py`: **32 passed / 91.966s**; covers initial/query state at boundaries 0–2, recorder append after native publication, strict fresh-process restoration, `/7` graph-backed upgrade/resave, and retained `/6` support.
+- `test_persistence_capability_matrix.py`: **3 passed / 0.022s**.
+- Focused recorder case: **1 passed / 0.920s**; focused `/6` Save and `/7` upgrade cases: **2 passed / 3.877s**.
+
+The first persistence-suite run found one stale `/6` fixture that still carried the newly added `/8` observer field. The fixture now removes that field to match a real `/6` artifact; the complete suite then passed. Production `/12` code is unchanged. The capability matrix now marks passive Arena historical knowledge as demonstrated but keeps the family partial. Graph-backed receipt duplication, multi-Encounter closure, general observer/query parity, crash-safe durable journaling and production API cutover remain engineering work; U-PER-SCALE-001 remains sole ACTIVE.
+
+## Per-Entity historical inspection query
+
+Native history `/8` already retains a validated sparse `EntityInspection` context stream. `NativeHistoryQuery.entity_at(entity_id, boundary)` and `entity_history_at(entity_id, boundary)` now expose one Entity or its ordered detached context rows without requiring callers to filter the entire map. The test compares every entity at boundaries 0–4 directly with native committed inspection receipts, checks detachment and unknown IDs, and confirms legacy schemas without this family return unavailable (`None`) rather than deriving facts. `test_native_history.py`: **23 passed / 20.527s**. This is a query API for the recorded inspection projection; full runtime field-state parity and graph-free reconstruction remain unproven.
+
+## Objective reality and fact-use history query
+
+The delta contains committed objective projections and the causal rows describing which Actions requested, supported, established and consumed those facts. `NativeHistoryQuery.objective_at(boundary)` and `objective_use_at(boundary)` now expose detached projections from that stored history. A real native Group observation at boundary 1 matches both APIs to its authoritative committed receipt; initial-boundary objective state remains empty. The focused history suite passes **24 tests / 21.347s**. This gives direct query access for the exercised Group-observation profile, not every resolution-on-demand or ReproductionGroup branch.
+
+## Scheduler and Choice lifecycle query
+
+The history state deltas already carry the validated `QueueProjection`, but this contract lacked direct query access. `schedule_at`, `action_state_at`, and `choice_state_at` expose detached committed scheduler and lifecycle facts. A native boundary containing completed Run/Delay Actions and a still-accepted future Run matches the exact published QueueProjection; the later Action remains unregistered until it starts. The pre-first-commit baseline gap was subsequently resolved for new native captures by schema `/9` below.
+
+## Schema `/9`: exact initial pending scheduler and Choices
+
+### Problems first
+
+The scheduler query API preserved committed queue changes but could not answer the exact state before the first committed boundary. In the pending native Save path, restoring then resolving a Choice caused the recorder to start with the post-restore queue instead of the saved time-zero baseline. An earlier upgrade draft also mutated nested fields of authenticated input, invalidating its digest on a second validation. Pre-`/9` history schemas stored `initial_schedule` from the first committed receipt, not the pre-commit scheduler cut; that value remains an internal replay anchor for existing deltas, but boundary zero is unavailable. Legacy `/10`–`/12` Arena graphs imported after commits also lack the pre-commit queue.
+
+### Correction
+
+History `/9` adds `initial.initial_schedule_available` and a strict closed `QueueProjection` representation. The native transaction path captures the baseline under the publication boundary before the first native commit; pending native Save/Load separately captures it before resumption. `NativeHistoryQuery.schedule_at(0)` returns the exact saved projection when known and `None` when the source archive did not retain that fact. Upgrade retains pre-`/9` queue records only as the old delta replay anchor, marks boundary-zero availability false, and deep-copies the authenticated log before adding schema data. It never reads current later scheduler state as historical evidence.
+
+### Verification
+
+- `cd src && PYTHONPATH=../tests:../examples python -m unittest test_native_history` — **26 passed / 21.102s**, including exact pre-commit accepted Choice state, legacy boundary-zero unavailability, upgrade-input immutability and strict `/9` validation.
+- `cd src && PYTHONPATH=../tests:../examples:../../npc-generator python -m unittest test_native_persistence` — **32 passed / 79.060s**.
+- Focused initial multi-Action Save/Load and accepted `/10`–`/12` native-graph continuation — **2 passed** across the focused invocations; one environment-only invocation without `npcgen` failed at fixture setup and passed when rerun with the read-only sibling import path.
+- A legacy `/12` import correctly returns boundary-zero scheduler history unavailable; it does not replace it with a post-commit `QueueProjection`. Its native graph continuation still matches uninterrupted control on time, identity, outcome, position and RNG.
+- `cd src && PYTHONPATH=../tests:../examples python -m unittest test_persistence_capability_matrix` — **3 passed / 0.026s**, checking the current schema and public query entry points.
+
+This closes the initial scheduler-history gap only. It does not remove duplicate runtime receipt/Target graphs, implement all 157 field families in the history reader, add a durable append journal, or move ordinary Arena Save/Load to the native format. Production `/12` files and user saves remain unchanged.

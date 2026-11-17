@@ -17,9 +17,10 @@ import test_encounter_inspection as inspection_fixtures
 
 
 def _legacy_shape(body):
-    """Strip fields introduced by history `/7` when constructing old fixtures."""
+    """Strip receipt, observer and initial-schedule fields for legacy fixtures."""
     body.pop("receipt_facts_complete", None)
     body.pop("observer_knowledge", None)
+    body.get("initial", {}).pop("initial_schedule_available", None)
     for row in body.get("boundaries", ()):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
@@ -27,6 +28,15 @@ def _legacy_shape(body):
         if row.get("kind") == "quiet_span":
             row.pop("receipt_facts_available", None)
     return body
+
+
+def _legacy_initial_schedule(log, schedule=None):
+    body = {key: copy.deepcopy(value) for key, value in log.items()
+            if key != "sha256"}
+    if schedule is not None:
+        body["initial"]["initial_schedule"] = copy.deepcopy(schedule)
+    body["initial"]["initial_schedule_available"] = False
+    return _seal(body)
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
@@ -36,7 +46,8 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
                             entity_at, entity_history_at, objective_at,
                             objective_use_at, schedule_at, action_state_at,
-                            choice_state_at, _plain, _expand_rows, _target_candidates)
+                            choice_state_at, capture_initial_schedule,
+                            _plain, _expand_rows, _target_candidates)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -171,6 +182,32 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(query.choice_state_at(accepted[0], 1), "accepted")
         self.assertEqual(choice_state_at(log, accepted[0], 1), "accepted")
         self.assertIsNone(query.choice_state_at("unregistered-choice", 1))
+
+    def test_first_commit_retains_exact_precommit_choice_and_queue_baseline(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        fixture.enable()
+        from activities import DelayAction, RunAction
+        first = RunAction(fixture.world, fixture.a.id, 0, 1, .5, experience=1)
+        second = DelayAction(fixture.enc, fixture.b.id, defense=0, start_time=0)
+        future = RunAction(fixture.world, fixture.c.id, 3, 1, .5, experience=1)
+        for action in (first, second, future):
+            fixture.enc.schedule_action(action)
+        initial = capture_initial_schedule(fixture.enc)
+        self.assertIn("accepted", initial["fields"]["choice_states"].values())
+        fixture.enc.step(1)
+        log = capture(fixture.enc)
+        self.assertTrue(log["initial"]["initial_schedule_available"])
+        query = NativeHistoryQuery(log)
+        self.assertEqual(query.schedule_at(0), initial)
+        self.assertTrue(any(state == "accepted" for state in
+                            query.schedule_at(0)["fields"]["choice_states"].values()))
+        malformed = copy.deepcopy(log)
+        malformed["initial"]["initial_schedule"] = None
+        with self.assertRaisesRegex(NativeHistoryRejected,
+                                    "available initial scheduler projection is absent"):
+            validate(_seal({key: value for key, value in malformed.items()
+                            if key != "sha256"}))
 
     def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
         log = decode(self.wire)
@@ -322,6 +359,7 @@ class NativeHistoryTests(unittest.TestCase):
                   if key not in ('sha256', 'entity_context')})
         legacy['schema'] = LEGACY_SCHEMA
         legacy['initial'].pop('rng_before_first_commit')
+        legacy_schedule = legacy['initial']['initial_schedule']
         previous = None
         for row in legacy['boundaries']:
             if row['rng_after'] == SAME_RNG:
@@ -331,9 +369,17 @@ class NativeHistoryTests(unittest.TestCase):
         legacy = _seal({key: value for key, value in legacy.items()
                         if key != 'sha256'})
         self.assertTrue(validate(legacy))
+        authenticated_legacy = copy.deepcopy(legacy)
         upgraded_legacy = upgrade(legacy)
+        self.assertEqual(legacy, authenticated_legacy,
+                         "schema upgrades must not mutate authenticated input")
         self.assertEqual(encode(upgraded_legacy),
-                         encode(__import__('native_history')._without_entity_context(log)))
+                         encode(__import__('native_history')._without_entity_context(
+                             _legacy_initial_schedule(log, legacy_schedule))))
+        legacy_query = NativeHistoryQuery(upgraded_legacy)
+        self.assertIsNone(legacy_query.schedule_at(0))
+        self.assertIsNone(legacy_query.state_at(0)['schedule'])
+        self.assertEqual(legacy_query.schedule_at(1), NativeHistoryQuery(log).schedule_at(1))
         self.assertIsNone(entity_context_at(upgraded_legacy, 4))
         self.assertIsNone(fatigue_context_at(upgraded_legacy, 4))
         self.assertIsNone(NativeHistoryQuery(upgraded_legacy).observer_knowledge_at(4))
@@ -401,7 +447,8 @@ class NativeHistoryTests(unittest.TestCase):
                                   if key != 'sha256'})
         self.assertTrue(validate(previous_schema))
         self.assertEqual(encode(upgrade(previous_schema)),
-                         encode(__import__('native_history')._without_entity_context(log)))
+                         encode(__import__('native_history')._without_entity_context(
+                             _legacy_initial_schedule(log, legacy_schedule))))
 
         quiet_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
                         if key not in ('sha256', 'entity_context')})
@@ -418,7 +465,8 @@ class NativeHistoryTests(unittest.TestCase):
             quiet_schema['boundaries'])
         quiet_schema = _seal(quiet_schema)
         self.assertEqual(encode(upgrade(quiet_schema)),
-                         encode(__import__('native_history')._without_entity_context(log)))
+                         encode(__import__('native_history')._without_entity_context(
+                             _legacy_initial_schedule(log, legacy_schedule))))
 
         corrupt = copy.deepcopy(log)
         corrupt['initial']['rng_before_first_commit'] = None
@@ -480,7 +528,8 @@ class NativeHistoryTests(unittest.TestCase):
                                   if key != 'sha256'})
         self.assertTrue(validate(previous_schema))
         self.assertEqual(encode(upgrade(previous_schema)),
-                         encode(__import__('native_history')._without_entity_context(log)))
+                         encode(__import__('native_history')._without_entity_context(
+                             _legacy_initial_schedule(log))))
         quiet_span_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
                              if key not in ('sha256', 'entity_context')})
         quiet_span_schema['schema'] = QUIET_SPAN_SCHEMA
@@ -498,7 +547,8 @@ class NativeHistoryTests(unittest.TestCase):
         quiet_span_schema = _seal(quiet_span_schema)
         self.assertTrue(validate(quiet_span_schema))
         self.assertEqual(encode(upgrade(quiet_span_schema)),
-                         encode(__import__('native_history')._without_entity_context(log)))
+                         encode(__import__('native_history')._without_entity_context(
+                             _legacy_initial_schedule(log))))
         encounter.inspect_committed()
         receipts = {row.boundary: row for row in encounter._atomic_interval_history}
         for boundary in range(1, encounter.last_processed_boundary + 1):
@@ -523,6 +573,7 @@ class NativeHistoryTests(unittest.TestCase):
                 if key != "sha256"}
         body.pop("receipt_facts_complete")
         body.pop("observer_knowledge")
+        body["initial"].pop("initial_schedule_available")
         body["schema"] = INITIAL_RNG_SCHEMA
         for row in body["boundaries"]:
             row.pop("notification_intents", None)
@@ -546,6 +597,7 @@ class NativeHistoryTests(unittest.TestCase):
                 if key != "sha256"}
         body.pop("receipt_facts_complete")
         body.pop("observer_knowledge")
+        body["initial"].pop("initial_schedule_available")
         body["schema"] = INITIAL_RNG_SCHEMA
         for row in body["boundaries"]:
             row.pop("notification_intents", None)

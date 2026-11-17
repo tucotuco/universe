@@ -44,6 +44,7 @@ from object_observation import ObjectObservationLedger
 def _legacy_history_shape(value):
     value.pop("receipt_facts_complete", None)
     value.pop("observer_knowledge", None)
+    value.get("initial", {}).pop("initial_schedule_available", None)
     for row in value.get("boundaries", ()):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
@@ -172,13 +173,14 @@ print(json.dumps({'encounter':encounter.id,
                 self.assertEqual(restored_query.observer_knowledge_at(
                     boundary, being_id), expected)
 
-        # A valid /7 native history had no passive observer timeline. Its
-        # authenticated graph still carries the old ledger, so Load may
-        # reconstruct /8 from those retained facts without inventing evidence.
+        # A valid /7 native history has no explicit schedule-availability
+        # marker or passive observer timeline. Its scheduler projection came
+        # from the first receipt, so it is not exposed as boundary-zero state.
         legacy_payload = json.loads(native_wire)
         legacy_history = {key: value for key, value in legacy_payload["history"].items()
                           if key != "sha256"}
         legacy_history.pop("observer_knowledge")
+        legacy_history["initial"].pop("initial_schedule_available")
         legacy_history["schema"] = native_history.RECEIPT_FACT_SCHEMA
         legacy_payload["history"] = native_history._seal(legacy_history)
         legacy_unsigned = {key: value for key, value in legacy_payload.items()
@@ -189,7 +191,15 @@ print(json.dumps({'encounter':encounter.id,
         migrated_world, migrated_encounter, _migrated_rng = load_save(legacy_wire)
         self.assertIs(migrated_world.event_history[migrated_encounter.id],
                       migrated_encounter)
-        self.assertEqual(export_save(migrated_encounter), native_wire)
+        migrated_log = native_history.current_recording(migrated_encounter)
+        migrated_query = native_history.NativeHistoryQuery(migrated_log)
+        self.assertFalse(migrated_log['initial']['initial_schedule_available'])
+        self.assertIsNone(migrated_query.schedule_at(0))
+        for boundary in range(1, encounter.last_processed_boundary + 1):
+            self.assertEqual(migrated_query.schedule_at(boundary),
+                             restored_query.schedule_at(boundary))
+        migrated_wire = export_save(migrated_encounter)
+        self.assertEqual(export_save(load_save(migrated_wire)[1]), migrated_wire)
 
     def test_arena_observer_knowledge_appends_only_committed_evidence_changes(self):
         from arena_browser_session import GeneratedArenaSession
@@ -338,14 +348,14 @@ if len(sys.argv)==4:
  continued=True
 assert not (set(__import__('sys').modules) & {
  'arena_browser_session','arena_server','npcgen'})
+if continued:
+ assert native_history.NativeHistoryQuery(native_history.capture(enc)).schedule_at(0) is None
 print(json.dumps({'universe':world.id,'encounter':enc.id,
  'boundary':enc.last_processed_boundary,'time':enc.time,
  'registry':len(world.object_registry.object_instances),'continued':continued,
  'action_outcome':None if not continued else action.resolution.outcome,
  'actor_position':None if not continued else actor.get_position().as_tuple(),
- 'rng':None if not continued else rng.state,
- 'history':None if not continued else hashlib.sha256(native_history.encode(
-  native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+ 'rng':None if not continued else rng.state},sort_keys=True))'''
         import os
         for label, wire, control in cases:
             with self.subTest(version=label), tempfile.TemporaryDirectory() as directory:
@@ -366,8 +376,6 @@ print(json.dumps({'universe':world.id,'encounter':enc.id,
                         "action_outcome": control_world.get_event_by_id(control_action).resolution.outcome,
                         "actor_position": control_world.get_object_by_id(control_actor).get_position().as_tuple(),
                         "rng": control_rng.state,
-                        "history": hashlib.sha256(native_history.encode(
-                            native_history.capture(control_encounter))).hexdigest(),
                     }
                     arguments.extend((control_actor, control_action))
                 result = subprocess.run(
@@ -1849,6 +1857,7 @@ print(json.dumps({'time':enc.time,
             ChoiceMember('second', actions[1], priority_penalty=3),
         ))
         choice = builder.encounter.choice_for_action(actions[0].id)
+        initial_schedule = native_history.capture_initial_schedule(builder.encounter)
         self.assertEqual(choice.state, 'accepted')
         choice_record = builder.encounter._choice_book._choices[choice.id]
         self.assertEqual(tuple(row.priority_penalty for row in choice_record.members), (0, 3))
@@ -1873,6 +1882,7 @@ print(json.dumps({'time':enc.time,
             'outcomes': [row.resolution.outcome for row in actions],
             'priority_penalties': [0, 3],
             'receipt_action_ids': list(first_receipt.action_ids),
+            'initial_schedule': initial_schedule,
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'native-multiple-action.json'
@@ -1893,13 +1903,16 @@ rows=enc._atomic_interval_history
 first_receipt=next(row for row in rows if row.boundary==1)
 assert set(first_receipt.action_ids)=={first_id,second_id}
 actions=[world.get_event_by_id(identity) for identity in (first_id,second_id)]
+initial_schedule=native_history.NativeHistoryQuery(
+ native_history.current_recording(enc)).schedule_at(0)
 print(json.dumps({'time':enc.time,
  'rng':hashlib.sha256(json.dumps(rng.state).encode()).hexdigest(),
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
  'choice_id':choice.id,'action_ids':[row.id for row in actions],
  'outcomes':[row.resolution.outcome for row in actions],
  'priority_penalties':[member.priority_penalty for member in record.members],
- 'receipt_action_ids':list(first_receipt.action_ids)},sort_keys=True))'''
+ 'receipt_action_ids':list(first_receipt.action_ids),
+ 'initial_schedule':initial_schedule},sort_keys=True))'''
             import os
             result = subprocess.run(
                 [sys.executable, '-B', '-c', child, str(path), choice.id,
@@ -2037,9 +2050,19 @@ print(json.dumps({'time':enc.time,
             encounter.schedule_action(DelayAction(
                 encounter, actor_id, defense=0, start_time=4, id=action_id))
             encounter.step(1)
-        self.assertEqual(native_history.encode(native_history.capture(original)),
-                         native_history.encode(native_history.capture(migrated)))
-        self.assertEqual(export_save(original), export_save(migrated))
+        original_query = native_history.NativeHistoryQuery(
+            native_history.capture(original))
+        migrated_query = native_history.NativeHistoryQuery(
+            native_history.capture(migrated))
+        self.assertIsNone(migrated_query.schedule_at(0))
+        self.assertIsNone(migrated_query.state_at(0)['schedule'])
+        for boundary in range(1, original.last_processed_boundary + 1):
+            self.assertEqual(migrated_query.schedule_at(boundary),
+                             original_query.schedule_at(boundary))
+            self.assertEqual(migrated_query.events_at(boundary),
+                             original_query.events_at(boundary))
+        migrated_wire = export_save(migrated)
+        self.assertEqual(export_save(load_save(migrated_wire)[1]), migrated_wire)
 
     def test_native_history_v4_save_migrates_without_fabricating_then_rebinds_current_context(self):
         from native_history import ENTITY_CONTEXT_SCHEMA, _seal
@@ -2070,12 +2093,15 @@ log=native_history.current_recording(enc)
 assert log['schema'] == native_history.SCHEMA
 query=native_history.NativeHistoryQuery(log)
 assert query.fatigue_context_at(4) is not None
+assert query.schedule_at(0) is None
 action=DelayAction(enc,enc.being_list[1],defense=0,start_time=4,
  id='native-history-v4-migrated-delay')
 enc.schedule_action(action)
 enc.step(1)
+query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
 print(json.dumps({'time':enc.time,'rng':rng.state,
- 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'schedules':[query.schedule_at(boundary) for boundary in
+  range(1,query._latest+1)],
  'actions':list(enc._atomic_interval_history[-1].action_ids)},sort_keys=True))'''
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path)], cwd=directory,
@@ -2090,8 +2116,9 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         expected = {
             "time": original.time,
             "rng": demo["rng_owner"].state,
-            "history": hashlib.sha256(native_history.encode(
-                native_history.capture(original))).hexdigest(),
+            "schedules":[native_history.NativeHistoryQuery(
+                native_history.capture(original)).schedule_at(boundary)
+                for boundary in range(1,original.last_processed_boundary+1)],
             "actions": list(original._atomic_interval_history[-1].action_ids),
         }
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2130,6 +2157,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
                    if key != "sha256"}
         history.pop("receipt_facts_complete")
         history.pop("observer_knowledge")
+        history["initial"].pop("initial_schedule_available")
         history["schema"] = INITIAL_RNG_SCHEMA
         for row in history["boundaries"]:
             row.pop("notification_intents", None)

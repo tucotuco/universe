@@ -55,7 +55,7 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
         self.assertIn('no production native restore path', text)
         self.assertIn('**Open**', text)
         import native_history
-        self.assertEqual(native_history.SCHEMA, 'universe.native-encounter-history/8')
+        self.assertEqual(native_history.SCHEMA, 'universe.native-encounter-history/9')
         self.assertTrue(callable(native_history.entity_context_at))
         self.assertTrue(callable(native_history.entity_at))
         self.assertTrue(callable(native_history.entity_history_at))

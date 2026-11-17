@@ -31,10 +31,12 @@ ENTITY_CONTEXT_SCHEMA = "universe.native-encounter-history/4"
 FATIGUE_CONTEXT_SCHEMA = "universe.native-encounter-history/5"
 INITIAL_RNG_SCHEMA = "universe.native-encounter-history/6"
 RECEIPT_FACT_SCHEMA = "universe.native-encounter-history/7"
-SCHEMA = "universe.native-encounter-history/8"
+OBSERVER_KNOWLEDGE_SCHEMA = "universe.native-encounter-history/8"
+SCHEMA = "universe.native-encounter-history/9"
 LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA,
                   ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
-                  INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA)
+                  INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
+                  OBSERVER_KNOWLEDGE_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
@@ -49,6 +51,7 @@ class NativeHistoryRejected(ValueError):
 
 
 _RECORDERS = WeakKeyDictionary()
+_INITIAL_SCHEDULES = WeakKeyDictionary()
 _RECORDER_LOCK = RLock()
 
 
@@ -365,6 +368,46 @@ def _target_candidates(encounter):
     return result
 
 
+def capture_initial_schedule(encounter):
+    """Capture the exact scheduler/Choice state before the first commit.
+
+    This closed initial projection is separate from the post-publication queue
+    records stored at boundaries. It is captured only while the Encounter is
+    quiescent or under the transaction's publication lock.
+    """
+    from interval_staging import QueueProjection
+    encounter._pending_schedule()
+    book = encounter._choice_book
+    world_data = object.__getattribute__(encounter.universe, "__dict__")
+    from interval_staging import AuthorityReference, RegistrationIntent, _data_metadata
+    registrations = []
+    for action_id, (choice_id, packet, _signature) in book._registered.items():
+        action = world_data["event_history"].get(action_id)
+        if action is None or packet.action_id != action_id:
+            raise NativeHistoryRejected(
+                "initial scheduler registration references a missing Action")
+        initialization = {key: value for key, value in packet.initialization
+                          if key != "start_position"}
+        initialization.update(end_time=packet.end_time,
+                              parent_event_id=encounter.id)
+        metadata = _data_metadata({action_id: initialization}, encounter)[action_id]
+        registrations.append(RegistrationIntent(
+            AuthorityReference("event", action_id, id(action)), choice_id,
+            AuthorityReference("accepted_packet", action_id, id(packet)), metadata))
+    projection = QueueProjection(
+        tuple(encounter.pending_action_list),
+        tuple(encounter.finished_action_list),
+        tuple(encounter.cancelled_action_list),
+        tuple(registrations),
+        MappingProxyType(dict(book._states)),
+        MappingProxyType({identity: record.view.state
+                          for identity, record in book._choices.items()}),
+        tuple(book._reservations),
+        world_data["_schedule_revision"],
+    )
+    return _plain(projection)
+
+
 def _stable_recipients(value):
     if type(value) not in (dict, MappingProxyType):
         raise NativeHistoryRejected("native observer projections are not a mapping")
@@ -636,19 +679,36 @@ def upgrade(log):
     if log["schema"] == SCHEMA:
         return decode(encode(log))
     previous = log["initial"].get("rng_before_first_commit")
-    body = {key: value for key, value in log.items() if key != "sha256"}
+    # Upgrade into detached data: shallow-copying only the envelope lets field
+    # additions mutate the caller's authenticated history and invalidate its
+    # digest during ordinary Load processing.
+    body = decode(encode(log))
+    body.pop("sha256")
     body["schema"] = SCHEMA
-    if log["schema"] not in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA):
+    if log["schema"] not in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
+                              OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA):
         body["initial"] = dict(body["initial"], rng_before_first_commit=None)
+    # Before /9 the value came from the first committed receipt, not from the
+    # pre-first-commit scheduler cut. Keep it as the old delta replay anchor,
+    # but never expose it as boundary-zero history.
+    schedule = body["initial"]["initial_schedule"]
+    if schedule is not None:
+        _validate_queue_projection(schedule)
+    body["initial"]["initial_schedule_available"] = False
     if log["schema"] == ENTITY_CONTEXT_SCHEMA:
         body["entity_context"] = dict(log["entity_context"], fatigue_available=False)
     elif log["schema"] not in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
-                               RECEIPT_FACT_SCHEMA, SCHEMA):
+                               RECEIPT_FACT_SCHEMA, OBSERVER_KNOWLEDGE_SCHEMA,
+                               SCHEMA):
         body["entity_context"] = _unavailable_entity_context()
-    has_receipt_facts = log["schema"] == RECEIPT_FACT_SCHEMA
+    has_receipt_facts = log["schema"] in (RECEIPT_FACT_SCHEMA,
+                                           OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA)
     body["receipt_facts_complete"] = (
         log["receipt_facts_complete"] if has_receipt_facts else False)
-    body["observer_knowledge"] = _unavailable_observer_knowledge()
+    body["observer_knowledge"] = (
+        log["observer_knowledge"]
+        if log["schema"] in (OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA)
+        else _unavailable_observer_knowledge())
     rows = []
     for original in _expand_rows(log):
         row = dict(original)
@@ -803,6 +863,13 @@ def _unavailable_observer_knowledge():
     return {"available": False, "initial": None, "changes": []}
 
 
+def _remember_record_initial_schedule(encounter, log):
+    initial = log.get("initial", {}) if type(log) is dict else {}
+    if initial.get("initial_schedule_available") is True:
+        with _RECORDER_LOCK:
+            _INITIAL_SCHEDULES[encounter] = initial["initial_schedule"]
+
+
 def _without_observer_knowledge(log):
     """Normalize /8 facts to the exact observer-knowledge scope of /7."""
     validate(log)
@@ -841,7 +908,11 @@ def _validate_plain_record(value, depth=0):
             raise NativeHistoryRejected("native EntityInspection record is malformed")
         tag = value["$record"]
         adapter = FIELD_ADAPTERS.get(tag)
-        if adapter is None and tag == "encounter_inspection.EntityInspection":
+        if tag == "interval_staging.AuthorityReference":
+            allowed = required = {"key", "role"}
+        elif tag == "observer_proposals.RecipientIdentity":
+            allowed = required = {"role"}
+        elif adapter is None and tag == "encounter_inspection.EntityInspection":
             allowed = {"category", "obj_type", "name", "position", "pre_action"}
             required = allowed
         elif adapter is not None:
@@ -887,7 +958,8 @@ def _validate_plain_record(value, depth=0):
         _validate_plain_record(item, depth + 1)
 
 
-def capture(encounter):
+def capture(encounter, *, initial_schedule=None,
+            initial_schedule_available=None):
     """Capture committed facts from a native Encounter without resolving work.
 
     The returned format is a queryable historical record, not a resumable Save
@@ -898,19 +970,25 @@ def capture(encounter):
     from encounter import Encounter
     if type(encounter) is not Encounter:
         raise NativeHistoryRejected("native Encounter required")
+    if initial_schedule is None:
+        with _RECORDER_LOCK:
+            initial_schedule = _INITIAL_SCHEDULES.get(encounter)
     view = encounter.inspect_committed()
     receipts = tuple(encounter.__dict__.get("_atomic_interval_history", ()))
     if not receipts or len(receipts) != len(view.timeline):
         raise NativeHistoryRejected("committed native receipt chain is incomplete")
     targets_by_boundary = _target_candidates(encounter)
     initial_receipt = receipts[0]
+    if initial_schedule_available is None:
+        initial_schedule_available = initial_schedule is not None
     initial = {
         "encounter_id": encounter.id,
         "universe_id": encounter.universe.id,
         "start": _plain(initial_receipt.inspection.start),
         "entities": _plain(initial_receipt.inspection.entities),
         "participants": _plain(initial_receipt.inspection.participants),
-        "initial_schedule": _plain(initial_receipt.inspection.schedule),
+        "initial_schedule": initial_schedule,
+        "initial_schedule_available": initial_schedule_available,
         "rng_before_first_commit": _plain(
             encounter.__dict__["_native_rng_origin_state"])
             if encounter.__dict__.get("_native_rng_origin_state") is not None
@@ -1174,9 +1252,10 @@ def append_committed(log, encounter):
 class NativeHistoryRecorder:
     """Opt-in in-memory recorder fed only after successful native publication."""
 
-    def __init__(self, encounter, log):
+    def __init__(self, encounter, log, *, initial_schedule=None):
         self._encounter_ref = weakref(encounter)
         self._log = log
+        self._initial_schedule = initial_schedule
         self.failure = None
 
     @property
@@ -1210,6 +1289,7 @@ class NativeHistoryRecorder:
                         "native history does not match the completed Save cut")
                 recorder = cls(encounter, candidate)
                 _RECORDERS[encounter] = recorder
+                _remember_record_initial_schedule(encounter, candidate)
             elif log is not None and encode(recorder._log) != encode(upgrade(log)):
                 raise NativeHistoryRejected(
                     "native history recorder differs from the completed Save cut")
@@ -1230,8 +1310,10 @@ class NativeHistoryRecorder:
         with _RECORDER_LOCK:
             recorder = _RECORDERS.get(encounter)
             if recorder is None:
-                recorder = cls(encounter, None)
+                recorder = cls(encounter, None,
+                               initial_schedule=capture_initial_schedule(encounter))
                 _RECORDERS[encounter] = recorder
+                _INITIAL_SCHEDULES[encounter] = recorder._initial_schedule
             elif recorder._log is not None:
                 raise NativeHistoryRejected(
                     "committed history recorder differs from the initial Save cut")
@@ -1255,6 +1337,7 @@ class NativeHistoryRecorder:
                     'a native history recorder is already attached')
             recorder = cls(encounter, decode(encode(log)))
             _RECORDERS[encounter] = recorder
+            _remember_record_initial_schedule(encounter, log)
             return recorder
 
     @classmethod
@@ -1292,23 +1375,33 @@ def current_recording(encounter):
     return None if recorder._log is None else recorder.export()
 
 
-def record_committed_boundary(encounter):
+def record_committed_boundary(encounter, *, initial_schedule=None):
     """Append the latest commit after native publication has fully returned."""
     with _RECORDER_LOCK:
         recorder = _RECORDERS.get(encounter)
     if recorder is None:
+        if initial_schedule is not None:
+            with _RECORDER_LOCK:
+                _INITIAL_SCHEDULES.setdefault(encounter, initial_schedule)
         return
     try:
-        updated = (capture(encounter) if recorder._log is None
+        baseline = (recorder._initial_schedule if recorder is not None
+                    and recorder._initial_schedule is not None
+                    else initial_schedule)
+        updated = (capture(encounter, initial_schedule=baseline)
+                   if recorder._log is None
                    else append_committed(recorder._log, encounter))
         with _RECORDER_LOCK:
             recorder._log = updated
+            recorder._initial_schedule = None
+            _remember_record_initial_schedule(encounter, updated)
     except Exception as exc:
         # The Encounter publication is already authoritative and committed.
         # Preserve ordinary progression; make later Save fail closed until the
         # recorder is recovered from the authenticated native receipt chain.
         with _RECORDER_LOCK:
-            recorder.failure = f"{type(exc).__name__}: {exc}"
+            if recorder is not None:
+                recorder.failure = f"{type(exc).__name__}: {exc}"
 
 
 def validate(log):
@@ -1316,10 +1409,13 @@ def validate(log):
     base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
     current_keys = base_keys | {"entity_context"}
     version = log.get("schema") if type(log) is dict else None
-    has_receipt_facts = version in (RECEIPT_FACT_SCHEMA, SCHEMA)
-    has_observer_knowledge = version == SCHEMA
+    has_receipt_facts = version in (RECEIPT_FACT_SCHEMA,
+                                    OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA)
+    has_observer_knowledge = version in (OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA)
+    has_initial_schedule = version == SCHEMA
     has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
-                                     INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA)
+                                     INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
+                                     OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA)
     expected_envelope = (current_keys | {"receipt_facts_complete"}
                          if has_receipt_facts else current_keys if has_entity_context
                          else base_keys)
@@ -1337,14 +1433,25 @@ def validate(log):
     initial = log["initial"]
     expected_initial = {"encounter_id", "universe_id", "start", "entities",
                         "participants", "initial_schedule"}
-    if version in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA):
+    if version in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
+                   OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA):
         expected_initial.add("rng_before_first_commit")
+    if has_initial_schedule:
+        expected_initial.add("initial_schedule_available")
     if (type(initial) is not dict or set(initial) != expected_initial or type(initial["encounter_id"]) is not str
             or not initial["encounter_id"] or type(initial["universe_id"]) is not str
             or not initial["universe_id"]):
         raise NativeHistoryRejected("native history initial state schema differs")
-    if version in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA) and initial["rng_before_first_commit"] is not None:
+    if version in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
+                   OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA) and initial["rng_before_first_commit"] is not None:
         _validate_rng_cursor(initial["rng_before_first_commit"])
+    if has_initial_schedule:
+        if type(initial["initial_schedule_available"]) is not bool:
+            raise NativeHistoryRejected("initial scheduler availability marker is malformed")
+        if initial["initial_schedule_available"] and initial["initial_schedule"] is None:
+            raise NativeHistoryRejected("available initial scheduler projection is absent")
+        if initial["initial_schedule"] is not None:
+            _validate_queue_projection(initial["initial_schedule"])
     if has_receipt_facts and type(log["receipt_facts_complete"]) is not bool:
         raise NativeHistoryRejected("native receipt-fact completeness marker is malformed")
     state = _initial_state(initial)
@@ -1369,7 +1476,8 @@ def validate(log):
                 raise NativeHistoryRejected("legacy quiet span contains a future receipt field")
             if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
                                       FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
-                                      RECEIPT_FACT_SCHEMA, SCHEMA):
+                                      RECEIPT_FACT_SCHEMA,
+                                      OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA):
                 raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
             if row.get("rng_after") != SAME_RNG or prior_rng is None:
                 raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
@@ -1392,7 +1500,8 @@ def validate(log):
         if row["rng_after"] == SAME_RNG:
             if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
                                       FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
-                                      RECEIPT_FACT_SCHEMA, SCHEMA) or prior_rng is None:
+                                      RECEIPT_FACT_SCHEMA,
+                                      OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA) or prior_rng is None:
                 raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
         else:
             if (type(row["rng_after"]) is not dict
@@ -1508,12 +1617,72 @@ def validate(log):
     return True
 
 
+def _validate_queue_projection(value):
+    """Validate the portable initial scheduler snapshot used by schema `/9`."""
+    _validate_plain_record(value)
+    if (type(value) is not dict
+            or value.get("$record") != "interval_staging.QueueProjection"
+            or type(value.get("fields")) is not dict):
+        record = value.get("$record") if type(value) is dict else type(value).__name__
+        raise NativeHistoryRejected(
+            f"initial scheduler projection type differs ({record!r})")
+    fields_value = value["fields"]
+    expected = {"pending", "finished", "cancelled", "event_registrations",
+                "action_states", "choice_states", "reservations",
+                "schedule_revision"}
+    if set(fields_value) != expected:
+        raise NativeHistoryRejected("initial scheduler projection fields differ")
+    for name in ("pending", "finished", "cancelled", "event_registrations",
+                 "reservations"):
+        sequence = fields_value[name]
+        if type(sequence) is not dict or set(sequence) != {"$tuple"} \
+                or type(sequence["$tuple"]) is not list:
+            raise NativeHistoryRejected("initial scheduler sequence is malformed")
+    for name in ("pending", "finished", "cancelled"):
+        rows = fields_value[name]["$tuple"]
+        if (any(type(identity) is not str or not identity for identity in rows)
+                or len(set(rows)) != len(rows)):
+            raise NativeHistoryRejected("initial scheduler Action identities are malformed")
+    for row in fields_value["event_registrations"]["$tuple"]:
+        if (type(row) is not dict
+                or row.get("$record") != "interval_staging.RegistrationIntent"
+                or type(row.get("fields")) is not dict):
+            raise NativeHistoryRejected("initial scheduler registration is malformed")
+        registration = row["fields"]
+        if (set(registration) != {"action", "choice_id", "accepted_packet", "metadata",
+                                 "signature_from_final_native_declaration"}
+                or type(registration["choice_id"]) is not str
+                or not registration["choice_id"]
+                or registration["signature_from_final_native_declaration"] is not True):
+            raise NativeHistoryRejected("initial scheduler registration fields differ")
+        for role_name, role in (("action", "event"),
+                                ("accepted_packet", "accepted_packet")):
+            reference = registration[role_name]
+            if (type(reference) is not dict
+                    or reference.get("$record") != "interval_staging.AuthorityReference"
+                    or set(reference.get("fields", {})) != {"key", "role"}
+                    or reference["fields"].get("role") != role
+                    or reference["fields"].get("key") == ""):
+                raise NativeHistoryRejected("initial scheduler registration reference differs")
+    for name in ("action_states", "choice_states"):
+        states = fields_value[name]
+        if (type(states) is not dict
+                or any(type(identity) is not str or not identity
+                       or type(state) is not str or not state
+                       for identity, state in states.items())):
+            raise NativeHistoryRejected("initial scheduler state map is malformed")
+    revision = fields_value["schedule_revision"]
+    if type(revision) is not int or revision < 0:
+        raise NativeHistoryRejected("initial scheduler revision is malformed")
+
+
 def _validate_entity_context(context, latest_boundary, schema):
     expected_keys = ({"available", "initial", "changes"}
                      if schema == ENTITY_CONTEXT_SCHEMA else
                      {"available", "fatigue_available", "initial", "changes"})
     current_context_schemas = (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
-                               RECEIPT_FACT_SCHEMA, SCHEMA)
+                               RECEIPT_FACT_SCHEMA, OBSERVER_KNOWLEDGE_SCHEMA,
+                               SCHEMA)
     if (type(context) is not dict or set(context) != expected_keys
             or type(context["available"]) is not bool or type(context["changes"]) is not list
             or schema in current_context_schemas
@@ -1775,7 +1944,9 @@ class NativeHistoryQuery:
         self._context_changes = {row["boundary"]: row
                                  for row in context["changes"]}
         self._has_receipt_facts = self._log.get("schema") in (
-            RECEIPT_FACT_SCHEMA, SCHEMA)
+            RECEIPT_FACT_SCHEMA, OBSERVER_KNOWLEDGE_SCHEMA, SCHEMA)
+        self._initial_schedule_available = bool(
+            self._log["initial"].get("initial_schedule_available", False))
         knowledge = self._log.get("observer_knowledge",
                                   _unavailable_observer_knowledge())
         self._knowledge_available = knowledge["available"]
@@ -1820,7 +1991,12 @@ class NativeHistoryQuery:
         if boundary >= self._state_boundary:
             self._state = state
             self._state_boundary = boundary
-        return self._copy(state)
+        result = self._copy(state)
+        if not self._initial_schedule_available:
+            result["initial_schedule"] = None
+            if boundary == 0:
+                result["schedule"] = None
+        return result
 
     def target_at(self, target_id, boundary):
         """Return one authoritative TargetCandidate at a committed boundary."""
@@ -1845,6 +2021,8 @@ class NativeHistoryQuery:
     def schedule_at(self, boundary):
         """Return the detached committed native queue and Choice projection."""
         self._boundary(boundary)
+        if boundary == 0 and not self._initial_schedule_available:
+            return None
         return self._copy(self.state_at(boundary)["schedule"])
 
     def action_state_at(self, action_id, boundary):
@@ -1852,6 +2030,8 @@ class NativeHistoryQuery:
         if type(action_id) is not str or not action_id:
             raise NativeHistoryRejected("Action state requires a stable identity")
         schedule = self.schedule_at(boundary)
+        if schedule is None:
+            return None
         fields_value = schedule.get("fields", {})
         states = fields_value.get("action_states", {})
         if type(states) is not dict:
@@ -1863,6 +2043,8 @@ class NativeHistoryQuery:
         if type(choice_id) is not str or not choice_id:
             raise NativeHistoryRejected("Choice state requires a stable identity")
         schedule = self.schedule_at(boundary)
+        if schedule is None:
+            return None
         fields_value = schedule.get("fields", {})
         states = fields_value.get("choice_states", {})
         if type(states) is not dict:

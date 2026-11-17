@@ -996,11 +996,23 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
     if not binding.running.acquire(blocking=False):raise TransactionalProgressionError('reentrant/concurrent transactional progression')
     try:
         completed=[];motion=None;facing_updates=None;movement_stop_times=None;movement_targets=None;movement_decision_ids=[]
+        first_initial_schedule=None
         while encounter.time<end:
             with publication_boundary(encounter,quiescent=True) as ownership:
                 # Reentrant entry checks are private control state, not timeline
                 # flags; 5C1/5C2 see an actual committed native checkpoint.
                 boundary=encounter.last_processed_boundary+1
+                if (first_initial_schedule is None
+                        and not encounter.__dict__.get('_atomic_interval_history')):
+                    from native_history import (NativeHistoryRejected,
+                                                capture_initial_schedule)
+                    try:
+                        first_initial_schedule=capture_initial_schedule(encounter)
+                    except NativeHistoryRejected:
+                        # History is an auxiliary persistence service. An
+                        # unsupported pre-boundary projection must not change
+                        # the native Action's ordinary transaction outcome.
+                        first_initial_schedule=None
                 context=_all_declarations(encounter,boundary,binding.rng_owner)
                 if motion is None:
                     positions={key:context.snapshot.entities[key].position for key in context.snapshot.participant_ids}
@@ -1059,7 +1071,7 @@ def step_transactionally(encounter,duration,velocities,velocity_frame,*,adult_me
     # the full publisher and rollback boundary. It runs after the progression
     # lock is released because the inspector refuses reads during a step.
     from native_history import record_committed_boundary
-    record_committed_boundary(encounter)
+    record_committed_boundary(encounter, initial_schedule=first_initial_schedule)
     encounter._choice_book._repeat_completed_programs(encounter.last_processed_boundary)
     return result
 
