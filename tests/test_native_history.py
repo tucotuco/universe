@@ -364,6 +364,7 @@ class NativeHistoryTests(unittest.TestCase):
                          query.fatigue_context_at(0))
         self.assertEqual(events_at(self.log, 0), expected_events)
         self.assertEqual(query.events_at(0), expected_events)
+        self.assertEqual(query.timeline_at(0), {"$tuple": []})
         self.assertEqual(rng_state_at(self.log, 0),
                          self.log["initial"]["rng_before_first_commit"])
         self.assertEqual(query.rng_state_at(0), rng_state_at(self.log, 0))
@@ -599,6 +600,13 @@ class NativeHistoryTests(unittest.TestCase):
         spans = [row for row in log['boundaries'] if row.get('kind') == 'quiet_span']
         self.assertTrue(spans)
         query = NativeHistoryQuery(log)
+        self.assertEqual(query.timeline_at(log['latest_boundary']),
+                         __import__('native_history')._plain(
+                             encounter.inspect_committed().timeline))
+        for boundary in range(1, log['latest_boundary'] + 1):
+            self.assertEqual(query.timeline_at(boundary),
+                __import__('native_history')._plain(
+                    encounter.inspect_committed(boundary).timeline))
         self.assertEqual(len(query._segments), len(log['boundaries']))
         self.assertLess(len(query._segments), log['latest_boundary'])
         expanded = dict(log)

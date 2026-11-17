@@ -64,6 +64,20 @@ def _canonical(value):
         raise NativeHistoryRejected("native history is not canonical finite JSON data") from exc
 
 
+def _number_value(value):
+    if type(value) in (int, float) and type(value) is not bool:
+        return value
+    if (type(value) is dict and set(value) == {"$number"}
+            and type(value["$number"]) is str):
+        try:
+            result = float.fromhex(value["$number"])
+        except ValueError as exc:
+            raise NativeHistoryRejected("native history timeline number is malformed") from exc
+        if math.isfinite(result) and result.hex() == value["$number"]:
+            return result
+    raise NativeHistoryRejected("native history timeline number is malformed")
+
+
 def _native_types():
     import importlib
     result = {}
@@ -2288,6 +2302,42 @@ class NativeHistoryQuery:
             events = row["events"]
         return self._copy(events)
 
+    def timeline_at(self, boundary=None):
+        """Return the committed native timeline through a boundary.
+
+        Quiet spans are expanded only in this detached query result, never in
+        the stored history or the validated query index.
+        """
+        if boundary is None:
+            boundary = self._latest
+        self._boundary(boundary)
+        rows = []
+        for row in self._segments:
+            start_boundary = (row["from_boundary"]
+                              if row.get("kind") == "quiet_span"
+                              else row["boundary"])
+            if start_boundary > boundary:
+                break
+            end_boundary = min(row.get("to_boundary", start_boundary), boundary)
+            for current in range(start_boundary, end_boundary + 1):
+                events = self.events_at(current)
+                if row.get("kind") == "quiet_span":
+                    start = _plain(_number_value(row["start"])
+                                   + (current-start_boundary)
+                                   * _number_value(row["step"]))
+                else:
+                    start = row["start"]
+                rows.append({"$record": "encounter_inspection.BoundaryInspection",
+                    "fields": {
+                        "encounter_id": self._log["initial"]["encounter_id"],
+                        "boundary": current,
+                        "start": start,
+                        "action_ids": {"$tuple": events["action_ids"]},
+                        "effect_ids": {"$tuple": events["effect_ids"]},
+                        "start_fences": events["starts"],
+                    }})
+        return {"$tuple": rows}
+
     def receipt_facts_at(self, boundary):
         """Return committed notification and Disarm landing facts, if retained."""
         self._boundary(boundary)
@@ -2528,6 +2578,11 @@ def events_at(log, boundary):
 def receipt_facts_at(log, boundary):
     """Return a detached committed receipt-fact row, or None for old logs."""
     return NativeHistoryQuery(log).receipt_facts_at(boundary)
+
+
+def timeline_at(log, boundary=None):
+    """Return the detached committed boundary timeline without graph reads."""
+    return NativeHistoryQuery(log).timeline_at(boundary)
 
 
 def committed_actions_at(log, boundary):

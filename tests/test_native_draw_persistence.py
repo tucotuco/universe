@@ -25,6 +25,7 @@ from object import ObjectDefinition, ObjectInstance
 from spatial.state import CartesianPosition
 from strategy import Strategy
 from melee_combat import effective_melee_reach_meters
+import native_history
 from weapon import author_worn_sheath_draw_location, native_weapon_draw_location
 from spatial.geometry import Sphere
 
@@ -44,6 +45,7 @@ class NativeDrawPersistenceTests(unittest.TestCase):
         for boundary in range(1, log['latest_boundary'] + 1):
             receipt = receipts[boundary]
             inspection = encounter.inspect_committed(boundary)
+            self.assertEqual(query.timeline_at(boundary), _plain(inspection.timeline))
             actual = query.committed_actions_at(boundary)
             self.assertEqual(actual['actions'], _plain(inspection.actions))
             self.assertEqual(actual['effects'], _plain(inspection.effects))
@@ -61,6 +63,32 @@ class NativeDrawPersistenceTests(unittest.TestCase):
                              _plain(receipt.inspection.entities))
             self.assertEqual(query.schedule_at(boundary),
                              _plain(receipt.inspection.schedule))
+            self.assertEqual(query.objective_at(boundary),
+                             _plain(inspection.objective))
+            self.assertEqual(query.objective_use_at(boundary),
+                             _plain(inspection.objective_use))
+            expected_recipients = native_history._stable_recipients(
+                inspection.recipients)
+            self.assertEqual(query.state_at(boundary)['recipients'],
+                             expected_recipients)
+            receipt_facts = query.receipt_facts_at(boundary)
+            self.assertEqual(receipt_facts['notification_intents'],
+                             _plain(receipt.notification_intents))
+            local_landings = tuple(row for row in encounter.__dict__.get(
+                '_disarm_landing_receipts', ()) if row.boundary == boundary)
+            self.assertEqual(receipt_facts['disarm_landings'], _plain(local_landings))
+            all_target_ids = set().union(*(set(rows) for cut, rows in targets.items()
+                                          if cut <= boundary))
+            for target_id in all_target_ids:
+                expected_history = [
+                    {'boundary': cut, 'state': _plain(rows[target_id])}
+                    for cut, rows in sorted(targets.items())
+                    if cut <= boundary and target_id in rows]
+                self.assertEqual(query.target_history_at(target_id, boundary),
+                                 expected_history)
+            for object_id in query.state_at(boundary)['projectile_states']:
+                self.assertEqual(query.projectile_state_at(object_id, boundary),
+                    query.state_at(boundary)['projectile_states'][object_id])
 
     def test_prepared_dodge_and_targeted_defense_restore_with_pending_strike(self):
         """A retained native defense reference survives a fresh-process Load."""

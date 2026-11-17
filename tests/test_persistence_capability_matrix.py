@@ -67,6 +67,7 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
         self.assertTrue(callable(native_history.action_state_at))
         self.assertTrue(callable(native_history.choice_state_at))
         self.assertTrue(callable(native_history.observer_knowledge_at))
+        self.assertTrue(callable(native_history.timeline_at))
         self.assertTrue(callable(native_history.NativeHistoryQuery))
 
 
