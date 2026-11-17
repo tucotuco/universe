@@ -1564,6 +1564,19 @@ class NativeHistoryQuery:
             if row.get("$record") == "encounter_inspection.EntityInspection"
             and row["fields"].get("category") == "being"}
 
+    def observer_facts_at(self, boundary, observer_id):
+        """Return only recipient facts explicitly owned by one observer."""
+        self._boundary(boundary)
+        if type(observer_id) is not str or not observer_id:
+            raise NativeHistoryRejected("observer history requires a stable observer ID")
+        recipients = self.state_at(boundary)["recipients"]
+        if recipients == {}:
+            return []
+        if type(recipients) is not list:
+            raise NativeHistoryRejected("native recipient history has an invalid shape")
+        return self._copy([row for row in recipients
+                           if type(row) is dict and row.get("owner_id") == observer_id])
+
 
 def events_at(log, boundary):
     validate(log)
@@ -1588,6 +1601,11 @@ def events_at(log, boundary):
 def committed_actions_at(log, boundary):
     """Return detached cumulative committed Action/Event/Effect records."""
     return NativeHistoryQuery(log).committed_actions_at(boundary)
+
+
+def observer_facts_at(log, boundary, observer_id):
+    """Return detached observer-owned history without other recipients."""
+    return NativeHistoryQuery(log).observer_facts_at(boundary, observer_id)
 
 
 def encode(log):

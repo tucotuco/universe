@@ -18,7 +18,7 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
                             NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
                             QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA, SCHEMA, SAME_RNG, _seal,
-                            fatigue_context_at, committed_actions_at,
+                            fatigue_context_at, committed_actions_at, observer_facts_at,
                             _plain, _expand_rows, _target_candidates)
 
 
@@ -574,6 +574,13 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertNotEqual(evidence[fixture.a.id], evidence[fixture.b.id])
         self.assertEqual(evidence[fixture.a.id]["observer_id"], fixture.a.id)
         self.assertEqual(evidence[fixture.b.id]["observer_id"], fixture.b.id)
+        first_only = observer_facts_at(log, 1, fixture.a.id)
+        second_only = observer_facts_at(log, 1, fixture.b.id)
+        self.assertEqual([row["owner_id"] for row in first_only], [fixture.a.id])
+        self.assertEqual([row["owner_id"] for row in second_only], [fixture.b.id])
+        self.assertEqual(first_only[0]["projection"], evidence[fixture.a.id])
+        self.assertEqual(second_only[0]["projection"], evidence[fixture.b.id])
+        self.assertEqual(observer_facts_at(log, 1, "unknown-observer"), [])
         self.assertTrue(validate(log))
 
 
