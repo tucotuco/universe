@@ -787,6 +787,67 @@ print(json.dumps({'time':enc.time,
                     boundary, {})))
         self.assertEqual(export_save(restored), wire)
 
+    def test_native_save_stores_entity_context_once_and_rebuilds_receipts(self):
+        """Committed EntityInspection maps are reconstructed from typed history."""
+        import base64
+        from native_graph_snapshot import decode as decode_graph
+        from native_graph_snapshot import encode as encode_graph
+        from checkpoint_inventory import capture_checkpoint_candidate
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        original_candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        original_graph_bytes = len(encode_graph(original_candidate.envelope, native=True))
+        expected = {
+            row.boundary: native_history._plain(row.inspection.entities)
+            for row in encounter._atomic_interval_history
+        }
+
+        wire = export_save(encounter)
+        save = json.loads(wire)
+        graph_wire = base64.b64decode(save["graph_b64"], validate=True)
+        self.assertLess(len(graph_wire), original_graph_bytes)
+        inventory = decode_graph(graph_wire, native=True)
+        nodes = next(row[1] for row in inventory[1] if row[0] == "nodes")
+        self.assertFalse(any(tag == "encounter_inspection.EntityInspection"
+                             for _reference, tag, _content in nodes))
+
+        world, restored, _rng = load_save(wire)
+        actual = {
+            row.boundary: native_history._plain(row.inspection.entities)
+            for row in restored._atomic_interval_history
+        }
+        self.assertEqual(actual, expected)
+        query = native_history.NativeHistoryQuery(native_history.capture(restored))
+        for boundary, entity_context in expected.items():
+            self.assertEqual(query.boundary_facts_at(boundary)["entity_context"],
+                             entity_context)
+        self.assertIs(world.event_history[restored.id], restored)
+        self.assertEqual(export_save(restored), wire)
+
+    def test_compacted_entity_context_rejects_altered_source_receipt(self):
+        """Omitted context remains covered by authenticated receipt integrity."""
+        from checkpoint_inventory import (capture_checkpoint_candidate,
+                                          validate_checkpoint_candidate)
+        from encounter_inspection import InspectionRejected
+
+        encounter = encounter_delta_headless.build_demo(until=2)["encounter"]
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        receipt = encounter._atomic_interval_history[-1]
+        from types import MappingProxyType
+        object.__setattr__(receipt.inspection, "entities", MappingProxyType({}))
+        with self.assertRaises(InspectionRejected):
+            validate_checkpoint_candidate(encounter.universe, encounter, candidate,
+                                          quiescent=True)
+
     def test_uncompacted_native_graph_v1_from_last_writer_migrates_strictly(self):
         """The immediately previous accepted /1 graph rewrites to compact /2."""
         import base64
@@ -825,6 +886,46 @@ print(json.dumps({'time':enc.time,
             native_persistence._canonical(unsigned_save)).hexdigest()
         restored_world, restored, _rng = load_save(
             native_persistence._canonical(old_save))
+        self.assertIs(restored_world.event_history[restored.id], restored)
+        self.assertEqual(export_save(restored), current_wire)
+
+    def test_target_compact_native_graph_v2_from_previous_writer_migrates(self):
+        """The immediately prior compact graph migrates to current graph facts."""
+        import base64
+        import native_graph_snapshot
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        current_wire = export_save(encounter)
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        prior_graph = json.loads(encode_graph(candidate.envelope, native=True))
+        legacy_compatibility = (
+            native_graph_snapshot._LEGACY_NATIVE_GRAPH_V2_TARGET_COMPATIBILITY)
+        prior_graph["compatibility"] = legacy_compatibility
+        old_inventory = native_graph_snapshot._expand_compact_inventory(
+            native_graph_snapshot._tuples(prior_graph["inventory"]), native=True)
+        old_inventory = (legacy_compatibility, old_inventory[1])
+        prior_graph["inventory"] = native_graph_snapshot._compact_inventory(
+            old_inventory, native=True)
+        unsigned_graph = {key: value for key, value in prior_graph.items()
+                          if key != "sha256"}
+        prior_graph["sha256"] = hashlib.sha256(
+            native_graph_snapshot._canonical(unsigned_graph)).hexdigest()
+
+        prior_save = json.loads(current_wire)
+        prior_save["graph_b64"] = base64.b64encode(
+            native_graph_snapshot._canonical(prior_graph)).decode("ascii")
+        unsigned_save = {key: value for key, value in prior_save.items()
+                         if key != "sha256"}
+        prior_save["sha256"] = hashlib.sha256(
+            native_persistence._canonical(unsigned_save)).hexdigest()
+        restored_world, restored, _rng = load_save(
+            native_persistence._canonical(prior_save))
         self.assertIs(restored_world.event_history[restored.id], restored)
         self.assertEqual(export_save(restored), current_wire)
 
@@ -4224,12 +4325,24 @@ print(json.dumps({'time':enc.time,
                 self.assertEqual(actual[key], value)
 
     def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
+        import base64
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
         from native_history import LEGACY_SCHEMA, SAME_RNG, _seal
         from native_persistence import _canonical
         demo = encounter_delta_headless.build_demo(until=4)
         original = demo['encounter']
         wire = export_save(original)
         body = json.loads(wire)
+        # Legacy histories did not compact EntityInspection into a separate
+        # fact family, so keep the corresponding legacy graph projection too.
+        legacy_candidate = capture_checkpoint_candidate(
+            original.universe, original, quiescent=True,
+            rng_scope='exclusive_encounter', native_adapters=True,
+            full_native=True,
+            rng_owner=native_persistence._native_rng_owner(original))
+        body['graph_b64'] = base64.b64encode(encode_graph(
+            legacy_candidate.envelope, native=True)).decode('ascii')
         boundary_rngs = {row['boundary']: native_history.rng_state_at(
             body['history'], row.get('to_boundary', row.get('boundary')))
             for row in native_history._expand_rows(body['history'])}
@@ -4272,11 +4385,21 @@ print(json.dumps({'time':enc.time,
         self.assertEqual(export_save(load_save(migrated_wire)[1]), migrated_wire)
 
     def test_native_history_v4_save_migrates_without_fabricating_then_rebinds_current_context(self):
+        import base64
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
         from native_history import ENTITY_CONTEXT_SCHEMA, _seal
         from native_persistence import _canonical
         demo = encounter_delta_headless.build_demo(until=4)
         original = demo["encounter"]
         body = json.loads(export_save(original))
+        legacy_candidate = capture_checkpoint_candidate(
+            original.universe, original, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True,
+            rng_owner=native_persistence._native_rng_owner(original))
+        body["graph_b64"] = base64.b64encode(encode_graph(
+            legacy_candidate.envelope, native=True)).decode("ascii")
         history = native_history._without_fatigue_context(body["history"])
         legacy = _legacy_history_shape({key: value for key, value in history.items()
                                         if key != "sha256"})

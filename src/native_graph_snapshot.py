@@ -109,6 +109,19 @@ _LEGACY_NATIVE_GRAPH_V1_BFC_COMPATIBILITY = (
     ('python-native-rng', 'MT19937-state-v3'),
     ('restore-adapters', 'not-implemented'),
 )
+_LEGACY_NATIVE_GRAPH_V2_TARGET_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', 'af95b65227b2fb59a24f157d6f5ae8882e4f6d4586bec58470b5e3f5e3651468'),
+    ('rule-kernel-source', '661905a7826fc109055595c63778cec56d4502efc942116e3b23fb71ea025f1c'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
+_LEGACY_NATIVE_GRAPH_V2_COMPATIBILITIES = (
+    _LEGACY_NATIVE_GRAPH_V2_TARGET_COMPATIBILITY,
+)
 _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITIES = (
     _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITY,
     _LEGACY_NATIVE_GRAPH_V1_BFC_COMPATIBILITY,
@@ -354,6 +367,9 @@ def decode(wire, *, native=False):
         saved_compatibility
         if native and data['schema'] == _LEGACY_NATIVE_SCHEMA_V1
             and saved_compatibility in _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITIES else
+        saved_compatibility
+        if native and data['schema'] == NATIVE_SCHEMA
+            and saved_compatibility in _LEGACY_NATIVE_GRAPH_V2_COMPATIBILITIES else
         _LEGACY_V5_COMPATIBILITY if saved_compatibility == _LEGACY_V5_COMPATIBILITY
         else _LEGACY_NATIVE_BRIDGE_COMPATIBILITY
         if saved_compatibility == _LEGACY_NATIVE_BRIDGE_COMPATIBILITY
@@ -568,7 +584,10 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
     if native:
         _need(sections['native-adapters'] in (
                   ('native-closure-recipes/1',),
-                  ('native-closure-recipes/1', 'target-candidate-history/1')),
+                  ('native-closure-recipes/1', 'target-candidate-history/1'),
+                  ('native-closure-recipes/1', 'entity-context-history/1'),
+                  ('native-closure-recipes/1', 'target-candidate-history/1',
+                   'entity-context-history/1')),
               'native adapter recipe version differs')
         _validate_host_binding_descriptors(sections['host-bindings'])
     _need(sections['readiness'] == (False, False, False), 'unsupported inventory readiness claim')
@@ -717,8 +736,11 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
                                  allow_rebuilt_fields=True, native=native)
     body = envelope[1]
     sections = {row[0]: row[1:] for row in body[1:]}
-    compact_target_history = (native and sections.get('native-adapters') ==
-        ('native-closure-recipes/1', 'target-candidate-history/1'))
+    native_adapter_markers = sections.get('native-adapters', ())
+    compact_target_history = (native and
+        'target-candidate-history/1' in native_adapter_markers)
+    compact_entity_context = (native and
+        'entity-context-history/1' in native_adapter_markers)
     history_map_supplied = native_histories is not None
     if native_histories is None:
         native_histories = {}
@@ -930,7 +952,7 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
             _need(target is not None, 'native committed fence reference cannot be rebound')
             object.__setattr__(reference, 'identity', id(target))
 
-    if compact_target_history:
+    if compact_target_history or compact_entity_context:
         if not history_map_supplied:
             _need(all(not saved.__dict__.get('_atomic_interval_history')
                       and saved.time == saved.start_time
@@ -941,11 +963,15 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
               'compacted native graph requires histories for every Encounter')
         import native_history as history_codec
         try:
-            history_codec.restore_compacted_target_history(world,
-                                                            native_histories)
+            if compact_entity_context:
+                history_codec.restore_compacted_entity_context(world,
+                                                               native_histories)
+            if compact_target_history:
+                history_codec.restore_compacted_target_history(world,
+                                                                native_histories)
         except history_codec.NativeHistoryRejected as exc:
             raise ArenaNativeSnapshotRejected(
-                f'compacted native Target history cannot be restored: {exc}') from exc
+                f'compacted native history cannot be restored: {exc}') from exc
 
     # Native inventory intentionally excludes pointer anchors. Recreate them
     # from the restored objects, then verify the whole history with native inspection.

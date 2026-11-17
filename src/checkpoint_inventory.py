@@ -365,7 +365,8 @@ def _candidate_seal(candidate):
 
 def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              bindings=(),rng_owner=None,full_native=False,
-             compact_native_target_history=False):
+             compact_native_target_history=False,
+             compact_native_entity_context=False):
     from universe import Universe
     from encounter import Encounter
     from transactional_progression import _BINDINGS,_all_declarations
@@ -384,6 +385,10 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              and (not compact_native_target_history
                   or native_adapters and full_native),
              'compact native Target history requires the full native adapter mode')
+    _require(type(compact_native_entity_context) is bool
+             and (not compact_native_entity_context
+                  or native_adapters and full_native),
+             'compact native EntityInspection context requires the full native adapter mode')
     _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
     _require(native_adapters or bindings == (), 'bindings require explicit native adapter mode')
     _require(quiescent is True,'explicit quiescent/coordinated read ownership is required')
@@ -444,7 +449,8 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
             from checkpoint_adapters import NativeInventory
             inventory=NativeInventory(world,encounter,bindings,rng_owner=owner,
                                       full_native=full_native,
-                                      compact_native_target_history=compact_native_target_history)
+                                      compact_native_target_history=compact_native_target_history,
+                                      compact_native_entity_context=compact_native_entity_context)
         else:
             inventory=_Inventory()
         body=inventory.build(world,encounter,role,rng,rng_scope)
@@ -459,7 +465,7 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
 
 def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=None,
         native_adapters=False,bindings=(),rng_owner=None,full_native=False,
-        compact_native_target_history=False):
+        compact_native_target_history=False,compact_native_entity_context=False):
     """Return an inactive partial inventory; all readiness flags remain false.
 
     rng_scope is an explicit caller assertion, not evidence of global privacy.
@@ -468,13 +474,14 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
     envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,
         rng_scope=rng_scope,native_adapters=native_adapters,bindings=bindings,
         rng_owner=rng_owner,full_native=full_native,
-        compact_native_target_history=compact_native_target_history)
+        compact_native_target_history=compact_native_target_history,
+        compact_native_entity_context=compact_native_entity_context)
     candidate=CheckpointCandidate(SCHEMA,envelope,diagnostics,_digest(envelope))
     key=id(candidate)
     _ISSUED[key]=(weakref.ref(candidate,lambda ref,key=key:_ISSUED.pop(key,None)),
         weakref.ref(world),weakref.ref(encounter),stamp,_candidate_seal(candidate),
         rng_scope,native_adapters,bindings,full_native,
-        compact_native_target_history)
+        compact_native_target_history,compact_native_entity_context)
     return candidate
 
 
@@ -485,6 +492,7 @@ def validate_checkpoint_candidate(world,encounter,candidate,*,quiescent=False):
     _require(_candidate_seal(candidate)==issued[4] and candidate.content_digest==_digest(candidate.envelope),'modified inventory candidate')
     envelope,diagnostics,stamp=_capture(world,encounter,quiescent=quiescent,
         rng_scope=issued[5],native_adapters=issued[6],bindings=issued[7],
-        full_native=issued[8],compact_native_target_history=issued[9])
+        full_native=issued[8],compact_native_target_history=issued[9],
+        compact_native_entity_context=issued[10])
     _require(stamp==issued[3] and envelope==candidate.envelope and diagnostics==candidate.diagnostics,'stale checkpoint inventory; recapture after correction')
     return CheckpointValidation(not any(d.code=='unsupported_native_value' for d in diagnostics),diagnostics)

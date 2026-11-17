@@ -2724,6 +2724,99 @@ class NativeHistoryQuery:
         return result if observer_id is None else result.get(observer_id, {})
 
 
+def restore_compacted_entity_context(world, histories):
+    """Rebuild receipt EntityInspection maps from their authenticated history.
+
+    Only the repeated display projection is omitted from the graph. The
+    strict native-history validator authenticates each typed fact and its
+    sparse before/after chronology; owner IDs and the complete receipt chain
+    are checked before the historical inspection map is installed.
+    """
+    from encounter import Encounter
+    from encounter_inspection import EntityInspection
+    from being import BeingInstance
+    from object import ObjectInstance
+    from weapon import WeaponInstance
+    from armor import ArmorInstance
+    from statistical_group import StatisticalGroup
+    from types import MappingProxyType
+    from action_evaluation import freeze
+
+    if type(histories) is not dict:
+        raise NativeHistoryRejected(
+            "compacted EntityInspection restoration requires Encounter histories")
+    encounters = {row.id: row for row in world.event_history.values()
+                  if type(row) is Encounter}
+    if set(histories) != set(encounters):
+        raise NativeHistoryRejected(
+            "compacted EntityInspection histories do not cover the Universe Encounters")
+    registry = world.object_registry.object_instances
+    supported = {
+        "being": (BeingInstance,),
+        "object": (ObjectInstance, StatisticalGroup),
+        "weapon": (WeaponInstance,),
+        "armor": (ArmorInstance,),
+        "group": (StatisticalGroup,),
+    }
+    for encounter_id in sorted(encounters):
+        encounter = encounters[encounter_id]
+        log = histories[encounter_id]
+        receipts = encounter.__dict__.get("_atomic_interval_history")
+        if log is None:
+            if receipts or encounter.time != encounter.start_time:
+                raise NativeHistoryRejected(
+                    "compacted history-free Encounter has committed boundaries")
+            continue
+        upgraded = upgrade(log)
+        validate(upgraded)
+        if (upgraded["schema"] != SCHEMA
+                or upgraded["initial"]["encounter_id"] != encounter_id
+                or upgraded["latest_boundary"] != encounter.last_processed_boundary
+                or type(receipts) is not list
+                or [row.boundary for row in receipts]
+                    != list(range(1, upgraded["latest_boundary"] + 1))):
+            raise NativeHistoryRejected(
+                "compacted EntityInspection history differs from its receipt chain")
+        query = NativeHistoryQuery(upgraded)
+        if query.entity_context_at(upgraded["latest_boundary"]) is None:
+            raise NativeHistoryRejected(
+                "compacted EntityInspection facts are unavailable")
+        for receipt in receipts:
+            meta = receipt.inspection
+            if type(meta.entities) not in (dict, MappingProxyType) or meta.entities:
+                raise NativeHistoryRejected(
+                    "compacted receipt contains an unexpected EntityInspection graph")
+            encoded = query.entity_context_at(receipt.boundary)
+            if type(encoded) is not dict:
+                raise NativeHistoryRejected(
+                    "compacted EntityInspection facts are unavailable")
+            entities = {}
+            for identity, value in encoded.items():
+                row = _materialize_plain(value)
+                if type(identity) is not str or not identity:
+                    raise NativeHistoryRejected(
+                        "compacted EntityInspection identity is malformed")
+                if type(row) is not EntityInspection:
+                    raise NativeHistoryRejected(
+                        "compacted EntityInspection record type is not admitted")
+                if identity not in registry:
+                    raise NativeHistoryRejected(
+                        "compacted EntityInspection owner is not in the native registry")
+                if type(registry[identity]) not in supported.get(row.category, ()):
+                    raise NativeHistoryRejected(
+                        "compacted EntityInspection category differs from its native owner")
+                if type(row.obj_type) is not str or type(row.pre_action) is not dict:
+                    raise NativeHistoryRejected(
+                        "compacted EntityInspection field shape is malformed")
+                object.__setattr__(row, "pre_action", freeze(row.pre_action))
+                entities[identity] = row
+            if len(entities) != len(encoded):
+                raise NativeHistoryRejected(
+                    "compacted EntityInspection identities are duplicated")
+            object.__setattr__(meta, "entities", MappingProxyType(entities))
+    return True
+
+
 def restore_compacted_target_history(world, histories):
     """Rebuild Target-owned rows omitted from the marked compact native graph.
 

@@ -72,6 +72,39 @@ def _encounter_rows(world, selected, selected_rng_owner):
     return rows
 
 
+def _entity_context_history_available(world):
+    """Use graph compaction only when every committed root has exact facts."""
+    from encounter import Encounter
+    from native_history import (NativeHistoryQuery, current_recording,
+                                capture, upgrade, validate)
+
+    encounters = [event for event in world.event_history.values()
+                  if type(event) is Encounter]
+    for encounter in encounters:
+        if not encounter.__dict__.get("_atomic_interval_history"):
+            continue
+        history = current_recording(encounter)
+        if history is None:
+            history = capture(encounter)
+        if history is None:
+            return False
+        # Earlier native fact versions can expose EntityInspection while
+        # lacking later-added fatigue, receipt, or observer subfamilies. Keep
+        # their complete graph projection intact; only the current schema is
+        # sufficient to replace the full receipt field.
+        if history.get("schema") != native_history.SCHEMA:
+            return False
+        normalized = upgrade(history)
+        validate(normalized)
+        context = normalized.get("entity_context")
+        if (normalized["latest_boundary"] != encounter.last_processed_boundary
+                or type(context) is not dict or context.get("available") is not True
+                or NativeHistoryQuery(normalized).entity_context_at(
+                    normalized["latest_boundary"]) is None):
+            return False
+    return True
+
+
 def _rng_json(value, depth=0):
     if depth > 8:
         raise NativeSaveRejected("native RNG state exceeds its nesting limit")
@@ -119,6 +152,8 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
             encounter.universe, encounter, quiescent=True,
             rng_scope="exclusive_encounter", native_adapters=True,
             full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=_entity_context_history_available(
+                encounter.universe),
             bindings=recipient_bindings,
             rng_owner=_native_rng_owner(encounter))
         if candidate.diagnostics:

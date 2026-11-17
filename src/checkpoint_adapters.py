@@ -5,7 +5,7 @@ Recipes describe native reconstruction obligations; they do not execute them.
 Complete checkpoint readiness remains refused by checkpoint_inventory.
 """
 from dataclasses import dataclass
-from types import FunctionType, MethodType, CodeType
+from types import FunctionType, MethodType, CodeType, MappingProxyType
 import hashlib
 import math
 
@@ -222,13 +222,15 @@ class NativeInventory(_Inventory):
     types = _TYPES | {ConditionalAttributes}
 
     def __init__(self, world, encounter, bindings, *, rng_owner=None,
-                 full_native=False, compact_native_target_history=False):
+                 full_native=False, compact_native_target_history=False,
+                 compact_native_entity_context=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
         self.rng_owner=rng_owner
         self.full_native=full_native
         self.compact_native_target_history=compact_native_target_history
+        self.compact_native_entity_context=compact_native_entity_context
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -369,6 +371,31 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if (self.compact_native_entity_context and
+                tag == 'encounter_inspection.CommittedBoundaryRecord'
+                and field == 'entities'):
+            from encounter_inspection import EntityInspection
+            from native_history import _canonical, _plain
+            _require(type(item) in (dict, MappingProxyType)
+                     and all(type(identity) is str and identity
+                         and type(row) is EntityInspection
+                         for identity, row in item.items()),
+                     'native EntityInspection context cannot be compacted from unreviewed records')
+            # The history stream already stores these exact typed projections.
+            # Bind capture freshness to the omitted source value, not merely
+            # its immutable map handle, because the receipt itself is frozen
+            # while its mapping must remain independently integrity checked.
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            empty_context = {}
+            encoded = super().field(tag, field, empty_context, ref, path, depth)
+            token_id = id(empty_context)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
         if (self.compact_native_target_history and field == '_atomic_target_history'
                 and tag in ('being.BeingInstance', 'object.ObjectInstance',
                             'weapon.WeaponInstance', 'armor.ArmorInstance',
@@ -387,7 +414,9 @@ class NativeInventory(_Inventory):
             # The replacement token below is synthetic. Keep the actual
             # source list in the candidate seal so any Target append between
             # capture and publication makes this exact cut stale.
-            self.dependencies.append((id(item), id(type(item))))
+            from native_history import _canonical, _plain
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
             # TargetCandidate receipts have an exact, independently validated
             # representation in NativeHistory. The graph keeps the field in
             # its closed schema but stores an empty list; restore repopulates
@@ -401,6 +430,8 @@ class NativeInventory(_Inventory):
             self.dependencies = [row for row in self.dependencies
                                  if row[0] != token_id]
             self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
             return encoded
         if self.full_native and tag=='history_conversation.AskAboutPastAction' and field in (
                 'generate','received_accounts'):
@@ -1214,6 +1245,9 @@ class NativeInventory(_Inventory):
                 from observer_proposals import _capture_belief
                 _capture_belief(b.recipient,b.observer_ids[0])
             descriptions.append((b.namespace,b.name,b.role,b.observer_ids,ref))
-        native_adapters = ((ADAPTER_VERSION, 'target-candidate-history/1')
-            if self.compact_native_target_history else (ADAPTER_VERSION,))
+        native_adapters = (ADAPTER_VERSION,
+            *(('target-candidate-history/1',)
+              if self.compact_native_target_history else ()),
+            *(('entity-context-history/1',)
+              if self.compact_native_entity_context else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))
