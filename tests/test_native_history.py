@@ -16,7 +16,7 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
                             LEGACY_SCHEMA, PREVIOUS_SCHEMA, SAME_RNG, _seal,
-                            _plain, _expand_rows)
+                            _plain, _expand_rows, _target_candidates)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -39,11 +39,7 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(len(events_at(log, 4)["effect_ids"]), 6)
         self.assertEqual(state_at(log, 4)["boundary"], 4)
         for boundary in range(1, 5):
-            expected = {}
-            for target_id, history in self.demo["encounter"].inspect_committed().histories.items():
-                for target in history:
-                    if target.boundary == boundary:
-                        expected[target_id] = target
+            expected = _target_candidates(self.demo["encounter"]).get(boundary, {})
             self.assertEqual(state_at(log, boundary)["entities"], _plain(expected))
             receipt = next(row for row in self.demo["encounter"]._atomic_interval_history
                            if row.boundary == boundary)
@@ -53,11 +49,7 @@ class NativeHistoryTests(unittest.TestCase):
         for boundary, delta in enumerate(self.log["boundaries"], 1):
             state = state_at(self.log, boundary)
             self.assertEqual(state["boundary"], boundary)
-            expected = {}
-            for target_id, history in self.demo["encounter"].inspect_committed().histories.items():
-                for target in history:
-                    if target.boundary == boundary:
-                        expected[target_id] = target
+            expected = _target_candidates(self.demo["encounter"]).get(boundary, {})
             # Native history contains exact typed target read records. The
             # initial entity state is separate and only changes by committed deltas.
             self.assertEqual(set(state["entities"]), set(expected))
@@ -128,14 +120,10 @@ class NativeHistoryTests(unittest.TestCase):
                                   if key != 'sha256'})
         self.assertTrue(validate(previous_schema))
         self.assertEqual(encode(upgrade(previous_schema)), encode(log))
-        view = encounter.inspect_committed()
+        encounter.inspect_committed()
         receipts = {row.boundary: row for row in encounter._atomic_interval_history}
         for boundary in range(1, encounter.last_processed_boundary + 1):
-            expected = {}
-            for target_id, history in view.histories.items():
-                for target in history:
-                    if target.boundary == boundary:
-                        expected[target_id] = target
+            expected = _target_candidates(encounter).get(boundary, {})
             state = state_at(log, boundary)
             self.assertEqual(state['entities'], _plain(expected))
             self.assertEqual(state['time'], receipts[boundary].inspection.end)

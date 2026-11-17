@@ -260,6 +260,32 @@ def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
     }
 
 
+def _target_candidates(encounter):
+    """Collect immutable committed native TargetCandidate values by boundary."""
+    from action_settlement import TargetCandidate
+    from atomic_publication import TargetIntervalRecord
+
+    result = {}
+    objects = encounter.universe.object_registry.object_instances
+    for entity_id, entity in objects.items():
+        storage = object.__getattribute__(entity, "__dict__").get(
+            "_atomic_target_history", ())
+        for record in storage:
+            if (type(record) is not TargetIntervalRecord
+                    or record.encounter_id != encounter.id):
+                continue
+            if (type(record.boundary) is not int or record.boundary < 1
+                    or type(record.state) is not TargetCandidate
+                    or record.state.target_id != entity_id):
+                raise NativeHistoryRejected(
+                    "native committed Target identity or boundary is malformed")
+            boundary = result.setdefault(record.boundary, {})
+            if entity_id in boundary:
+                raise NativeHistoryRejected("native Target has duplicate committed boundary")
+            boundary[entity_id] = record.state
+    return result
+
+
 def _stable_recipients(value):
     if type(value) not in (dict, MappingProxyType):
         raise NativeHistoryRejected("native observer projections are not a mapping")
@@ -530,11 +556,7 @@ def capture(encounter):
     receipts = tuple(encounter.__dict__.get("_atomic_interval_history", ()))
     if not receipts or len(receipts) != len(view.timeline):
         raise NativeHistoryRejected("committed native receipt chain is incomplete")
-    histories = view.histories
-    targets_by_boundary = {}
-    for target_id, rows in histories.items():
-        for row in rows:
-            targets_by_boundary.setdefault(row.boundary, {})[target_id] = row
+    targets_by_boundary = _target_candidates(encounter)
     initial_receipt = receipts[0]
     initial = {
         "encounter_id": encounter.id,
@@ -686,12 +708,7 @@ def append_committed(log, encounter):
     # inspect_committed validates the complete receipt chain and obtains the
     # authoritative, detached historical read model after publication.
     view = encounter.inspect_committed(receipt=receipt)
-    targets = {}
-    for target_id, rows in view.histories.items():
-        for row in rows:
-            if row.boundary == expected:
-                targets[target_id] = row
-                break
+    targets = _target_candidates(encounter).get(expected, {})
     payload = _boundary_payload(encounter, receipt, view, {expected: targets})
     state = {
         "boundary": payload["boundary"],

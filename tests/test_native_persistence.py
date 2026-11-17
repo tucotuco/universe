@@ -113,7 +113,7 @@ print(json.dumps({'world':world.id,'encounter':encounter.id,'time':encounter.tim
  'receipt_actions':list(encounter._atomic_interval_history[-1].action_ids),
  'arena_app_imports':sorted(set(sys.modules)&{'arena_browser_session','arena_server','npcgen'})},sort_keys=True))'''
             result = subprocess.run(
-                [sys.executable, "-B", "-c", child, str(path)], cwd=ROOT,
+                [sys.executable, "-B", "-c", child, str(path)], cwd=directory,
                 env={**__import__("os").environ,
                      "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=30)
