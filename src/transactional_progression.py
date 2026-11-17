@@ -775,7 +775,7 @@ def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
             or ed.get('_atomic_interval_history') or (used is not None and used() is encounter)
             or (facade is not None and facade[0]() is encounter and facade[1]() is not None)):
         raise TransactionalProgressionError('select native programmatic mode before any legacy progression/resolution, incompatible history or facade ownership')
-    role,identity,_=_rng_input(encounter,None,rng_owner)
+    role,identity,rng_state=_rng_input(encounter,None,rng_owner)
     if role not in ('module','native_random','caller_cursor'):
         raise TransactionalProgressionError('facade RNG ownership is outside native programmatic progression (5C3B)')
     unactivated_arena=(ed.get('arena_activation_enabled') is True
@@ -786,12 +786,18 @@ def _enable_transactional_progression_owned(encounter, *, rng_owner=None):
         and not ed['_choice_book']._registered)
     if not unactivated_arena:
         _all_declarations(encounter,ed['last_processed_boundary']+1,rng_owner)
+    # Retain the exact cursor that anchors this native history. Receipts keep
+    # post-boundary cursors; without this origin the initial boundary cannot
+    # answer a historical RNG query or validate the first RNG transition.
     descriptor=ProgressionMode('transactional',id(encounter),role,identity)
     key=id(encounter)
     binding=_Binding(weakref.ref(encounter,lambda ref:_BINDINGS.pop(key,None)),descriptor,rng_owner,threading.Lock())
     _BINDINGS[key]=binding
-    try:ed['_transactional_mode']=descriptor
+    try:
+        ed['_native_rng_origin_state']=rng_state
+        ed['_transactional_mode']=descriptor
     except BaseException:
+        ed.pop('_native_rng_origin_state',None)
         _BINDINGS.pop(key,None);raise
     return descriptor
 

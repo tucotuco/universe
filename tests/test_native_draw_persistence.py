@@ -1485,6 +1485,85 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_failed_overrun_restores_standing_without_displacement(self):
+        """A failed four-second Overrun remains failed and non-displacing."""
+        builder = NativeScenarioBuilder(
+            "native-overrun-failure", Library(config_dir=str(ROOT / "src/config")),
+            seed=1, encounter_id="native-overrun-failure-encounter")
+        actor = builder.add_being("Human", "Overrunner", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Resisting Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        for being in (actor, target):
+            being.set_posture("standing")
+            being.size_category = "medium"
+            being.set_ability("strength", 10)
+            being.set_ability("dexterity", 10)
+        actor.set_hex_facing(0)
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.enable()
+
+        overrun = Action(builder.world, 0, 4, "overrun", actor.id, target.id,
+                         None, id="native-overrun-failed-action")
+        builder.schedule(overrun)
+        pending = export_save(builder.encounter)
+        before_positions = [actor.get_position().as_tuple(),
+                            target.get_position().as_tuple()]
+        builder.step(4)
+        receipt = builder.encounter.inspect_committed(4).action(overrun.id)
+        self.assertEqual(receipt.facts.outcome, "failed")
+        self.assertEqual(target.get_posture(), "standing")
+        self.assertEqual([actor.get_position().as_tuple(), target.get_position().as_tuple()],
+                         before_positions)
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [actor.id, target.id],
+            "action_id": overrun.id,
+            "outcome": receipt.facts.outcome,
+            "posture": target.get_posture(),
+            "positions": [actor.get_position().as_tuple(),
+                          target.get_position().as_tuple()],
+            "hp": [actor.get_hit_points(), target.get_hit_points()],
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor_id,target_id,overrun_id=sys.argv[2:]
+assert enc.time==0 and enc.progression_mode=='transactional'
+choice=enc.choice_for_action(overrun_id);assert choice.state=='accepted'
+overrun=next(m.action for m in enc._choice_book._choices[choice.id].members
+             if m.action.id==overrun_id)
+assert overrun.actor_id==actor_id and overrun.target_id==target_id
+actor=world.get_object_by_id(actor_id);target=world.get_object_by_id(target_id)
+before=[actor.get_position().as_tuple(),target.get_position().as_tuple()]
+enc.step(4);receipt=enc.inspect_committed(4).action(overrun_id)
+assert receipt.facts.outcome=='failed' and target.get_posture()=='standing'
+assert [actor.get_position().as_tuple(),target.get_position().as_tuple()]==before
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[actor_id,target_id],'action_id':overrun_id,
+ 'outcome':receipt.facts.outcome,'posture':target.get_posture(),
+ 'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'hp':[actor.get_hit_points(),target.get_hit_points()], 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-overrun-failure.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), actor.id,
+                 target.id, overrun.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_headless_charge_overrun_restores_and_commits_represented_forward_hex(self):
         """An adopted one-hex landing survives continuation in a new process."""
         from arena_hex_map import encounter_map_descriptor

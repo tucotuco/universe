@@ -63,6 +63,40 @@ class NativePersistenceTests(unittest.TestCase):
         encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
         return world, encounter, rng, attacker, defender, weapon_id
 
+    def test_native_save_preserves_initial_rng_history_anchor(self):
+        _world, encounter, rng, *_ = self._combat_encounter()
+        origin = rng.state
+        encounter.step(1)
+        wire = export_save(encounter)
+        restored_world, restored_encounter, restored_rng = load_save(wire)
+        self.assertEqual(restored_rng.state, rng.state)
+        self.assertEqual(restored_encounter.__dict__["_native_rng_origin_state"], origin)
+        log = native_history.current_recording(restored_encounter)
+        self.assertIsNotNone(log)
+        self.assertEqual(native_history.rng_state_at(log, 0), native_history._plain(origin))
+        self.assertIs(restored_world.event_history[restored_encounter.id], restored_encounter)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "initial-rng-native-save.json"
+            path.write_bytes(wire)
+            child = r'''import json,sys
+import native_history
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+log=native_history.current_recording(encounter)
+print(json.dumps({'encounter':encounter.id,
+ 'initial_rng':native_history.rng_state_at(log,0),
+ 'current_rng':native_history._plain(rng.state)},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)], cwd=ROOT,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        child_state = json.loads(result.stdout)
+        self.assertEqual(child_state["encounter"], encounter.id)
+        self.assertEqual(child_state["initial_rng"], native_history._plain(origin))
+        self.assertEqual(child_state["current_rng"], native_history._plain(rng.state))
+
     def test_generated_v12_arena_save_migrates_to_canonical_native_save(self):
         """A current legacy /12 Arena artifact can enter native Save/Load losslessly."""
         from arena_browser_session import GeneratedArenaSession
@@ -1871,13 +1905,18 @@ print(json.dumps({'time':enc.time,
         original = demo['encounter']
         wire = export_save(original)
         body = json.loads(wire)
+        boundary_rngs = {row['boundary']: native_history.rng_state_at(
+            body['history'], row.get('to_boundary', row.get('boundary')))
+            for row in native_history._expand_rows(body['history'])}
         legacy = {key: value for key, value in body['history'].items()
                   if key not in ('sha256', 'entity_context')}
         legacy['schema'] = LEGACY_SCHEMA
+        legacy['initial'].pop('rng_before_first_commit')
         previous = None
         for row in legacy['boundaries']:
             if row['rng_after'] == SAME_RNG:
-                row['rng_after'] = previous
+                row['rng_after'] = (boundary_rngs[row['boundary']]
+                                    if previous is None else previous)
             previous = row['rng_after']
         body['history'] = _seal({key: value for key, value in legacy.items()
                                  if key != 'sha256'})
@@ -1907,6 +1946,7 @@ print(json.dumps({'time':enc.time,
         legacy = {key: value for key, value in history.items() if key != "sha256"}
         legacy["schema"] = ENTITY_CONTEXT_SCHEMA
         legacy["entity_context"].pop("fatigue_available")
+        legacy["initial"].pop("rng_before_first_commit")
         body["history"] = _seal(legacy)
         unsigned = {key: item for key, item in body.items() if key != "sha256"}
         body["sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
@@ -1950,6 +1990,29 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         }
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+    def test_native_history_v5_save_upgrades_without_inventing_origin_then_rebinds_graph(self):
+        from native_history import FATIGUE_CONTEXT_SCHEMA, _seal
+        from native_persistence import _canonical
+        demo = encounter_delta_headless.build_demo(until=4)
+        original = demo["encounter"]
+        body = json.loads(export_save(original))
+        prior = native_history._without_initial_rng(body["history"])
+        legacy = {key: value for key, value in prior.items() if key != "sha256"}
+        legacy["schema"] = FATIGUE_CONTEXT_SCHEMA
+        legacy["initial"].pop("rng_before_first_commit")
+        body["history"] = _seal(legacy)
+        unsigned = {key: value for key, value in body.items() if key != "sha256"}
+        body["sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+
+        restored_world, restored, restored_rng = load_save(_canonical(body))
+        self.assertEqual(restored.id, original.id)
+        self.assertEqual(restored_rng.state, demo["rng_owner"].state)
+        current = native_history.current_recording(restored)
+        self.assertEqual(current["schema"], native_history.SCHEMA)
+        self.assertEqual(current["initial"]["rng_before_first_commit"],
+                         native_history._plain(demo["rng_owner"].state))
+        self.assertEqual(restored_world.event_history[restored.id], restored)
 
 
 if __name__ == "__main__":

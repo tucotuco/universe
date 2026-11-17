@@ -27,9 +27,10 @@ LEGACY_SCHEMA = "universe.native-encounter-history/1"
 PREVIOUS_SCHEMA = "universe.native-encounter-history/2"
 QUIET_SPAN_SCHEMA = "universe.native-encounter-history/3"
 ENTITY_CONTEXT_SCHEMA = "universe.native-encounter-history/4"
-SCHEMA = "universe.native-encounter-history/5"
+FATIGUE_CONTEXT_SCHEMA = "universe.native-encounter-history/5"
+SCHEMA = "universe.native-encounter-history/6"
 LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA,
-                  ENTITY_CONTEXT_SCHEMA)
+                  ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
@@ -341,6 +342,33 @@ def _rng_record(value, previous, schema=SCHEMA):
     return value
 
 
+def _decode_rng_cursor(value):
+    """Decode the closed JSON tuple encoding for Python's portable RNG state."""
+    if type(value) is dict:
+        if set(value) == {"$tuple"} and type(value["$tuple"]) is list:
+            return tuple(_decode_rng_cursor(item) for item in value["$tuple"])
+        if set(value) == {"$list"} and type(value["$list"]) is list:
+            return [_decode_rng_cursor(item) for item in value["$list"]]
+        if set(value) == {"$number"} and type(value["$number"]) is str:
+            return float.fromhex(value["$number"])
+    if type(value) is list:
+        return [_decode_rng_cursor(item) for item in value]
+    if type(value) in (str, bool, int) or value is None:
+        return value
+    raise NativeHistoryRejected("native history RNG cursor has an invalid shape")
+
+
+def _validate_rng_cursor(value):
+    if (type(value) is not dict or set(value) != {"$tuple"}
+            or type(value["$tuple"]) is not list):
+        raise NativeHistoryRejected("native history RNG cursor has an invalid shape")
+    import random
+    try:
+        random.Random().setstate(_decode_rng_cursor(value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise NativeHistoryRejected("native history RNG cursor is invalid") from exc
+
+
 def _quiet_changes(row):
     """Return numeric metadata increments safe to derive across a quiet run."""
     events = row.get("events")
@@ -499,9 +527,15 @@ def _apply_quiet_span(state, row, through_boundary):
 def rng_state_at(log, boundary):
     """Return the exact RNG cursor after a committed boundary."""
     validate(log)
+    if type(boundary) is int and boundary == 0:
+        initial = log["initial"].get("rng_before_first_commit")
+        if initial is None:
+            raise NativeHistoryRejected(
+                "initial RNG cursor is not recorded in this native history")
+        return json.loads(_canonical(initial).decode("ascii"))
     if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native RNG boundary is not committed")
-    current = None
+    current = log["initial"].get("rng_before_first_commit")
     for row in log["boundaries"]:
         if row["rng_after"] == SAME_RNG:
             if current is None:
@@ -525,9 +559,11 @@ def upgrade(log):
     previous = None
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["schema"] = SCHEMA
+    if log["schema"] != SCHEMA:
+        body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     if log["schema"] == ENTITY_CONTEXT_SCHEMA:
         body["entity_context"] = dict(log["entity_context"], fatigue_available=False)
-    else:
+    elif log["schema"] not in (FATIGUE_CONTEXT_SCHEMA, SCHEMA):
         body["entity_context"] = _unavailable_entity_context()
     rows = []
     for original in _expand_rows(log):
@@ -547,8 +583,36 @@ def upgrade(log):
 
 def _without_entity_context(log):
     """Normalize a current recording only for an authenticated legacy migration check."""
+    validate(log)
     body = {key: value for key, value in log.items() if key != "sha256"}
+    body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     body["entity_context"] = _unavailable_entity_context()
+    rows = []
+    previous = None
+    for row, actual in _resolved_rng_rows(log):
+        current = dict(row)
+        current["rng_after"] = _rng_record(actual, previous, SCHEMA)
+        previous = actual
+        rows.append(current)
+    body["boundaries"] = _compact_quiet_rows(rows)
+    result = _seal(body)
+    validate(result)
+    return result
+
+
+def _without_initial_rng(log):
+    """Normalize a current log to the information available in schema `/5`."""
+    validate(log)
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["initial"] = dict(body["initial"], rng_before_first_commit=None)
+    rows = []
+    previous = None
+    for row, actual in _resolved_rng_rows(log):
+        current = dict(row)
+        current["rng_after"] = _rng_record(actual, previous, SCHEMA)
+        previous = actual
+        rows.append(current)
+    body["boundaries"] = _compact_quiet_rows(rows)
     result = _seal(body)
     validate(result)
     return result
@@ -568,7 +632,7 @@ def _unavailable_entity_context():
 
 
 def _without_fatigue_context(log):
-    """Remove only the /5 fatigue facts for an authenticated /4 migration check."""
+    """Normalize current context facts for an authenticated `/4` migration check."""
     validate(log)
     if log["schema"] != SCHEMA or not log["entity_context"]["available"]:
         return _without_entity_context(log)
@@ -597,8 +661,17 @@ def _without_fatigue_context(log):
                             "state_sha256": hashlib.sha256(_canonical(current)).hexdigest()})
         prior = current
     body = {key: value for key, value in log.items() if key != "sha256"}
+    body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     body["entity_context"] = {"available": True, "fatigue_available": False,
                               "initial": strip(context["initial"]), "changes": changes}
+    rows = []
+    previous_rng = None
+    for row, actual_rng in _resolved_rng_rows(log):
+        current = dict(row)
+        current["rng_after"] = _rng_record(actual_rng, previous_rng, SCHEMA)
+        previous_rng = actual_rng
+        rows.append(current)
+    body["boundaries"] = _compact_quiet_rows(rows)
     result = _seal(body)
     validate(result)
     return result
@@ -702,6 +775,10 @@ def capture(encounter):
         "entities": _plain(initial_receipt.inspection.entities),
         "participants": _plain(initial_receipt.inspection.participants),
         "initial_schedule": _plain(initial_receipt.inspection.schedule),
+        "rng_before_first_commit": _plain(
+            encounter.__dict__["_native_rng_origin_state"])
+            if encounter.__dict__.get("_native_rng_origin_state") is not None
+            else None,
     }
     initial_entity_context = _plain(initial_receipt.inspection.entities)
     entity_context_state = initial_entity_context
@@ -709,7 +786,7 @@ def capture(encounter):
     prior = _initial_state(initial)
     boundaries = []
     previous_boundary = None
-    previous_rng = None
+    previous_rng = initial["rng_before_first_commit"]
     for receipt in receipts:
         if (receipt.encounter_id != encounter.id
                 or type(receipt.boundary) is not int
@@ -788,6 +865,19 @@ def _expand_rows(log):
             })
             state = next_state
     return output
+
+
+def _resolved_rng_rows(log):
+    """Yield expanded rows with their exact cursor using one linear pass."""
+    current = log["initial"].get("rng_before_first_commit")
+    for row in _expand_rows(log):
+        encoded = row["rng_after"]
+        if encoded == SAME_RNG:
+            if current is None:
+                raise NativeHistoryRejected("native RNG reference has no prior state")
+        else:
+            current = encoded
+        yield row, current
 
 
 def _append_compact_row(boundaries, row):
@@ -1055,7 +1145,7 @@ def validate(log):
     base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
     current_keys = base_keys | {"entity_context"}
     version = log.get("schema") if type(log) is dict else None
-    has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, SCHEMA)
+    has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA, SCHEMA)
     if (type(log) is not dict
             or set(log) != (current_keys if has_entity_context else base_keys)):
         raise NativeHistoryRejected("native history envelope schema differs")
@@ -1066,23 +1156,28 @@ def validate(log):
         raise NativeHistoryRejected("native history integrity digest differs")
     _measure(unsigned)
     initial = log["initial"]
-    if (type(initial) is not dict or set(initial) != {
-            "encounter_id", "universe_id", "start", "entities", "participants",
-            "initial_schedule"} or type(initial["encounter_id"]) is not str
+    expected_initial = {"encounter_id", "universe_id", "start", "entities",
+                        "participants", "initial_schedule"}
+    if version == SCHEMA:
+        expected_initial.add("rng_before_first_commit")
+    if (type(initial) is not dict or set(initial) != expected_initial or type(initial["encounter_id"]) is not str
             or not initial["encounter_id"] or type(initial["universe_id"]) is not str
             or not initial["universe_id"]):
         raise NativeHistoryRejected("native history initial state schema differs")
+    if version == SCHEMA and initial["rng_before_first_commit"] is not None:
+        _validate_rng_cursor(initial["rng_before_first_commit"])
     state = _initial_state(initial)
     boundaries = log["boundaries"]
     if type(boundaries) is not list:
         raise NativeHistoryRejected("native history boundaries are not an array")
     seen_actions = set()
     seen_effects = set()
-    prior_rng = None
+    prior_rng = initial.get("rng_before_first_commit")
     covered = 0
     for row in boundaries:
         if type(row) is dict and row.get("kind") == "quiet_span":
-            if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, SCHEMA):
+            if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
+                                      FATIGUE_CONTEXT_SCHEMA, SCHEMA):
                 raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
             if row.get("rng_after") != SAME_RNG or prior_rng is None:
                 raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
@@ -1100,7 +1195,8 @@ def validate(log):
                 or row["boundary"] != expected):
             raise NativeHistoryRejected("native history boundary is missing, repeated, or malformed")
         if row["rng_after"] == SAME_RNG:
-            if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, SCHEMA) or prior_rng is None:
+            if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
+                                      FATIGUE_CONTEXT_SCHEMA, SCHEMA) or prior_rng is None:
                 raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
         else:
             if (type(row["rng_after"]) is not dict
@@ -1155,18 +1251,20 @@ def _validate_entity_context(context, latest_boundary, schema):
                      {"available", "fatigue_available", "initial", "changes"})
     if (type(context) is not dict or set(context) != expected_keys
             or type(context["available"]) is not bool or type(context["changes"]) is not list
-            or schema == SCHEMA and type(context["fatigue_available"]) is not bool):
+            or schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA)
+            and type(context["fatigue_available"]) is not bool):
         raise NativeHistoryRejected("native EntityInspection history schema differs")
     if not context["available"]:
         if (context["initial"] is not None or context["changes"]
-                or schema == SCHEMA and context["fatigue_available"]):
+                or schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA)
+                and context["fatigue_available"]):
             raise NativeHistoryRejected("legacy EntityInspection history marker is inconsistent")
         return
     if type(context["initial"]) is not dict:
         raise NativeHistoryRejected("native EntityInspection initial state is missing")
     _validate_plain_record(context["initial"])
     state = context["initial"]
-    if schema == SCHEMA and context["fatigue_available"]:
+    if schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA) and context["fatigue_available"]:
         _validate_fatigue_context_entities(state)
     previous = 0
     for row in context["changes"]:
@@ -1178,7 +1276,7 @@ def _validate_entity_context(context, latest_boundary, schema):
             raise NativeHistoryRejected("native EntityInspection change chronology differs")
         state = _apply(state, row["changes"])
         _validate_plain_record(state)
-        if schema == SCHEMA and context["fatigue_available"]:
+        if schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA) and context["fatigue_available"]:
             _validate_fatigue_context_entities(state)
         if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
             raise NativeHistoryRejected("native EntityInspection state digest differs")
@@ -1223,9 +1321,11 @@ def _validate_fatigue_context_entities(entities):
 def state_at(log, boundary):
     """Reconstruct the historical property projection without Action resolution."""
     validate(log)
-    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
+    if type(boundary) is not int or not 0 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
     initial = log["initial"]
+    if boundary == 0:
+        return json.loads(_canonical(_initial_state(initial)).decode("ascii"))
     state = _initial_state(initial)
     for row in log["boundaries"]:
         if row.get("kind") == "quiet_span":
@@ -1247,11 +1347,13 @@ def entity_context_at(log, boundary):
     context, with the initial context retained once.
     """
     validate(log)
-    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
+    if type(boundary) is not int or not 0 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
     context = log.get("entity_context", _unavailable_entity_context())
     if not context["available"]:
         return None
+    if boundary == 0:
+        return json.loads(_canonical(context["initial"]).decode("ascii"))
     state = json.loads(_canonical(context["initial"]).decode("ascii"))
     for row in context["changes"]:
         if row["boundary"] > boundary:
@@ -1296,7 +1398,7 @@ class NativeHistoryQuery:
         self._segment_starts = []
         self._segment_ends = []
         self._segment_rng = []
-        cursor = None
+        cursor = self._log["initial"].get("rng_before_first_commit")
         for row in self._log["boundaries"]:
             if row.get("kind") == "quiet_span":
                 start, end = row["from_boundary"], row["to_boundary"]
@@ -1319,7 +1421,7 @@ class NativeHistoryQuery:
                                  for row in context["changes"]}
 
     def _boundary(self, boundary):
-        if type(boundary) is not int or not 1 <= boundary <= self._latest:
+        if type(boundary) is not int or not 0 <= boundary <= self._latest:
             raise NativeHistoryRejected("requested native boundary is not committed")
 
     def _segment(self, boundary):
@@ -1357,6 +1459,10 @@ class NativeHistoryQuery:
 
     def events_at(self, boundary):
         self._boundary(boundary)
+        if boundary == 0:
+            return self._copy({"action_ids": [], "effect_ids": [], "actions": {},
+                               "effects": {}, "starts": {"$tuple": []},
+                               "participants": self._log["initial"]["participants"]})
         _index, row = self._segment(boundary)
         if row.get("kind") == "quiet_span":
             events = {"action_ids": [], "effect_ids": [], "actions": {},
@@ -1368,6 +1474,12 @@ class NativeHistoryQuery:
 
     def rng_state_at(self, boundary):
         self._boundary(boundary)
+        if boundary == 0:
+            cursor = self._log["initial"].get("rng_before_first_commit")
+            if cursor is None:
+                raise NativeHistoryRejected(
+                    "initial RNG cursor is not recorded in this native history")
+            return self._copy(cursor)
         index, _row = self._segment(boundary)
         cursor = self._segment_rng[index]
         if cursor is None:
@@ -1411,8 +1523,12 @@ class NativeHistoryQuery:
 
 def events_at(log, boundary):
     validate(log)
-    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
+    if type(boundary) is not int or not 0 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
+    if boundary == 0:
+        return json.loads(_canonical({"action_ids": [], "effect_ids": [],
+            "actions": {}, "effects": {}, "starts": {"$tuple": []},
+            "participants": log["initial"]["participants"]}).decode("ascii"))
     for row in log["boundaries"]:
         if row.get("kind") == "quiet_span":
             if row["from_boundary"] <= boundary <= row["to_boundary"]:

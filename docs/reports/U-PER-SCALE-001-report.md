@@ -911,4 +911,26 @@ The focused fatal-effect continuation passed **1 test / 5.238s**. The matrix and
 
 A seed-1 `NativeScenarioBuilder` encounter with represented facing, equal medium size and equal Strength commits the ordinary failed Bull Rush contest. The test saves its accepted pending Choice, then compares uninterrupted execution with a fresh OS process strict-loading the same native Save and resolving via `Encounter.step(1)`. Both paths retain the same Action and Being IDs, `failed` receipt, unchanged positions and HP, RNG state and canonical native-history digest. No forced roll or special permission is used.
 
-The focused test `test_headless_failed_bull_rush_restores_the_resisted_contest_without_movement` passed **1 test / 1.586s**. The full `.venv/bin/python -B tests/test_native_draw_persistence.py -v` suite passed **20 tests in 112.349s** with this negative branch included. Capability-matrix validation passed **3 tests**; `git diff --check` passed. U-PER-SCALE-001 remains ACTIVE.
+The focused test `test_headless_failed_bull_rush_restores_the_resisted_contest_without_movement` passed **1 test / 1.586s**. The full `.venv/bin/python -B tests/test_native_draw_persistence.py -v` suite passed **21 tests in 108.304s** with both negative forced-movement branches included. Capability-matrix validation passed **3 tests**; `git diff --check` passed. U-PER-SCALE-001 remains ACTIVE.
+
+## Failed Overrun after native restoration
+
+**Problems first.** A successful Overrun continuation had fresh-process evidence, but its ordinary failed contest branch did not. The target's standing posture and absence of displacement are part of the committed result and need the same restoration proof.
+
+A seed-1 Arena-independent native fixture saves an accepted four-second Overrun Choice before resolution. The ordinary unpatched contest fails. Parent and fresh OS process agree on the `failed` Action receipt, standing target, unchanged represented positions and HP, exact RNG and canonical native-history digest. The case uses the same represented facing, size category and abilities as the already tested contest and changes no contest rules.
+
+Focused test `test_headless_failed_overrun_restores_standing_without_displacement` passed **1 / 2.663s**. The full `.venv/bin/python -B tests/test_native_draw_persistence.py -v` suite passed **21 tests in 108.304s** with both failed forced-movement branches included. Capability-matrix validation passed **3 tests**. U-PER-SCALE-001 remains ACTIVE.
+
+## Query the retained initial native boundary
+
+**Superseded:** the initial boundary query note below was written before the `/6` origin-cursor extension. Use the later `/6` section for current behavior.
+
+## Native history schema `/6`: exact initial RNG cursor
+
+**Problems first.** The initial projection could be read at boundary 0, but `/5` lacked the pre-first-commit RNG cursor. That state cannot be derived from later cursors or committed dice results. Leaving the query unavailable contradicted the assignment's requirement to preserve every authoritative RNG stream at arbitrary boundaries.
+
+Entering transactional progression now records the exact state from the already validated RNG owner in optional Encounter field `_native_rng_origin_state`. Schema `/6` stores its canonical tuple encoding in the initial history record, validates it with a private `random.Random.setstate()` call, and returns detached data through both `rng_state_at(0)` and `NativeHistoryQuery.rng_state_at(0)`. First-boundary SAME-RNG markers are anchored to this origin. The field is optional in the graph adapter so `/10`–`/12` and older native graph fixtures remain admissible. History `/1`–`/5` remain strict readers; upgrades mark an origin absent from those old history records as `null`, never infer it from later state. Where the same saved native graph independently carries the new exact origin field, strict Load validates the legacy history against the graph and binds the recorder to the graph's current `/6` facts.
+
+The new Save/Load regression checks the origin in a fresh OS process, while explicit `/1`, `/4`, and `/5` migration tests compare historical facts and verify that unavailable legacy origins remain unavailable after standalone history upgrade. The added optional Encounter field initially made the bounded Run/Spot closure's audited A/D/T/U field table stale; two affected checkpoint tests reproduced this mismatch, and the closure policy now classifies the origin as authoritative. The two targeted regressions and the complete checkpoint-adapter suite are green.
+
+Verified results for this increment: `tests/test_native_history.py -v` — **18 passed / 18.962s**; `tests/test_native_persistence.py -v` — **30 passed / 88.393s**; `tests/test_checkpoint_adapters.py -v` — **48 passed / 23.303s** after repairing the A/D/T/U policy; `tests/test_persistence_capability_matrix.py -v` — **3 passed / 0.018s**; `/1`, `/4`, `/5`, and exact-origin persistence focused tests — **3 passed / 8.226s** (before the added child-process assertion); history `/5` upgrade plus native Save graph rebinding — **2 passed / 3.557s**. The fresh-process origin assertion passed separately (**1 / 1.530s**) after the full-suite run. The Arena-independent Action-family suite passed **21 / 111.909s** in this execution. The overall assignment remains ACTIVE: native history still duplicates committed receipt/Target graph, all-family historical reader parity remains incomplete, durable journal/crash recovery is unverified, and ordinary application Save/Load has not been cut over.

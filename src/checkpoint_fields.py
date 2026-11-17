@@ -171,7 +171,7 @@ FIELD_ADAPTERS = {
         "required": '_committed _external _rng_for specifications'.split(),
     },
     'encounter.Encounter': {
-        "allowed": '_active_fatigue_frame _advancing _atomic_interval_history _boundary_context _choice_book _coordinator_time _dispatching _disarm_landing_receipts _interval_start _physiology_registry _running _shield_allocation_choices _transactional_mode active_boundary awareness arena_activation arena_activation_enabled arena_movement_activation being_list boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history finished_action_list id initiated initiation last_fatigue_frame last_processed_boundary local_frame location map name non_being_object_list parent_event_id pending_action_list start_time time type universe'.split(),
+        "allowed": '_active_fatigue_frame _advancing _atomic_interval_history _boundary_context _choice_book _coordinator_time _dispatching _disarm_landing_receipts _interval_start _native_rng_origin_state _physiology_registry _running _shield_allocation_choices _transactional_mode active_boundary awareness arena_activation arena_activation_enabled arena_movement_activation being_list boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history finished_action_list id initiated initiation last_fatigue_frame last_processed_boundary local_frame location map name non_being_object_list parent_event_id pending_action_list start_time time type universe'.split(),
         "required": '_active_fatigue_frame _advancing _boundary_context _choice_book _coordinator_time _dispatching _disarm_landing_receipts _interval_start _physiology_registry _running _shield_allocation_choices active_boundary awareness arena_activation arena_activation_enabled arena_movement_activation boundary_fault cancelled_action_list difficulty_class end_time event_type fatigue_frame_history initiated last_fatigue_frame last_processed_boundary location map name parent_event_id start_time type universe'.split(),
     },
     'encounter.EncounterInitiation': {
@@ -628,7 +628,7 @@ ARENA_REBUILT_FIELDS = frozenset({
 RUN_SPOT_FIELD_CLOSURE = {
     'encounter.Encounter': {
         'authoritative': ('_atomic_interval_history', '_choice_book', '_coordinator_time',
-                          '_interval_start', '_physiology_registry', 'active_boundary',
+                          '_interval_start', '_native_rng_origin_state', '_physiology_registry', 'active_boundary',
                           'awareness', 'arena_activation', 'arena_activation_enabled',
                           'arena_movement_activation', '_shield_allocation_choices',
                           'being_list', 'boundary_fault', 'cancelled_action_list',
