@@ -1092,9 +1092,14 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
               and bound[1] and inquiry.actor_id in bound[1],
               'AskAboutPast recipient binding has no matching listener owner')
         account_list = bound[0]
-        _need(all(type(row) is HeardAccount and row.listener_id == inquiry.actor_id
+        # One explicitly bound native list may serve several Actions and
+        # listeners. The durable binding has already proved its complete
+        # observer set, and native Action bindings above require this inquiry's
+        # actor to be one of those owners. Validate each account against that
+        # set instead of incorrectly treating a shared list as single-owner.
+        _need(all(type(row) is HeardAccount and row.listener_id in bound[1]
                   for row in account_list),
-              'AskAboutPast recipient contains an account for another listener')
+              'AskAboutPast recipient contains an account for an unbound listener')
         inquiry.received_accounts = account_list
     from reproduction_checkpoint import (
         restore_portable_native_reproduction_registry,

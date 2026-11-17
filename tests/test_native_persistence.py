@@ -2280,6 +2280,81 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         self.assertEqual(actual['history'], expected['history'])
         self.assertEqual(actual['account'], expected['account'])
 
+    def test_shared_testimony_binding_restores_listener_aliases_without_cross_exposure(self):
+        world, encounter, rng, first_listener, speaker, _weapon_id = self._combat_encounter()
+        second_id = world.make_being('Human', 'Second Listener')
+        second_listener = world.get_object_by_id(second_id)
+        second_listener.set_position(CartesianPosition(-1.5, 0, 0))
+        second_listener.set_geometry(Sphere(.25))
+        second_listener.set_hit_points(100)
+        encounter.add_being(second_listener.id)
+        encounter.mark_aware(second_listener.id, speaker.id)
+        from personal_history import PersonalHistory
+        from realization import Fact
+        from objective_reality import EpisodeFacts
+        speaker.personal_history = PersonalHistory(
+            speaker, earliest=-10, known_through=0, nondeclining_skills=())
+        accounts = []
+        first_key = speaker.personal_history.episode_key(-1, 'shared-native-first')
+        second_key = speaker.personal_history.episode_key(-2, 'shared-native-second')
+        first = AskAboutPastAction(world, first_listener.id, speaker.id, 0,
+            episode_time=-1, topic='shared-native-first', received_accounts=accounts,
+            generate=EpisodeFacts((Fact(first_key, {'description': 'first account'},
+                                        origin='shared-native-test'),)))
+        second = AskAboutPastAction(world, second_listener.id, speaker.id, 0,
+            episode_time=-2, topic='shared-native-second', received_accounts=accounts,
+            generate=EpisodeFacts((Fact(second_key, {'description': 'second account'},
+                                        origin='shared-native-test'),)))
+        encounter.schedule_choice((first, second))
+        encounter.step(1)
+        self.assertEqual((first.resolution.outcome, second.resolution.outcome),
+                         ('heard', 'heard'))
+        binding = RecipientBinding(world, 'history', 'shared-native-listeners',
+            'in_world_received_accounts', (first_listener.id, second_listener.id), accounts)
+        wire = export_save(encounter, recipient_bindings=(binding,))
+        query = native_history.NativeHistoryQuery(native_history.capture(encounter))
+        left = query.observer_facts_at(1, first_listener.id)
+        right = query.observer_facts_at(1, second_listener.id)
+        self.assertEqual(len(left), 1)
+        self.assertEqual(len(right), 1)
+        self.assertNotEqual(left, right)
+        encounter.step(1)
+        expected_digest = hashlib.sha256(native_history.encode(
+            native_history.capture(encounter))).hexdigest()
+        expected_rng = rng.state
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-shared-testimony-save.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+actions=[a for a in world.event_history.values()
+ if type(a).__name__=='AskAboutPastAction']
+assert len(actions)==2 and actions[0].received_accounts is actions[1].received_accounts
+assert len(actions[0].received_accounts)==2
+query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
+first=actions[0].actor_id; second=actions[1].actor_id
+left=query.observer_facts_at(1,first); right=query.observer_facts_at(1,second)
+assert len(left)==len(right)==1 and left!=right
+assert left[0]['owner_id']==first and right[0]['owner_id']==second
+enc.step(1)
+query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
+assert query.observer_facts_at(2,first)==left
+assert query.observer_facts_at(2,second)==right
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+            import os
+            result = subprocess.run([sys.executable, '-B', '-c', child, str(path)],
+                cwd=ROOT, env={**os.environ,
+                    'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['time'], encounter.time)
+        self.assertEqual(actual['rng'], json.loads(json.dumps(expected_rng)))
+        self.assertEqual(actual['history'], expected_digest)
+
     def test_spot_location_evidence_restores_with_owner_and_provenance(self):
         world, encounter, rng, observer, target, _weapon_id = self._combat_encounter()
         ledger = LocationEvidenceLedger(observer.id)

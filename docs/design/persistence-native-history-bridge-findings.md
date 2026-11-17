@@ -340,4 +340,12 @@ The strict `/9` history upgrade replays authenticated boundary-local recipient v
 - Native history: **28 passed / 21.060s**; strict checkpoint adapters: **50 passed / 19.317s**; capability matrix: **3 passed / 0.024s**.
 - Native Action-history parity: **25 passed / 116.775s** on schema `/10`.
 
+## Problems-first — restore a deliberately shared testimony list
+
+The history query correctly separated a shared account container into per-listener projections, but an end-to-end native Save exposed a distinct restore defect: `native_graph_snapshot` required every account in a bound list to belong to the currently rehydrated AskAboutPast Action's actor. The capture-side durable binding already declared a valid set of two listener identities, so this predicate incorrectly rejected a state the native writer itself permits.
+
+The restore path now validates every `HeardAccount.listener_id` against the exact durable binding's owner set, while its existing per-Action check still requires the Action actor to be in that set. It retains the original list alias for both Actions. No account or owner is synthesized. A fresh-process test performs two simultaneous successful inquiries into one shared list, checks that each owner query sees only its own account at the Action boundary and after a quiet boundary, verifies restored alias identity, and matches the uninterrupted RNG/history. The initial test failure was the single-owner predicate; after correction it passes **1 test / 1.875s**. The matrix keeps broader recipient/query privacy and family coverage explicitly partial.
+
+Affected integration results after the change: `test_native_persistence` **40 passed / 116.441s**, `test_native_history` **28 passed / 21.299s**, `test_checkpoint_adapters` **50 passed / 18.992s**, and capability matrix validation **3 passed / 0.007s**. The independent run boundaries also avoid a known cross-module import-isolation issue in the test harness.
+
 This resolves the identified cumulative-recipient defect and the tested single/shared-list listener attribution paths only. Full family history/query parity, receipt/Target graph removal, durable append journal, broad security/scale, and application Save/Load cutover remain open. No rules or external blocker is identified.

@@ -54,6 +54,26 @@ Exact verification:
 
 Remaining gaps are still material: the 157-type family inventory is not closed end-to-end, history remains coupled to the runtime receipt/Target graph, durable append-journal crash recovery is not proven, broad state-family and corruption/scale portfolios remain, and the successful native path has not been cut over to ordinary application Save/Load. These are engineering gaps with no external or adopted-rule blocker identified; U-PER-SCALE-001 stays ACTIVE.
 
+## Problems-first — shared testimony recipient restore
+
+### Gap and correction
+
+A new native Save/Load case for one physical `received_accounts` list shared by two AskAboutPast listeners initially failed in `native_graph_snapshot` rehydration. Capture and binding validation correctly admitted the declared two-listener owner set, but restore then incorrectly required every account in the shared list to belong to the current Action's actor. The restore validator now checks each account against the complete authenticated binding owner set; each individual Action still must reference that binding as one of its declared listeners. Same-list alias identity is preserved. This was an implementation mismatch, not an adopted-rule ambiguity.
+
+### Evidence
+
+The new `NativePersistenceTests.test_shared_testimony_binding_restores_listener_aliases_without_cross_exposure` commits two simultaneous lawful AskAboutPast Actions with different listener-specific facts into one explicitly bound list. It saves, loads in a fresh OS process, proves both restored Actions reference the same Python list, queries each listener independently at the committed boundary, advances a quiet boundary, and compares RNG plus canonical history to the uninterrupted run. The focused test passes **1 / 1.875s**. Its initial failing run reproduced the single-listener restore predicate; the corrected run passes. The broader current observer gap is still open: other supported recipient families and complete caller/privacy/query parity are not closed. No external or rules blocker is identified.
+
+Regression verification after the correction:
+
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence -v` — **40 passed / 116.441s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history -v` — **28 passed / 21.299s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_checkpoint_adapters -v` — **50 passed / 18.992s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_persistence_capability_matrix -v` — **3 passed / 0.007s**.
+- `.venv/bin/python -B -m py_compile src/native_graph_snapshot.py tests/test_native_persistence.py` and `git diff --check` — passed.
+
+The history and adapter suites were run as separate processes to avoid their known test import isolation interaction.
+
 
 ## Native action-family continuation — contact history and Break Weapon
 
