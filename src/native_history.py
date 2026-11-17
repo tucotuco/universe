@@ -1,8 +1,9 @@
 """Arena-session-independent, fact-only native Encounter history records.
 
 The history wire stores an initial committed-boundary projection, atomic
-state changes, sparse EntityInspection context changes, and native
-Action/Effect/observation/receipt facts for each commit. ``NativeHistoryQuery``
+state changes, sparse EntityInspection and Arena observer-knowledge context
+changes, and native Action/Effect/observation/receipt facts for each commit.
+``NativeHistoryQuery``
 provides validated repeated historical reads without re-expanding quiet spans
 or evaluating Actions. This module does not yet replace production Save/Load.
 """
@@ -29,10 +30,11 @@ QUIET_SPAN_SCHEMA = "universe.native-encounter-history/3"
 ENTITY_CONTEXT_SCHEMA = "universe.native-encounter-history/4"
 FATIGUE_CONTEXT_SCHEMA = "universe.native-encounter-history/5"
 INITIAL_RNG_SCHEMA = "universe.native-encounter-history/6"
-SCHEMA = "universe.native-encounter-history/7"
+RECEIPT_FACT_SCHEMA = "universe.native-encounter-history/7"
+SCHEMA = "universe.native-encounter-history/8"
 LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA,
                   ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
-                  INITIAL_RNG_SCHEMA)
+                  INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
@@ -271,6 +273,70 @@ def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
         "projectile_states": _plain(meta.projectile_states),
         "rng_after": _plain(receipt.rng_state),
     }
+
+
+def _arena_observer_context(encounter, latest_boundary):
+    """Fold committed Arena evidence as observer-owned, sparse facts.
+
+    The ledger's immutable evidence rows carry their publication/visibility
+    boundary. Replaying these rows constructs only what each observer had
+    recorded; it never infers visibility from the objective Entity graph.
+    """
+    from arena_perception import ArenaPerceptionEvidence, ArenaPerceptionLedger
+    from being import BeingInstance
+
+    ledgers = {}
+    objects = encounter.universe.object_registry.object_instances
+    for owner_id in encounter.being_list:
+        observer = objects.get(owner_id)
+        if type(observer) is not BeingInstance:
+            continue
+        ledger = object.__getattribute__(observer, "__dict__").get(
+            "_arena_perception_ledger")
+        if ledger is None:
+            continue
+        if (type(ledger) is not ArenaPerceptionLedger
+                or ledger.observer_id != owner_id
+                or type(ledger._history) is not list):
+            raise NativeHistoryRejected("Arena perception ledger owner or storage differs")
+        ledgers[owner_id] = ledger
+
+    initial = {}
+    rows_by_boundary = {}
+    seen_rows = set()
+    for owner_id, ledger in sorted(ledgers.items()):
+        for evidence in ledger._history:
+            if type(evidence) is not ArenaPerceptionEvidence:
+                raise NativeHistoryRejected("Arena observer evidence has an unreviewed type")
+            boundary = evidence.visibility_boundary
+            if (type(boundary) is not int or not 0 <= boundary <= latest_boundary
+                    or evidence.observer_id != owner_id):
+                raise NativeHistoryRejected("Arena observer evidence boundary or owner differs")
+            identity = (owner_id, evidence.entity_id, boundary)
+            if identity in seen_rows:
+                raise NativeHistoryRejected(
+                    "Arena observer evidence repeats an Entity at one boundary")
+            seen_rows.add(identity)
+            encoded = _plain(evidence)
+            if boundary == 0:
+                initial.setdefault(owner_id, {})[evidence.entity_id] = encoded
+            else:
+                rows_by_boundary.setdefault(boundary, []).append(
+                    (owner_id, evidence.entity_id, encoded))
+
+    state = initial
+    changes = []
+    for boundary in sorted(rows_by_boundary):
+        prior = state
+        state = json.loads(_canonical(state).decode("ascii"))
+        for owner_id, entity_id, encoded in rows_by_boundary[boundary]:
+            state.setdefault(owner_id, {})[entity_id] = encoded
+        delta = _diff(prior, state)
+        if delta:
+            changes.append({"boundary": boundary, "changes": delta,
+                            "state_sha256": hashlib.sha256(
+                                _canonical(state)).hexdigest()})
+    return {"available": True, "initial": initial, "changes": changes}
 
 
 def _target_candidates(encounter):
@@ -572,19 +638,24 @@ def upgrade(log):
     previous = log["initial"].get("rng_before_first_commit")
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["schema"] = SCHEMA
-    if log["schema"] not in (INITIAL_RNG_SCHEMA, SCHEMA):
+    if log["schema"] not in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA):
         body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     if log["schema"] == ENTITY_CONTEXT_SCHEMA:
         body["entity_context"] = dict(log["entity_context"], fatigue_available=False)
-    elif log["schema"] not in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA):
+    elif log["schema"] not in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
+                               RECEIPT_FACT_SCHEMA, SCHEMA):
         body["entity_context"] = _unavailable_entity_context()
-    body["receipt_facts_complete"] = False
+    has_receipt_facts = log["schema"] == RECEIPT_FACT_SCHEMA
+    body["receipt_facts_complete"] = (
+        log["receipt_facts_complete"] if has_receipt_facts else False)
+    body["observer_knowledge"] = _unavailable_observer_knowledge()
     rows = []
     for original in _expand_rows(log):
         row = dict(original)
-        row["notification_intents"] = {"$tuple": []}
-        row["disarm_landings"] = {"$tuple": []}
-        row["receipt_facts_available"] = False
+        if not has_receipt_facts:
+            row["notification_intents"] = {"$tuple": []}
+            row["disarm_landings"] = {"$tuple": []}
+            row["receipt_facts_available"] = False
         encoded_rng = original["rng_after"]
         actual_rng = previous if encoded_rng == SAME_RNG else encoded_rng
         if actual_rng is None:
@@ -605,6 +676,7 @@ def _without_entity_context(log):
     body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     body["entity_context"] = _unavailable_entity_context()
     body["receipt_facts_complete"] = False
+    body["observer_knowledge"] = _unavailable_observer_knowledge()
     rows = []
     previous = None
     for row, actual in _resolved_rng_rows(log):
@@ -627,6 +699,7 @@ def _without_initial_rng(log):
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     body["receipt_facts_complete"] = False
+    body["observer_knowledge"] = _unavailable_observer_knowledge()
     rows = []
     previous = None
     for row, actual in _resolved_rng_rows(log):
@@ -690,6 +763,7 @@ def _without_fatigue_context(log):
     body["entity_context"] = {"available": True, "fatigue_available": False,
                               "initial": strip(context["initial"]), "changes": changes}
     body["receipt_facts_complete"] = False
+    body["observer_knowledge"] = _unavailable_observer_knowledge()
     rows = []
     previous_rng = None
     for row, actual_rng in _resolved_rng_rows(log):
@@ -711,6 +785,7 @@ def _without_receipt_facts(log):
     validate(log)
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["receipt_facts_complete"] = False
+    body["observer_knowledge"] = _unavailable_observer_knowledge()
     rows = []
     for original in _expand_rows(log):
         row = dict(original)
@@ -719,6 +794,20 @@ def _without_receipt_facts(log):
         row["receipt_facts_available"] = False
         rows.append(row)
     body["boundaries"] = _compact_quiet_rows(rows)
+    result = _seal(body)
+    validate(result)
+    return result
+
+
+def _unavailable_observer_knowledge():
+    return {"available": False, "initial": None, "changes": []}
+
+
+def _without_observer_knowledge(log):
+    """Normalize /8 facts to the exact observer-knowledge scope of /7."""
+    validate(log)
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["observer_knowledge"] = _unavailable_observer_knowledge()
     result = _seal(body)
     validate(result)
     return result
@@ -880,6 +969,7 @@ def capture(encounter):
         previous_rng = payload["rng_after"]
         prior = state
         previous_boundary = receipt.boundary
+    observer_context = _arena_observer_context(encounter, previous_boundary)
     body = {"schema": SCHEMA, "initial": initial,
             "boundaries": _compact_quiet_rows(boundaries),
             "latest_boundary": previous_boundary,
@@ -887,7 +977,8 @@ def capture(encounter):
             "entity_context": {"available": True,
                                "fatigue_available": True,
                                "initial": initial_entity_context,
-                               "changes": entity_context_changes}}
+                               "changes": entity_context_changes},
+            "observer_knowledge": observer_context}
     _measure(body)
     return _seal(body)
 
@@ -1055,6 +1146,25 @@ def append_committed(log, encounter):
                     _canonical(payload["entity_context"])).hexdigest(),
             })
     body["entity_context"] = entity_context
+    knowledge = json.loads(_canonical(log["observer_knowledge"]).decode("ascii"))
+    if knowledge["available"]:
+        fresh_knowledge = _arena_observer_context(encounter, expected)
+        old_rows = [row for row in fresh_knowledge["changes"]
+                    if row["boundary"] <= log["latest_boundary"]]
+        if (fresh_knowledge["initial"] != knowledge["initial"]
+                or old_rows != knowledge["changes"]):
+            raise NativeHistoryRejected(
+                "Arena observer evidence changed outside the appended native boundary")
+        latest_rows = [row for row in fresh_knowledge["changes"]
+                       if row["boundary"] == expected]
+        if len(latest_rows) > 1:
+            raise NativeHistoryRejected(
+                "Arena observer evidence has ambiguous same-boundary reconstruction")
+        if latest_rows:
+            knowledge["changes"].append(latest_rows[0])
+        body["observer_knowledge"] = knowledge
+    else:
+        body["observer_knowledge"] = knowledge
     _measure(body)
     result = _seal(body)
     validate(result)
@@ -1206,12 +1316,15 @@ def validate(log):
     base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
     current_keys = base_keys | {"entity_context"}
     version = log.get("schema") if type(log) is dict else None
-    has_receipt_facts = version == SCHEMA
+    has_receipt_facts = version in (RECEIPT_FACT_SCHEMA, SCHEMA)
+    has_observer_knowledge = version == SCHEMA
     has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
-                                     INITIAL_RNG_SCHEMA, SCHEMA)
+                                     INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA)
     expected_envelope = (current_keys | {"receipt_facts_complete"}
                          if has_receipt_facts else current_keys if has_entity_context
                          else base_keys)
+    if has_observer_knowledge:
+        expected_envelope |= {"observer_knowledge"}
     if (type(log) is not dict
             or set(log) != expected_envelope):
         raise NativeHistoryRejected("native history envelope schema differs")
@@ -1224,13 +1337,13 @@ def validate(log):
     initial = log["initial"]
     expected_initial = {"encounter_id", "universe_id", "start", "entities",
                         "participants", "initial_schedule"}
-    if version in (INITIAL_RNG_SCHEMA, SCHEMA):
+    if version in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA):
         expected_initial.add("rng_before_first_commit")
     if (type(initial) is not dict or set(initial) != expected_initial or type(initial["encounter_id"]) is not str
             or not initial["encounter_id"] or type(initial["universe_id"]) is not str
             or not initial["universe_id"]):
         raise NativeHistoryRejected("native history initial state schema differs")
-    if version in (INITIAL_RNG_SCHEMA, SCHEMA) and initial["rng_before_first_commit"] is not None:
+    if version in (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA, SCHEMA) and initial["rng_before_first_commit"] is not None:
         _validate_rng_cursor(initial["rng_before_first_commit"])
     if has_receipt_facts and type(log["receipt_facts_complete"]) is not bool:
         raise NativeHistoryRejected("native receipt-fact completeness marker is malformed")
@@ -1255,7 +1368,8 @@ def validate(log):
             elif "receipt_facts_available" in row:
                 raise NativeHistoryRejected("legacy quiet span contains a future receipt field")
             if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
-                                      FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA):
+                                      FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
+                                      RECEIPT_FACT_SCHEMA, SCHEMA):
                 raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
             if row.get("rng_after") != SAME_RNG or prior_rng is None:
                 raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
@@ -1277,7 +1391,8 @@ def validate(log):
             raise NativeHistoryRejected("native history boundary is missing, repeated, or malformed")
         if row["rng_after"] == SAME_RNG:
             if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
-                                      FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA) or prior_rng is None:
+                                      FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
+                                      RECEIPT_FACT_SCHEMA, SCHEMA) or prior_rng is None:
                 raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
         else:
             if (type(row["rng_after"]) is not dict
@@ -1387,6 +1502,9 @@ def validate(log):
         _validate_entity_context(log["entity_context"], log["latest_boundary"], version)
     if has_receipt_facts and log["receipt_facts_complete"] != all(receipt_completeness):
         raise NativeHistoryRejected("receipt-fact completeness marker disagrees with boundaries")
+    if has_observer_knowledge:
+        _validate_observer_knowledge(log["observer_knowledge"],
+                                     log["latest_boundary"], initial, state)
     return True
 
 
@@ -1394,14 +1512,16 @@ def _validate_entity_context(context, latest_boundary, schema):
     expected_keys = ({"available", "initial", "changes"}
                      if schema == ENTITY_CONTEXT_SCHEMA else
                      {"available", "fatigue_available", "initial", "changes"})
+    current_context_schemas = (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
+                               RECEIPT_FACT_SCHEMA, SCHEMA)
     if (type(context) is not dict or set(context) != expected_keys
             or type(context["available"]) is not bool or type(context["changes"]) is not list
-            or schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA)
+            or schema in current_context_schemas
             and type(context["fatigue_available"]) is not bool):
         raise NativeHistoryRejected("native EntityInspection history schema differs")
     if not context["available"]:
         if (context["initial"] is not None or context["changes"]
-                or schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA)
+                or schema in current_context_schemas
                 and context["fatigue_available"]):
             raise NativeHistoryRejected("legacy EntityInspection history marker is inconsistent")
         return
@@ -1409,7 +1529,7 @@ def _validate_entity_context(context, latest_boundary, schema):
         raise NativeHistoryRejected("native EntityInspection initial state is missing")
     _validate_plain_record(context["initial"])
     state = context["initial"]
-    if schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA) and context["fatigue_available"]:
+    if schema in current_context_schemas and context["fatigue_available"]:
         _validate_fatigue_context_entities(state)
     previous = 0
     for row in context["changes"]:
@@ -1421,10 +1541,93 @@ def _validate_entity_context(context, latest_boundary, schema):
             raise NativeHistoryRejected("native EntityInspection change chronology differs")
         state = _apply(state, row["changes"])
         _validate_plain_record(state)
-        if schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA) and context["fatigue_available"]:
+        if schema in current_context_schemas and context["fatigue_available"]:
             _validate_fatigue_context_entities(state)
         if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
             raise NativeHistoryRejected("native EntityInspection state digest differs")
+        previous = row["boundary"]
+
+
+def _validate_observer_knowledge(context, latest_boundary, initial, state):
+    if (type(context) is not dict
+            or set(context) != {"available", "initial", "changes"}
+            or type(context["available"]) is not bool
+            or type(context["changes"]) is not list):
+        raise NativeHistoryRejected("native observer-knowledge context schema differs")
+    if not context["available"]:
+        if context["initial"] is not None or context["changes"]:
+            raise NativeHistoryRejected("legacy observer-knowledge availability is inconsistent")
+        return
+    initial_knowledge = context["initial"]
+    if type(initial_knowledge) is not dict:
+        raise NativeHistoryRejected("native observer-knowledge initial state is missing")
+    _validate_plain_record(initial_knowledge)
+    participants = set(initial["participants"]["$tuple"])
+    def validate_state(value, boundary):
+        if type(value) is not dict:
+            raise NativeHistoryRejected("native observer-knowledge state is malformed")
+        for observer_id, entities in value.items():
+            if (type(observer_id) is not str or observer_id not in participants
+                    or type(entities) is not dict):
+                raise NativeHistoryRejected("native observer-knowledge owner is invalid")
+            for entity_id, evidence in entities.items():
+                if type(entity_id) is not str or type(evidence) is not dict:
+                    raise NativeHistoryRejected("native observer evidence row is malformed")
+                _validate_plain_record(evidence)
+                fields_value = evidence.get("fields", {})
+                if (evidence.get("$record") != "arena_perception.ArenaPerceptionEvidence"
+                        or fields_value.get("observer_id") != observer_id
+                        or fields_value.get("entity_id") != entity_id
+                        or any(type(fields_value.get(key)) is not str
+                               or not fields_value[key]
+                               for key in ("basis", "category", "name", "present_state",
+                                           "type_key"))
+                        or fields_value.get("basis") !=
+                            "arena.r65.initial_unobstructed_perception"
+                        or type(fields_value.get("boundary")) is not int
+                        or fields_value["boundary"] < 0
+                        or type(fields_value.get("time")) is not dict
+                        or set(fields_value["time"]) != {"$number"}
+                        or type(fields_value["time"].get("$number")) is not str
+                        or type(fields_value.get("currently_observable")) is not bool
+                        or type(fields_value.get("visibility_boundary")) is not int
+                        or not 0 <= fields_value["visibility_boundary"] <= boundary
+                        or fields_value["boundary"] > fields_value["visibility_boundary"]
+                        or fields_value.get("category") not in ("being", "object")
+                        or fields_value.get("present_state") not in
+                            ("present", "ground", "carried", "unplaced")
+                        or fields_value.get("position") is not None
+                            and (type(fields_value["position"]) is not dict
+                                 or fields_value["position"].get("$record") !=
+                                    "spatial.state.CartesianPosition")
+                        or fields_value.get("category") == "being"
+                            and (fields_value.get("owner_id") is not None
+                                 or fields_value.get("equipment_status") is not None)
+                        or (fields_value.get("owner_id") is not None)
+                            != (fields_value.get("equipment_status") is not None)):
+                    raise NativeHistoryRejected("native observer evidence owner, time, or category differs")
+                if entity_id not in state["entities"]:
+                    raise NativeHistoryRejected("native observer evidence references an unknown Entity")
+                if fields_value.get("owner_id") is not None:
+                    if (type(fields_value["owner_id"]) is not str
+                            or fields_value["owner_id"] not in participants):
+                        raise NativeHistoryRejected(
+                            "native observer evidence has an invalid Object owner")
+
+    validate_state(initial_knowledge, 0)
+    current = initial_knowledge
+    previous = 0
+    for row in context["changes"]:
+        if (type(row) is not dict or set(row) != {"boundary", "changes", "state_sha256"}
+                or type(row["boundary"]) is not int
+                or not previous < row["boundary"] <= latest_boundary
+                or type(row["changes"]) is not list or not row["changes"]
+                or type(row["state_sha256"]) is not str):
+            raise NativeHistoryRejected("native observer-knowledge chronology differs")
+        current = _apply(current, row["changes"])
+        validate_state(current, row["boundary"])
+        if hashlib.sha256(_canonical(current)).hexdigest() != row["state_sha256"]:
+            raise NativeHistoryRejected("native observer-knowledge state digest differs")
         previous = row["boundary"]
 
 
@@ -1571,7 +1774,16 @@ class NativeHistoryQuery:
                          if self._context_available else None)
         self._context_changes = {row["boundary"]: row
                                  for row in context["changes"]}
-        self._has_receipt_facts = self._log.get("schema") == SCHEMA
+        self._has_receipt_facts = self._log.get("schema") in (
+            RECEIPT_FACT_SCHEMA, SCHEMA)
+        knowledge = self._log.get("observer_knowledge",
+                                  _unavailable_observer_knowledge())
+        self._knowledge_available = knowledge["available"]
+        self._knowledge_boundary = 0
+        self._knowledge = (json.loads(_canonical(knowledge["initial"]).decode("ascii"))
+                           if self._knowledge_available else None)
+        self._knowledge_changes = {row["boundary"]: row
+                                   for row in knowledge["changes"]}
 
     def _boundary(self, boundary):
         if type(boundary) is not int or not 0 <= boundary <= self._latest:
@@ -1800,6 +2012,36 @@ class NativeHistoryQuery:
         return self._copy([row for row in recipients
                            if type(row) is dict and row.get("owner_id") == observer_id])
 
+    def observer_knowledge_at(self, boundary, observer_id=None):
+        """Return only recorded passive evidence owned by the requested observer.
+
+        Older schemas return ``None`` because they did not retain this ledger
+        history; current Saves do not reconstruct evidence from objective state.
+        """
+        self._boundary(boundary)
+        if observer_id is not None and (type(observer_id) is not str or not observer_id):
+            raise NativeHistoryRejected("observer history requires a stable observer ID")
+        if not self._knowledge_available:
+            return None
+        if boundary < self._knowledge_boundary:
+            context = json.loads(_canonical(
+                self._log["observer_knowledge"]["initial"]).decode("ascii"))
+            first = 1
+        else:
+            context = self._knowledge
+            first = self._knowledge_boundary + 1
+        for current in range(first, boundary + 1):
+            row = self._knowledge_changes.get(current)
+            if row is not None:
+                context = _apply(context, row["changes"])
+                if hashlib.sha256(_canonical(context)).hexdigest() != row["state_sha256"]:
+                    raise NativeHistoryRejected("native observer-knowledge digest differs")
+        if boundary >= self._knowledge_boundary:
+            self._knowledge = context
+            self._knowledge_boundary = boundary
+        result = self._copy(context)
+        return result if observer_id is None else result.get(observer_id, {})
+
 
 def events_at(log, boundary):
     validate(log)
@@ -1849,6 +2091,11 @@ def target_history_at(log, target_id, boundary=None):
 def observer_facts_at(log, boundary, observer_id):
     """Return detached observer-owned history without other recipients."""
     return NativeHistoryQuery(log).observer_facts_at(boundary, observer_id)
+
+
+def observer_knowledge_at(log, boundary, observer_id=None):
+    """Return detached Arena passive evidence for one owner or every owner."""
+    return NativeHistoryQuery(log).observer_knowledge_at(boundary, observer_id)
 
 
 def encode(log):

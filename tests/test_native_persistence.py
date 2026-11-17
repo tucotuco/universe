@@ -43,6 +43,7 @@ from object_observation import ObjectObservationLedger
 
 def _legacy_history_shape(value):
     value.pop("receipt_facts_complete", None)
+    value.pop("observer_knowledge", None)
     for row in value.get("boundaries", ()):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
@@ -124,6 +125,28 @@ print(json.dumps({'encounter':encounter.id,
                      for key, value in sorted(encounter.awareness.items())}
         ledgers = {being_id: world.get_object_by_id(being_id)._arena_perception_ledger
                    for being_id in encounter.being_list}
+        history_log = native_history.capture(encounter)
+        history_query = native_history.NativeHistoryQuery(history_log)
+        for being_id, ledger in ledgers.items():
+            for boundary in range(encounter.last_processed_boundary + 1):
+                expected = {}
+                for row in ledger._history:
+                    if row.visibility_boundary <= boundary:
+                        expected[row.entity_id] = native_history._plain(row)
+                self.assertEqual(history_query.observer_knowledge_at(
+                    boundary, being_id), expected)
+        self.assertEqual(history_query.observer_knowledge_at(
+            encounter.last_processed_boundary, "not-an-observer"), {})
+        corrupt_history = json.loads(json.dumps(history_log))
+        owner_id = next(iter(corrupt_history["observer_knowledge"]["initial"]))
+        entity_id = next(iter(corrupt_history["observer_knowledge"]["initial"][owner_id]))
+        corrupt_history["observer_knowledge"]["initial"][owner_id][entity_id][
+            "fields"]["observer_id"] = "forged-observer"
+        with self.assertRaisesRegex(native_history.NativeHistoryRejected,
+                                    "observer evidence owner"):
+            native_history.validate(native_history._seal(
+                {key: value for key, value in corrupt_history.items()
+                 if key != "sha256"}))
         native_wire = export_save(encounter)
         restored_world, restored_encounter, restored_rng = load_save(native_wire)
         self.assertEqual(export_save(restored_encounter), native_wire)
@@ -138,6 +161,65 @@ print(json.dumps({'encounter':encounter.id,
             self.assertIsNotNone(restored)
             self.assertEqual(restored.observer_id, ledger.observer_id)
             self.assertEqual(restored._history, ledger._history)
+        restored_log = native_history.current_recording(restored_encounter)
+        restored_query = native_history.NativeHistoryQuery(restored_log)
+        for being_id, ledger in ledgers.items():
+            for boundary in range(restored_encounter.last_processed_boundary + 1):
+                expected = {}
+                for row in ledger._history:
+                    if row.visibility_boundary <= boundary:
+                        expected[row.entity_id] = native_history._plain(row)
+                self.assertEqual(restored_query.observer_knowledge_at(
+                    boundary, being_id), expected)
+
+        # A valid /7 native history had no passive observer timeline. Its
+        # authenticated graph still carries the old ledger, so Load may
+        # reconstruct /8 from those retained facts without inventing evidence.
+        legacy_payload = json.loads(native_wire)
+        legacy_history = {key: value for key, value in legacy_payload["history"].items()
+                          if key != "sha256"}
+        legacy_history.pop("observer_knowledge")
+        legacy_history["schema"] = native_history.RECEIPT_FACT_SCHEMA
+        legacy_payload["history"] = native_history._seal(legacy_history)
+        legacy_unsigned = {key: value for key, value in legacy_payload.items()
+                           if key != "sha256"}
+        legacy_payload["sha256"] = hashlib.sha256(
+            native_persistence._canonical(legacy_unsigned)).hexdigest()
+        legacy_wire = native_persistence._canonical(legacy_payload)
+        migrated_world, migrated_encounter, _migrated_rng = load_save(legacy_wire)
+        self.assertIs(migrated_world.event_history[migrated_encounter.id],
+                      migrated_encounter)
+        self.assertEqual(export_save(migrated_encounter), native_wire)
+
+    def test_arena_observer_knowledge_appends_only_committed_evidence_changes(self):
+        from arena_browser_session import GeneratedArenaSession
+
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
+        session.generate({"starting_experience": "10000", "width_cells": "5",
+                          "height_cells": "5"})
+        session.choose_run()
+        encounter = session._active.encounter
+        # Attach before the first commit, then let the ordinary native
+        # publisher create boundary evidence and append it on the next turn.
+        export_save(encounter)
+        session.advance_one_second()
+        actor_id = encounter.being_list[0]
+        encounter.schedule_action(DelayAction(
+            encounter, actor_id, defense=0, start_time=encounter.time,
+            id="arena-observer-history-second-boundary"))
+        encounter.step(1)
+        log = native_history.current_recording(encounter)
+        self.assertEqual(log["schema"], native_history.SCHEMA)
+        reader = native_history.NativeHistoryQuery(log)
+        for boundary in range(encounter.last_processed_boundary + 1):
+            for observer_id in encounter.being_list:
+                expected = {}
+                ledger = encounter.get_being(observer_id)._arena_perception_ledger
+                for evidence in ledger._history:
+                    if evidence.visibility_boundary <= boundary:
+                        expected[evidence.entity_id] = native_history._plain(evidence)
+                self.assertEqual(reader.observer_knowledge_at(
+                    boundary, observer_id), expected)
 
     def test_legacy_v10_v11_pristine_arena_migrate_and_start_natively(self):
         """Accepted pristine legacy files migrate without inventing an Action."""
@@ -2047,6 +2129,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         history = {key: item for key, item in body["history"].items()
                    if key != "sha256"}
         history.pop("receipt_facts_complete")
+        history.pop("observer_knowledge")
         history["schema"] = INITIAL_RNG_SCHEMA
         for row in history["boundaries"]:
             row.pop("notification_intents", None)

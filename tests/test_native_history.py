@@ -18,6 +18,7 @@ import native_persistence_scale
 def _legacy_shape(body):
     """Strip fields introduced by history `/7` when constructing old fixtures."""
     body.pop("receipt_facts_complete", None)
+    body.pop("observer_knowledge", None)
     for row in body.get("boundaries", ()):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
@@ -142,6 +143,7 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(rng_state_at(self.log, 0),
                          self.log["initial"]["rng_before_first_commit"])
         self.assertEqual(query.rng_state_at(0), rng_state_at(self.log, 0))
+        self.assertEqual(query.observer_knowledge_at(0), {})
         source = copy.deepcopy(self.log)
         detached_state = state_at(source, 0)
         detached_events = events_at(source, 0)
@@ -238,6 +240,7 @@ class NativeHistoryTests(unittest.TestCase):
                          encode(__import__('native_history')._without_entity_context(log)))
         self.assertIsNone(entity_context_at(upgraded_legacy, 4))
         self.assertIsNone(fatigue_context_at(upgraded_legacy, 4))
+        self.assertIsNone(NativeHistoryQuery(upgraded_legacy).observer_knowledge_at(4))
 
         old_context = __import__('native_history')._without_fatigue_context(log)
         old_context_body = _legacy_shape({key: copy.deepcopy(value) for key, value in old_context.items()
@@ -423,6 +426,7 @@ class NativeHistoryTests(unittest.TestCase):
         body = {key: copy.deepcopy(value) for key, value in log.items()
                 if key != "sha256"}
         body.pop("receipt_facts_complete")
+        body.pop("observer_knowledge")
         body["schema"] = INITIAL_RNG_SCHEMA
         for row in body["boundaries"]:
             row.pop("notification_intents", None)
@@ -445,6 +449,7 @@ class NativeHistoryTests(unittest.TestCase):
         body = {key: copy.deepcopy(value) for key, value in current.items()
                 if key != "sha256"}
         body.pop("receipt_facts_complete")
+        body.pop("observer_knowledge")
         body["schema"] = INITIAL_RNG_SCHEMA
         for row in body["boundaries"]:
             row.pop("notification_intents", None)
