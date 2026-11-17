@@ -1407,6 +1407,210 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_charge_overrun_restores_and_commits_represented_forward_hex(self):
+        """An adopted one-hex landing survives continuation in a new process."""
+        from arena_hex_map import encounter_map_descriptor
+        from hex_facing import facing_vector
+        from measured_values import truncate_position
+
+        layout = ArenaHexLayout.rectangle(20, 10)
+        origin = layout.center_position(HexAddress(1, 4))
+        dx, dy = facing_vector(1)
+        builder = NativeScenarioBuilder(
+            "native-charge-overrun",
+            Library(config_dir=str(ROOT / "src/config")), seed=3,
+            encounter_id="native-charge-overrun-encounter")
+        actor = builder.add_being("Human", "Charger", position=origin.as_tuple(),
+                                  radius=.25, hit_points=100)
+        target_position = CartesianPosition(origin.x + 8.4 * dx,
+                                            origin.y + 8.4 * dy, origin.z)
+        target = builder.add_being("Human", "Charge Target",
+                                   position=target_position.as_tuple(),
+                                   radius=.25, hit_points=100)
+        builder.encounter.map = encounter_map_descriptor(layout)
+        actor.set_hex_facing(1)
+        actor.size_category = target.size_category = "medium"
+        actor.set_ability("strength", 10)
+        target.set_ability("strength", 10)
+        actor.set_ability("dexterity", 10)
+        target.set_ability("dexterity", 10)
+        actor.set_weapon_skill_level(
+            builder.world.get_weapon_dictionary(), "Dagger", 100)
+        actor.set_posture("standing")
+        target.set_posture("standing")
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        weapon = builder.make_weapon(actor.id, "Dagger", "Charge Dagger",
+                                     hand="right hand")
+        builder.enable()
+
+        charge = MeleeStrike(
+            builder.encounter, actor.id, target.id, weapon.id, motion="thrust",
+            reach=2, strategy=Strategy(timing=3), charge=True)
+        builder.schedule(charge)
+        builder.encounter.step(2, velocities={actor.id: (3.8 * dx, 3.8 * dy, 0)})
+        self.assertEqual(builder.encounter.inspect_committed(2).action(
+            charge.id).facts.outcome, "normal")
+        charge_position = actor.get_position()
+        target_before = target.get_position()
+
+        overrun = Action(builder.world, 2, 6, "overrun", actor.id, target.id,
+                         None, id="native-charge-overrun-action")
+        overrun.charge_continuation_source_id = charge.id
+        prepared = builder.encounter.prepare_action(overrun)
+        self.assertEqual(prepared.end_time, 8)
+        builder.schedule(overrun)
+        pending = export_save(builder.encounter)
+        builder.step(6)
+        receipt = builder.encounter.inspect_committed(8).action(overrun.id)
+        self.assertEqual(receipt.facts.outcome, "success")
+
+        start_cell = layout.cell_at_position(target_before)
+        neighbors = [address for address in layout.neighbors(start_cell)
+                     if layout.contains(address)]
+        expected_position = layout.center_position(
+            max(neighbors, key=lambda address: (
+                layout.center_yards(address)[0] * dx
+                + layout.center_yards(address)[1] * dy)), z=target_before.z)
+        expected_position = truncate_position(expected_position)
+        self.assertEqual(target.get_position(), expected_position)
+        self.assertEqual(target.get_posture(), "lying")
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [actor.id, target.id],
+            "weapon_id": weapon.id,
+            "action_ids": [charge.id, overrun.id],
+            "outcomes": [builder.encounter.inspect_committed(2).action(
+                charge.id).facts.outcome, receipt.facts.outcome],
+            "positions": [actor.get_position().as_tuple(),
+                          target.get_position().as_tuple()],
+            "hp": [actor.get_hit_points(), target.get_hit_points()],
+            "posture": target.get_posture(),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+            "history_rows": [hashlib.sha256(json.dumps(row, sort_keys=True,
+                separators=(",", ":")).encode()).hexdigest()
+                for row in capture(builder.encounter)["boundaries"]],
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor_id,target_id,weapon_id,charge_id,overrun_id=sys.argv[2:]
+assert enc.time==2 and enc.progression_mode=='transactional'
+assert enc.inspect_committed(2).action(charge_id).facts.outcome=='normal'
+choice=enc.choice_for_action(overrun_id);assert choice.state=='accepted'
+overrun=next(m.action for m in enc._choice_book._choices[choice.id].members
+             if m.action.id==overrun_id)
+assert overrun.charge_continuation_source_id==charge_id
+assert overrun.start_time==2 and overrun.end_time==6
+enc.step(6);receipt=enc.inspect_committed(8).action(overrun_id)
+assert receipt.facts.outcome=='success'
+actor=world.get_object_by_id(actor_id);target=world.get_object_by_id(target_id)
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[actor_id,target_id],'weapon_id':weapon_id,
+ 'action_ids':[charge_id,overrun_id],
+ 'outcomes':[enc.inspect_committed(2).action(charge_id).facts.outcome,
+             receipt.facts.outcome],
+ 'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'hp':[actor.get_hit_points(),target.get_hit_points()],
+ 'posture':target.get_posture(),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest(),
+ 'history_rows':[hashlib.sha256(json.dumps(row,sort_keys=True,
+ separators=(',',':')).encode()).hexdigest()
+                 for row in history_log['boundaries']]},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-charge-overrun.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), actor.id,
+                 target.id, weapon.id, charge.id, overrun.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+    def test_headless_failed_charge_restores_pending_choice_and_speed_result(self):
+        """A below-threshold Charge remains a failed native fact after Load."""
+        builder = NativeScenarioBuilder(
+            "native-charge-failure", Library(config_dir=str(ROOT / "src/config")),
+            seed=19, encounter_id="native-charge-failure-encounter")
+        actor = builder.add_being("Human", "Slow Charger", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Charge Target", position=(7.4, 0, 0),
+                                   radius=.25, hit_points=100)
+        actor.set_hex_facing(0)
+        actor.size_category = target.size_category = "medium"
+        actor.set_weapon_skill_level(
+            builder.world.get_weapon_dictionary(), "Dagger", 100)
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        weapon = builder.make_weapon(actor.id, "Dagger", "Charge Dagger",
+                                     hand="right hand")
+        builder.enable()
+        charge = MeleeStrike(
+            builder.encounter, actor.id, target.id, weapon.id, motion="thrust",
+            reach=2, strategy=Strategy(timing=3), charge=True)
+        builder.schedule(charge)
+        pending = export_save(builder.encounter)
+
+        movement = {actor.id: (3.5, 0.0, 0.0)}
+        builder.encounter.step(2, velocities=movement)
+        receipt = builder.encounter.inspect_committed(2).action(charge.id)
+        self.assertEqual(receipt.facts.outcome, "insufficient_charge_speed")
+        self.assertEqual(target.get_hit_points(), 100)
+        expected = {
+            "world_id": builder.world.id,
+            "encounter_id": builder.encounter.id,
+            "being_ids": [actor.id, target.id],
+            "weapon_id": weapon.id,
+            "action_id": charge.id,
+            "outcome": receipt.facts.outcome,
+            "positions": [actor.get_position().as_tuple(),
+                          target.get_position().as_tuple()],
+            "hp": [actor.get_hit_points(), target.get_hit_points()],
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor_id,target_id,weapon_id,charge_id=sys.argv[2:]
+assert enc.time==0 and enc.progression_mode=='transactional'
+choice=enc.choice_for_action(charge_id);assert choice.state=='accepted'
+charge=next(m.action for m in enc._choice_book._choices[choice.id].members
+            if m.action.id==charge_id)
+assert charge.actor_id==actor_id and charge.target_id==target_id
+assert charge.instrument_id==weapon_id and charge.charge is True
+enc.step(2,velocities={actor_id:(3.5,0.0,0.0)})
+receipt=enc.inspect_committed(2).action(charge_id)
+assert receipt.facts.outcome=='insufficient_charge_speed'
+actor=world.get_object_by_id(actor_id);target=world.get_object_by_id(target_id)
+history_log=native_history.capture(enc)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':[actor_id,target_id],'weapon_id':weapon_id,
+ 'action_id':charge_id,'outcome':receipt.facts.outcome,
+ 'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'hp':[actor.get_hit_points(),target.get_hit_points()],
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(history_log)).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-charge-failure.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), actor.id,
+                 target.id, weapon.id, charge.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
     def test_headless_break_weapon_failure_preserves_later_attack_after_restore(self):
         attacking = NativeScenarioBuilder(
             "native-break-weapon", Library(config_dir=str(ROOT / "src/config")),
