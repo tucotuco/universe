@@ -611,9 +611,12 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertAlmostEqual(facts.metadata[0][1],.2)
 
     def test_native_touch_grab_hold_break_grapple_and_escape_use_separate_receipt_state(self):
+        from arena_hex_map import HexAddress
         from physical_contact import active_contact_state
         self.a.set_position(CartesianPosition(0,0,0))
-        self._place_disarm_hexes()
+        layout=self._place_disarm_hexes()
+        target_cell=layout.cell_at_position(self.b.get_position())
+        self.assertEqual(target_cell,HexAddress(6,5))
         self.a.current.body_parts['left hand'] = None
         self.a.current.body_parts['right hand'] = None
         self.a.current.skills.skills['improved grapple'] = 3
@@ -725,7 +728,7 @@ class TestActionEvaluation(unittest.TestCase):
         # A second independent attacker is admitted under the adopted size
         # cap and receives the +2 held-opponent bonus from the first holder.
         c = self.world.get_object_by_id(self.world.make_being('Human','C'))
-        c.set_position(CartesianPosition(.4,0,0));c.set_geometry(Sphere(.25))
+        c.set_position(layout.center_position(HexAddress(7,5)));c.set_geometry(Sphere(.25))
         c.set_hit_points(100);c.size_category='medium';c.set_posture('standing')
         c.current.skills.skills['improved grapple']=0
         c.set_ability('strength',10);self.b.set_ability('strength',10)
@@ -742,10 +745,10 @@ class TestActionEvaluation(unittest.TestCase):
         # Four medium attackers are the adopted maximum against a medium
         # target; the fifth is refused before drawing any random numbers.
         extra=[]
-        for name, start, rolls in (('D',55,[6,6,6,1,1,1]),
-                                   ('E',57,[6,6,6,1,1,1])):
+        for name, start, address, rolls in (('D',55,HexAddress(7,4),[6,6,6,1,1,1]),
+                                            ('E',57,HexAddress(6,4),[6,6,6,1,1,1])):
             being=self.world.get_object_by_id(self.world.make_being('Human',name))
-            being.set_position(CartesianPosition(.5,0,0));being.set_geometry(Sphere(.25))
+            being.set_position(layout.center_position(address));being.set_geometry(Sphere(.25))
             being.set_hit_points(100);being.size_category='medium';being.set_posture('standing')
             being.current.skills.skills['improved grapple']=0
             being.set_ability('strength',10);self.enc.add_being(being.id)
@@ -759,7 +762,7 @@ class TestActionEvaluation(unittest.TestCase):
         self.assertEqual(len(active_contact_state(self.enc)[0]),4)
 
         fifth=self.world.get_object_by_id(self.world.make_being('Human','Fifth'))
-        fifth.set_position(CartesianPosition(.6,0,0));fifth.set_geometry(Sphere(.25))
+        fifth.set_position(layout.center_position(HexAddress(5,4)));fifth.set_geometry(Sphere(.25))
         fifth.set_hit_points(100);fifth.size_category='medium';fifth.set_posture('standing')
         fifth.current.skills.skills['improved grapple']=0
         fifth.set_ability('strength',10);self.enc.add_being(fifth.id)
