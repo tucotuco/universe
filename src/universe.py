@@ -277,7 +277,7 @@ class Universe(Identifiable):
         return self.get_object_dictionary().get_object_definition(object_name)
 
     def get_skill_definition(self, skill_name):
-        return self.get_skill_dictionary().get_object_definition(skill_name)
+        return self.get_skill_dictionary().get_skill_definition(skill_name)
 
     def get_weapon_definition(self, weapon_name):
         return self.get_weapon_dictionary().get_object_definition(weapon_name)

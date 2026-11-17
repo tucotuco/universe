@@ -103,7 +103,7 @@ class Library(Identifiable):
         return self.object_dictionary.get_object_definition(object_name)
 
     def get_skill_definition(self, skill_name):
-        return self.skill_dictionary.get_object_definition(skill_name)
+        return self.skill_dictionary.get_skill_definition(skill_name)
 
     def get_weapon_definition(self, weapon_name):
         return self.weapon_dictionary.get_object_definition(weapon_name)
