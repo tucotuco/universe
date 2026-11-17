@@ -821,6 +821,9 @@ class NativeHistoryTests(unittest.TestCase):
     def test_capture_is_read_only_and_does_not_import_arena_application(self):
         import sys
         from encounter_inspection import fingerprint
+        arena_modules = {"arena_browser_session", "arena_persistence",
+                         "arena_native_snapshot", "arena_server", "npcgen"}
+        arena_modules_before = arena_modules & set(sys.modules)
         encounter = self.demo["encounter"]
         before = tuple((id(row), fingerprint(row))
                        for row in encounter._atomic_interval_history)
@@ -831,9 +834,7 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual(rng_before, self.demo["rng_owner"].state)
         self.assertEqual(encode(recaptured), self.wire)
-        for module in ("arena_browser_session", "arena_persistence",
-                       "arena_native_snapshot", "arena_server", "npcgen"):
-            self.assertNotIn(module, sys.modules)
+        self.assertFalse((arena_modules & set(sys.modules)) - arena_modules_before)
 
     def test_corrupt_digest_preimage_duplicate_actions_and_reordering_refuse(self):
         corrupted = copy.deepcopy(self.log)

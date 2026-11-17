@@ -51,8 +51,8 @@ The recipient-heavy graph-retention path remains intentionally exact and is excl
 - `test_native_history` in its required isolated process: **31 passed / 22.865s**.
 - `test_persistence_capability_matrix` in its own process: **3 passed / 0.017s**.
 - Python compilation of all changed native persistence modules and `git diff --check`: passed.
-- A combined native-history + matrix invocation produced **33 passed / 1 failure / 22.714s** because the matrix test imports `arena_native_snapshot` before a native-history test asserts that the process has not imported Arena. Both suites pass separately; this is test-process import-order coupling, not a persistence failure, and tests are run in isolation as the report's established workflow requires.
-- Boundary reconstruction implementation is committed as `832812bad76d43e933872d99aee8b9a6695b44e3`. The subsequent scale-runner extension and 2/20/200 quiet-profile results are part of the next scoped local documentation/harness commit.
+- The combined native-history + matrix invocation originally failed because matrix collection imports `arena_native_snapshot` before the test's process-wide absence assertion. The test now snapshots the process baseline and rejects only Arena modules newly imported by `capture()`. Combined result: **34 passed / 22.585s**; the isolated native-history run also passed **31 / 22.865s**.
+- Boundary reconstruction is committed as `832812bad76d43e933872d99aee8b9a6695b44e3`; the quiet-scale harness and results are committed as `ee11afb`. The import-isolation regression correction is a separate scoped follow-up in progress.
 
 ## Current continuation — committed receipt compaction and no-time Disarm history
 
