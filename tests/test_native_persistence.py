@@ -4113,6 +4113,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         encounter.schedule_action(continuation)
         encounter.step(1)
         row = ledger.observations[0]
+        last_seen=ledger.last_seen_location(target.id)
         expected = {
             'time': encounter.time, 'rng': rng.state,
             'history': hashlib.sha256(native_history.encode(
@@ -4120,6 +4121,10 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
             'observation': [row.id, row.observer_id, row.being_id,
                             row.source_action_id, row.encounter_id, row.boundary,
                             row.time, list(row.position.as_tuple()), row.basis],
+            'last_seen': [last_seen.observer_id,last_seen.being_id,
+                          list(last_seen.position.as_tuple()),last_seen.observed_at,
+                          last_seen.boundary,last_seen.source_action_id,
+                          last_seen.observation_id],
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'native-location-evidence-save.json'
@@ -4134,6 +4139,8 @@ ledger=spot.location_ledger
 row=ledger.observations[0]
 assert ledger.observer_id == spot.actor_id
 assert row.source_action_id == spot.id and row.being_id == spot.target_id
+last=ledger.last_seen_location(row.being_id)
+assert last.observer_id==spot.actor_id and last.observation_id==row.id
 action=DelayAction(enc,spot.actor_id,defense=0,start_time=enc.time,
  id='native-location-continuation')
 enc.schedule_action(action)
@@ -4141,7 +4148,9 @@ enc.step(1)
 print(json.dumps({'time':enc.time,'rng':rng.state,
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
  'observation':[row.id,row.observer_id,row.being_id,row.source_action_id,
- row.encounter_id,row.boundary,row.time,list(row.position.as_tuple()),row.basis]},sort_keys=True))'''
+ row.encounter_id,row.boundary,row.time,list(row.position.as_tuple()),row.basis],
+ 'last_seen':[last.observer_id,last.being_id,list(last.position.as_tuple()),
+ last.observed_at,last.boundary,last.source_action_id,last.observation_id]},sort_keys=True))'''
             import os
             result = subprocess.run(
                 [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,

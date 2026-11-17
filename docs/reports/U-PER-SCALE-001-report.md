@@ -1734,3 +1734,17 @@ Extended the two-root Group observer test to compare owner-independent `objectiv
 - `git diff --check` — passed.
 
 The independent rotated-frame continuation and matrix gate were committed as `a42c44b`. This objective-family extension is pending scoped commit. It does not close all native field families or historical consumers; application Save/Load cutover, broad security/compatibility gates, other reader parity, receipt-backed inquiry/reassessment integration and durable journal recovery remain open. U-PER-SCALE-001 remains ACTIVE; no rule-choice blocker was found.
+
+
+## Problems-first — owner-bound LastSeenLocation projection
+
+### Gap and correction
+
+The source matrix described both native location records as unsupported even though successful Spot evidence already survives strict Save/Load. However, the materialized `LastSeenLocation` answer is derived from the immutable owner ledger and was not checked after restore. Treating it as a separately persisted mutable record would duplicate history and risk exposing another observer's sample.
+
+Extended the actual native Spot fresh-process case to compare the derived LastSeenLocation's owner, Being, exact position/time/boundary, source Action and observation identity against the restored observation row. The source-linked matrix now states that the immutable `BeingLocationObservation` is persisted, while `LastSeenLocation` is derived on demand from the one owner's records.
+
+- `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_spot_location_evidence_restores_with_owner_and_provenance test_persistence_capability_matrix -v` (from `tests/`) — **4 passed / 3.123s**.
+- `git diff --check` — passed.
+
+Objective-fact restoration and query coverage is committed as `c4ec5b4`. The LastSeenLocation regression plus matrix/report/TASKS update remains pending a scoped commit. Broader observer history/privacy combinations and complete production application cutover are still open; U-PER-SCALE-001 remains ACTIVE.
