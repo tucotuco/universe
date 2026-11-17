@@ -1705,3 +1705,17 @@ The field-level evidence is corrected; the full assignment remains incomplete. I
 
 
 The historical recipient query comparison was added after the initial commit: `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_restores_distinct_group_beliefs_across_encounters test_persistence_capability_matrix -v` (from `tests/`) — **4 passed / 4.213s**. This checks each observer-owned Group BeliefLedger view at boundaries 0/1/2, including no evidence before observation, the owner-only committed projection at boundary 1, and the unchanged projection through boundary 2. The follow-up documentation/test diff is pending scoped commit.
+
+
+## Problems-first — native local spatial-frame continuation
+
+### Gap and correction
+
+The source-linked matrix listed `spatial.frame.LocalFrame` in the strict native graph contract, but only geometry/unit tests—not Save/Load continuation—supported the row. Encounter-local coordinate frame is future-relevant because later legal movement may declare a local velocity. A save that retains only global Being positions would not be sufficient to continue that command.
+
+Added `test_native_local_frame_movement_resumes_in_fresh_process`: a native Encounter uses a translated, rotated, right-handed frame, commits one local-velocity Run, saves, and then independently commits a second local-velocity Run. An OS child strictly loads the first boundary and executes the same ordinary native Action. The test compares exact frame origin/axes, global and local Being positions, Action identities, RNG and full native-history digest against the uninterrupted control. The test derives the transformed global displacement from the declared LocalFrame axes; it does not infer frame data from position or geometry.
+
+- `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_local_frame_movement_resumes_in_fresh_process -v` (from `tests/`) — **1 passed / 2.000s**; paired with the 3-test capability matrix in one invocation, **4 passed / 2.051s**.
+- `git diff --check` — passed.
+
+The matrix now cites this evidence. Remaining spatial geometry concerns include historical query support for every LocalFrame-bearing context and all legal frame transitions; this scenario proves exact current-frame restoration and continuation only. Commit `74a5b60` is the verified observer-history baseline. This local-frame test and report/TASKS/matrix updates remain pending a scoped commit. No ordinary Arena Save path was changed; U-PER-SCALE-001 remains ACTIVE.

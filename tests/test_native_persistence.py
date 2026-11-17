@@ -2144,6 +2144,62 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
+    def test_native_local_frame_movement_resumes_in_fresh_process(self):
+        fixture=inspection_fixtures.InspectionFixture();fixture.setUp()
+        from spatial.frame import LocalFrame
+        frame=LocalFrame(CartesianPosition(10,-4,20),(0,1,0),(-1,0,0),(0,0,1))
+        fixture.enc.set_local_frame(frame)
+        fixture.enable()
+        initial_position=fixture.a.get_position()
+        first=RunAction(fixture.world,fixture.a.id,0,1,.5,experience=1,
+            id='native-local-frame-run-0')
+        fixture.enc.schedule_action(first)
+        fixture.enc.step(1,velocities={fixture.a.id:(1,0,0)},velocity_frame='local')
+        self.assertEqual(frame.vector_to_global((1,0,0)),(0.0,1.0,0.0))
+        self.assertEqual(fixture.a.get_position(),CartesianPosition(
+            initial_position.x,initial_position.y+1,initial_position.z))
+        wire=export_save(fixture.enc)
+        continuation=RunAction(fixture.world,fixture.a.id,1,1,.5,experience=1,
+            id='native-local-frame-run-1')
+        fixture.enc.schedule_action(continuation)
+        fixture.enc.step(1,velocities={fixture.a.id:(0,1,0)},velocity_frame='local')
+        expected={'encounter_id':fixture.enc.id,'time':fixture.enc.time,
+            'frame':fixture.enc.local_frame.to_dict(),
+            'global_position':fixture.a.get_position().as_tuple(),
+            'local_position':fixture.enc.entity_local_position(fixture.a.id).as_tuple(),
+            'rng':fixture.rng.state,
+            'history':hashlib.sha256(native_history.encode(
+                native_history.capture(fixture.enc))).hexdigest(),
+            'actions':list(fixture.enc._atomic_interval_history[-1].action_ids)}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-local-frame.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+import native_history
+from activities import RunAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+frame=enc.local_frame
+assert frame is not None
+assert enc.entity_local_position(enc.being_list[0]).as_tuple()==frame.to_local(
+ world.get_object_by_id(enc.being_list[0]).get_position()).as_tuple()
+action=RunAction(world,enc.being_list[0],enc.time,1,.5,experience=1,
+ id='native-local-frame-run-1')
+enc.schedule_action(action)
+enc.step(1,velocities={enc.being_list[0]:(0,1,0)},velocity_frame='local')
+print(json.dumps({'encounter_id':enc.id,'time':enc.time,'frame':frame.to_dict(),
+ 'global_position':world.get_object_by_id(enc.being_list[0]).get_position().as_tuple(),
+ 'local_position':enc.entity_local_position(enc.being_list[0]).as_tuple(),
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'actions':[entry.action_ids for entry in enc._atomic_interval_history[-1:]][0]},sort_keys=True))'''
+            import os
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path)],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=45)
+        self.assertEqual(result.returncode,0,result.stderr)
+        actual=json.loads(result.stdout)
+        self.assertEqual(actual,json.loads(json.dumps(expected)))
+
     def test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()
