@@ -518,10 +518,20 @@ def _validate_effect(effect, proposal, action, actions, entities, participants, 
             and effect.actor_id == action.actor_id
             and effect.target_id == action.target_id
             and effect.next_check == snapshot.boundary + 6)
+        is_failed_grapple_escape_maintenance = (
+            action.family == 'grappling' and event_type == 'grapple escape'
+            and proposal.outcome == 'failed' and effect.kind == 'control'
+            and effect.operation == 'maintain'
+            and effect.state_id == action.data.get('grapple_id')
+            and effect.target_id == action.actor_id
+            and effect.actor_id == action.target_id
+            and effect.next_check == snapshot.boundary + 6
+            and effect.position is None)
         _require((action.family == 'grappling'
                  and (proposal.outcome == 'success'
                       or (event_type == 'hold' and proposal.outcome == 'failed')
-                      or is_failed_initial_grapple_maintenance)
+                      or is_failed_initial_grapple_maintenance
+                      or is_failed_grapple_escape_maintenance)
                  or is_damage_release)
                  and recipient.category == 'being'
                  and effect.target_id in participants

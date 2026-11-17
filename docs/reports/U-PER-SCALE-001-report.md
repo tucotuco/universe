@@ -849,3 +849,18 @@ Verification after the correction: `.venv/bin/python -B tests/test_native_draw_p
 The native matrix's `action.Action` and `GrappleStateEffect` rows now cite the fresh-process initial Grapple→Takedown case. This is a tested supported profile only: it does not close all Grapple escape/recovery combinations, every native historical reader, general Action-family parity, graph duplication, durable journaling, accepted legacy migration for every family, or the normal production API cutover. Neither the capability matrix nor U-PER-SCALE-001 is marked complete. No push was made.
 
 **Execution interval:** Start `2026-11-17T06:10:55Z`; End **IN PROGRESS**; elapsed **to be calculated at closeout**.
+
+## Failed and successful Grapple Escape restoration
+
+### Problems first
+
+- Native Action evaluation already described a failed Grapple Escape as a `control/maintain` effect and the specialized settlement branch already required that existing control identity, participants, and `boundary + 6` check. The preceding generic Grapple Effect gate nevertheless allowed failed outcomes only for automatic Hold and failed initial Grapple. Consequently a legal failed Escape was rejected atomically as `Grapple state effect requires a native Being contact Action`. This was missing settlement admission, not missing adopted semantics.
+- No unrelated Action-evaluation failure was folded into this change. Its older Touch/Grab/Grapple chain still fails at the later test-line-735 Touch as `out_of_reach`, and the same failure was reproduced against archived committed baseline `79f6ead` as documented above.
+
+### Narrow correction
+
+`src/action_settlement.py` now admits a failed Escape only when it is the exact Grappling-family `grapple escape`, the proposal outcome is `failed`, and its effect has `kind=control`, `operation=maintain`, the Action's declared control ID, the reversed controller/escapee attribution required by the control record, `boundary + 6`, and no position transition. The later Escape-specific settlement checks remain in force. This allows the already implemented effect semantics to commit; it adds no new outcome, bonus, timing, or transition.
+
+Two seeded Arena-independent native cases now save after the Escape Choice is accepted and continue in separate OS processes. With ordinary definition-backed checks, the low-skill escapee fails against the established top control: the same Grapple ID and position remain, the next check advances six seconds, and concurrent automatic Grip maintenance/history also matches. With represented Escape Artist skill 20, a standing-position Escape succeeds and releases exactly that control while retaining the independently verified Grip state. Both compare literal Entity/Action IDs, result, Grip/control projection, posture, RNG, all boundary history digests, and canonical history bytes against uninterrupted execution.
+
+Verification after the settlement correction: `.venv/bin/python -B tests/test_native_draw_persistence.py -v` — **14 passed in 79.337s**; focused successful and failed Grapple Escape tests — **2 passed in 17.231s**; existing automatic Hold and Multiple Grapple/Break-hold tests — **2 passed in 2.816s**; capability-matrix validation passed **3 tests** after the GrappleStateEffect row was updated. The Action-evaluation chain regression remains separately recorded and reproduced on baseline; it is not masked by this narrow settlement fix. U-PER-SCALE-001 remains ACTIVE: reverse-from-pin escape, pin-bottom escape, all recovery histories, full supported Action/query parity, graph-free history, durable journal, complete migration families, and production API cutover remain open.
