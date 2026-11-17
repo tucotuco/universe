@@ -17,7 +17,8 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
                             NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
-                            QUIET_SPAN_SCHEMA, SAME_RNG, _seal,
+                            QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, SCHEMA, SAME_RNG, _seal,
+                            fatigue_context_at,
                             _plain, _expand_rows, _target_candidates)
 
 
@@ -87,6 +88,8 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(reader.rng_state_at(boundary), rng_state_at(self.log, boundary))
             self.assertEqual(reader.entity_context_at(boundary),
                              entity_context_at(self.log, boundary))
+            self.assertEqual(reader.fatigue_context_at(boundary),
+                             fatigue_context_at(self.log, boundary))
         expected = reader.state_at(4)
         source['initial']['encounter_id'] = 'mutated-after-validation'
         self.assertEqual(reader.state_at(4), expected)
@@ -104,7 +107,7 @@ class NativeHistoryTests(unittest.TestCase):
 
     def test_unchanged_rng_cursor_is_referenced_and_legacy_history_upgrades(self):
         log = decode(self.wire)
-        self.assertEqual(log['schema'], 'universe.native-encounter-history/4')
+        self.assertEqual(log['schema'], SCHEMA)
         previous = None
         for boundary, row in enumerate(log['boundaries'], 1):
             current = rng_state_at(log, boundary)
@@ -129,6 +132,21 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(encode(upgraded_legacy),
                          encode(__import__('native_history')._without_entity_context(log)))
         self.assertIsNone(entity_context_at(upgraded_legacy, 4))
+        self.assertIsNone(fatigue_context_at(upgraded_legacy, 4))
+
+        old_context = __import__('native_history')._without_fatigue_context(log)
+        old_context_body = {key: copy.deepcopy(value) for key, value in old_context.items()
+                            if key != 'sha256'}
+        old_context_body['schema'] = ENTITY_CONTEXT_SCHEMA
+        old_context_body['entity_context'].pop('fatigue_available')
+        old_context = _seal(old_context_body)
+        self.assertTrue(validate(old_context))
+        upgraded_context = upgrade(old_context)
+        self.assertEqual(upgraded_context['schema'], SCHEMA)
+        self.assertFalse(upgraded_context['entity_context']['fatigue_available'])
+        self.assertIsNone(fatigue_context_at(upgraded_context, 4))
+        self.assertEqual(entity_context_at(upgraded_context, 4),
+                         entity_context_at(old_context, 4))
 
         previous_schema = {key: copy.deepcopy(value) for key, value in log.items()
                            if key not in ('sha256', 'entity_context')}
@@ -154,6 +172,25 @@ class NativeHistoryTests(unittest.TestCase):
         corrupt = copy.deepcopy(log)
         corrupt['boundaries'][0]['rng_after'] = dict(SAME_RNG)
         with self.assertRaisesRegex(NativeHistoryRejected, 'RNG reference'):
+            validate(_seal({key: value for key, value in corrupt.items()
+                            if key != 'sha256'}))
+
+    def test_fatigue_history_is_versioned_and_strictly_validated(self):
+        reader = NativeHistoryQuery(self.log)
+        for boundary in range(1, self.log['latest_boundary'] + 1):
+            state = reader.fatigue_context_at(boundary)
+            self.assertIsNotNone(state)
+            self.assertEqual(set(state), set(self.demo['encounter'].being_list))
+            for row in state.values():
+                fatigue = row['physical_fatigue']
+                self.assertEqual(set(fatigue), {'b', 'check_modifier', 'physiology_id', 'q'})
+                self.assertEqual(row['physiology'], {})
+
+        corrupt = copy.deepcopy(self.log)
+        pre_action = corrupt['entity_context']['initial'][
+            self.demo['encounter'].being_list[0]]['fields']['pre_action']
+        pre_action.pop('physical_fatigue')
+        with self.assertRaisesRegex(NativeHistoryRejected, 'fatigue/physiology'):
             validate(_seal({key: value for key, value in corrupt.items()
                             if key != 'sha256'}))
 

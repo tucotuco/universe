@@ -131,11 +131,17 @@ def load_save(wire):
         actual_log = native_history.capture(encounter)
         actual_history = native_history.encode(actual_log)
         if actual_history != expected_history:
-            legacy_source = value["history"]["schema"] in native_history.LEGACY_SCHEMAS
-            contextless_actual = (native_history.encode(
-                native_history._without_entity_context(actual_log))
-                if legacy_source else None)
-            if contextless_actual != expected_history:
+            source_schema = value["history"]["schema"]
+            compatible_actual = None
+            if source_schema in (native_history.LEGACY_SCHEMA,
+                                  native_history.PREVIOUS_SCHEMA,
+                                  native_history.QUIET_SPAN_SCHEMA):
+                compatible_actual = native_history.encode(
+                    native_history._without_entity_context(actual_log))
+            elif source_schema == native_history.ENTITY_CONTEXT_SCHEMA:
+                compatible_actual = native_history.encode(
+                    native_history._without_fatigue_context(actual_log))
+            if compatible_actual != expected_history:
                 raise NativeSaveRejected("restored native graph disagrees with saved history")
         if encounter.id != value["history"]["initial"]["encounter_id"]:
             raise NativeSaveRejected("restored Encounter logical identity differs")

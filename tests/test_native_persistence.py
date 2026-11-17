@@ -210,7 +210,7 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         actor.exertion.set_load_level("heavy")
         actor.exertion.set_fatigue_level(1)
         actor.exertion.set_accumulated_exertion(17)
-        action = RunAction(world, actor.id, encounter.time, 2, .75, 25,
+        action = RunAction(world, actor.id, encounter.time, 2, .75, 250,
                            id="native-run-pending-continuation")
         encounter.schedule_action(action)
         encounter.step(1, velocities={actor.id: (.5, 0, 0)})
@@ -219,8 +219,9 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         self.assertEqual(action.start_position, CartesianPosition(0, 0, 0))
         self.assertIsNone(action.resolution)
         saved_fatigue_view = encounter.last_fatigue_frame.view(actor.id).to_dict()
-        saved_physiology_version = encounter.last_fatigue_frame.physiology(
-            actor.id).version_hash
+        saved_physiology_versions = {
+            mode: encounter.last_fatigue_frame.physiology(actor.id, mode=mode).version_hash
+            for mode in ("ordinary", "running")}
 
         wire = export_save(encounter)
         query = native_history.NativeHistoryQuery(
@@ -228,18 +229,30 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         for boundary, expected_x in ((1, .5),):
             position = query.entity_context_at(boundary)[actor.id]["fields"]["position"]["fields"]
             self.assertEqual(float.fromhex(position["x"]["$number"]), expected_x)
+            fatigue = query.fatigue_context_at(boundary)[actor.id]
+            self.assertEqual(float.fromhex(
+                fatigue["physical_fatigue"]["q"]["$number"]), .7)
+            self.assertEqual(fatigue["physiology"]["ordinary"]["version_hash"],
+                             saved_physiology_versions["ordinary"])
 
         encounter.step(1, velocities={actor.id: (.5, 0, 0)})
         self.assertEqual(actor.get_position(), CartesianPosition(1, 0, 0))
-        self.assertEqual(actor.get_skill_experience("run"), 25)
-        committed_action = encounter.inspect_committed().action(action.id)
-        self.assertEqual(committed_action.facts.outcome, "success")
+        self.assertEqual(actor.get_skill_experience("run"), 250)
+        self.assertEqual(actor.get_skill_level("run"), 1)
+        run_commit = encounter.inspect_committed(boundary=2).action(action.id)
+        self.assertEqual(run_commit.facts.outcome, "success")
         self.assertEqual(encounter._atomic_interval_history[-1].action_ids,
                          (action.id,))
-        practice_effects = [row.effect for row in committed_action.effects
+        practice_effects = [row.effect for row in run_commit.effects
                             if type(row.effect).__name__ == "PracticeEffect"]
         self.assertEqual(len(practice_effects), 1)
         self.assertEqual(practice_effects[0].source_action_id, action.id)
+        run_result = {
+            "outcome": run_commit.facts.outcome,
+            "practice_effect_sources": [row.source_action_id for row in practice_effects],
+            "receipt_action_ids": list(encounter._atomic_interval_history[-1].action_ids),
+        }
+        encounter.step(1)
         expected = {
             "time": encounter.time,
             "position": actor.get_position().as_tuple(),
@@ -249,8 +262,7 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                             "level_after": row.level_after, "time": row.time,
                             "exercise_experience": [use.experience for use in row.exercises]}
                            for row in actor.skill_use_history],
-            "outcome": committed_action.facts.outcome,
-            "practice_effect_sources": [row.source_action_id for row in practice_effects],
+            "run_result": run_result,
             "receipt_action_ids": list(encounter._atomic_interval_history[-1].action_ids),
             "physical_fatigue": actor.get_physical_fatigue().to_dict(actor.physiology_id),
             "fatigue_view": encounter.last_fatigue_frame.view(actor.id).to_dict(),
@@ -264,8 +276,20 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         }
         query = native_history.NativeHistoryQuery(
             native_history.current_recording(encounter))
-        position = query.entity_context_at(2)[actor.id]["fields"]["position"]["fields"]
-        self.assertEqual(float.fromhex(position["x"]["$number"]), 1.0)
+        versions = {}
+        for boundary in (1, 2, 3):
+            context = query.entity_context_at(boundary)[actor.id]["fields"]
+            position = context["position"]["fields"]
+            self.assertEqual(float.fromhex(position["x"]["$number"]), .5 if boundary == 1 else 1.0)
+            exertion = context["pre_action"]["exertion"]
+            self.assertEqual(exertion["accumulated_exertion"], 17)
+            self.assertEqual(exertion["activity_level"], "run")
+            fatigue = query.fatigue_context_at(boundary)[actor.id]
+            self.assertEqual(float.fromhex(
+                fatigue["physical_fatigue"]["q"]["$number"]), .7)
+            versions[boundary] = fatigue["physiology"]["running"]["version_hash"]
+        self.assertEqual(versions[1], versions[2])
+        self.assertNotEqual(versions[2], versions[3])
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "native-run-pending-save.json"
@@ -279,21 +303,26 @@ action=world.event_history['native-run-pending-continuation']
 actor=world.get_object_by_id(action.actor_id)
 assert actor.physiology_id == 'native-human@1'
 assert encounter.last_fatigue_frame.view(actor.id).to_dict() == json.loads(sys.argv[2])
-assert encounter.last_fatigue_frame.physiology(actor.id).version_hash == sys.argv[3]
+saved_versions=json.loads(sys.argv[3])
+assert {mode:encounter.last_fatigue_frame.physiology(actor.id,mode=mode).version_hash
+ for mode in ('ordinary','running')} == saved_versions
 assert encounter.time == 1 and action.start_position.as_tuple() == (0.0,0.0,0.0)
 assert action.resolution is None and actor.get_position().as_tuple() == (.5,0.0,0.0)
 encounter.step(1,velocities={actor.id:(.5,0,0)})
-committed=encounter.inspect_committed().action(action.id)
+committed=encounter.inspect_committed(boundary=2).action(action.id)
 facts=committed.facts
 practice=[row.effect for row in committed.effects if type(row.effect) is PracticeEffect]
+run_result={'outcome':facts.outcome,
+ 'practice_effect_sources':[row.source_action_id for row in practice],
+ 'receipt_action_ids':list(encounter._atomic_interval_history[-1].action_ids)}
+encounter.step(1)
 print(json.dumps({'time':encounter.time,'position':actor.get_position().as_tuple(),
  'experience':actor.get_skill_experience('run'),
  'skill_uses':[{'skill':row.skill_name,'experience':row.experience,
   'level_before':row.level_before,'level_after':row.level_after,'time':row.time,
   'exercise_experience':[use.experience for use in row.exercises]}
   for row in actor.skill_use_history],
- 'outcome':facts.outcome,
- 'practice_effect_sources':[row.source_action_id for row in practice],
+ 'run_result':run_result,
  'receipt_action_ids':list(encounter._atomic_interval_history[-1].action_ids),
  'physical_fatigue':actor.get_physical_fatigue().to_dict(actor.physiology_id),
  'fatigue_view':encounter.last_fatigue_frame.view(actor.id).to_dict(),
@@ -306,7 +335,7 @@ print(json.dumps({'time':encounter.time,'position':actor.get_position().as_tuple
             import os
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path),
-                 json.dumps(saved_fatigue_view), saved_physiology_version], cwd=directory,
+                 json.dumps(saved_fatigue_view), json.dumps(saved_physiology_versions)], cwd=directory,
                 env={**os.environ,
                      "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=45)
@@ -1053,7 +1082,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         migrated_world, migrated, _ = load_save(_canonical(body))
         self.assertEqual(migrated.id, original.id)
         self.assertEqual(native_history.current_recording(migrated)['schema'],
-                         'universe.native-encounter-history/4')
+                         native_history.SCHEMA)
         action_id = 'native-history-v1-migrated-delay'
         actor_id = original.being_list[1]
         for encounter in (original, migrated):
@@ -1063,6 +1092,60 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         self.assertEqual(native_history.encode(native_history.capture(original)),
                          native_history.encode(native_history.capture(migrated)))
         self.assertEqual(export_save(original), export_save(migrated))
+
+    def test_native_history_v4_save_migrates_without_fabricating_then_rebinds_current_context(self):
+        from native_history import ENTITY_CONTEXT_SCHEMA, _seal
+        from native_persistence import _canonical
+        demo = encounter_delta_headless.build_demo(until=4)
+        original = demo["encounter"]
+        body = json.loads(export_save(original))
+        history = native_history._without_fatigue_context(body["history"])
+        legacy = {key: value for key, value in history.items() if key != "sha256"}
+        legacy["schema"] = ENTITY_CONTEXT_SCHEMA
+        legacy["entity_context"].pop("fatigue_available")
+        body["history"] = _seal(legacy)
+        unsigned = {key: item for key, item in body.items() if key != "sha256"}
+        body["sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+        legacy_wire = _canonical(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-history-v4-save.json"
+            path.write_bytes(legacy_wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+log=native_history.current_recording(enc)
+assert log['schema'] == native_history.SCHEMA
+query=native_history.NativeHistoryQuery(log)
+assert query.fatigue_context_at(4) is not None
+action=DelayAction(enc,enc.being_list[1],defense=0,start_time=4,
+ id='native-history-v4-migrated-delay')
+enc.schedule_action(action)
+enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'actions':list(enc._atomic_interval_history[-1].action_ids)},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)], cwd=directory,
+                env={**__import__("os").environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=45)
+
+        action = DelayAction(original, original.being_list[1], defense=0,
+                             start_time=4, id="native-history-v4-migrated-delay")
+        original.schedule_action(action)
+        original.step(1)
+        expected = {
+            "time": original.time,
+            "rng": demo["rng_owner"].state,
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(original))).hexdigest(),
+            "actions": list(original._atomic_interval_history[-1].action_ids),
+        }
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
 
 if __name__ == "__main__":

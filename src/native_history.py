@@ -26,8 +26,10 @@ from checkpoint_fields import FIELD_ADAPTERS
 LEGACY_SCHEMA = "universe.native-encounter-history/1"
 PREVIOUS_SCHEMA = "universe.native-encounter-history/2"
 QUIET_SPAN_SCHEMA = "universe.native-encounter-history/3"
-SCHEMA = "universe.native-encounter-history/4"
-LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA)
+ENTITY_CONTEXT_SCHEMA = "universe.native-encounter-history/4"
+SCHEMA = "universe.native-encounter-history/5"
+LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA,
+                  ENTITY_CONTEXT_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
@@ -523,7 +525,10 @@ def upgrade(log):
     previous = None
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["schema"] = SCHEMA
-    body["entity_context"] = _unavailable_entity_context()
+    if log["schema"] == ENTITY_CONTEXT_SCHEMA:
+        body["entity_context"] = dict(log["entity_context"], fatigue_available=False)
+    else:
+        body["entity_context"] = _unavailable_entity_context()
     rows = []
     for original in _expand_rows(log):
         row = dict(original)
@@ -558,7 +563,45 @@ def _seal(body):
 def _unavailable_entity_context():
     # Older histories did not retain these per-boundary inspection facts.
     # Preserve that limitation explicitly; never infer it from current state.
-    return {"available": False, "initial": None, "changes": []}
+    return {"available": False, "fatigue_available": False,
+            "initial": None, "changes": []}
+
+
+def _without_fatigue_context(log):
+    """Remove only the /5 fatigue facts for an authenticated /4 migration check."""
+    validate(log)
+    if log["schema"] != SCHEMA or not log["entity_context"]["available"]:
+        return _without_entity_context(log)
+    context = log["entity_context"]
+
+    def strip(state):
+        result = json.loads(_canonical(state).decode("ascii"))
+        for entity in result.values():
+            if type(entity) is not dict or entity.get("$record") != "encounter_inspection.EntityInspection":
+                continue
+            pre_action = entity["fields"].get("pre_action")
+            if type(pre_action) is dict:
+                pre_action.pop("physical_fatigue", None)
+                pre_action.pop("physiology", None)
+        return result
+
+    prior = strip(context["initial"])
+    original = context["initial"]
+    changes = []
+    for row in context["changes"]:
+        original = _apply(original, row["changes"])
+        current = strip(original)
+        delta = _diff(prior, current)
+        if delta:
+            changes.append({"boundary": row["boundary"], "changes": delta,
+                            "state_sha256": hashlib.sha256(_canonical(current)).hexdigest()})
+        prior = current
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["entity_context"] = {"available": True, "fatigue_available": False,
+                              "initial": strip(context["initial"]), "changes": changes}
+    result = _seal(body)
+    validate(result)
+    return result
 
 
 def _validate_plain_record(value, depth=0):
@@ -714,6 +757,7 @@ def capture(encounter):
             "boundaries": _compact_quiet_rows(boundaries),
             "latest_boundary": previous_boundary,
             "entity_context": {"available": True,
+                               "fatigue_available": True,
                                "initial": initial_entity_context,
                                "changes": entity_context_changes}}
     _measure(body)
@@ -976,8 +1020,10 @@ def validate(log):
     """Strictly validate identity, chronology, atomic deltas, and integrity."""
     base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
     current_keys = base_keys | {"entity_context"}
+    version = log.get("schema") if type(log) is dict else None
+    has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, SCHEMA)
     if (type(log) is not dict
-            or set(log) != (current_keys if log.get("schema") == SCHEMA else base_keys)):
+            or set(log) != (current_keys if has_entity_context else base_keys)):
         raise NativeHistoryRejected("native history envelope schema differs")
     unsigned = dict(log)
     digest = unsigned.pop("sha256")
@@ -1002,7 +1048,7 @@ def validate(log):
     covered = 0
     for row in boundaries:
         if type(row) is dict and row.get("kind") == "quiet_span":
-            if log["schema"] not in (QUIET_SPAN_SCHEMA, SCHEMA):
+            if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, SCHEMA):
                 raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
             if row.get("rng_after") != SAME_RNG or prior_rng is None:
                 raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
@@ -1020,7 +1066,7 @@ def validate(log):
                 or row["boundary"] != expected):
             raise NativeHistoryRejected("native history boundary is missing, repeated, or malformed")
         if row["rng_after"] == SAME_RNG:
-            if log["schema"] not in (QUIET_SPAN_SCHEMA, SCHEMA) or prior_rng is None:
+            if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, SCHEMA) or prior_rng is None:
                 raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
         else:
             if (type(row["rng_after"]) is not dict
@@ -1064,23 +1110,30 @@ def validate(log):
             or not 0 <= log["latest_boundary"] <= MAX_BOUNDARIES
             or log["latest_boundary"] != covered):
         raise NativeHistoryRejected("native history latest boundary differs")
-    if log["schema"] == SCHEMA:
-        _validate_entity_context(log["entity_context"], log["latest_boundary"])
+    if has_entity_context:
+        _validate_entity_context(log["entity_context"], log["latest_boundary"], version)
     return True
 
 
-def _validate_entity_context(context, latest_boundary):
-    if (type(context) is not dict or set(context) != {"available", "initial", "changes"}
-            or type(context["available"]) is not bool or type(context["changes"]) is not list):
+def _validate_entity_context(context, latest_boundary, schema):
+    expected_keys = ({"available", "initial", "changes"}
+                     if schema == ENTITY_CONTEXT_SCHEMA else
+                     {"available", "fatigue_available", "initial", "changes"})
+    if (type(context) is not dict or set(context) != expected_keys
+            or type(context["available"]) is not bool or type(context["changes"]) is not list
+            or schema == SCHEMA and type(context["fatigue_available"]) is not bool):
         raise NativeHistoryRejected("native EntityInspection history schema differs")
     if not context["available"]:
-        if context["initial"] is not None or context["changes"]:
+        if (context["initial"] is not None or context["changes"]
+                or schema == SCHEMA and context["fatigue_available"]):
             raise NativeHistoryRejected("legacy EntityInspection history marker is inconsistent")
         return
     if type(context["initial"]) is not dict:
         raise NativeHistoryRejected("native EntityInspection initial state is missing")
     _validate_plain_record(context["initial"])
     state = context["initial"]
+    if schema == SCHEMA and context["fatigue_available"]:
+        _validate_fatigue_context_entities(state)
     previous = 0
     for row in context["changes"]:
         if (type(row) is not dict or set(row) != {"boundary", "changes", "state_sha256"}
@@ -1091,9 +1144,46 @@ def _validate_entity_context(context, latest_boundary):
             raise NativeHistoryRejected("native EntityInspection change chronology differs")
         state = _apply(state, row["changes"])
         _validate_plain_record(state)
+        if schema == SCHEMA and context["fatigue_available"]:
+            _validate_fatigue_context_entities(state)
         if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
             raise NativeHistoryRejected("native EntityInspection state digest differs")
         previous = row["boundary"]
+
+
+def _validate_fatigue_context_entities(entities):
+    for identity, entity in entities.items():
+        if (type(entity) is not dict
+                or entity.get("$record") != "encounter_inspection.EntityInspection"):
+            continue
+        fields_value = entity.get("fields")
+        if type(fields_value) is not dict or fields_value.get("category") != "being":
+            continue
+        pre_action = fields_value.get("pre_action")
+        fatigue = pre_action.get("physical_fatigue") if type(pre_action) is dict else None
+        physiology = pre_action.get("physiology") if type(pre_action) is dict else None
+        if (type(fatigue) is not dict
+                or set(fatigue) != {"b", "check_modifier", "physiology_id", "q"}
+                or any(type(fatigue.get(key)) is not dict
+                       or set(fatigue[key]) != {"$number"}
+                       or type(fatigue[key]["$number"]) is not str
+                       for key in ("b", "q"))
+                or type(fatigue["check_modifier"]) is not int
+                or fatigue["physiology_id"] is not None
+                    and type(fatigue["physiology_id"]) is not str
+                or type(physiology) is not dict
+                or set(physiology) not in (set(), {"ordinary", "running"})):
+            raise NativeHistoryRejected("native fatigue/physiology boundary facts are malformed")
+        for mode, resolved in physiology.items():
+            if (type(resolved) is not dict
+                    or not {"identifier", "lineage", "mode", "profile", "version_hash"}
+                    <= set(resolved)
+                    or resolved.get("mode") != mode
+                    or type(resolved.get("version_hash")) is not str
+                    or len(resolved["version_hash"]) != 64
+                    or any(char not in "0123456789abcdef"
+                           for char in resolved["version_hash"])):
+                raise NativeHistoryRejected("native resolved physiology boundary facts are malformed")
 
 
 def state_at(log, boundary):
@@ -1138,6 +1228,25 @@ def entity_context_at(log, boundary):
     return state
 
 
+def fatigue_context_at(log, boundary):
+    """Return receipt-backed Q/B and resolved physiology, or None if not recorded."""
+    validate(log)
+    context = log.get("entity_context", _unavailable_entity_context())
+    if not context["available"] or not context.get("fatigue_available", False):
+        return None
+    entities = entity_context_at(log, boundary)
+    result = {}
+    for identity, entity in entities.items():
+        fields_value = entity.get("fields", {}) if type(entity) is dict else {}
+        if fields_value.get("category") == "being":
+            pre_action = fields_value["pre_action"]
+            result[identity] = {
+                "physical_fatigue": pre_action["physical_fatigue"],
+                "physiology": pre_action["physiology"],
+            }
+    return result
+
+
 class NativeHistoryQuery:
     """Validated, detached query session for repeated history reads.
 
@@ -1168,6 +1277,7 @@ class NativeHistoryQuery:
         self._state = _initial_state(self._log["initial"])
         context = self._log.get("entity_context", _unavailable_entity_context())
         self._context_available = context["available"]
+        self._fatigue_available = context.get("fatigue_available", False)
         self._context_boundary = 0
         self._context = (json.loads(_canonical(context["initial"]).decode("ascii"))
                          if self._context_available else None)
@@ -1251,6 +1361,18 @@ class NativeHistoryQuery:
             self._context = context
             self._context_boundary = boundary
         return self._copy(context)
+
+    def fatigue_context_at(self, boundary):
+        self._boundary(boundary)
+        if not self._context_available or not self._fatigue_available:
+            return None
+        entities = self.entity_context_at(boundary)
+        return {identity: {
+            "physical_fatigue": row["fields"]["pre_action"]["physical_fatigue"],
+            "physiology": row["fields"]["pre_action"]["physiology"],
+        } for identity, row in entities.items()
+            if row.get("$record") == "encounter_inspection.EntityInspection"
+            and row["fields"].get("category") == "being"}
 
 
 def events_at(log, boundary):

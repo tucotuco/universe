@@ -295,8 +295,15 @@ def prepare_record(encounter, candidate, anchors, events):
     for key, entity in snap.entities.items():
         obj = objects[key]
         label = object.__getattribute__(obj, '__dict__').get('name')
+        pre_action = dict(entity.data)
+        if key in snap.fatigue:
+            # Q/B and the resolved definition version are authoritative
+            # boundary facts, not values that may be recomputed from the
+            # Being's latest state when a historical query is made.
+            pre_action['physical_fatigue'] = snap.fatigue[key]
+            pre_action['physiology'] = snap.physiology.get(key, {})
         entities[key] = EntityInspection(entity.category, entity.obj_type, label if type(label) is str else None,
-                         entity.position, entity.data)
+                         entity.position, freeze(pre_action))
     actions = {aid: (snap.actions[aid], proposal) for aid, proposal in supported.boundary.actions.items()}
     projectile_states={}
     from action_evaluation import ProjectileReleaseEffect
