@@ -286,6 +286,22 @@ def _materialize_plain(value, depth=0):
             # retain this type only as a role marker; 0 is a fail-closed
             # process-local sentinel and is never rebound or dereferenced.
             encoded_fields = {**encoded_fields, "object_identity": 0}
+        if (tag == "interval_staging.AuthorityReference"
+                and set(encoded_fields) == {"key", "role"}
+                and expected == {"key", "role", "identity"}):
+            # Stable role/key pairs are portable; the identity is rebuilt by
+            # the native restore adapter after resolving the registered owner.
+            encoded_fields = {**encoded_fields, "identity": 0}
+        if (tag == "encounter_inspection.ObjectiveInspection"
+                and set(encoded_fields) == expected - {"ledger_identity"}
+                and "ledger_identity" in expected):
+            # The ledger is rebound from the native subject registry below.
+            encoded_fields = {**encoded_fields, "ledger_identity": 0}
+        if (tag == "objective_reality.SubjectRealityCandidate"
+                and set(encoded_fields) == expected - {"ledger_identity"}
+                and "ledger_identity" in expected):
+            # This address is rebound from the same stable objective subject.
+            encoded_fields = {**encoded_fields, "ledger_identity": 0}
         if set(encoded_fields) != expected:
             raise NativeHistoryRejected("native history fact record fields differ")
         record = object.__new__(cls)
@@ -489,6 +505,7 @@ def capture_initial_schedule(encounter):
     quiescent or under the transaction's publication lock.
     """
     from interval_staging import QueueProjection
+    from objective_reality import SubjectRealityCandidate
     encounter._pending_schedule()
     book = encounter._choice_book
     world_data = object.__getattribute__(encounter.universe, "__dict__")
@@ -2814,6 +2831,238 @@ def restore_compacted_entity_context(world, histories):
                 raise NativeHistoryRejected(
                     "compacted EntityInspection identities are duplicated")
             object.__setattr__(meta, "entities", MappingProxyType(entities))
+    return True
+
+
+def restore_compacted_receipt_facts(world, histories):
+    """Rebuild duplicated immutable receipt projections from authenticated facts.
+
+    Action declarations/results, identified Effects, scheduler/fence state,
+    participants, objective-use rows and projectile states are recorded in the
+    native fact stream. The graph keeps the current simulation snapshot and
+    receipt identities, but does not serialize a second copy of these committed
+    inspection projections.
+    """
+    from encounter import Encounter
+    from encounter_inspection import (ActionInspection, CommittedBoundaryRecord,
+                                      ObjectiveInspection, detached)
+    from action_evaluation import ActionView, ActionProposal, EffectIdentity, IdentifiedEffect
+    from interval_staging import QueueProjection
+    from statistical_group import StatisticalGroup
+    from types import MappingProxyType
+
+    def rebind_recipient_identities(value, action_id):
+        from observer_proposals import RecipientIdentity
+        if type(value) is RecipientIdentity:
+            action = world.get_event_by_id(action_id)
+            data = {} if action is None else object.__getattribute__(action, "__dict__")
+            field_by_role = {
+                "in_world_belief_ledger": "ledger",
+                "in_world_received_accounts": "received_accounts",
+                "observer_location_evidence": "location_ledger",
+                "observer_object_evidence": "object_ledger",
+            }
+            field = field_by_role.get(value.role)
+            handle = None if field is None else data.get(field)
+            if handle is None:
+                raise NativeHistoryRejected(
+                    "committed receipt recipient cannot be rebound to its Action")
+            return RecipientIdentity(value.role, id(handle))
+        if type(value) in (dict, MappingProxyType):
+            return MappingProxyType({
+                rebind_recipient_identities(key, action_id):
+                rebind_recipient_identities(item, action_id)
+                for key, item in value.items()})
+        if type(value) in (tuple, list):
+            rows = tuple(rebind_recipient_identities(item, action_id)
+                         for item in value)
+            return rows if type(value) is tuple else list(rows)
+        if type(value) in (set, frozenset):
+            rows = frozenset(rebind_recipient_identities(item, action_id)
+                             for item in value)
+            return rows if type(value) is frozenset else set(rows)
+        if is_dataclass(value) and not isinstance(value, type):
+            record = object.__new__(type(value))
+            for field in fields(type(value)):
+                object.__setattr__(record, field.name,
+                    rebind_recipient_identities(getattr(value, field.name), action_id))
+            return record
+        return value
+
+    def rebind_authority_references(value, encounter):
+        from interval_staging import AuthorityReference
+        if type(value) is AuthorityReference:
+            if value.role == "event":
+                target = world.get_event_by_id(value.key)
+            elif value.role == "accepted_packet":
+                registered = encounter._choice_book._registered.get(value.key)
+                target = None if registered is None else registered[1]
+            elif value.role == "encounter":
+                target = encounter if value.key == encounter.id else None
+            elif value.role == "universe":
+                target = world if value.key == world.id else None
+            else:
+                target = None
+            if target is None:
+                raise NativeHistoryRejected(
+                    "compacted scheduler reference cannot be rebound")
+            object.__setattr__(value, "identity", id(target))
+            return
+        if type(value) in (dict, MappingProxyType):
+            for key, item in value.items():
+                rebind_authority_references(key, encounter)
+                rebind_authority_references(item, encounter)
+        elif type(value) in (tuple, list, set, frozenset):
+            for item in value:
+                rebind_authority_references(item, encounter)
+        elif is_dataclass(value) and not isinstance(value, type):
+            for field in fields(type(value)):
+                rebind_authority_references(getattr(value, field.name), encounter)
+
+    def rebind_objective_ledger(value, ledger):
+        if type(value) in (dict, MappingProxyType):
+            return MappingProxyType({
+                rebind_objective_ledger(key, ledger):
+                rebind_objective_ledger(item, ledger)
+                for key, item in value.items()})
+        if type(value) in (tuple, list):
+            rows = tuple(rebind_objective_ledger(item, ledger) for item in value)
+            return rows if type(value) is tuple else list(rows)
+        if type(value) in (set, frozenset):
+            rows = frozenset(rebind_objective_ledger(item, ledger) for item in value)
+            return rows if type(value) is frozenset else set(rows)
+        if is_dataclass(value) and not isinstance(value, type):
+            record = object.__new__(type(value))
+            for field in fields(type(value)):
+                field_value = (id(ledger) if type(value) is SubjectRealityCandidate
+                               and field.name == "ledger_identity"
+                               else rebind_objective_ledger(
+                                   getattr(value, field.name), ledger))
+                object.__setattr__(record, field.name, field_value)
+            return record
+        return value
+
+    if type(histories) is not dict:
+        raise NativeHistoryRejected("compacted receipt restoration requires Encounter histories")
+    encounters = {row.id: row for row in world.event_history.values()
+                  if type(row) is Encounter}
+    if set(histories) != set(encounters):
+        raise NativeHistoryRejected(
+            "compacted receipt histories do not cover the Universe Encounters")
+    for encounter_id in sorted(encounters):
+        encounter = encounters[encounter_id]
+        log = histories[encounter_id]
+        receipts = encounter.__dict__.get("_atomic_interval_history")
+        if log is None:
+            if receipts or encounter.time != encounter.start_time:
+                raise NativeHistoryRejected(
+                    "compacted history-free Encounter has committed boundaries")
+            continue
+        upgraded = upgrade(log)
+        validate(upgraded)
+        if (upgraded["schema"] != SCHEMA
+                or upgraded["initial"]["encounter_id"] != encounter_id
+                or upgraded["latest_boundary"] != encounter.last_processed_boundary
+                or type(receipts) is not list
+                or [row.boundary for row in receipts]
+                    != list(range(1, upgraded["latest_boundary"] + 1))):
+            raise NativeHistoryRejected(
+                "compacted receipt facts differ from their committed boundary chain")
+        query = NativeHistoryQuery(upgraded)
+        for receipt in receipts:
+            meta = receipt.inspection
+            if type(meta) is not CommittedBoundaryRecord:
+                raise NativeHistoryRejected("compacted receipt record type is unsupported")
+            if (meta.actions or meta.effects or meta.objective or meta.objective_use or meta.starts
+                    or meta.participants or meta.schedule is not None
+                    or meta.projectile_states):
+                raise NativeHistoryRejected(
+                    "compacted receipt graph contains an unexpected projection")
+            facts = query.boundary_facts_at(receipt.boundary)
+            encoded_actions = _materialize_plain(facts["actions"])
+            encoded_effects = _materialize_plain(facts["effects"])
+            encoded_objective = _materialize_plain(facts["objective"])
+            encoded_use = _materialize_plain(facts["objective_use"])
+            encoded_starts = _materialize_plain(facts["starts"])
+            encoded_participants = _materialize_plain(facts["participants"])
+            encoded_schedule = _materialize_plain(facts["schedule"])
+            encoded_projectiles = _materialize_plain(facts["projectile_states"])
+            if (type(encoded_actions) is not dict
+                    or set(encoded_actions) != set(receipt.action_ids)
+                    or any(type(row) is not ActionInspection
+                           or type(row.declaration) is not ActionView
+                           or type(row.facts) is not ActionProposal
+                           for row in encoded_actions.values())):
+                raise NativeHistoryRejected(
+                    "compacted Action declaration/result facts are malformed")
+            actions = {identity: (encoded_actions[identity].declaration,
+                                  encoded_actions[identity].facts)
+                       for identity in receipt.action_ids}
+            actions = {
+                identity: (
+                    rebind_recipient_identities(declaration, identity),
+                    rebind_recipient_identities(proposal, identity))
+                for identity, (declaration, proposal) in actions.items()}
+            if (type(encoded_effects) is not dict
+                    or set(encoded_effects) != set(receipt.effect_ids)
+                    or any(type(identity) is not EffectIdentity
+                           or type(row) is not IdentifiedEffect
+                           or row.identity != identity
+                           for identity, row in encoded_effects.items())):
+                raise NativeHistoryRejected(
+                    "compacted identified Effect facts are malformed")
+            effects = {identity: encoded_effects[identity]
+                       for identity in receipt.effect_ids}
+            effects = {
+                identity: rebind_recipient_identities(
+                    row, identity.source_action_id)
+                for identity, row in effects.items()}
+            from objective_reality import SubjectRealityCandidate
+            if (type(encoded_objective) is not dict
+                    or any(type(row) is not SubjectRealityCandidate
+                           for row in encoded_objective.values())):
+                raise NativeHistoryRejected(
+                    "compacted objective candidate facts are malformed")
+            objects = world.object_registry.object_instances
+            candidates = {}
+            for subject_id, row in encoded_objective.items():
+                subject = objects.get(subject_id)
+                if subject is None:
+                    raise NativeHistoryRejected(
+                        "compacted objective subject is not registered")
+                ledger = (subject._composition_reality
+                          if type(subject) is StatisticalGroup
+                          else getattr(getattr(subject, "personal_history", None),
+                                       "reality", None))
+                if ledger is None or type(subject_id) is not str:
+                    raise NativeHistoryRejected(
+                        "compacted objective ledger cannot be rebound")
+                object.__setattr__(row, "ledger_identity", id(ledger))
+                object.__setattr__(row, "facts",
+                    rebind_objective_ledger(row.facts, ledger))
+                candidates[subject_id] = row
+            if (type(encoded_use) is not tuple
+                    or type(encoded_starts) is not tuple
+                    or type(encoded_participants) is not tuple
+                    or type(encoded_schedule) is not QueueProjection
+                    or type(encoded_projectiles) is not dict
+                    or any(type(identity) is not str or not identity
+                           for identity in encoded_projectiles)):
+                raise NativeHistoryRejected(
+                    "compacted receipt projection fields have invalid shapes")
+            objective = MappingProxyType(candidates)
+            rebind_authority_references(encoded_starts, encounter)
+            rebind_authority_references(encoded_schedule, encounter)
+            for name, value in (
+                    ("actions", MappingProxyType(actions)),
+                    ("effects", MappingProxyType(effects)),
+                    ("objective", MappingProxyType(objective)),
+                    ("objective_use", detached(encoded_use)),
+                    ("starts", detached(encoded_starts)),
+                    ("participants", detached(encoded_participants)),
+                    ("schedule", detached(encoded_schedule)),
+                    ("projectile_states", MappingProxyType(encoded_projectiles))):
+                object.__setattr__(meta, name, value)
     return True
 
 

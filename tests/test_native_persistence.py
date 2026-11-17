@@ -828,6 +828,53 @@ print(json.dumps({'time':enc.time,
         self.assertIs(world.event_history[restored.id], restored)
         self.assertEqual(export_save(restored), wire)
 
+    def test_native_save_rebuilds_committed_inspection_facts_from_history(self):
+        """Stable receipt projections are stored once and reconstructed exactly."""
+        import base64
+        from native_graph_snapshot import decode as decode_graph
+        from native_graph_snapshot import encode as encode_graph
+        from checkpoint_inventory import capture_checkpoint_candidate
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        target_entity_candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        graph_before_receipt_facts = len(encode_graph(
+            target_entity_candidate.envelope, native=True))
+        fields = ("actions", "effects", "objective", "objective_use", "starts",
+                  "participants", "schedule", "projectile_states")
+        expected = {
+            receipt.boundary: {
+                name: native_history._plain(getattr(receipt.inspection, name))
+                for name in fields
+            }
+            for receipt in encounter._atomic_interval_history
+        }
+
+        wire = export_save(encounter)
+        save = json.loads(wire)
+        graph_wire = base64.b64decode(save["graph_b64"], validate=True)
+        self.assertLess(len(graph_wire), graph_before_receipt_facts)
+        inventory = decode_graph(graph_wire, native=True)
+        marker = next(row[1:] for row in inventory[1]
+                      if row[0] == "native-adapters")
+        self.assertIn("committed-receipt-facts/1", marker)
+
+        world, restored, _rng = load_save(wire)
+        actual = {
+            receipt.boundary: {
+                name: native_history._plain(getattr(receipt.inspection, name))
+                for name in fields
+            }
+            for receipt in restored._atomic_interval_history
+        }
+        self.assertEqual(actual, expected)
+        self.assertIs(world.event_history[restored.id], restored)
+        self.assertEqual(export_save(restored), wire)
+
     def test_compacted_entity_context_rejects_altered_source_receipt(self):
         """Omitted context remains covered by authenticated receipt integrity."""
         from checkpoint_inventory import (capture_checkpoint_candidate,
@@ -847,6 +894,28 @@ print(json.dumps({'time':enc.time,
         with self.assertRaises(InspectionRejected):
             validate_checkpoint_candidate(encounter.universe, encounter, candidate,
                                           quiescent=True)
+
+    def test_compacted_receipt_facts_reject_altered_source_projection(self):
+        """A compact graph candidate remains sealed to its receipt source."""
+        from checkpoint_inventory import (CheckpointRejected,
+                                          capture_checkpoint_candidate,
+                                          validate_checkpoint_candidate)
+        from encounter_inspection import InspectionRejected
+
+        encounter = encounter_delta_headless.build_demo(until=2)["encounter"]
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=True,
+            compact_native_receipt_facts=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        receipt = encounter._atomic_interval_history[-1]
+        from types import MappingProxyType
+        object.__setattr__(receipt.inspection, "actions", MappingProxyType({}))
+        with self.assertRaises((CheckpointRejected, InspectionRejected)):
+            validate_checkpoint_candidate(encounter.universe, encounter,
+                                          candidate, quiescent=True)
 
     def test_uncompacted_native_graph_v1_from_last_writer_migrates_strictly(self):
         """The immediately previous accepted /1 graph rewrites to compact /2."""
@@ -912,6 +981,46 @@ print(json.dumps({'time':enc.time,
         old_inventory = (legacy_compatibility, old_inventory[1])
         prior_graph["inventory"] = native_graph_snapshot._compact_inventory(
             old_inventory, native=True)
+        unsigned_graph = {key: value for key, value in prior_graph.items()
+                          if key != "sha256"}
+        prior_graph["sha256"] = hashlib.sha256(
+            native_graph_snapshot._canonical(unsigned_graph)).hexdigest()
+
+        prior_save = json.loads(current_wire)
+        prior_save["graph_b64"] = base64.b64encode(
+            native_graph_snapshot._canonical(prior_graph)).decode("ascii")
+        unsigned_save = {key: value for key, value in prior_save.items()
+                         if key != "sha256"}
+        prior_save["sha256"] = hashlib.sha256(
+            native_persistence._canonical(unsigned_save)).hexdigest()
+        restored_world, restored, _rng = load_save(
+            native_persistence._canonical(prior_save))
+        self.assertIs(restored_world.event_history[restored.id], restored)
+        self.assertEqual(export_save(restored), current_wire)
+
+    def test_entity_compact_native_graph_v2_from_previous_writer_migrates(self):
+        """The last Target+Entity graph writer remains a strict migration input."""
+        import base64
+        import native_graph_snapshot
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        current_wire = export_save(encounter)
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        prior_graph = json.loads(encode_graph(candidate.envelope, native=True))
+        legacy_compatibility = (
+            native_graph_snapshot._LEGACY_NATIVE_GRAPH_V2_ENTITY_COMPATIBILITY)
+        prior_graph["compatibility"] = legacy_compatibility
+        old_inventory = native_graph_snapshot._expand_compact_inventory(
+            native_graph_snapshot._tuples(prior_graph["inventory"]), native=True)
+        prior_graph["inventory"] = native_graph_snapshot._compact_inventory(
+            (legacy_compatibility, old_inventory[1]), native=True)
         unsigned_graph = {key: value for key, value in prior_graph.items()
                           if key != "sha256"}
         prior_graph["sha256"] = hashlib.sha256(

@@ -148,12 +148,14 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
         from checkpoint_inventory import (capture_checkpoint_candidate,
                                           validate_checkpoint_candidate)
         from native_graph_snapshot import encode as encode_graph
+        compact_entity_context = _entity_context_history_available(
+            encounter.universe)
         candidate = capture_checkpoint_candidate(
             encounter.universe, encounter, quiescent=True,
             rng_scope="exclusive_encounter", native_adapters=True,
             full_native=True, compact_native_target_history=True,
-            compact_native_entity_context=_entity_context_history_available(
-                encounter.universe),
+            compact_native_entity_context=compact_entity_context,
+            compact_native_receipt_facts=compact_entity_context,
             bindings=recipient_bindings,
             rng_owner=_native_rng_owner(encounter))
         if candidate.diagnostics:

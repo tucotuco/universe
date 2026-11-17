@@ -223,7 +223,8 @@ class NativeInventory(_Inventory):
 
     def __init__(self, world, encounter, bindings, *, rng_owner=None,
                  full_native=False, compact_native_target_history=False,
-                 compact_native_entity_context=False):
+                 compact_native_entity_context=False,
+                 compact_native_receipt_facts=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
@@ -231,6 +232,7 @@ class NativeInventory(_Inventory):
         self.full_native=full_native
         self.compact_native_target_history=compact_native_target_history
         self.compact_native_entity_context=compact_native_entity_context
+        self.compact_native_receipt_facts=compact_native_receipt_facts
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -390,6 +392,37 @@ class NativeInventory(_Inventory):
             empty_context = {}
             encoded = super().field(tag, field, empty_context, ref, path, depth)
             token_id = id(empty_context)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
+        if (self.compact_native_receipt_facts
+                and tag == 'encounter_inspection.CommittedBoundaryRecord'
+                and field in ('actions', 'effects', 'objective', 'objective_use',
+                              'starts', 'participants', 'schedule',
+                              'projectile_states')):
+            from native_history import _canonical, _plain
+            if field in ('actions', 'effects', 'objective', 'projectile_states'):
+                valid_shape = type(item) in (dict, MappingProxyType)
+            elif field == 'schedule':
+                from interval_staging import QueueProjection
+                valid_shape = type(item) is QueueProjection
+            else:
+                valid_shape = type(item) is tuple
+            _require(valid_shape,
+                     'committed receipt fact cannot be compacted from unreviewed field')
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            if field in ('actions', 'effects', 'objective', 'projectile_states'):
+                replacement = {}
+            elif field == 'schedule':
+                replacement = None
+            else:
+                replacement = ()
+            encoded = super().field(tag, field, replacement, ref, path, depth)
+            token_id = id(replacement)
             self.dependencies = [row for row in self.dependencies
                                  if row[0] != token_id]
             self._objects_by_identity.pop(token_id, None)
@@ -1249,5 +1282,7 @@ class NativeInventory(_Inventory):
             *(('target-candidate-history/1',)
               if self.compact_native_target_history else ()),
             *(('entity-context-history/1',)
-              if self.compact_native_entity_context else ()))
+              if self.compact_native_entity_context else ()),
+            *(('committed-receipt-facts/1',)
+              if self.compact_native_receipt_facts else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))
