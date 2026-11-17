@@ -26,6 +26,7 @@ from spatial.state import CartesianPosition
 from strategy import Strategy
 from melee_combat import effective_melee_reach_meters
 from weapon import author_worn_sheath_draw_location, native_weapon_draw_location
+from spatial.geometry import Sphere
 
 
 class NativeDrawPersistenceTests(unittest.TestCase):
@@ -60,6 +61,340 @@ class NativeDrawPersistenceTests(unittest.TestCase):
                              _plain(receipt.inspection.entities))
             self.assertEqual(query.schedule_at(boundary),
                              _plain(receipt.inspection.schedule))
+
+    def test_prepared_dodge_and_targeted_defense_restore_with_pending_strike(self):
+        """A retained native defense reference survives a fresh-process Load."""
+        from melee_defense import MeleeDefense
+
+        builder = NativeScenarioBuilder(
+            "native-dodge-history", Library(config_dir=str(ROOT / "src/config")),
+            seed=8124, encounter_id="native-dodge-history-encounter")
+        attacker = builder.add_being("Human", "Dodge test attacker",
+            position=(0, 0, 0))
+        defender = builder.add_being("Human", "Dodge test defender",
+            position=(1.5, 0, 0))
+        attacker.set_geometry(Sphere(.25))
+        defender.set_geometry(Sphere(.25))
+        builder.mark_aware(attacker.id, defender.id)
+        builder.mark_aware(defender.id, attacker.id)
+        weapon = builder.make_weapon(attacker.id, "Dagger", "Dodge test Dagger",
+                                     hand="right hand")
+        builder.enable()
+        preparation = MeleeDefense(builder.encounter, defender.id, kind="dodge",
+                                   strategy=Strategy(defense=0, timing=0))
+        builder.schedule(preparation)
+        builder.step(2)
+        self.assertEqual(preparation.resolution.outcome, "ready")
+
+        strike = MeleeStrike(builder.encounter, attacker.id, defender.id, weapon.id,
+                             motion="thrust", reach=2, strategy=Strategy())
+        builder.schedule(strike)
+        builder.step(1)
+        defense = MeleeDefense(builder.encounter, defender.id, attacker.id,
+            kind="dodge", target_action_id=strike.id,
+            prepared_defense_action_id=preparation.id)
+        builder.schedule(defense)
+        wire = export_save(builder.encounter)
+        builder.step(3)
+        view = builder.encounter.inspect_committed(6)
+        expected = {
+            "time": builder.encounter.time,
+            "preparation_id": preparation.id,
+            "preparation_outcome": preparation.resolution.outcome,
+            "strike_id": strike.id,
+            "defense_id": defense.id,
+            "defense_source": defense.prepared_defense_action_id,
+            "defense_outcome": defense.resolution.outcome,
+            "defended_action_ids": list(defense.defended_action_ids),
+            "strike_defended_by": strike.defended_by,
+            "hp": [attacker.get_hit_points(), defender.get_hit_points()],
+            "receipt_actions": list(builder.encounter._atomic_interval_history[-1].action_ids),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+            "committed": {
+                "preparation": _plain(view.action(preparation.id)),
+                "strike": _plain(view.action(strike.id)),
+                "defense": _plain(view.action(defense.id)),
+            },
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+attacker=world.get_object_by_id(sys.argv[2]);defender=world.get_object_by_id(sys.argv[3])
+prep=world.get_event_by_id(sys.argv[4]);strike=world.get_event_by_id(sys.argv[5])
+defense_choice=enc.choice_for_action(sys.argv[6])
+defense=next(m.action for m in enc._choice_book._choices[defense_choice.id].members
+ if m.action.id==sys.argv[6])
+assert prep.resolution.outcome=='ready'
+assert defense.prepared_defense_action_id==prep.id
+assert enc.choice_for_action(strike.id).state=='executing'
+assert defense_choice.state=='accepted'
+enc.step(3);view=enc.inspect_committed(6)
+print(json.dumps({'time':enc.time,'preparation_id':prep.id,
+ 'preparation_outcome':prep.resolution.outcome,'strike_id':strike.id,
+ 'defense_id':defense.id,'defense_source':defense.prepared_defense_action_id,
+ 'defense_outcome':defense.resolution.outcome,
+ 'defended_action_ids':list(defense.defended_action_ids),
+ 'strike_defended_by':strike.defended_by,
+ 'hp':[attacker.get_hit_points(),defender.get_hit_points()],
+ 'receipt_actions':list(enc._atomic_interval_history[-1].action_ids),
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'committed':{'preparation':native_history._plain(view.action(prep.id)),
+ 'strike':native_history._plain(view.action(strike.id)),
+ 'defense':native_history._plain(view.action(defense.id))}},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-dodge-save.json"
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), attacker.id,
+                 defender.id, preparation.id, strike.id, defense.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
+
+    def test_yield_and_same_boundary_bull_rush_restore_from_one_pending_choice(self):
+        """Yield's linked defensive result survives ordinary native Load."""
+        from melee_defense import MeleeDefense
+
+        builder = NativeScenarioBuilder(
+            "native-yield-history", Library(config_dir=str(ROOT / "src/config")),
+            seed=8125, encounter_id="native-yield-history-encounter")
+        attacker = builder.add_being("Human", "Yield test attacker",
+                                     position=(0, 0, 0))
+        target = builder.add_being("Human", "Yield test target",
+                                   position=(.8, 0, 0))
+        attacker.set_hex_facing(0)
+        attacker.size_category = target.size_category = "medium"
+        builder.mark_aware(attacker.id, target.id)
+        builder.mark_aware(target.id, attacker.id)
+        builder.enable()
+        rush = Action(builder.world, 0, 1, "bull rush", attacker.id, target.id,
+                      None, parent_event_id=builder.encounter.id,
+                      id="native-yield-bull-rush")
+        yield_action = MeleeDefense(builder.encounter, target.id, attacker.id,
+            kind="yield", target_action_id=rush.id)
+        builder.schedule_choice((rush, yield_action))
+        wire = export_save(builder.encounter)
+        builder.step(1, velocities={target.id: (0, .1, 0)})
+        view = builder.encounter.inspect_committed(1)
+        expected = {
+            "time": builder.encounter.time,
+            "action_ids": list(builder.encounter._atomic_interval_history[-1].action_ids),
+            "rush_id": rush.id,
+            "yield_id": yield_action.id,
+            "rush_outcome": view.action(rush.id).facts.outcome,
+            "yield_outcome": view.action(yield_action.id).facts.outcome,
+            "target_position": target.get_position().as_tuple(),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        self.assertEqual(expected["rush_outcome"], "yielded")
+        self.assertEqual(expected["yield_outcome"], "yielded")
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+target=world.get_object_by_id(sys.argv[2])
+choice=enc.choice_for_action(sys.argv[4])
+members=enc._choice_book._choices[choice.id].members
+rush=next(member.action for member in members if member.action.id==sys.argv[3])
+yield_action=next(member.action for member in members if member.action.id==sys.argv[4])
+assert choice.state=='accepted'
+enc.step(1,velocities={target.id:(0,.1,0)})
+view=enc.inspect_committed(1)
+print(json.dumps({'time':enc.time,
+ 'action_ids':list(enc._atomic_interval_history[-1].action_ids),
+ 'rush_id':rush.id,'yield_id':yield_action.id,
+ 'rush_outcome':view.action(rush.id).facts.outcome,
+ 'yield_outcome':view.action(yield_action.id).facts.outcome,
+ 'target_position':target.get_position().as_tuple(),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-yield-save.json"
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id,
+                 rush.id, yield_action.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
+
+    def test_native_block_choice_and_shielded_strike_restore_together(self):
+        """An equipped shield and same-boundary Block restore natively."""
+        from action_choice import ChoiceMember
+        from melee_defense import MeleeDefense
+
+        builder = NativeScenarioBuilder(
+            "native-block-history", Library(config_dir=str(ROOT / "src/config")),
+            seed=8126, encounter_id="native-block-history-encounter")
+        attacker = builder.add_being("Human", "Block test attacker",
+                                     position=(0, 0, 0))
+        defender = builder.add_being("Human", "Block test defender",
+                                     position=(1.5, 0, 0))
+        for being in (attacker, defender):
+            being.set_geometry(Sphere(.25))
+        builder.mark_aware(attacker.id, defender.id)
+        builder.mark_aware(defender.id, attacker.id)
+        dagger = builder.make_weapon(attacker.id, "Dagger", "Block test Dagger",
+                                     hand="right hand")
+        shield = builder.make_weapon(defender.id, "Small shield", "Block test shield",
+                                     hand="left hand")
+        builder.enable()
+        strike = MeleeStrike(builder.encounter, attacker.id, defender.id, dagger.id,
+                             motion="thrust", reach=2, strategy=Strategy())
+        strike.end_time = int(shield.get_weapon_size())
+        block = MeleeDefense(builder.encounter, defender.id, attacker.id,
+                             kind="block", target_action_id="incoming",
+                             weapon_id=shield.id)
+        builder.encounter.schedule_choice((
+            ChoiceMember("block", block, "incoming"),
+            ChoiceMember("incoming", strike)))
+        wire = export_save(builder.encounter)
+        builder.step(int(shield.get_weapon_size()))
+        inspection = builder.encounter.inspect_committed(builder.encounter.time)
+        expected = {
+            "time": builder.encounter.time,
+            "strike_id": strike.id,
+            "block_id": block.id,
+            "block_outcome": inspection.action(block.id).facts.outcome,
+            "strike_outcome": inspection.action(strike.id).facts.outcome,
+            "shield_hp": shield.hit_points(),
+            "defender_hp": defender.get_hit_points(),
+            "attacker_hp": attacker.get_hit_points(),
+            "action_ids": list(builder.encounter._atomic_interval_history[-1].action_ids),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        self.assertEqual(expected["block_outcome"], "blocked")
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+attacker=world.get_object_by_id(sys.argv[2]);defender=world.get_object_by_id(sys.argv[3])
+shield=world.get_object_by_id(sys.argv[4]);choice=enc.choice_for_action(sys.argv[5])
+members=enc._choice_book._choices[choice.id].members
+block=next(m.action for m in members if m.action.id==sys.argv[5])
+strike=next(m.action for m in members if m.action.id==sys.argv[6])
+assert choice.state=='accepted' and block.kind=='block'
+assert block.instrument_id==shield.id
+enc.step(int(shield.get_weapon_size()))
+inspection=enc.inspect_committed(enc.time)
+print(json.dumps({'time':enc.time,'strike_id':strike.id,'block_id':block.id,
+ 'block_outcome':inspection.action(block.id).facts.outcome,
+ 'strike_outcome':inspection.action(strike.id).facts.outcome,
+ 'shield_hp':shield.hit_points(),'defender_hp':defender.get_hit_points(),
+ 'attacker_hp':attacker.get_hit_points(),
+ 'action_ids':list(enc._atomic_interval_history[-1].action_ids),
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-block-save.json"
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), attacker.id,
+                 defender.id, shield.id, block.id, strike.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
+
+    def test_native_parry_choice_restores_weapon_motion_and_defended_action(self):
+        """The exact Parry weapon/motion reference survives Save and Load."""
+        from action_choice import ChoiceMember
+        from melee_defense import MeleeDefense
+
+        builder = NativeScenarioBuilder(
+            "native-parry-history", Library(config_dir=str(ROOT / "src/config")),
+            seed=8127, encounter_id="native-parry-history-encounter")
+        attacker = builder.add_being("Human", "Parry test attacker",
+                                     position=(0, 0, 0))
+        defender = builder.add_being("Human", "Parry test defender",
+                                     position=(1.5, 0, 0))
+        for being in (attacker, defender):
+            being.set_geometry(Sphere(.25))
+        builder.mark_aware(attacker.id, defender.id)
+        builder.mark_aware(defender.id, attacker.id)
+        incoming = builder.make_weapon(attacker.id, "Dagger", "Incoming Parry Dagger",
+                                       hand="right hand")
+        parrying = builder.make_weapon(defender.id, "Dagger", "Native Parry Dagger",
+                                       hand="right hand")
+        defender.set_weapon_skill_level(builder.world.get_weapon_dictionary(),
+                                        "Dagger", 2)
+        builder.enable()
+        strike = MeleeStrike(builder.encounter, attacker.id, defender.id, incoming.id,
+                             motion="thrust", reach=2, strategy=Strategy())
+        parry = MeleeDefense(builder.encounter, defender.id, attacker.id,
+            kind="parry", parry_motion="swing", target_action_id="incoming",
+            weapon_id=parrying.id)
+        builder.encounter.schedule_choice((
+            ChoiceMember("parry", parry, "incoming"),
+            ChoiceMember("incoming", strike)))
+        wire = export_save(builder.encounter)
+        builder.step(int(strike.end_time))
+        inspection = builder.encounter.inspect_committed(builder.encounter.time)
+        expected = {
+            "time": builder.encounter.time,
+            "strike_id": strike.id,
+            "parry_id": parry.id,
+            "parry_weapon_id": parrying.id,
+            "parry_motion": parry.parry_motion,
+            "parry_outcome": inspection.action(parry.id).facts.outcome,
+            "strike_outcome": inspection.action(strike.id).facts.outcome,
+            "defended_action_ids": list(parry.defended_action_ids),
+            "strike_defended_by": strike.defended_by,
+            "hp": [attacker.get_hit_points(), defender.get_hit_points()],
+            "action_ids": list(builder.encounter._atomic_interval_history[-1].action_ids),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+attacker=world.get_object_by_id(sys.argv[2]);defender=world.get_object_by_id(sys.argv[3])
+parrying=world.get_object_by_id(sys.argv[4]);choice=enc.choice_for_action(sys.argv[5])
+members=enc._choice_book._choices[choice.id].members
+parry=next(m.action for m in members if m.action.id==sys.argv[5])
+strike=next(m.action for m in members if m.action.id==sys.argv[6])
+assert choice.state=='accepted' and parry.kind=='parry'
+assert parry.instrument_id==parrying.id and parry.parry_motion=='swing'
+enc.step(int(strike.end_time-enc.time))
+inspection=enc.inspect_committed(enc.time)
+print(json.dumps({'time':enc.time,'strike_id':strike.id,'parry_id':parry.id,
+ 'parry_weapon_id':parry.instrument_id,'parry_motion':parry.parry_motion,
+ 'parry_outcome':inspection.action(parry.id).facts.outcome,
+ 'strike_outcome':inspection.action(strike.id).facts.outcome,
+ 'defended_action_ids':list(parry.defended_action_ids),
+ 'strike_defended_by':strike.defended_by,
+ 'hp':[attacker.get_hit_points(),defender.get_hit_points()],
+ 'action_ids':list(enc._atomic_interval_history[-1].action_ids),
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-parry-save.json"
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), attacker.id,
+                 defender.id, parrying.id, parry.id, strike.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self._assert_history_matches_receipts(builder.encounter)
 
     def test_headless_draw_restores_and_commits_in_a_fresh_native_process(self):
         builder = NativeScenarioBuilder(

@@ -100,7 +100,7 @@ class NativeScenarioBuilder:
         self.encounter.schedule_choice(tuple(actions))
         return tuple(actions)
 
-    def step(self, seconds):
+    def step(self, seconds, **progression):
         if not self._enabled:
             raise ValueError("enable native progression before advancing the Encounter")
-        return self.encounter.step(seconds)
+        return self.encounter.step(seconds, **progression)
