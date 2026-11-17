@@ -13,7 +13,8 @@ from checkpoint_inventory import _Inventory, _TYPES, _require, CheckpointRejecte
 from checkpoint_fields import FIELD_ADAPTERS, RUN_SPOT_FIELD_CLOSURE
 from conditional_attributes import ConditionalAttributes
 import statistical_group
-from statistical_group import StatisticalGroup, validate_composition_records
+from statistical_group import (StatisticalGroup, validate_composition_records,
+                               validate_membership_history)
 from personal_history import PersonalHistory
 from realization import RealityLedger, CommittedFact, FactKey
 from field_observation import BeliefLedger
@@ -303,6 +304,7 @@ class NativeInventory(_Inventory):
                  'recipient binding aliases another recipient internal container')
         for obj in objects.values():
             if type(obj) is StatisticalGroup:
+                validate_membership_history(obj, objects)
                 data=_fields(obj)
                 for lookup,child in ((self.conditional_owners,data['_conditional_attributes']), (self.ledger_owners,data['_composition_reality'])):
                     _require(id(child) not in lookup,'shared native owner store');lookup[id(child)]=obj

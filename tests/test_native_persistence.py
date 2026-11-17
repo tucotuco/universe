@@ -39,7 +39,7 @@ from history_conversation import AskAboutPastAction
 from activities import SpotAction
 from location_observation import LocationEvidenceLedger
 from object_observation import ObjectObservationLedger
-from statistical_group import StatisticalGroup
+from statistical_group import MembershipChange, StatisticalGroup
 
 
 def _legacy_history_shape(value):
@@ -980,7 +980,6 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         group = StatisticalGroup("Native group", "group-one", group_config,
                                  group_config["seed"])
         fixture.world.add_object(group)
-        fixture.enc.add_object(group.id)
         expected_count = group.household_count
         expected_household = group.household(0)
         group.counts()
@@ -994,7 +993,28 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                             start_time=0, id="native-group-delay")
         fixture.enc.schedule_action(first)
         fixture.enc.step(1)
+        group.join_being(fixture.world, fixture.a, time=0)
+        group.advance(1)
+        group.leave_being(fixture.world, fixture.a, time=1)
+        group.advance(2)
+        group.join_being(fixture.world, fixture.a, time=3)
+        expected_membership = {str(time): group.state_at(time)
+                               for time in (0, 0.5, 1, 2, 3)}
+        original_membership = group.membership_history[1]
+        group.membership_history[1] = MembershipChange(
+            1, fixture.a.id, "adults", "foreign-group", "leave")
+        with self.assertRaises(NativeSaveRejected):
+            export_save(fixture.enc)
+        group.membership_history[1] = original_membership
         wire = export_save(fixture.enc)
+        group.advance(1)
+        expected_group_continuation = {
+            "time": group.time,
+            "position": group.get_position().as_tuple(),
+            "velocity": group.velocity,
+            "state": group.state_at(3.5),
+            "member_position": fixture.a.get_position().as_tuple(),
+        }
 
         continuation_id = "native-group-continuation-delay"
         next_action = DelayAction(fixture.enc, fixture.a.id, defense=0,
@@ -1006,6 +1026,8 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             "time": fixture.enc.time, "rng": fixture.rng.state,
             "group_id": group.id, "count": group.household_count,
             "household": group.household(0),
+            "membership": expected_membership,
+            "group_continuation": expected_group_continuation,
             "formation_attribute": expected_voice,
             "history": hashlib.sha256(native_history.encode(
                 native_history.capture(fixture.enc))).hexdigest(),
@@ -1023,6 +1045,14 @@ from activities import DelayAction
 from native_persistence import load_path
 world,enc,rng=load_path(sys.argv[1])
 group=world.object_registry.object_instances['group-one']
+membership={str(time):group.state_at(time) for time in (0,0.5,1,2,3)}
+assert [row.action for row in group.membership_history]==['join','leave','join']
+assert [row.time for row in group.membership_history]==[0.0,1.0,3.0]
+group.advance(1)
+group_continuation={'time':group.time,'position':group.get_position().as_tuple(),
+ 'velocity':group.velocity,'state':group.state_at(3.5),
+ 'member_position':world.object_registry.object_instances[
+  group.membership_history[0].being_id].get_position().as_tuple()}
 assert group.household_count == int(sys.argv[2])
 assert group.household(0) == json.loads(sys.argv[3])
 household,index=int(sys.argv[4]),int(sys.argv[5])
@@ -1033,7 +1063,8 @@ enc.schedule_action(action)
 enc.step(1)
 print(json.dumps({'world':world.id,'encounter':enc.id,'time':enc.time,
  'rng':rng.state,'group_id':group.id,'count':group.household_count,
- 'household':group.household(0),
+ 'household':group.household(0),'membership':membership,
+ 'group_continuation':group_continuation,
  'formation_attribute':group.committed_formation_attributes(household,'adults',index)['voice'],
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
  'actions':list(enc._atomic_interval_history[-1].action_ids),
@@ -1121,11 +1152,14 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         from personal_history import PersonalHistory
         from realization import Fact
         history = PersonalHistory(fixture.a, earliest=-10, known_through=0,
-                                  nondeclining_skills=())
+                                  nondeclining_skills=('run',))
         fixture.a.personal_history = history
+        history.commit_skill_rank(-5, 'run', 1, origin='native-history-fixture')
         key = history.episode_key(-1, "earlier-training")
         history.realize_episode(-1, "earlier-training", lambda _view: (
-            Fact(key, {"description": "practiced earlier"}),))
+            Fact(key, {"description": "practiced earlier", "skill": "run",
+                       "rank_after": 2}, 'native-history-fixture'),
+            Fact(history.skill_key(-1, 'run'), 2, 'native-history-fixture')))
         fixture.enable()
         first = DelayAction(fixture.enc, fixture.a.id, defense=0,
                             start_time=0, id="native-personal-history-delay")
@@ -1133,8 +1167,11 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         fixture.enc.step(1)
         wire = export_save(fixture.enc)
         self.assertEqual(history.inspect_episode(-1, "earlier-training").value,
-                         {"description": "practiced earlier"})
-        self.assertEqual(len(history.facts_at(-1)), 1)
+                         {"description": "practiced earlier", "skill": "run",
+                          "rank_after": 2})
+        self.assertEqual(len(history.facts_at(-1)), 2)
+        self.assertEqual(history.reality.inspect(history.skill_key(-5, 'run')).value, 1)
+        self.assertEqual(len(history.facts_at(-5)), 1)
 
         continuation = DelayAction(fixture.enc, fixture.a.id, defense=0,
                                    start_time=1, id="native-history-continuation")
@@ -1163,8 +1200,12 @@ world,enc,rng=load_path(sys.argv[1])
 being=world.get_object_by_id(enc.being_list[0])
 history=being.personal_history
 history._validate(history.reality.view())
-assert history.inspect_episode(-1,'earlier-training').value=={'description':'practiced earlier'}
-assert len(history.facts_at(-1))==1
+assert history.inspect_episode(-1,'earlier-training').value=={
+ 'description':'practiced earlier','skill':'run','rank_after':2}
+assert len(history.facts_at(-1))==2
+assert history.reality.inspect(history.skill_key(-5,'run')).value==1
+assert len(history.facts_at(-5))==1
+assert history.reality.revision==2
 action=DelayAction(enc,being.id,defense=0,start_time=enc.time,
  id='native-history-continuation')
 enc.schedule_action(action)
@@ -2160,10 +2201,28 @@ print(json.dumps({'changed_nodes':changed_nodes,
         encounter.schedule_action(initial)
         encounter.step(1)
         wire = export_save(encounter)
+        continued = DelayAction(encounter, being.id, defense=0, start_time=1,
+                                id='native-reproduction-binding-continuation')
+        encounter.schedule_action(continued)
+        encounter.step(1)
+        expected = {
+            'being_id': being.id,
+            'name': being.name,
+            'request': 'native-binding-materialize',
+            'revision': world.reproduction_group_snapshot().revision,
+            'time': encounter.time,
+            'rng': rng.state,
+            'outcome': continued.resolution.outcome,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+        }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'native-reproduction-binding-save.json'
             path.write_bytes(wire)
-            child = r'''import json,sys
+            child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from being import BeingDefinition
 from native_persistence import load_path
 world,enc,rng=load_path(sys.argv[1])
 registry=world._reproduction_group_registry
@@ -2172,8 +2231,21 @@ record=registry._native_being_requests['native-binding-materialize']
 assert registry._native_beings_by_person_id['C1'] is being
 assert record.being is being and record.person_id == 'C1'
 assert world.get_reproduction_group('RG-BINDING').offspring_ids == ('C1',)
+definition=BeingDefinition(obj_type='Native reproduction fixture',length=1.8,
+ weight=70,hit_points=12,hit_dice='1d8',alignment='Neutral',
+ armor_class=10,challenge_rating=0)
+from reproduction_being_bridge import materialize_reproductive_offspring
+assert materialize_reproductive_offspring(world,'C1',being_definition=definition,
+ name='Child',request_key='native-binding-materialize',
+ expected_revision=1) is being
+action=DelayAction(enc,being.id,defense=0,start_time=enc.time,
+ id='native-reproduction-binding-continuation')
+enc.schedule_action(action)
+enc.step(1)
 print(json.dumps({'being_id':being.id,'name':being.name,'request':record.request_key,
- 'time':enc.time,'rng':rng.state},sort_keys=True))'''
+ 'revision':world.reproduction_group_snapshot().revision,
+ 'time':enc.time,'rng':rng.state,'outcome':action.resolution.outcome,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},sort_keys=True))'''
             import os
             result = subprocess.run(
                 [sys.executable, '-B', '-c', child, str(path)], cwd=ROOT,
@@ -2185,6 +2257,7 @@ print(json.dumps({'being_id':being.id,'name':being.name,'request':record.request
         self.assertEqual(restored['being_id'], 'C1')
         self.assertEqual(restored['name'], 'Child')
         self.assertEqual(restored['request'], 'native-binding-materialize')
+        self.assertEqual(restored, json.loads(json.dumps(expected)))
 
     def test_completed_ask_about_past_and_listener_accounts_resume_with_binding(self):
         world, encounter, rng, listener, speaker, _weapon_id = self._combat_encounter()

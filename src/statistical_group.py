@@ -136,9 +136,92 @@ class MembershipChange:
             raise ValueError("membership action must be 'join' or 'leave'")
 
     def to_dict(self):
-        return dict(time=self.time, being_id=self.being_id,
-                    category=self.category, group_id=self.group_id,
-                    action=self.action)
+        return {
+            "time": self.time,
+            "being_id": self.being_id,
+            "category": self.category,
+            "group_id": self.group_id,
+            "action": self.action,
+        }
+
+
+def validate_membership_history(group, objects):
+    """Validate Group-owned membership facts against their restored snapshot.
+
+    This checks only the implemented adult membership contract. It does not
+    infer travel, historical health, or any other Being state from affiliation.
+    """
+    from being import BeingInstance
+    if type(group) is not StatisticalGroup or type(objects) is not dict:
+        raise ValueError("native Group membership owner or registry is invalid")
+    records = group.membership_history
+    if type(records) is not list:
+        raise ValueError("native Group membership history must be an ordered list")
+    formation = group.formation_time
+    now = group.time
+    if (type(formation) not in (int, float) or type(now) not in (int, float)
+            or not math.isfinite(formation) or not math.isfinite(now)
+            or formation > now):
+        raise ValueError("native Group membership time range is invalid")
+
+    realized = group._realized_beings
+    departed = group._departed_member_ids
+    incoming = group._incoming_beings
+    if (type(realized) is not dict
+            or any(type(identity) is not str
+                   or type(being) is not BeingInstance
+                   or being.id != identity or objects.get(identity) is not being
+                   for identity, being in realized.items())
+            or type(departed) is not set
+            or any(type(identity) is not str for identity in departed)
+            or type(incoming) is not dict
+            or set(realized) & set(incoming)):
+        raise ValueError("native Group current membership containers conflict")
+    initial_members = set(realized)
+    current = initial_members - departed
+    for identity, entry in incoming.items():
+        if (type(identity) is not str or type(entry) is not tuple
+                or len(entry) != 2 or type(entry[0]) is not BeingInstance
+                or entry[0].id != identity or objects.get(identity) is not entry[0]
+                or entry[1] != "adults"):
+            raise ValueError("native Group incoming Being identity is invalid")
+        current.add(identity)
+
+    active = {}
+    previous_time = formation
+    touched = set()
+    for record in records:
+        if (type(record) is not MembershipChange
+                or type(record.time) not in (int, float)
+                or not math.isfinite(record.time)
+                or record.time < formation or record.time > now
+                or record.time < previous_time
+                or record.group_id != group.id
+                or record.category != "adults"
+                or type(record.being_id) is not str
+                or type(objects.get(record.being_id)) is not BeingInstance
+                or record.action not in ("join", "leave")):
+            raise ValueError("native Group membership fact is malformed or out of order")
+        identity = record.being_id
+        if identity not in active:
+            active[identity] = identity in initial_members
+        if record.action == "join":
+            if active[identity]:
+                raise ValueError("native Group membership repeats an active join")
+            active[identity] = True
+        else:
+            if not active[identity]:
+                raise ValueError("native Group membership leaves an absent Being")
+            active[identity] = False
+        previous_time = record.time
+        touched.add(identity)
+
+    for identity in touched:
+        if active[identity] != (identity in current):
+            raise ValueError("native Group membership history disagrees with current membership")
+    if not (set(departed) <= initial_members and set(departed) <= touched
+            and set(incoming) <= touched):
+        raise ValueError("native Group membership state lacks matching history")
 
 
 class StatisticalGroup(ObjectInstance):

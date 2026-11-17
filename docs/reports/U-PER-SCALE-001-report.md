@@ -2,6 +2,26 @@
 
 **Problems first — status ACTIVE and incomplete.** Native history is schema `/10`, and still duplicates committed receipt/Target projections in the resumable graph. Complete supported Action/state-family history reconstruction, durable history journal recovery, production application cutover, broad scale/security, and some native recipient/query combinations remain incomplete. The new `/10` fixes cumulative recipient-state loss across quiet boundaries and preserves listener-specific testimony; it does not close the overall matrix. Native Save `/2` preserves independent RNG/history for multiple progressing Encounters. Prior scale and accepted `/10`–`/12` compatibility evidence remain relevant, not sufficient for this revised all-or-nothing assignment. No unresolved rule or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
 
+## Current problems-first addendum — Group-owned membership continuation
+
+The exact closed native field matrix was missing `statistical_group.MembershipChange`; consequently any Group with dated membership facts was refused as unsupported. Adding its exact schema also revealed a missing `MembershipChange.to_dict()` required by the existing `StatisticalGroup.state_at()` API. The initial test additionally registered the independently moving Group as an Encounter target and advanced it outside Encounter publication, correctly triggering the native `unreceipted position change` guard. The test now keeps the Group in the same Universe Save but outside the Encounter; no Encounter movement or visibility guard was weakened.
+
+Strict capture and rehydration now validate ordered Group-owned membership history against its current snapshot, reject malformed owner/category/identity/time/transition sequences, and preserve join/leave/rejoin records. A fresh OS process restores those records, queries five historical times, advances Group motion, and independently continues a pending native Encounter Delay; Group time/position/velocity, Being non-teleportation, Encounter RNG and history match the uninterrupted control. Focused verification after the adapter and reader corrections:
+
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence -v` — **40 passed / 117.186s**, including legacy `/10`–`/12` compatibility and the fresh-process Group membership/continuation case.
+- `... -m unittest test_native_persistence.NativePersistenceTests.test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process -v` — **1 passed / 1.809s**.
+- `... -m unittest test_group_membership_changes -v` — **12 passed / 0.128s**; `test_evolving_group_composition -v` — **8 passed / 0.156s**; `test_historical_group_realization -v` — **5 passed / 0.029s**.
+- `... -m unittest test_checkpoint_adapters -v` — **50 passed / 19.038s**; `... -m unittest test_persistence_capability_matrix -v` — **3 passed / 0.009s**.
+
+This remains a bounded family increment. The runtime receipt/Target graph is still duplicated beside fact history; complete 158-type historical-reader parity, durable journal recovery, application Save/Load cutover and broad rejection/migration coverage remain open. No rule or external blocker is identified; U-PER-SCALE-001 remains ACTIVE.
+
+## Problems-first addendum — Reproduction binding and PersonalHistory facts
+
+The existing ReproductionGroup fresh-process fixture restored the logical Group and bound Being but only checked identity. It now saves a Group whose offspring `C1` has an authored native `BeingInstance` and an exact request record, then loads in a fresh OS process, retries the identical materialization request through the supported read-only retry path, and resolves a native Delay. The uninterrupted and restored paths match literal Being/request/Action identities, Group revision, outcome, RNG and canonical Encounter history digest. This does not bypass `materialize_reproductive_offspring()`'s rule that *new* bindings require the native no-Encounter context. The existing API rejects new creation after an Encounter exists; only the identical already-committed request is retryable there.
+
+The PersonalHistory continuation now stores two dated rank facts: rank 1 at t=-5, then an Episode and rank 2 at t=-1 in one RealityLedger transaction. It queries exact-date facts and the episode, reruns the validator in a new process, then continues Delay with equal PersonalHistory bytes, RNG and native history. Exact focused results: ReproductionGroup logical registry plus binding continuation **2 passed / 2.544s**; PersonalHistory multi-fact continuation **1 passed / 1.720s**. These close selected current-snapshot facts, not all Group/Reproduction/PersonalHistory mutation histories or graph-free history reconstruction.
+
+
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
 **Repository:** active Universe checkout; no push performed.

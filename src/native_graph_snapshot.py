@@ -964,7 +964,8 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
                                       BeingLocationObservation)
     from object_observation import ObjectObservationLedger, ObjectObservation
     from checkpoint_adapters import NativeInventory
-    from statistical_group import validate_composition_records
+    from statistical_group import (validate_composition_records,
+                                   validate_membership_history)
 
     groups = [value for value in cache.values()
               if type(value) is StatisticalGroup]
@@ -1112,6 +1113,11 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
         raise ArenaNativeSnapshotRejected(
             f'native reproduction registry restore refused: {exc}') from exc
     for group in groups:
+        try:
+            validate_membership_history(group, world.object_registry.object_instances)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ArenaNativeSnapshotRejected(
+                f'native Group membership restore refused: {exc}') from exc
         store = group._conditional_attributes
         group._composition_reality._validators = (
             group._validate_composition_facts,)

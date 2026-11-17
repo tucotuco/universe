@@ -12,7 +12,8 @@ from activities import RunAction
 from encounter import Encounter
 from group_membership_changes import run_experiment
 from library import Library
-from statistical_group import MembershipChange, StatisticalGroup
+from statistical_group import (MembershipChange, StatisticalGroup,
+                               validate_membership_history)
 from universe import Universe
 
 CONFIG = json.loads((ROOT / 'examples/nomadic_group.json').read_text())
@@ -33,6 +34,28 @@ def make_world(n=3):
 
 
 class GroupMembershipChangeTests(unittest.TestCase):
+    def test_native_membership_history_validation_is_ordered_and_read_only(self):
+        world, (group, _, _) = make_world()
+        being = group.realize_being(world, 0, 'adults', 0)
+        group.advance(2)
+        record = group.leave_being(world, being)
+        validate_membership_history(group, world.object_registry.object_instances)
+        for malformed in (
+            MembershipChange(3, being.id, 'adults', group.id, 'leave'),
+            MembershipChange(2, 'missing-being', 'adults', group.id, 'leave'),
+            MembershipChange(2, being.id, 'children', group.id, 'leave'),
+            MembershipChange(2, being.id, 'adults', 'other-group', 'leave'),
+            MembershipChange(2, being.id, 'adults', group.id, 'join'),
+        ):
+            with self.subTest(malformed=malformed):
+                group.membership_history[0] = malformed
+                with self.assertRaises(ValueError):
+                    validate_membership_history(
+                        group, world.object_registry.object_instances)
+                self.assertFalse(group.has_realized_member(being))
+        group.membership_history[0] = record
+        validate_membership_history(group, world.object_registry.object_instances)
+
     def test_leave_without_destination_and_join_later(self):
         world, (a, b, _) = make_world()
         being = a.realize_being(world, 0, 'adults', 0)

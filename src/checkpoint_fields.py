@@ -526,6 +526,10 @@ FIELD_ADAPTERS = {
         "allowed": '_atomic_target_history _composition_reality _conditional_attributes _counts _departed_member_ids _formation_traits _incoming_beings _members _motion_attached_native_ids _realized_beings acceleration config current footprint_radius formation_time front_facing geometry id max_acceleration membership_history name original parent_container_id seed spatial_state time top_facing type velocity visual_occlusion'.split(),
         "required": '_composition_reality _conditional_attributes _counts _departed_member_ids _formation_traits _incoming_beings _members _motion_attached_native_ids _realized_beings acceleration config current footprint_radius formation_time front_facing geometry max_acceleration membership_history name original parent_container_id seed spatial_state time top_facing type velocity visual_occlusion'.split(),
     },
+    'statistical_group.MembershipChange': {
+        "allowed": 'action being_id category group_id time'.split(),
+        "required": 'action being_id category group_id time'.split(),
+    },
     'strategy.Strategy': {
         "allowed": 'attack defense extra_damage timing'.split(),
         "required": 'attack defense extra_damage timing'.split(),
