@@ -238,6 +238,17 @@ class NativeHistoryTests(unittest.TestCase):
                 write(self.log, path)
             self.assertEqual(path.read_bytes(), before)
 
+    def test_interrupted_standalone_write_cleans_temp_and_allows_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'history.json'
+            with patch('native_history.os.link', side_effect=OSError('injected prepublish fault')):
+                with self.assertRaisesRegex(NativeHistoryRejected, 'before publication'):
+                    write(self.log, path)
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            write(self.log, path)
+            self.assertEqual(decode(path.read_bytes()), self.log)
+
     def test_append_accepts_only_the_next_authenticated_native_commit(self):
         demo = encounter_delta_headless.build_demo(until=4)
         encounter = demo["encounter"]

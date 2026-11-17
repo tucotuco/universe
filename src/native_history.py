@@ -11,7 +11,9 @@ from dataclasses import fields, is_dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+import tempfile
 from threading import RLock
 from types import MappingProxyType
 from weakref import WeakKeyDictionary, ref as weakref
@@ -991,24 +993,37 @@ def decode(wire):
 
 
 def write(log, path):
-    """Atomically replace a standalone history artifact after complete encode."""
+    """Atomically publish a standalone history artifact without replacement."""
     wire = encode(log)
     target = Path(path)
-    temporary = target.with_name(target.name + ".tmp")
+    temporary = None
+    linked = False
     try:
-        with temporary.open("xb") as stream:
+        fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp",
+                                         dir=target.parent)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
             stream.write(wire)
             stream.flush()
-            import os
             os.fsync(stream.fileno())
-        import os
         os.link(temporary, target)
-        temporary.unlink()
-    except FileExistsError as exc:
-        raise NativeHistoryRejected("native history temporary path already exists") from exc
-    except OSError as exc:
+        linked = True
+        os.unlink(temporary)
+        temporary = None
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_fd = os.open(target.parent, flags)
         try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise NativeHistoryRejected("native history write failed without replacing destination") from exc
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except FileExistsError as exc:
+        raise NativeHistoryRejected("native history destination already exists") from exc
+    except OSError as exc:
+        detail = " after atomic publication" if linked else " before publication"
+        raise NativeHistoryRejected("native history write failed" + detail) from exc
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
