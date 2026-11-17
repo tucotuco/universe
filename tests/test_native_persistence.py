@@ -1065,8 +1065,9 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             child = r'''import hashlib,json,sys
 import native_history
 from activities import DelayAction
-from native_persistence import load_path
+from native_persistence import export_save, load_path
 world,enc,rng=load_path(sys.argv[1])
+assert export_save(enc)==open(sys.argv[1],'rb').read()
 group=world.object_registry.object_instances['group-one']
 realized_member=world.get_object_by_id(sys.argv[7])
 assert group._realized_beings[realized_member.id] is realized_member
@@ -2262,8 +2263,10 @@ print(json.dumps({'changed_nodes':changed_nodes,
 import native_history
 from activities import DelayAction
 from being import BeingDefinition
-from native_persistence import load_path
+from native_persistence import export_save,load_path
 world,enc,rng=load_path(sys.argv[1])
+assert enc.id=='native-reproduction-binding-encounter'
+assert export_save(enc)==open(sys.argv[1],'rb').read()
 registry=world._reproduction_group_registry
 being=world.get_object_by_id('C1')
 record=registry._native_being_requests['native-binding-materialize']
