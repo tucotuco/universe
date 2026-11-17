@@ -84,6 +84,8 @@ Two simultaneous seeded Object strikes against one shared low-durability target 
 
 Native Subdue now has fresh-process continuation evidence for its separate condition state. Ordinary seed-5 resolution records 4 body damage plus a distinct Subdual burden of 9 and a t=5 recovery anchor. Restoring the accepted initial Action reproduces the facts, then a separate Save after the committed Subdue and with a pending Delay continues with equal burden/state/HP/RNG/history. Stun remains a separate condition and no recovery or interruption mechanics were changed. The matrix/report retain the uncovered hour-boundary recovery and broader Subdual query cases.
 
+Successful zero-diff Feint is also covered: the historical Event is present with no effects and no HP change, and a pending same-target Strike retains the exact Feint Action identity as its one-use bonus source after Load. Seeded native execution and history/RNG compare with uninterrupted continuation. The matrix still labels `action.Action` partial because other event types are not closed.
+
 
 ## 2026-11-16 continuation addendum
 

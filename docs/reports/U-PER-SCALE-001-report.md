@@ -752,3 +752,13 @@ The headless test uses the native `declare_subdue()` path, a held Club, explicit
 Verification: `.venv/bin/python -B tests/test_native_draw_persistence.py NativeDrawPersistenceTests.test_headless_subdual_burden_and_continuation_restore_exactly -v` — **1 passed in 6.216s**. This covers the supported Subdue damage/burden and pending continuation shape, not one-hour recovery advancement, unconscious interruption, every armor/critical outcome, or all Subdual consumer queries. Those variants remain open for matrix closure.
 
 The full increment after adding Subdue passed: `.venv/bin/python -B tests/test_native_draw_persistence.py -v` — **7 tests in 44.544s**; the adopted native Subdue damage/burden test — **1 in 1.261s**; capability-matrix validation — **3 in 0.005s**.
+
+### Native zero-diff Feint and linked follow-up
+
+**Problems first.** A Feint that succeeds without changing an Entity property is still a meaningful committed Event: the successful declaration grants one adopted follow-up bonus to its same-target Strike. Save/Load therefore must preserve the Feint Event facts and the follow-up's exact `feint_source_action_id`, without treating the zero-diff boundary as absent or re-evaluating the old Feint.
+
+The Arena-independent case uses native Dagger skill and seed 3. A successful Feint records an empty effects tuple and leaves target HP unchanged. The control then schedules a same-target native Strike with the Feint's literal Action ID as its source and saves with that Strike accepted/pending. Fresh-process Load validates the source Feint and follows its pending Strike through normal evaluation. The Action IDs, source reference, hit outcome/effects, target HP, RNG, and authenticated history digest match uninterrupted execution. This confirms meaningful zero-diff Event retention for this supported profile, not all other Action event types.
+
+Verification: `.venv/bin/python -B tests/test_native_draw_persistence.py NativeDrawPersistenceTests.test_headless_feint_and_one_followup_continue_with_original_action_identity -v` — **1 passed in 3.831s**. The Action matrix row now cites both one zero-diff Feint profile and native Object-strike profiles while retaining its explicit partial-coverage qualification.
+
+Latest family-increment integration: the existing adopted Feint success/one-use follow-up regression passed **1 test in 1.525s**; the complete Arena-independent native family file passed **8 tests in 47.195s**; capability-matrix validation passed **3 tests in 0.006s**.

@@ -663,6 +663,86 @@ print(json.dumps({'time':enc.time,'delay_id':action.id,
         self.assertEqual(json.loads(continued.stdout),
                          json.loads(json.dumps(expected_continue)))
 
+    def test_headless_feint_and_one_followup_continue_with_original_action_identity(self):
+        builder = NativeScenarioBuilder(
+            "native-feint", Library(config_dir=str(ROOT / "src/config")),
+            seed=3, encounter_id="native-feint-encounter")
+        actor = builder.add_being("Human", "Feinting Being", position=(0, 0, 0),
+                                  radius=.25, hit_points=100)
+        target = builder.add_being("Human", "Feint Target", position=(.2, 0, 0),
+                                   radius=.25, hit_points=100)
+        weapon = builder.make_weapon(actor.id, "Dagger", "Feint Dagger",
+                                     hand="right hand")
+        actor.current.skills.weapon_skills["Dagger"] = 2
+        builder.mark_aware(actor.id, target.id)
+        builder.mark_aware(target.id, actor.id)
+        builder.enable()
+        feint = Action(builder.world, 0, 1, "feint", actor.id, target.id, weapon.id,
+                       id="native-feint-action")
+        feint.feint_motion = "thrust"
+        feint.reach = effective_melee_reach_meters(actor.current, weapon.current)
+        feint.end_time = math.ceil(weapon.Tt() / 2)
+        builder.schedule(feint)
+        builder.step(feint.end_time)
+        committed_feint = builder.encounter.inspect_committed(
+            int(builder.encounter.time)).action(feint.id)
+        self.assertEqual(committed_feint.facts.outcome, "success")
+        self.assertEqual(committed_feint.facts.effects, ())
+        self.assertEqual(target.get_hit_points(), 100)
+
+        strike = MeleeStrike(builder.encounter, actor.id, target.id, weapon.id,
+                             motion="thrust", reach=2)
+        strike.feint_source_action_id = feint.id
+        builder.schedule(strike)
+        pending = export_save(builder.encounter)
+        builder.step(int(strike.end_time - builder.encounter.time))
+        receipt = builder.encounter.inspect_committed(
+            int(builder.encounter.time)).action(strike.id)
+        self.assertEqual(strike.feint_source_action_id, feint.id)
+        self.assertEqual(receipt.facts.outcome, "normal")
+        self.assertTrue(any(getattr(effect, "component", None) == "body"
+                            for effect in receipt.facts.effects))
+        expected = {
+            "time": builder.encounter.time,
+            "feint_id": feint.id,
+            "strike_id": strike.id,
+            "source_id": strike.feint_source_action_id,
+            "outcome": receipt.facts.outcome,
+            "effects": [type(effect).__name__ for effect in receipt.facts.effects],
+            "target_hp": target.get_hit_points(),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+target=world.get_object_by_id(sys.argv[2]);feint_id,strike_id=sys.argv[3:]
+feint=world.get_event_by_id(feint_id);assert feint is not None
+choice=enc.choice_for_action(strike_id);assert choice.state=='accepted'
+strike=next(member.action for member in enc._choice_book._choices[choice.id].members
+            if member.action.id==strike_id)
+assert strike.feint_source_action_id==feint.id and feint.resolution.outcome=='success'
+enc.step(int(strike.end_time-enc.time))
+receipt=enc.inspect_committed(int(enc.time)).action(strike.id)
+print(json.dumps({'time':enc.time,'feint_id':feint.id,'strike_id':strike.id,
+ 'source_id':strike.feint_source_action_id,'outcome':receipt.facts.outcome,
+ 'effects':[type(effect).__name__ for effect in receipt.facts.effects],
+ 'target_hp':target.get_hit_points(),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-feint-followup.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id,
+                 feint.id, strike.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()
