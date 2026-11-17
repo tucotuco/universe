@@ -57,6 +57,18 @@ The scale profiles contain no observer-recipient maps, so their graph-reduction 
 - The complete native Action continuation suite after selective observer compaction passed **25 / 142.034s**. `test_native_history` plus capability matrix passed **34 / 22.585s** after the import-isolation fix. No failure remains in this focused verification set.
 - Current reruns after selective compaction: checkpoint adapters **50 passed / 21.451s**; native history plus capability matrix **34 passed / 25.162s**; Python compilation and `git diff --check` passed. The first combined invocation omitted `PYTHONPATH` and failed at test discovery; rerunning with the repository import path passed. The selective compaction source/test/docs update is staged for a separate scoped commit; no source/test failure remains.
 
+## Current continuation — self-contained definition coverage
+
+### Problems first
+
+The portable graph already bundled the configured Library, but its proof only exercised a Human and Dagger. The matrix therefore did not substantiate Object and Armor definition identity or prove that those definition families load without repository configuration files. This is a coverage gap in the evidence, not a known graph-restore failure.
+
+### Correction and verification
+
+Expanded `test_native_save_is_self_contained_for_shared_library_definitions` with an equipped Gauntlet Armor and a registered Linen pillow Object, using their exact bundled ArmorDictionary/ObjectDictionary definitions. Its child process blocks reads beneath `src/config`, performs strict fresh-process Load, verifies each original definition is the exact object in the corresponding restored Library dictionary, checks the canonical graph node set is unchanged by load, then continues the pending Delay and compares native outcome/RNG/history. The source-linked matrix now records the Human, Dagger, Armor and Object evidence on their concrete type rows.
+
+Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_is_self_contained_for_shared_library_definitions -v` — **1 passed / 1.748s**. Current code HEAD is `cc692942c64e790fab7a67fd37c12154a5350f2c` (selective observer receipt compaction). This added test and matrix/report reconciliation are pending scoped documentation/test commit. This improves the immutable-definition evidence but does not establish all family behavior, definition evolution rules, every observer-binding combination or production `/12` writer cutover; U-PER-SCALE-001 remains ACTIVE.
+
 ## Current continuation — committed receipt compaction and no-time Disarm history
 
 ### Problems first

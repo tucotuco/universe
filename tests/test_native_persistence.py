@@ -3333,6 +3333,13 @@ print(json.dumps(output,sort_keys=True))'''
         weapon = builder.make_weapon(
             actor.id, 'Dagger', 'Portable-definition Dagger',
             hand='right hand', participant=True)
+        armor_id = builder.world.make_armor_for_being(
+            actor.id, 'Gauntlet', 'Portable-definition armor')
+        scenery_id = builder.world.make_object(
+            'Linen pillow', 'Portable-definition Object')
+        builder.encounter.add_object(scenery_id)
+        armor = builder.world.get_object_by_id(armor_id)
+        scenery = builder.world.get_object_by_id(scenery_id)
         builder.enable()
         pending = DelayAction(builder.encounter, actor.id, defense=0,
                               start_time=builder.encounter.time,
@@ -3344,11 +3351,17 @@ print(json.dumps(output,sort_keys=True))'''
                       builder.world.library.get_being_definition('Human'))
         self.assertIs(weapon.original,
                       builder.world.library.get_weapon_definition('Dagger'))
+        self.assertIs(armor.original,
+                      builder.world.library.get_armor_definition('Gauntlet'))
+        self.assertIs(scenery.original,
+                      builder.world.library.get_object_definition('Linen pillow'))
         builder.step(1)
         expected = {
             'changed_nodes': [],
             'shared_actor_definition': True,
             'shared_weapon_definition': True,
+            'shared_armor_definition': True,
+            'shared_object_definition': True,
             'time': builder.encounter.time,
             'outcome': pending.resolution.outcome,
             'action_id': pending.id,
@@ -3381,8 +3394,11 @@ def guarded_io_open(path,*args,**kwargs):
 builtins.open=guarded_open;io.open=guarded_io_open
 world,enc,rng=load_path(sys.argv[1])
 actor=world.get_object_by_id(sys.argv[3]);weapon=world.get_object_by_id(sys.argv[4])
+armor=world.get_object_by_id(sys.argv[6]);scenery=world.get_object_by_id(sys.argv[7])
 assert actor.original is world.library.get_being_definition('Human')
 assert weapon.original is world.library.get_weapon_definition('Dagger')
+assert armor.original is world.library.get_armor_definition('Gauntlet')
+assert scenery.original is world.library.get_object_definition('Linen pillow')
 original_save=open(sys.argv[1],'rb').read()
 resaved=export_save(enc)
 original_value=json.loads(original_save);resaved_value=json.loads(resaved)
@@ -3402,6 +3418,8 @@ enc.step(1)
 print(json.dumps({'changed_nodes':changed_nodes,
  'shared_actor_definition':actor.original is world.library.get_being_definition('Human'),
  'shared_weapon_definition':weapon.original is world.library.get_weapon_definition('Dagger'),
+ 'shared_armor_definition':armor.original is world.library.get_armor_definition('Gauntlet'),
+ 'shared_object_definition':scenery.original is world.library.get_object_definition('Linen pillow'),
  'time':enc.time,'outcome':action.resolution.outcome,'action_id':action.id,
  'rng':rng_owner_for(enc).state,
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
@@ -3411,7 +3429,8 @@ print(json.dumps({'changed_nodes':changed_nodes,
             path.write_bytes(wire)
             result = subprocess.run(
                 [sys.executable, '-B', '-c', child, str(path),
-                 str(ROOT / 'src/config'), actor.id, weapon.id, pending.id], cwd=directory,
+                 str(ROOT / 'src/config'), actor.id, weapon.id, pending.id,
+                 armor.id, scenery.id], cwd=directory,
                 env={**os.environ,
                      'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
                 text=True, capture_output=True, check=False, timeout=60)
