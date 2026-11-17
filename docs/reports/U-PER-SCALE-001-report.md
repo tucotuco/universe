@@ -71,7 +71,7 @@ Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -
 
 The same regression now also checks the configured ActionDefinition (`break weapon (armed)`) and SkillDefinition (`unarmed combat`) resolve to the exact bundled ActionDictionary/SkillDictionary objects after strict Load. Re-run: **1 passed / 1.692s**. Canonical graph nodes remain unchanged and configuration reads remain blocked. This extends shared-definition portability evidence across all six Library definition dictionaries; it does not complete mutable family or historical read coverage. This work was committed as `339bc93`.
 
-Exercising the public skill accessors exposed two existing defects: both `Library.get_skill_definition()` and `Universe.get_skill_definition()` called a nonexistent `SkillDictionary.get_object_definition()`. Both now delegate to the actual `get_skill_definition()` method. The same fresh-process regression exercises both public accessors and the dictionary accessor, verifying they return the same bundled definition. Re-run after both fixes: **1 passed / 1.817s**. The fixes and report/TASKS correction are pending a scoped commit on code HEAD `339bc93`.
+Exercising the public skill accessors exposed two existing defects: both `Library.get_skill_definition()` and `Universe.get_skill_definition()` called a nonexistent `SkillDictionary.get_object_definition()`. Both now delegate to the actual `get_skill_definition()` method. The same fresh-process regression exercises both public accessors and the dictionary accessor, verifying they return the same bundled definition. Re-run after both fixes: **1 passed / 1.817s**. The fixes and report/TASKS correction were committed as `a0d1bd3`.
 
 ### Adjacent verification reconciliation
 
@@ -1681,3 +1681,24 @@ A current-code quiet-boundary rerun checked all **200** boundaries and matched f
 The graph still retains per-receipt Objective-recipient projections, the identity-bearing receipt shells and complete current simulation state. Some registered field families and historical readers still lack full native scenario evidence. Durable append-journal crash recovery, the broad adversarial/security portfolio, general production `/10`–`/12` cutover and the final application Save/Load path remain open. There is no adopted-rule or external blocker. U-PER-SCALE-001 remains ACTIVE.
 
 **Implementation commit:** `88e7d3f` (`Compact native committed receipt facts`). The scoped safety audit passed with zero findings; the five pre-staged historical archive paths were preserved and excluded from this commit.
+
+
+## Problems-first — observer belief fields and inquiry reachability
+
+### Findings
+
+The multi-Encounter BeliefLedger test previously established fresh-process evidence and belief-history restoration, but did not compare interpretation fields or the sampler/interpreter configuration. It also left these concrete field-catalog rows marked as having no native restore evidence. The native observer transaction stores its committed observation and interpretation in the observer-owned ledger; `ObserveGroupAction.field_observation` and `.field_interpretation` are resolution scratch slots and remain unset on the transactional route. They are not the authoritative committed evidence and must not be mistaken for lost state.
+
+An attempted extension using `InquiryPolicy.propose()` followed by `BeliefLedger.record_inquiry()` after accepted scheduling was correctly refused at Save with `InspectionRejected: unreceipted Belief change`. The helper is not wired to an atomic native publication effect; the native inspector rejects out-of-band observer mutations. I removed that probe rather than bypassing receipt validation. `InquiryProposal`, `InquiryRecord`, and `EvidenceReassessment` remain defined/policy-side shapes without native transactional producers. This is an implementation gap in the scaffold-to-native integration, not an ambiguity in persistence serialization or an adopted rule decision.
+
+### Correction and verification
+
+Extended `test_native_save_restores_distinct_group_beliefs_across_encounters` to compare the complete configured `SampledGroupObservation` and `FieldInterpreter`, every FieldObservation field, all noisy CountReport values, original/current FieldInterpretation fields, chronological BeliefRevision provenance, separate observer ownership, Group Reality records, RNG, native-history digest and native Delay continuation for both roots after strict fresh-process Load. The matrix now distinguishes tested native state from Inquiry/Reassessment scaffolding that cannot currently enter committed state.
+
+- `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_restores_distinct_group_beliefs_across_encounters -v` (from `tests/`) — **1 passed / 3.550s**.
+- The same test plus `test_persistence_capability_matrix` initially exposed the matrix's executable Arena-classification check after an evidence row was improved; no implementation test failed. After restoring the required source classification phrase, `test_persistence_capability_matrix` — **3 passed / 0.019s**.
+- `git diff --check` — passed.
+
+The field-level evidence is corrected; the full assignment remains incomplete. In particular, receipt-backed reassessment/inquiry Actions do not exist, and general historical query parity, remaining state families, strict corruption/security breadth, durable append-journal recovery, broad migration coverage and ordinary application Save/Load cutover still require implementation. No rule or external blocker is established. U-PER-SCALE-001 remains the sole ACTIVE program.
+
+**Current worktree commit basis:** `a0d1bd3` before this uncommitted test/matrix/report/TASKS increment. The scoped increment requires its normal staged diff review, publication-safety audit and local commit; no push.

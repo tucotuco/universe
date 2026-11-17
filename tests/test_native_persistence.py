@@ -2916,10 +2916,20 @@ print(json.dumps({'times':[row[0].time for row in rows],
                 observation.mode,sorted(observation.dubious_candidates.items()),
                 observation.focus_category]
 
+        def project_interpretation(value):
+            return [value.observation_id,value.observer_id,value.skill_name,
+                value.skill_level,sorted((name,report.estimate,report.uncertainty)
+                    for name,report in value.reports.items()),
+                sorted(value.rejected_candidates.items())]
+
         def project():
             return {'times':[row[0].time for row in rows],
                 'outcomes':[row[4].resolution.outcome for row in rows],
+                'samplers':[json.loads(json.dumps(row[4].observer.__dict__)) for row in rows],
+                'interpreters':[json.loads(json.dumps(row[4].interpreter.__dict__)) for row in rows],
                 'evidence':[[project_observation(ob) for ob in row[5].evidence] for row in rows],
+                'interpretations':[[[key,project_interpretation(value)] for key,value in sorted(
+                    row[5]._interpretations.items())] for row in rows],
                 'belief_history':[[[item.group_id,item.category,item.estimate,
                     list(item.evidence_ids),item.trigger,item.time,item.disputed,
                     item.trigger_observation_id] for item in row[5].belief_history] for row in rows],
@@ -2940,6 +2950,10 @@ from encounter import Encounter
 from activities import DelayAction
 import native_history
 from native_persistence import load_path,rng_owner_for
+def interpretation(value):
+ return [value.observation_id,value.observer_id,value.skill_name,value.skill_level,
+  sorted((name,report.estimate,report.uncertainty) for name,report in value.reports.items()),
+  sorted(value.rejected_candidates.items())]
 world,selected,selected_rng=load_path(sys.argv[1])
 encounters={event.id:event for event in world.event_history.values() if type(event)is Encounter}
 assert len(encounters)==2
@@ -2949,7 +2963,12 @@ for index in range(2):
  action=world.get_event_by_id(sys.argv[index+2])
  group=world.get_object_by_id(f'native-group-{index}')
  ledger=action.ledger
- assert ledger.observer_id==action.actor_id and len(ledger.evidence)==1
+ assert ledger.observer_id==action.actor_id
+ assert len(ledger.evidence)==1 and len(ledger.inquiry_history)==0
+ assert ledger.interpretation_for(ledger.evidence[0].id) is not None
+ assert interpretation(ledger.current_interpretation_for(ledger.evidence[0].id))==interpretation(ledger.interpretation_for(ledger.evidence[0].id))
+ assert action.interpreter.skill_name=='spot' and action.interpreter.expert_level==5
+ assert action.observer.coarse_range_m==100 and action.observer.detailed_range_m==50
  actor=world.get_object_by_id(action.actor_id)
  enc.schedule_action(DelayAction(enc,actor.id,defense=0,start_time=enc.time,
   id=f'{enc.id}-continuation'))
@@ -2959,9 +2978,17 @@ def obs(o):
   None if o.reported_position is None else list(o.reported_position.as_tuple()),
   sorted((name,value.estimate,value.uncertainty) for name,value in o.reports.items()),
   o.mode,sorted(o.dubious_candidates.items()),o.focus_category]
+def interpretation(value):
+ return [value.observation_id,value.observer_id,value.skill_name,value.skill_level,
+  sorted((name,report.estimate,report.uncertainty) for name,report in value.reports.items()),
+  sorted(value.rejected_candidates.items())]
 print(json.dumps({'times':[r[0].time for r in rows],
  'outcomes':[r[1].resolution.outcome for r in rows],
+ 'samplers':[r[1].observer.__dict__ for r in rows],
+ 'interpreters':[r[1].interpreter.__dict__ for r in rows],
  'evidence':[[obs(o) for o in r[2].evidence] for r in rows],
+ 'interpretations':[[[key,interpretation(value)] for key,value in sorted(
+  r[2]._interpretations.items())] for r in rows],
  'belief_history':[[[i.group_id,i.category,i.estimate,list(i.evidence_ids),i.trigger,
   i.time,i.disputed,i.trigger_observation_id] for i in r[2].belief_history] for r in rows],
  'rng':[r[3].state for r in rows],
