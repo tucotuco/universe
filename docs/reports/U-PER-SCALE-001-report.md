@@ -1748,3 +1748,15 @@ Extended the actual native Spot fresh-process case to compare the derived LastSe
 - `git diff --check` — passed.
 
 Objective-fact restoration and query coverage is committed as `c4ec5b4`. The LastSeenLocation regression plus matrix/report/TASKS update remains pending a scoped commit. Broader observer history/privacy combinations and complete production application cutover are still open; U-PER-SCALE-001 remains ACTIVE.
+
+
+## Problems-first — fatigue and physiology matrix reconciliation
+
+The matrix had contradictory prose: its implementation evidence already referenced restored Q/B values, per-boundary fatigue contexts, pending Run continuation, and selected physiology profile hashes, while some row statuses still said “no production native restore path.” Those conclusions understated existing tested support and obscured what remains a separate simulation-mechanics question.
+
+Reconciled `FrozenFatigueFrame`, `FrozenFatigueView`, `PhysicalFatigueState`, `Exertion`, `PhysiologyDefinition`, `PhysiologyRegistry`, `ResolvedPhysiology`, and `universe_physical_fatigue_r4.Profile` against the existing pending-Run Save/Load test. The rows now distinguish exact current-state restore and time-qualified history from unproven activity/fatigue settlement behavior; no new mechanics are claimed.
+
+- `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_running_action_history_and_pending_continuation_in_fresh_process test_persistence_capability_matrix -v` (from `tests/`) — **4 passed / 2.462s**.
+- `git diff --check` — passed.
+
+The LastSeenLocation test/documentation increment is committed as `571bea5`. This fatigue/physiology matrix and report/TASKS reconciliation is pending scoped commit. U-PER-SCALE-001 remains ACTIVE; the matrix still contains many supported-state families and application/history/security gates requiring work.
