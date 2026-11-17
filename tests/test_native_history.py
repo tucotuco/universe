@@ -90,6 +90,17 @@ class NativeHistoryTests(unittest.TestCase):
                 for boundary, rows in target_rows.items() if target_id in rows]
             self.assertEqual(query.target_history_at(target_id), expected_history)
 
+    def test_target_query_refuses_initial_entity_projection_as_target_candidate(self):
+        query = NativeHistoryQuery(self.log)
+        encounter = self.demo["encounter"]
+        entity_id = encounter.being_list[0]
+        initial_entity = query.entity_at(entity_id, 0)
+        self.assertEqual(initial_entity["$record"],
+                         "encounter_inspection.EntityInspection")
+        with self.assertRaisesRegex(NativeHistoryRejected,
+                                    "no committed TargetCandidate"):
+            query.target_at(entity_id, 0)
+
     def test_per_entity_inspection_history_matches_each_native_receipt(self):
         query = NativeHistoryQuery(self.log)
         entity_ids = set(self.log["entity_context"]["initial"])

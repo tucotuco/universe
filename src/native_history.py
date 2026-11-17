@@ -2203,13 +2203,22 @@ class NativeHistoryQuery:
         return result
 
     def target_at(self, target_id, boundary):
-        """Return one authoritative TargetCandidate at a committed boundary."""
+        """Return one recorded TargetCandidate at a committed boundary.
+
+        Boundary zero carries initial EntityInspection facts, not a committed
+        TargetCandidate. Do not expose that different record type through the
+        Target-history API.
+        """
         self._boundary(boundary)
         if type(target_id) is not str or not target_id:
             raise NativeHistoryRejected("Target history requires a stable identity")
         target = self.state_at(boundary)["entities"].get(target_id)
         if target is None:
             raise NativeHistoryRejected("requested Target is absent at this boundary")
+        if (type(target) is not dict
+                or target.get("$record") != "action_settlement.TargetCandidate"):
+            raise NativeHistoryRejected(
+                "requested Target has no committed TargetCandidate at this boundary")
         return target
 
     def projectile_state_at(self, object_id, boundary):
