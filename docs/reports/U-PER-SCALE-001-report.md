@@ -41,7 +41,7 @@ The first post-change measurements establish the effect of omitting both per-bou
 
 For comparison, current reruns at 2 and 20 registered Beings measured graph reduction from **4,859,442 B to 1,128,349 B (76.78%)** and **5,094,837 B to 1,370,227 B (73.11%)**, respectively; each retained **1,193,049 B** history and had exact 129-boundary/fresh-process parity. Their complete Save sizes were **2,697,664 B** and **3,020,168 B**. The older measurements in the preceding table reflect pre-`/11` graph compaction and are retained as historical comparison only.
 
-A strict 200-quiet-boundary run retained **34,563 B** of history in a **1,152,566 B** complete Save, queried every logical boundary in **1.061 s**, exported in **2.413 s**, and loaded/continued in a fresh process in **3.722 s**; the history remained a compact quiet span and the continuation matched. Scenario stepping took **47.150 s**, peak RSS **79,773,696 bytes**. This command used the supported default 2-Being quiet fixture; the command-line runner does not expose a quiet-registry-count option, so no larger quiet-registry claim is made.
+Strict 200-quiet-boundary runs at registry sizes 2, 20 and 200 all retained **34,563 B** history, queried all cuts, and matched fresh-process continuation. Their graph/Save bytes were **838,392 / 1,152,566**, **1,080,373 / 1,475,210**, and **3,500,991 / 4,702,698**, respectively. Scenario / query / export / fresh Load+continue times were **47.150 / 1.061 / 2.413 / 3.722 s**, **40.606 / 0.932 / 2.219 / 3.430 s**, and **41.118 / 0.952 / 3.009 / 3.818 s**; peak RSS was **79,773,696**, **80,330,752**, and **127,549,440 bytes**. These runs use the new `--quiet-registry-count 200 <count>` harness option; constant history size reflects the same two active Entities and nonparticipant registry growth remaining in the snapshot.
 
 The recipient-heavy graph-retention path remains intentionally exact and is excluded from these compaction percentages. These controlled profiles establish storage reduction and resumption only for their represented families; they do not close the matrix, general historical-reader parity, adversarial archive portfolio, or `/12` application-writer cutover.
 
@@ -52,6 +52,7 @@ The recipient-heavy graph-retention path remains intentionally exact and is excl
 - `test_persistence_capability_matrix` in its own process: **3 passed / 0.017s**.
 - Python compilation of all changed native persistence modules and `git diff --check`: passed.
 - A combined native-history + matrix invocation produced **33 passed / 1 failure / 22.714s** because the matrix test imports `arena_native_snapshot` before a native-history test asserts that the process has not imported Arena. Both suites pass separately; this is test-process import-order coupling, not a persistence failure, and tests are run in isolation as the report's established workflow requires.
+- Boundary reconstruction implementation is committed as `832812bad76d43e933872d99aee8b9a6695b44e3`. The subsequent scale-runner extension and 2/20/200 quiet-profile results are part of the next scoped local documentation/harness commit.
 
 ## Current continuation — committed receipt compaction and no-time Disarm history
 

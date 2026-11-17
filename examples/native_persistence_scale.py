@@ -2,6 +2,8 @@
 
 Run from the repository root:
     .venv/bin/python -B examples/native_persistence_scale.py
+    .venv/bin/python -B examples/native_persistence_scale.py --registry-count 200
+    .venv/bin/python -B examples/native_persistence_scale.py --quiet-registry-count 200 200
 
 The scenario uses legal adopted Dagger Feints against an explicitly placed,
 aware opponent. It contains no Arena, browser, session, or npcgen dependency.
@@ -347,6 +349,9 @@ if __name__ == '__main__':
         print(json.dumps(_continue(sys.argv[2]), sort_keys=True))
     elif len(sys.argv) == 3 and sys.argv[1] == '--quiet-boundaries':
         print(json.dumps(run_quiet(boundary_count=int(sys.argv[2])), sort_keys=True))
+    elif len(sys.argv) == 4 and sys.argv[1] == '--quiet-registry-count':
+        print(json.dumps(run_quiet(boundary_count=int(sys.argv[2]),
+                                   registry_count=int(sys.argv[3])), sort_keys=True))
     else:
         registry_count = (int(sys.argv[2]) if len(sys.argv) == 3
                           and sys.argv[1] == '--registry-count' else 2)
