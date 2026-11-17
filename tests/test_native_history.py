@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "examples"))
 
 import encounter_delta_headless
+import native_persistence_scale
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
@@ -44,6 +45,20 @@ class NativeHistoryTests(unittest.TestCase):
             receipt = next(row for row in self.demo["encounter"]._atomic_interval_history
                            if row.boundary == boundary)
             self.assertEqual(events_at(log, boundary)["action_ids"], list(receipt.action_ids))
+
+    def test_scale_verifier_checks_action_and_quiet_span_receipts(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo["encounter"]
+        encounter.step(8)
+        log = native_persistence_scale._verify_history_boundaries(encounter)
+        self.assertEqual(log["latest_boundary"], 12)
+        self.assertEqual(sum(row.get("to_boundary", row.get("boundary", 0))
+                             - row.get("from_boundary", row.get("boundary", 0)) + 1
+                             for row in log["boundaries"]), 12)
+        with patch("native_persistence_scale.state_at",
+                   side_effect=lambda _log, boundary: {"boundary": boundary + 1}):
+            with self.assertRaisesRegex(RuntimeError, "receipt at 1"):
+                native_persistence_scale._verify_history_boundaries(encounter)
 
     def test_changes_are_presence_aware_and_reconstruct_each_native_target_boundary(self):
         for boundary, delta in enumerate(self.log["boundaries"], 1):

@@ -592,3 +592,23 @@ The latest report's code-only/progress conclusions are superseded only within th
 - Final focused run: **8 passed in 16.783 s**; `py_compile` and `git diff --check` passed. A direct fresh-CLI write/resume command also reached t=9 with Bram HP 6, zero forbidden Arena imports, 46.558 ms strict load/rehydration and 48,300,032 peak-RSS platform units. The 61-test adjacent transactional suite result and non-baseline-reproduced six mismatches are above.
 - `tools/check_publication_safety.py --staged` passed before the implementation commit (11 staged paths, 0 findings). After the scoped commit, the five unrelated historical archive operations remain staged and unchanged; the safety check again passed (6 staged paths, 0 findings). No unrelated staged paths entered the implementation commit. The user-provided assignment, archive save artifacts, process standard and other untracked files were preserved.
 - Active time across six recorded sessions is `PT9H33M24S`; total calendar span is `PT18H44M55S`, with `PT9H11M31S` between sessions excluded. No push or history rewrite. U-PER-SCALE-001 remains sole ACTIVE; this bounded native resume is verified, while the broader program is not complete.
+
+## Full-capability continuation — history fidelity at scale
+
+### Problems first
+
+- Acceptance remains open: native Saves still duplicate the runtime receipt/Target graph beside fact history. Existing native inspection reads that graph; the fact log does not yet reconstruct every implemented inspection family or all state needed for equivalent arbitrary queries.
+- Broad current-state family coverage, native `/10`–`/12` migration, crash recovery, and ordinary application Save/Load integration remain unproven. No user-rule or external blocker has been found.
+
+### New verification
+
+`examples/native_persistence_scale.py` now checks reconstructed `state_at`, `events_at`, and `rng_state_at` against native committed receipts before Save. It compares TargetCandidates, boundary/time, schedule, objective facts/use, projectile states, ordered Action/Effect IDs and exact RNG at every logical boundary. Quiet spans are expanded by the query API. A focused regression verifies Action plus quiet-span checks and rejects a deliberately mismatched query result.
+
+| Scenario | Checked native boundaries | Native Actions | Graph bytes | History bytes | Save bytes | Scenario / export / fresh-process continuation | Peak RSS |
+|---|---:|---:|---:|---:|---:|---|---:|
+| Dagger Feint scale | 129 | 64 | 4,842,737 | 1,171,895 | 7,629,026 | 77.348 / 23.233 / 5.893 / 7.766 s | 176,717,824 |
+| Quiet intervals | 200 | 0 | 4,837,012 | 26,705 | 6,476,204 | 45.081 / 1.279 / 2.764 / 3.472 s | 162,955,264 |
+
+Timing column order is simulation / historical queries / Save export / fresh-process Load+continue. The query check calls public state/event/RNG reconstruction separately at every boundary; its cost is measurable and included rather than folded into simulation time.
+
+Both strict fresh-process Loads and native Delay continuations matched uninterrupted controls. The runs extend history proof to high-activity and quiet-span scale, but do not resolve graph duplication or establish all-family query parity.

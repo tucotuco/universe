@@ -32,7 +32,9 @@ from atomic_publication import RNGCursor
 from encounter import Encounter
 from library import Library
 from melee_combat import effective_melee_reach_meters
-from native_history import encode as encode_history
+from native_history import (encode as encode_history, capture as capture_history,
+                            state_at, events_at, rng_state_at, _plain,
+                            _target_candidates)
 from native_persistence import export_save, load_path
 from spatial import CartesianPosition, Sphere
 from universe import Universe
@@ -41,6 +43,31 @@ from universe import Universe
 def _being_count(world):
     return sum(type(value).__name__ == 'BeingInstance'
                for value in world.object_registry.object_instances.values())
+
+
+def _verify_history_boundaries(encounter):
+    """Compare reconstructed history with every authoritative native receipt."""
+    log = capture_history(encounter)
+    candidates = _target_candidates(encounter)
+    receipts = {row.boundary: row for row in encounter._atomic_interval_history}
+    if set(receipts) != set(range(1, encounter.last_processed_boundary + 1)):
+        raise RuntimeError('native receipt boundaries are not contiguous')
+    for boundary, receipt in receipts.items():
+        state = state_at(log, boundary)
+        events = events_at(log, boundary)
+        meta = receipt.inspection
+        if (state['boundary'] != boundary
+                or state['time'] != meta.end
+                or state['entities'] != _plain(candidates.get(boundary, {}))
+                or state['schedule'] != _plain(meta.schedule)
+                or state['objective'] != _plain(meta.objective)
+                or state['objective_use'] != _plain(meta.objective_use)
+                or state['projectile_states'] != _plain(meta.projectile_states)
+                or events['action_ids'] != list(receipt.action_ids)
+                or events['effect_ids'] != [_plain(item) for item in receipt.effect_ids]
+                or rng_state_at(log, boundary) != _plain(receipt.rng_state)):
+            raise RuntimeError(f'native history differs from committed receipt at {boundary}')
+    return log
 
 
 def _continue(path):
@@ -112,6 +139,9 @@ def run(action_count=64, registry_count=2):
             raise RuntimeError(f'Feint {index} did not resolve')
         resolved.append(action.id)
     authored_seconds = time.perf_counter() - started
+    history_query_started = time.perf_counter()
+    _verify_history_boundaries(encounter)
+    history_query_seconds = time.perf_counter() - history_query_started
     export_started = time.perf_counter()
     wire = export_save(encounter)
     export_seconds = time.perf_counter() - export_started
@@ -167,9 +197,11 @@ def run(action_count=64, registry_count=2):
         'actions_resolved': action_count,
         'being_registry_count': registry_count,
         'committed_boundaries': encounter.last_processed_boundary,
+        'history_boundaries_checked': encounter.last_processed_boundary,
         'save_bytes': len(wire), 'graph_bytes': graph_bytes,
         'history_bytes': history_bytes,
         'scenario_seconds': round(authored_seconds, 3),
+        'history_query_seconds': round(history_query_seconds, 3),
         'export_seconds': round(export_seconds, 3),
         'fresh_process_load_and_continue_seconds': round(load_continue_seconds, 3),
         'peak_rss_platform_units': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
@@ -207,6 +239,9 @@ def run_quiet(boundary_count=200, registry_count=2):
     started = time.perf_counter()
     encounter.step(boundary_count)
     scenario_seconds = time.perf_counter() - started
+    history_query_started = time.perf_counter()
+    _verify_history_boundaries(encounter)
+    history_query_seconds = time.perf_counter() - history_query_started
     export_started = time.perf_counter()
     wire = export_save(encounter)
     export_seconds = time.perf_counter() - export_started
@@ -246,9 +281,11 @@ def run_quiet(boundary_count=200, registry_count=2):
             raise RuntimeError('fresh-process quiet continuation differs from control')
     return {
         'quiet_boundaries': boundary_count,
+        'history_boundaries_checked': boundary_count,
         'being_registry_count': registry_count,
         'graph_bytes': graph_bytes, 'history_bytes': history_bytes,
         'save_bytes': len(wire), 'scenario_seconds': round(scenario_seconds, 3),
+        'history_query_seconds': round(history_query_seconds, 3),
         'export_seconds': round(export_seconds, 3),
         'fresh_process_load_and_continue_seconds': round(load_continue_seconds, 3),
         'fresh_process_matches_uninterrupted_control': True,
