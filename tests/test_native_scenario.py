@@ -12,6 +12,49 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeScenarioTests(unittest.TestCase):
+    def test_independent_native_reexecution_matches_recorded_semantics(self):
+        """Current-version replay compares complete facts at each boundary."""
+        from activities import DelayAction, RunAction
+        from library import Library
+        from native_history import NativeHistoryQuery, capture
+        from native_scenario import NativeScenarioBuilder
+
+        def execute():
+            scenario = NativeScenarioBuilder(
+                "native-semantic-replay", Library(config_dir=str(ROOT / "src/config")),
+                seed=412, end_time=3, encounter_id="native-semantic-replay-encounter")
+            runner = scenario.add_being(
+                "Human", "Replay Runner", entity_id="native-replay/runner",
+                position=(0.0, 0.0, 0.0), radius=.25, hit_points=10)
+            scenario.add_being(
+                "Human", "Replay Observer", entity_id="native-replay/observer",
+                position=(4.0, 0.0, 0.0), radius=.25, hit_points=10)
+            scenario.enable()
+            run = RunAction(scenario.world, runner.id, 0, 1, .5,
+                            experience=2, id="native-replay/run")
+            scenario.schedule(run)
+            scenario.step(1, velocities={runner.id: (1.0, 0.0, 0.0)})
+            delay = DelayAction(scenario.encounter, runner.id, defense=0,
+                                start_time=1, id="native-replay/delay")
+            scenario.schedule(delay)
+            scenario.step(1)
+            return scenario, NativeHistoryQuery(capture(scenario.encounter))
+
+        first, first_query = execute()
+        second, second_query = execute()
+        for boundary in range(3):
+            self.assertEqual(first_query.boundary_facts_at(boundary),
+                             second_query.boundary_facts_at(boundary))
+            self.assertEqual(first_query.state_at(boundary),
+                             second_query.state_at(boundary))
+            self.assertEqual(first_query.events_at(boundary),
+                             second_query.events_at(boundary))
+            self.assertEqual(first_query.rng_state_at(boundary),
+                             second_query.rng_state_at(boundary))
+        # Native receipt wrappers intentionally own process-local anchors;
+        # the persisted boundary-fact projection above is the comparison
+        # contract between independent Encounter object graphs.
+
     def test_headless_builder_authors_and_restores_without_arena_application(self):
         script = r'''import json,sys
 from activities import DelayAction

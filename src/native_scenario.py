@@ -33,9 +33,23 @@ class NativeScenarioBuilder:
         self._enabled = False
 
     def add_being(self, being_type, name, *, position=None, radius=None,
-                  hit_points=None, participant=True, aware_of=()):
+                  hit_points=None, participant=True, aware_of=(),
+                  entity_id=None):
         """Create a native Being with only the explicitly supplied facts."""
-        identity = self.world.make_being(being_type, name)
+        if entity_id is None:
+            identity = self.world.make_being(being_type, name)
+        else:
+            from being import BeingInstance
+            definition = self.world.library.get_being_definition(being_type)
+            if definition is None:
+                raise ValueError(f"native Being definition is unavailable: {being_type}")
+            if self.world.get_object_by_id(entity_id) is not None:
+                raise ValueError("native Being identity is already registered")
+            being = BeingInstance(definition, name, id=entity_id)
+            self.world.add_object(being)
+            identity = being.id
+        if identity is None:
+            raise ValueError(f"native Being could not be created: {being_type}")
         being = self.world.get_object_by_id(identity)
         if position is not None:
             if type(position) not in (tuple, list) or len(position) != 3:

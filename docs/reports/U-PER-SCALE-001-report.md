@@ -81,6 +81,18 @@ The native scenario builder could author Beings, Weapons and explicit geometry, 
 
 Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_scenario -v` — **2 passed / 2.461s**; module compilation and `git diff --check` passed. This improves the reusable test/scenario API and explicit-state fidelity, but leaves broad field-family and historical-read parity, archive recovery/security, migrations and application cutover open. Current code HEAD at this increment is `e2b0883`; the builder/test/docs changes are pending their own scoped commit. U-PER-SCALE-001 remains ACTIVE.
 
+## Current continuation — independent native re-execution parity
+
+### Problems first
+
+The 64-Action scale runner checked each history cut against receipts from the same Encounter, but no compact reusable fixture independently re-executed a consequential native sequence and compared its recorded meaning at every boundary. Comparing full `EncounterInspection` wrappers directly is invalid because they intentionally contain process-local anchors.
+
+### Correction and verification
+
+The native scenario builder now accepts an explicit Being identity for independently authored test worlds. A new headless replay fixture instantiates two separate native Encounters with the same authored identities, seed, Run Action and Delay Action. It compares every portable `boundary_facts_at`, `state_at`, `events_at`, and RNG cursor at boundary 0, movement/practice boundary 1, and quiet/Delay boundary 2. The comparison retains literal IDs here by authoring stable identities; process-local receipt anchors are excluded, consistent with the assignment's semantic-comparison rule.
+
+Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_scenario -v` — **3 passed / 3.522s**; module compilation and `git diff --check` passed. The complete supported-family replay portfolio remains open; this is not a substitute for broad matrix closure. Current code HEAD at this increment is `79d0da6`; scenario-builder identity and replay changes are pending their own scoped commit. U-PER-SCALE-001 remains ACTIVE.
+
 ## Current continuation — committed receipt compaction and no-time Disarm history
 
 ### Problems first
