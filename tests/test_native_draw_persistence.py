@@ -921,6 +921,91 @@ print(json.dumps({'time':enc.time,'break_id':break_action.id,'followup_id':follo
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_standard_weapon_break_commits_and_disables_followup_after_restore(self):
+        builder = NativeScenarioBuilder(
+            "native-standard-break", Library(config_dir=str(ROOT / "src/config")),
+            seed=3, encounter_id="native-standard-break-encounter")
+        breaker = builder.add_being("Human", "Bastard Sword User",
+                                    position=(0, 0, 0), radius=.25, hit_points=100)
+        defender = builder.add_being("Human", "Dagger User", position=(.2, 0, 0),
+                                     radius=.25, hit_points=100)
+        attacking = builder.make_weapon(breaker.id, "Bastard sword", "Standard Bastard sword",
+                                        hand="right hand")
+        target_weapon = builder.make_weapon(defender.id, "Dagger", "Standard Target Dagger",
+                                            hand="right hand")
+        breaker.current.skills.weapon_skills["Bastard sword"] = 2
+        builder.mark_aware(breaker.id, defender.id)
+        builder.mark_aware(defender.id, breaker.id)
+        builder.enable()
+        duration = max(1, math.ceil(attacking.St()))
+        followup = MeleeStrike(builder.encounter, defender.id, breaker.id,
+                               target_weapon.id, motion="thrust", reach=2)
+        followup.end_time = duration + 1
+        builder.schedule(followup)
+        action = Action(builder.world, 0, 1, "break weapon", breaker.id,
+                        defender.id, attacking.id, id="native-standard-break-action")
+        action.break_weapon_id = target_weapon.id
+        action.break_motion = "swing"
+        action.reach = effective_melee_reach_meters(breaker.current, attacking.current)
+        action.end_time = duration
+        builder.schedule(action)
+        initial = export_save(builder.encounter)
+
+        builder.step(duration)
+        break_receipt = builder.encounter.inspect_committed(duration).action(action.id)
+        self.assertEqual(break_receipt.facts.outcome, "broken")
+        self.assertLessEqual(target_weapon.hit_points(), 0)
+        target_hp_after_break = target_weapon.hit_points()
+        builder.step(1)
+        follow_receipt = builder.encounter.inspect_committed(duration + 1).action(followup.id)
+        self.assertEqual(follow_receipt.facts.outcome, "weapon_unavailable")
+        expected = {
+            "time": builder.encounter.time,
+            "break_id": action.id,
+            "break_outcome": break_receipt.facts.outcome,
+            "followup_id": followup.id,
+            "followup_outcome": follow_receipt.facts.outcome,
+            "attacking_weapon_id": attacking.id,
+            "target_weapon_id": target_weapon.id,
+            "target_weapon_hp": target_weapon.hit_points(),
+            "target_hp_after_break": target_hp_after_break,
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+break_id,follow_id,attacking_id,target_id=sys.argv[2:]
+break_choice=enc.choice_for_action(break_id);follow_choice=enc.choice_for_action(follow_id)
+assert break_choice.state=='accepted' and follow_choice.state=='accepted'
+action=next(m.action for m in enc._choice_book._choices[break_choice.id].members
+            if m.action.id==break_id)
+attacking=world.get_object_by_id(attacking_id);target=world.get_object_by_id(target_id)
+enc.step(int(action.end_time-enc.time));first=enc.inspect_committed(int(enc.time))
+assert first.action(break_id).facts.outcome=='broken' and target.hit_points()<=0
+target_hp_after_break=target.hit_points()
+enc.step(1);second=enc.inspect_committed(int(enc.time))
+assert second.action(follow_id).facts.outcome=='weapon_unavailable'
+print(json.dumps({'time':enc.time,'break_id':action.id,
+ 'break_outcome':first.action(break_id).facts.outcome,'followup_id':follow_id,
+ 'followup_outcome':second.action(follow_id).facts.outcome,
+ 'attacking_weapon_id':attacking.id,'target_weapon_id':target.id,
+ 'target_weapon_hp':target.hit_points(),'target_hp_after_break':target_hp_after_break,
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+ native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-standard-break.json"
+            path.write_bytes(initial)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), action.id,
+                 followup.id, attacking.id, target_weapon.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()
