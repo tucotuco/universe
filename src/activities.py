@@ -211,9 +211,9 @@ class PickUpAction(Action):
 
     def prepare_schedule(self, encounter):
         from being import BeingInstance
-        if (encounter is not self.encounter or not encounter.arena_activation_enabled
+        if (encounter is not self.encounter
                 or encounter.progression_mode != 'transactional'):
-            raise ValueError('Pick up requires the activated generated-Arena transaction path')
+            raise ValueError('Pick up requires a native transactional Encounter')
         actor = encounter.get_being(self.actor_id)
         target = encounter.universe.get_object_by_id(self.target_id)
         if actor is None or not isinstance(target, ObjectInstance) or isinstance(target, BeingInstance):
@@ -423,10 +423,10 @@ class ReadyWeaponAction(Action):
             and (not encounter.initiated
                  or (encounter.arena_activation is not None
                      and encounter.arena_activation.actor_id == self.actor_id)))
-        if (encounter is not self.encounter or not encounter.arena_activation_enabled
+        if (encounter is not self.encounter
                 or (encounter.progression_mode != 'transactional'
                     and not first_choice_preparation)):
-            raise ValueError('Ready weapon requires the activated generated-Arena transaction path')
+            raise ValueError('Ready weapon requires native transactional or authorized Arena progression')
         actor = encounter.get_being(self.actor_id)
         target = encounter.universe.get_object_by_id(self.target_id)
         if actor is None or type(target) is not WeaponInstance:
@@ -492,9 +492,9 @@ class ShieldEquipmentAction(Action):
     def prepare_schedule(self, encounter):
         from being import BeingInstance
         from weapon import WeaponInstance
-        if (encounter is not self.encounter or not encounter.arena_activation_enabled
+        if (encounter is not self.encounter
                 or encounter.progression_mode != 'transactional'):
-            raise ValueError('Shield Don/Remove requires the native transactional Encounter')
+            raise ValueError('Shield Don/Remove requires a native transactional Encounter')
         actor = encounter.get_being(self.actor_id)
         shield = encounter.universe.get_object_by_id(self.target_id)
         if type(actor) is not BeingInstance or type(shield) is not WeaponInstance:

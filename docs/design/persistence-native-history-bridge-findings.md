@@ -68,6 +68,14 @@ An adjacent observer regression run initially exposed a stale test fixture: two 
 
 No push or `/12` implementation change occurred in this continuation. Exact code commits and repository preservation/audit evidence are in `docs/reports/U-PER-SCALE-001-report.md`.
 
+### Arena-independent native Draw and Shield Don/Remove
+
+**Problems first.** `ReadyWeaponAction` and `ShieldEquipmentAction` already had native transactional evaluator, effects, restore adapters and Arena continuation coverage, but scheduling still required `arena_activation_enabled`. That implementation gate contradicted the general native API even though no Draw/Shield rule required an Arena activation. The gate is removed only for native transactional encounters; source evidence, exact custody, free/selected hand, adopted timing, non-Tower Don, carried Remove, and normal native publication are still validated.
+
+The new `tests/test_native_draw_persistence.py` uses the reusable native scenario builder, with no Arena modules imported in its child processes. It saves an accepted Draw Choice before the first boundary and verifies two-second Draw completion after fresh-process restore. It separately saves pending Don at the initial cursor and pending Remove after Don has committed. Both paths preserve same-Encounter Action and Object IDs, hand/equipment/custody state, RNG and authenticated history digest against uninterrupted `Encounter.step()` execution. The focused native test and Arena regression commands, including timings, are recorded in the engineering report. This extends the verified families without changing the report's architectural verdict: the stored receipt/Target graph remains duplicate, broad historical read parity and migration are incomplete, crash-recoverable journaling is unproven, and production Save/Load remains `/12`.
+
+The same Arena gate was also unnecessary for `PickUpAction`: the native evaluator already has the complete supported one-second pickup check using explicit hex dimensions/positions, represented Object weight/capacity, and simultaneous common-snapshot contention. Its scheduling guard now admits a native transactional Encounter. The headless regression persists two accepted same-object pickup attempts from the initial cursor; both restore and resolve `contested`, with one unchanged ground Object and no duplicate custody. All nine existing `test_arena_ground_pickup.py` regressions pass. This adds native coverage without claiming more precise geometry than the adopted hex-cell convention.
+
 
 ## 2026-11-16 continuation addendum
 
