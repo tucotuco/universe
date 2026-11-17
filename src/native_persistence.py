@@ -17,7 +17,8 @@ import tempfile
 import native_history
 
 
-SCHEMA = "universe.native-encounter-save/1"
+SCHEMA = "universe.native-encounter-save/2"
+LEGACY_SCHEMA = "universe.native-encounter-save/1"
 MAX_BYTES = 64 * 1024 * 1024
 
 
@@ -42,6 +43,55 @@ def _unique(pairs):
     return value
 
 
+def _encounter_rows(world, selected, selected_rng_owner):
+    from encounter import Encounter
+    from interval_staging import _rng_input
+    from transactional_progression import _BINDINGS
+
+    encounters = sorted((event for event in world.event_history.values()
+                         if type(event) is Encounter), key=lambda row: row.id)
+    rows = []
+    for saved in encounters:
+        binding = _BINDINGS.get(id(saved))
+        owner = (selected_rng_owner if saved is selected else
+                 binding.rng_owner if binding is not None and binding.encounter() is saved
+                 else None)
+        if owner is None:
+            raise NativeSaveRejected(
+                "every registered Encounter requires a separately owned native RNG")
+        state = _rng_input(saved, None, owner)[2]
+        history = native_history.current_recording(saved)
+        receipts = saved.__dict__.get("_atomic_interval_history")
+        if history is None and receipts:
+            history = native_history.capture(saved)
+        rows.append({"encounter_id": saved.id,
+                     "rng_state": _rng_json(state),
+                     "history": history})
+    if not rows or selected.id not in {row["encounter_id"] for row in rows}:
+        raise NativeSaveRejected("selected Encounter is absent from the Universe registry")
+    return rows
+
+
+def _rng_json(value, depth=0):
+    if depth > 8:
+        raise NativeSaveRejected("native RNG state exceeds its nesting limit")
+    if type(value) is tuple:
+        return [_rng_json(row, depth + 1) for row in value]
+    if value is None or type(value) in (int, float):
+        return value
+    raise NativeSaveRejected("native RNG owner has an unsupported state value")
+
+
+def _rng_tuple(value, depth=0):
+    if depth > 8:
+        raise NativeSaveRejected("saved RNG state exceeds its nesting limit")
+    if type(value) is list:
+        return tuple(_rng_tuple(row, depth + 1) for row in value)
+    if value is None or type(value) in (int, float):
+        return value
+    raise NativeSaveRejected("saved RNG state is malformed")
+
+
 def export_save(encounter, *, recipient_bindings=()):
     """Return a self-contained native graph plus authenticated fact history.
 
@@ -49,6 +99,18 @@ def export_save(encounter, *, recipient_bindings=()):
     explicit :class:`checkpoint_adapters.RecipientBinding` values. Their data
     is included once in the graph; no external process handle is serialized.
     """
+    try:
+        from atomic_publication import coordinated_access
+        with coordinated_access(encounter.universe):
+            return _export_save_coordinated(encounter,
+                                            recipient_bindings=recipient_bindings)
+    except NativeSaveRejected:
+        raise
+    except Exception as exc:
+        raise NativeSaveRejected(f"native Encounter could not be saved: {exc}") from exc
+
+
+def _export_save_coordinated(encounter, *, recipient_bindings=()):
     try:
         from checkpoint_inventory import (capture_checkpoint_candidate,
                                           validate_checkpoint_candidate)
@@ -62,34 +124,40 @@ def export_save(encounter, *, recipient_bindings=()):
             codes = ", ".join(sorted({row.code for row in candidate.diagnostics}))
             raise NativeSaveRejected("native semantic closure refused: " + codes)
         graph = encode_graph(candidate.envelope, native=True)
-        history = native_history.current_recording(encounter)
-        receipt_chain = encounter.__dict__.get("_atomic_interval_history")
-        if history is None and receipt_chain:
-            # Build the first history copy locally. Do not mutate the weak
-            # recorder registry until every graph/history check and portable
-            # size check has succeeded for this Save cut.
-            history = native_history.capture(encounter)
-        elif history is None:
-            # Before the first committed boundary the complete authoritative
-            # state is the graph snapshot. History begins from that boundary's
-            # receipt.start projection when the native publisher commits it.
-            history = None
+        encounter_rows = _encounter_rows(encounter.universe, encounter,
+                                         _native_rng_owner(encounter))
         # Bind the detached history copy to the exact graph candidate. A
         # commit racing Save between graph capture and recorder export must
         # refuse this bundle rather than mix two valid but different cuts.
         validate_checkpoint_candidate(
             encounter.universe, encounter, candidate, quiescent=True)
-        body = {"schema": SCHEMA, "graph_b64": base64.b64encode(graph).decode("ascii"),
-                "history": history}
+        if len(encounter_rows) == 1:
+            # Keep the established single-Encounter contract and byte-level
+            # migration behavior unchanged. Version /2 is only needed when a
+            # Save must carry independent state for multiple Encounter roots.
+            body = {"schema": LEGACY_SCHEMA,
+                    "graph_b64": base64.b64encode(graph).decode("ascii"),
+                    "history": encounter_rows[0]["history"]}
+        else:
+            body = {"schema": SCHEMA,
+                    "selected_encounter_id": encounter.id,
+                    "graph_b64": base64.b64encode(graph).decode("ascii"),
+                    "encounters": encounter_rows}
         body["sha256"] = hashlib.sha256(_canonical(body)).hexdigest()
         wire = _canonical(body)
         if len(wire) > MAX_BYTES:
             raise NativeSaveRejected("native Save exceeds the portable size limit")
-        if native_history.current_recording(encounter) is None:
-            if history is None:
-                native_history.NativeHistoryRecorder.ensure_pending_attached(encounter)
-            else:
-                native_history.NativeHistoryRecorder.ensure_attached(encounter, log=history)
+        from encounter import Encounter
+        by_id = {event.id: event for event in encounter.universe.event_history.values()
+                 if type(event) is Encounter}
+        for row in encounter_rows:
+            saved = by_id[row['encounter_id']]
+            if native_history.current_recording(saved) is None:
+                if row['history'] is None:
+                    native_history.NativeHistoryRecorder.ensure_pending_attached(saved)
+                else:
+                    native_history.NativeHistoryRecorder.ensure_attached(
+                        saved, log=row['history'])
         return wire
     except NativeSaveRejected:
         raise
@@ -107,7 +175,133 @@ def _native_rng_owner(encounter):
     return binding.rng_owner
 
 
+def rng_owner_for(encounter):
+    """Return the independently restored native RNG owner for one Encounter."""
+    try:
+        from transactional_progression import _BINDINGS
+        binding = _BINDINGS.get(id(encounter))
+        if binding is None or binding.encounter() is not encounter:
+            raise NativeSaveRejected("Encounter has no bound native RNG owner")
+        return binding.rng_owner
+    except NativeSaveRejected:
+        raise
+    except Exception as exc:
+        raise NativeSaveRejected("Encounter RNG owner is unavailable") from exc
+
+
 def load_save(wire):
+    """Restore every registered native Encounter from a strict Save cut."""
+    if type(wire) is not bytes or not wire or len(wire) > MAX_BYTES:
+        raise NativeSaveRejected("native Save is empty or exceeds the portable size limit")
+    try:
+        value = json.loads(wire.decode("ascii"), object_pairs_hook=_unique,
+                           parse_constant=lambda _v: (_ for _ in ()).throw(
+                               NativeSaveRejected("native Save contains a non-finite number")))
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise NativeSaveRejected("native Save is malformed JSON") from exc
+    if type(value) is not dict:
+        raise NativeSaveRejected("native Save schema differs")
+    if value.get("schema") == LEGACY_SCHEMA:
+        return _load_v1_save(wire)
+    return _load_v2_save(wire, value)
+
+
+def _load_v2_save(wire, value):
+    expected_fields = {"schema", "selected_encounter_id", "graph_b64",
+                       "encounters", "sha256"}
+    if set(value) != expected_fields or value.get("schema") != SCHEMA:
+        raise NativeSaveRejected("native Save schema differs")
+    unsigned = {key: item for key, item in value.items() if key != "sha256"}
+    if (type(value["sha256"]) is not str
+            or hashlib.sha256(_canonical(unsigned)).hexdigest() != value["sha256"]
+            or _canonical(value) != wire):
+        raise NativeSaveRejected("native Save integrity or canonical encoding differs")
+    if (type(value["selected_encounter_id"]) is not str
+            or not value["selected_encounter_id"]
+            or type(value["graph_b64"]) is not str
+            or type(value["encounters"]) is not list
+            or len(value["encounters"]) < 2):
+        raise NativeSaveRejected("native Save roots or Encounter table are malformed")
+    rows = value["encounters"]
+    ids = []
+    companion_owners = {}
+    from atomic_publication import RNGCursor
+    for row in rows:
+        if type(row) is not dict or set(row) != {"encounter_id", "rng_state", "history"}:
+            raise NativeSaveRejected("native Save Encounter row is malformed")
+        identity = row["encounter_id"]
+        if type(identity) is not str or not identity:
+            raise NativeSaveRejected("native Save Encounter identity is malformed")
+        ids.append(identity)
+        state = _rng_tuple(row["rng_state"])
+        try:
+            import random
+            random.Random(0).setstate(state)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise NativeSaveRejected("native Save Encounter RNG state is invalid") from exc
+        if row["history"] is not None:
+            native_history.validate(row["history"])
+            initial = row["history"]["initial"]
+            if (initial["encounter_id"] != identity
+                    or row["history"]["latest_boundary"] < 0):
+                raise NativeSaveRejected("native history belongs to another Encounter")
+        if identity != value["selected_encounter_id"]:
+            companion_owners[identity] = RNGCursor(state)
+    if ids != sorted(set(ids)) or value["selected_encounter_id"] not in ids:
+        raise NativeSaveRejected("native Save Encounter identities are duplicated or noncanonical")
+    try:
+        graph_wire = base64.b64decode(value["graph_b64"].encode("ascii"), validate=True)
+        if base64.b64encode(graph_wire).decode("ascii") != value["graph_b64"]:
+            raise NativeSaveRejected("native graph payload is not canonical base64")
+        from native_graph_snapshot import decode as decode_graph, restore as restore_graph
+        world, selected, selected_rng = restore_graph(
+            decode_graph(graph_wire, native=True), native=True,
+            companion_rng_owners=companion_owners)
+        from encounter import Encounter
+        encounters = {event.id: event for event in world.event_history.values()
+                      if type(event) is Encounter}
+        if (selected.id != value["selected_encounter_id"]
+                or set(encounters) != set(ids)):
+            raise NativeSaveRejected("native Save graph Encounter roots differ")
+        from transactional_progression import _BINDINGS
+        for row in rows:
+            saved = encounters[row["encounter_id"]]
+            binding = _BINDINGS.get(id(saved))
+            if binding is None or binding.encounter() is not saved:
+                raise NativeSaveRejected("restored Encounter RNG ownership is missing")
+            if _rng_json(binding.rng_owner.state if hasattr(binding.rng_owner, "state")
+                         else binding.rng_owner.getstate()) != row["rng_state"]:
+                raise NativeSaveRejected("restored Encounter RNG differs from its Save row")
+            log = row["history"]
+            receipts = saved.__dict__.get("_atomic_interval_history")
+            if log is None:
+                if (receipts or saved.time != saved.start_time
+                        or saved.last_processed_boundary != saved.time):
+                    raise NativeSaveRejected(
+                        "history-free native Encounter is not at its initial boundary")
+                native_history.NativeHistoryRecorder.restore_pending(saved)
+                continue
+            expected_log = native_history.upgrade(log)
+            expected_wire = native_history.encode(expected_log)
+            initial = expected_log["initial"]
+            actual_log = native_history.capture(
+                saved, initial_schedule=initial["initial_schedule"],
+                initial_schedule_available=initial.get(
+                    "initial_schedule_available", False))
+            actual_wire = native_history.encode(actual_log)
+            if actual_wire != expected_wire:
+                raise NativeSaveRejected(
+                    "restored native Encounter disagrees with its saved history")
+            native_history.NativeHistoryRecorder.restore(
+                saved, actual_log, current_history=actual_wire)
+        return world, selected, selected_rng
+    except NativeSaveRejected:
+        raise
+    except Exception as exc:
+        raise NativeSaveRejected(f"native Save restoration refused: {exc}") from exc
+
+
+def _load_v1_save(wire):
     """Strictly restore an exact native graph and verify its historical view."""
     if type(wire) is not bytes or not wire or len(wire) > MAX_BYTES:
         raise NativeSaveRejected("native Save is empty or exceeds the portable size limit")
@@ -119,7 +313,7 @@ def load_save(wire):
         raise NativeSaveRejected("native Save is malformed JSON") from exc
     if (type(value) is not dict
             or set(value) != {"schema", "graph_b64", "history", "sha256"}
-            or value["schema"] != SCHEMA):
+            or value["schema"] != LEGACY_SCHEMA):
         raise NativeSaveRejected("native Save schema differs")
     unsigned = {key: item for key, item in value.items() if key != "sha256"}
     if (type(value["sha256"]) is not str

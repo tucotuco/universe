@@ -651,7 +651,7 @@ def _walk_refs(value, refs):
             _walk_refs(row, refs)
 
 
-def restore(envelope, *, native=False):
+def restore(envelope, *, native=False, companion_rng_owners=None):
     """Materialize an exact private graph and bind ordinary native progression."""
     from checkpoint_inventory import _TYPES
     from atomic_publication import RNGCursor
@@ -661,6 +661,12 @@ def restore(envelope, *, native=False):
     from action_choice import ChoiceBook, _Accepted, declaration
     from transactional_progression import (_bind_restored_arena_progression,
         _unbind_restored_arena_progression)
+
+    if companion_rng_owners is None:
+        companion_rng_owners = {}
+    _need(type(companion_rng_owners) is dict
+          and all(type(key) is str and key for key in companion_rng_owners),
+          'native companion RNG owner map is malformed')
 
     _validate_inventory(envelope, native=native)
     _validate_arena_field_schema(envelope, require_required=True,
@@ -799,6 +805,9 @@ def restore(envelope, *, native=False):
     world._reproduction_group_registry = ReproductionGroupRegistry(world)
     encounters = [value for value in cache.values()
                   if type(value) is Encounter]
+    encounter_ids = {saved.id for saved in encounters}
+    _need(set(companion_rng_owners) <= encounter_ids,
+          'native companion RNG map names an unknown Encounter')
     for saved_encounter in encounters:
         saved_encounter._transactional_mode = None
         saved_encounter._active_fatigue_frame = None
@@ -907,6 +916,7 @@ def restore(envelope, *, native=False):
         and not encounter.finished_action_list and not encounter.cancelled_action_list
         and not book._choices and encounter.arena_activation is None
         and encounter.arena_movement_activation is None)
+    bound_encounters = []
     try:
         # Native Saves are resumable simulation state, including a pristine
         # pre-Choice Encounter. Bind that exact initial state to its restored
@@ -915,11 +925,21 @@ def restore(envelope, *, native=False):
         # pristine, nontransactional coexistence behavior.
         if native or not pristine:
             _bind_restored_arena_progression(encounter, rng_owner, _ARENA_RESTORE_AUTHORITY)
+            bound_encounters.append(encounter)
+        for saved_encounter in encounters:
+            if saved_encounter is encounter:
+                continue
+            owner = companion_rng_owners.get(saved_encounter.id)
+            if owner is not None:
+                _bind_restored_arena_progression(
+                    saved_encounter, owner, _ARENA_RESTORE_AUTHORITY)
+                bound_encounters.append(saved_encounter)
         for saved_encounter in encounters:
             if saved_encounter.__dict__.get('_atomic_interval_history'):
                 inspect_encounter(saved_encounter)
     except Exception:
-        _unbind_restored_arena_progression(encounter, _ARENA_RESTORE_AUTHORITY)
+        for bound in reversed(bound_encounters):
+            _unbind_restored_arena_progression(bound, _ARENA_RESTORE_AUTHORITY)
         from atomic_publication import (_unregister_arena_restored_receipts,
                                         _unregister_arena_restored_disarm_landings)
         for saved_encounter in encounters:

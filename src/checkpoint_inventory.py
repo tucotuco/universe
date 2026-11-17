@@ -309,15 +309,13 @@ def _rng_data(value):
     raise CheckpointRejected('unsupported native RNG state')
 
 
-def _validate_native_companion_encounters(world, selected):
-    """Admit only pristine, separately owned companion Encounters in a native Save.
-
-    The public native Save API is scoped to one Encounter and serializes the
-    owning Universe registry. Until independent per-Encounter RNG/history
-    records are present, another progressed Encounter cannot be silently
-    treated as part of the selected Encounter's save.
-    """
+def _validate_native_companion_encounters(world, selected, selected_rng_owner):
+    """Validate every registered Encounter as independently resumable state."""
     from encounter import Encounter
+    from encounter_inspection import _idle
+    from interval_staging import _preflight, _rng_input
+    from transactional_progression import (_BINDINGS, _all_declarations,
+                                           mode_of)
     events = world.event_history
     encounters = [event for event in events.values() if type(event) is Encounter]
     books = world.__dict__.get('_choice_books')
@@ -329,33 +327,30 @@ def _validate_native_companion_encounters(world, selected):
              'Universe Encounter/ChoiceBook ownership registry differs')
     _require(selected in encounters and events.get(selected.id) is selected,
              'selected native Encounter is missing from the Universe registry')
-    for companion in encounters:
-        if companion is selected:
-            continue
-        book = companion._choice_book
-        _require(type(book.encounter) is Encounter and book.encounter is companion,
-                 'companion Encounter ChoiceBook owner differs')
-        _require(not companion.arena_activation_enabled
-                 and companion.arena_activation is None
-                 and companion.arena_movement_activation is None
-                 and companion.time == companion.start_time
-                 and companion.last_processed_boundary == math.floor(companion.start_time)
-                 and companion.active_boundary is None
-                 and companion.boundary_fault is None
-                 and not companion.pending_action_list
-                 and not companion.finished_action_list
-                 and not companion.cancelled_action_list
-                 and not companion.__dict__.get('_atomic_interval_history')
-                 and not companion.fatigue_frame_history
-                 and not book._choices and not book._drafts
-                 and not book._closed_drafts and not book._registered
-                 and not book._reservations and not book._states
-                 and not book._tokens,
-                 'only a pristine companion Encounter without prior Actions is supported')
-        from transactional_progression import _BINDINGS
-        binding = _BINDINGS.get(id(companion))
-        _require(binding is None or binding.encounter() is not companion,
-                 'companion Encounter RNG ownership is not represented in this Save')
+    owners = set()
+    for saved in encounters:
+        book = saved._choice_book
+        _require(type(book.encounter) is Encounter and book.encounter is saved,
+                 'Encounter ChoiceBook owner differs')
+        binding = _BINDINGS.get(id(saved))
+        bound_owner = (binding.rng_owner if binding is not None
+                       and binding.encounter() is saved else None)
+        owner = ((selected_rng_owner or bound_owner) if saved is selected
+                 else bound_owner)
+        mode = mode_of(saved)
+        _require(owner is not None and mode == 'transactional',
+                 'every registered Encounter requires an independently bound native RNG: '
+                 + saved.id + ' (' + mode + ')')
+        role, identity, _state = _rng_input(saved, None, owner)
+        _require(role in ('caller_cursor', 'native_random')
+                 and identity not in owners,
+                 'each registered Encounter requires a distinct private RNG owner')
+        owners.add(identity)
+        _idle(saved)
+        if saved is not selected:
+            _preflight(saved, saved.last_processed_boundary + 1)
+            book.assert_accepted()
+            _all_declarations(saved, saved.last_processed_boundary + 1, owner)
 
 
 def _candidate_seal(candidate):
@@ -409,7 +404,7 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
             _idle(encounter)
         _require(world.event_history.get(encounter.id)is encounter,'Encounter registry identity changed')
         if full_native and native_adapters:
-            _validate_native_companion_encounters(world, encounter)
+            _validate_native_companion_encounters(world, encounter, rng_owner)
         else:
             _require(len(world._choice_books)==1,
                      'multi-Encounter closure has no reviewed ownership adapter')
