@@ -1688,6 +1688,89 @@ print(json.dumps({'times':[r[0].time for r in rows],
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
 
+    def test_native_save_restores_listener_accounts_across_encounters(self):
+        import os
+        import random
+        from personal_history import PersonalHistory
+        from realization import Fact
+        from objective_reality import EpisodeFacts
+
+        world=Universe('native-multi-listener-accounts',library=Library(
+            config_dir=str(ROOT/'src/config')))
+        rows=[];bindings=[]
+        for index,seed in ((0,51),(1,52)):
+            listener_id=world.make_being('Human',f'Listener {index}')
+            speaker_id=world.make_being('Human',f'Speaker {index}')
+            listener=world.get_object_by_id(listener_id);speaker=world.get_object_by_id(speaker_id)
+            listener.set_position(CartesianPosition(0,index*5,0))
+            speaker.set_position(CartesianPosition(1.5,index*5,0))
+            encounter=Encounter(world,10,0,initiated=True,
+                id=f'native-multi-accounts-encounter-{index}')
+            encounter.add_being(listener_id);encounter.add_being(speaker_id)
+            encounter.mark_aware(listener_id,speaker_id)
+            world.add_event(encounter)
+            rng=RNGCursor(random.Random(seed).getstate())
+            encounter.enable_transactional_progression(quiescent=True,rng_owner=rng)
+            topic=f'account-{index}'
+            speaker.personal_history=PersonalHistory(speaker,earliest=-10,
+                known_through=0,nondeclining_skills=())
+            key=speaker.personal_history.episode_key(-1,topic)
+            description=f'native testimony {index}'
+            facts=EpisodeFacts((Fact(key,{'description':description},origin='declared-testimony'),))
+            accounts=[]
+            action=AskAboutPastAction(world,listener_id,speaker_id,0,
+                episode_time=-1,topic=topic,generate=facts,
+                duration=1,received_accounts=accounts)
+            encounter.schedule_action(action);encounter.step(1)
+            self.assertEqual(action.resolution.outcome,'heard')
+            self.assertEqual(len(accounts),1)
+            rows.append((encounter,listener,speaker,rng,action,accounts))
+            bindings.append(RecipientBinding(world,'native-multi-accounts',
+                f'accounts-{index}','in_world_received_accounts',(listener_id,),accounts))
+        wire=export_save(rows[1][0],recipient_bindings=tuple(bindings))
+        for encounter,*_ in rows:
+            encounter.schedule_action(DelayAction(encounter,encounter.being_list[0],
+                defense=0,start_time=encounter.time,id=f'{encounter.id}-continuation'))
+            encounter.step(1)
+        expected={'times':[row[0].time for row in rows],
+            'outcomes':[row[4].resolution.outcome for row in rows],
+            'accounts':[row[5][0].to_dict() for row in rows],
+            'facts':[row[2].personal_history.to_jsonable() for row in rows],
+            'rng':[row[3].state for row in rows],
+            'histories':[hashlib.sha256(native_history.encode(
+                native_history.capture(row[0]))).hexdigest() for row in rows]}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-multi-listener-accounts.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+from encounter import Encounter
+from activities import DelayAction
+import native_history
+from native_persistence import load_path,rng_owner_for
+world,selected,selected_rng=load_path(sys.argv[1])
+encounters={event.id:event for event in world.event_history.values() if type(event)is Encounter}
+assert len(encounters)==2;rows=[]
+for index in range(2):
+ enc=encounters[f'native-multi-accounts-encounter-{index}']
+ action=world.get_event_by_id(sys.argv[index+2])
+ assert action.resolution.outcome=='heard' and len(action.received_accounts)==1
+ speaker=world.get_object_by_id(action.target_id)
+ enc.schedule_action(DelayAction(enc,action.actor_id,defense=0,start_time=enc.time,
+  id=f'{enc.id}-continuation'))
+ enc.step(1);rows.append((enc,action,speaker,rng_owner_for(enc)))
+print(json.dumps({'times':[r[0].time for r in rows],
+ 'outcomes':[r[1].resolution.outcome for r in rows],
+ 'accounts':[r[1].received_accounts[0].to_dict() for r in rows],
+ 'facts':[r[2].personal_history.to_jsonable() for r in rows],
+ 'rng':[r[3].state for r in rows],
+ 'histories':[hashlib.sha256(native_history.encode(native_history.capture(r[0]))).hexdigest()
+  for r in rows]},sort_keys=True))'''
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path),
+                rows[0][4].id,rows[1][4].id],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=60)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))
