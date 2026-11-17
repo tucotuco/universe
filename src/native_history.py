@@ -19,7 +19,9 @@ from weakref import WeakKeyDictionary, ref as weakref
 from checkpoint_fields import FIELD_ADAPTERS
 
 
-SCHEMA = "universe.native-encounter-history/1"
+LEGACY_SCHEMA = "universe.native-encounter-history/1"
+SCHEMA = "universe.native-encounter-history/2"
+SAME_RNG = {"$same_as_previous": True}
 MAX_BYTES = 64 * 1024 * 1024
 MAX_NODES = 10_000_000
 MAX_DEPTH = 128
@@ -294,6 +296,49 @@ def _initial_state(initial):
     }
 
 
+def _rng_record(value, previous, schema=SCHEMA):
+    if schema == SCHEMA and previous is not None and value == previous:
+        return dict(SAME_RNG)
+    return value
+
+
+def rng_state_at(log, boundary):
+    """Return the exact RNG cursor after a committed boundary."""
+    validate(log)
+    if type(boundary) is not int or not 1 <= boundary <= len(log["boundaries"]):
+        raise NativeHistoryRejected("requested native RNG boundary is not committed")
+    current = None
+    for row in log["boundaries"][:boundary]:
+        if row["rng_after"] == SAME_RNG:
+            if current is None:
+                raise NativeHistoryRejected("native RNG reference has no prior state")
+        else:
+            current = row["rng_after"]
+    if current is None:
+        raise NativeHistoryRejected("native RNG state is absent")
+    return current
+
+
+def upgrade(log):
+    """Upgrade legacy repeated-cursor history to the compact current schema."""
+    validate(log)
+    if log["schema"] == SCHEMA:
+        return decode(encode(log))
+    previous = None
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["schema"] = SCHEMA
+    rows = []
+    for original in log["boundaries"]:
+        row = dict(original)
+        row["rng_after"] = _rng_record(row["rng_after"], previous, SCHEMA)
+        previous = original["rng_after"]
+        rows.append(row)
+    body["boundaries"] = rows
+    result = _seal(body)
+    validate(result)
+    return result
+
+
 def _seal(body):
     value = dict(body)
     value["sha256"] = hashlib.sha256(_canonical(value)).hexdigest()
@@ -331,6 +376,7 @@ def capture(encounter):
     prior = _initial_state(initial)
     boundaries = []
     previous_boundary = None
+    previous_rng = None
     for receipt in receipts:
         if (receipt.encounter_id != encounter.id
                 or type(receipt.boundary) is not int
@@ -359,9 +405,10 @@ def capture(encounter):
                        "effects": payload["effects"],
                        "starts": payload["starts"],
                        "participants": payload["participants"]},
-            "rng_after": payload["rng_after"],
+            "rng_after": _rng_record(payload["rng_after"], previous_rng),
             "state_sha256": hashlib.sha256(_canonical(state)).hexdigest(),
         })
+        previous_rng = payload["rng_after"]
         prior = state
         previous_boundary = receipt.boundary
     body = {"schema": SCHEMA, "initial": initial,
@@ -423,7 +470,9 @@ def append_committed(log, encounter):
         "recipients": payload["recipients"],
         "projectile_states": payload["projectile_states"],
     }
+    log = upgrade(log)
     previous = state_at(log, log["latest_boundary"])
+    previous_rng = rng_state_at(log, log["latest_boundary"])
     row = {
         "boundary": expected,
         "start": payload["start"], "end": payload["end"],
@@ -434,7 +483,7 @@ def append_committed(log, encounter):
                     "effects": payload["effects"],
                     "starts": payload["starts"],
                     "participants": payload["participants"]},
-        "rng_after": payload["rng_after"],
+        "rng_after": _rng_record(payload["rng_after"], previous_rng),
         "state_sha256": hashlib.sha256(_canonical(state)).hexdigest(),
     }
     body = {key: value for key, value in log.items() if key != "sha256"}
@@ -484,7 +533,7 @@ class NativeHistoryRecorder:
     @classmethod
     def restore(cls, encounter, log, *, current_history=None):
         """Resume recording from an authenticated Save history after Load."""
-        validate(log)
+        log = upgrade(log)
         actual_history = (encode(capture(encounter)) if current_history is None
                           else current_history)
         if (log['initial']['encounter_id'] != encounter.id
@@ -550,7 +599,7 @@ def validate(log):
         raise NativeHistoryRejected("native history envelope schema differs")
     unsigned = dict(log)
     digest = unsigned.pop("sha256")
-    if (log["schema"] != SCHEMA or type(digest) is not str
+    if (log["schema"] not in (LEGACY_SCHEMA, SCHEMA) or type(digest) is not str
             or hashlib.sha256(_canonical(unsigned)).hexdigest() != digest):
         raise NativeHistoryRejected("native history integrity digest differs")
     _measure(unsigned)
@@ -567,12 +616,22 @@ def validate(log):
         raise NativeHistoryRejected("native history boundaries are not an array")
     seen_actions = set()
     seen_effects = set()
+    prior_rng = None
     for expected, row in enumerate(boundaries, 1):
         if (type(row) is not dict or set(row) != {
                 "boundary", "start", "end", "changes", "events", "rng_after",
                 "state_sha256"} or type(row["boundary"]) is not int
                 or row["boundary"] != expected):
             raise NativeHistoryRejected("native history boundary is missing, repeated, or malformed")
+        if row["rng_after"] == SAME_RNG:
+            if log["schema"] != SCHEMA or prior_rng is None:
+                raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
+        else:
+            if (type(row["rng_after"]) is not dict
+                    or set(row["rng_after"]) != {"$tuple"}
+                    or type(row["rng_after"]["$tuple"]) is not list):
+                raise NativeHistoryRejected("native history RNG cursor has an invalid shape")
+            prior_rng = row["rng_after"]
         state = _apply(state, row["changes"])
         if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
             raise NativeHistoryRejected("native history reconstructed state digest differs")

@@ -35,6 +35,51 @@ Added explicit host recipient bindings for LocationEvidenceLedger and ObjectObse
 
 A native Search at an explicitly represented `arena_search_accessible=True` target succeeds; a subsequent Listen at an explicitly `arena_audible=True` target fails from a declared roll. Saving with the Listen Choice pending and resuming in a fresh OS process preserves the committed Search awareness, exact Action IDs/outcomes, RNG, and normalized complete history equal to uninterrupted native execution. No Arena UI/server or `npcgen` is imported by native child processes.
 
+### Native history `/2` and extended headless scale verification — 2026-11-16
+
+#### Problems first
+
+- U-PER-SCALE-001 remains ACTIVE. Native Save still serializes the whole receipt/Target runtime graph beside fact history; native historical query only covers tested inspection projections; no ordinary `Universe` or Arena Save/Load cutover, complete Action/state-family parity, crash recovery, or native `/10`–`/12` migration is demonstrated.
+- The prior 200-quiet-boundary probe showed each row repeated the same roughly 6.7 KB RNG cursor. This was representational redundancy, not a rule gap. Native history `/2` stores a strict reference when a boundary's RNG cursor is unchanged, and `rng_state_at` recovers the exact cursor.
+- `/1` history remains accepted and is upgraded losslessly to `/2` before continuation. A fresh Load of a `/1` outer native Save upgrades, resumes automatic post-publication recording, continues with the same Action ID, and produces the same `/2` Save bytes as uninterrupted execution.
+- No rule, authorization, or external blocker is outstanding. The full receipt graph, complete general historical readers, production integration, and other all-family work remain engineering requirements.
+
+#### Measured 64-Action native continuation by registry size
+
+The reproducible [`native_persistence_scale.py`](../../examples/native_persistence_scale.py) resolves 64 lawful Dagger Feints against an explicitly positioned and aware native target, saves after 128 resolved intervals, restores in a fresh OS process, and continues with the same Delay ID. It verifies complete committed Action count, Being registry size, same-Encounter history/ID digest, RNG, HP and time against uninterrupted execution. Only the first two registered Beings are Encounter participants; extra Beings are realized Universe registry entries. No Arena, browser/session, or `npcgen` imports occur in the child process.
+
+| Registered Beings | Actions / boundaries | Graph bytes | Fact-history bytes | Total Save bytes | Export seconds | Fresh-process load+continue seconds | Peak RSS (macOS bytes) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 64 / 129 | 4,836,836 | 1,232,823 | 7,682,086 | 4.483 | 6.995 | 254,787,584 |
+| 20 | 64 / 129 | 5,084,609 | 1,232,823 | 8,012,450 | 4.582 | 7.147 | 177,848,320 |
+| 200 | 64 / 129 | 7,503,051 | 1,232,823 | 11,237,038 | 5.400 | 7.310 | 245,071,872 |
+
+The 64-Action workload continued exactly in all three fresh processes. Fact-history bytes are constant across registry sizes while graph/Save size rises with registered Beings. At 2 Beings, however, the runtime graph is 3.92 times the fact-history bytes; 7.68 MB total is not the requested compact architecture.
+
+#### Quiet-boundary growth before and after RNG-reference encoding
+
+The same 200-boundary no-Action fixture was measured under the old `/1` representation and the new `/2`; strict load and an ordinary Delay at boundary 201 matched uninterrupted control in both runs.
+
+| Quiet boundaries | History version | Graph bytes | Fact-history bytes | Total Save bytes | Scenario seconds | Export seconds | Fresh-process load+continue seconds |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 200 | `/1` repeated RNG | 4,837,613 | 1,547,608 | 7,997,907 | 40.694 | 2.960 | 4.324 |
+| 200 | `/2` prior-cursor reference | 4,837,822 | 212,318 | 6,662,897 | 41.213 | 2.866 | 4.407 |
+
+The `/2` fact history is **86.28% smaller** and its total Save **16.69% smaller** for the same quiet run. This removes repeated RNG payload; it does not yet replace the receipt/Target runtime graph with compact state or merge quiet boundaries into spans.
+
+#### Focused verification
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` | 16 passed in 45.383s |
+| `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` | 11 passed in 5.977s |
+| `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_inventory.py'` | 30 passed in 12.179s |
+| `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` | 48 passed in 18.431s |
+| `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` | 3 passed |
+| Selected `/12` archive integrity/corruption, pinned v4, and fresh-process v10/v11 migration tests | 5 passed in 6.962s; Python `zipfile` emitted its expected duplicate-entry warning in the corruption fixture |
+
+The Arena `/12` compatibility checks above remain evidence for the legacy Arena reader; they do **not** demonstrate migration through the separate native Save API. Native `/1` to `/2` upgrade is instead covered by `test_native_history.py` and `test_native_persistence.py`. This continuation has no standalone native `/10`–`/12` compatibility claim.
+
 ## Latest continuation — revised full native-history bridge
 
 ### Problems first

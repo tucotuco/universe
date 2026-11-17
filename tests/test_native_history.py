@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT / "examples"))
 import encounter_delta_headless
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
-                            NativeHistoryRecorder, write, _plain)
+                            NativeHistoryRecorder, write, rng_state_at, upgrade,
+                            LEGACY_SCHEMA, SAME_RNG, _seal, _plain)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -61,6 +62,36 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(set(state["entities"]), set(expected))
             self.assertTrue(all(row["before"] is True or row["before"] is False
                                 for row in delta["changes"]))
+
+    def test_unchanged_rng_cursor_is_referenced_and_legacy_history_upgrades(self):
+        log = decode(self.wire)
+        self.assertEqual(log['schema'], 'universe.native-encounter-history/2')
+        previous = None
+        for boundary, row in enumerate(log['boundaries'], 1):
+            current = rng_state_at(log, boundary)
+            if current == previous:
+                self.assertEqual(row['rng_after'], SAME_RNG)
+            else:
+                self.assertNotEqual(row['rng_after'], SAME_RNG)
+            previous = current
+
+        legacy = copy.deepcopy(log)
+        legacy['schema'] = LEGACY_SCHEMA
+        previous = None
+        for row in legacy['boundaries']:
+            if row['rng_after'] == SAME_RNG:
+                row['rng_after'] = previous
+            previous = row['rng_after']
+        legacy = _seal({key: value for key, value in legacy.items()
+                        if key != 'sha256'})
+        self.assertTrue(validate(legacy))
+        self.assertEqual(encode(upgrade(legacy)), self.wire)
+
+        corrupt = copy.deepcopy(log)
+        corrupt['boundaries'][0]['rng_after'] = dict(SAME_RNG)
+        with self.assertRaisesRegex(NativeHistoryRejected, 'RNG reference'):
+            validate(_seal({key: value for key, value in corrupt.items()
+                            if key != 'sha256'}))
 
     def test_wire_omits_process_pointer_anchors(self):
         forbidden = {"object_identity", "ledger_identity", "target_anchors", "action_anchors"}

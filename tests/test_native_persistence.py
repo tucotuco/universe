@@ -901,6 +901,38 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         self.assertEqual(actual['actions'], expected['actions'])
         self.assertEqual(actual['effects'], expected['effects'])
 
+    def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
+        from native_history import LEGACY_SCHEMA, SAME_RNG, _seal
+        from native_persistence import _canonical
+        demo = encounter_delta_headless.build_demo(until=4)
+        original = demo['encounter']
+        wire = export_save(original)
+        body = json.loads(wire)
+        legacy = body['history']
+        legacy['schema'] = LEGACY_SCHEMA
+        previous = None
+        for row in legacy['boundaries']:
+            if row['rng_after'] == SAME_RNG:
+                row['rng_after'] = previous
+            previous = row['rng_after']
+        body['history'] = _seal({key: value for key, value in legacy.items()
+                                 if key != 'sha256'})
+        unsigned = {key: value for key, value in body.items() if key != 'sha256'}
+        body['sha256'] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+        migrated_world, migrated, _ = load_save(_canonical(body))
+        self.assertEqual(migrated.id, original.id)
+        self.assertEqual(native_history.current_recording(migrated)['schema'],
+                         'universe.native-encounter-history/2')
+        action_id = 'native-history-v1-migrated-delay'
+        actor_id = original.being_list[1]
+        for encounter in (original, migrated):
+            encounter.schedule_action(DelayAction(
+                encounter, actor_id, defense=0, start_time=4, id=action_id))
+            encounter.step(1)
+        self.assertEqual(native_history.encode(native_history.capture(original)),
+                         native_history.encode(native_history.capture(migrated)))
+        self.assertEqual(export_save(original), export_save(migrated))
+
 
 if __name__ == "__main__":
     unittest.main()

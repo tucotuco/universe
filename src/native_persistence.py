@@ -120,7 +120,7 @@ def load_save(wire):
             raise NativeSaveRejected("native graph payload is not canonical base64")
         from native_graph_snapshot import decode as decode_graph, restore as restore_graph
         native_history.validate(value["history"])
-        expected_history = native_history.encode(value["history"])
+        expected_history = native_history.encode(native_history.upgrade(value["history"]))
         world, encounter, rng_owner = restore_graph(
             decode_graph(graph_wire, native=True), native=True)
         actual_history = native_history.encode(native_history.capture(encounter))
