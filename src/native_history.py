@@ -1842,6 +1842,33 @@ class NativeHistoryQuery:
         self._boundary(boundary)
         return self._copy(self.state_at(boundary)["objective_use"])
 
+    def schedule_at(self, boundary):
+        """Return the detached committed native queue and Choice projection."""
+        self._boundary(boundary)
+        return self._copy(self.state_at(boundary)["schedule"])
+
+    def action_state_at(self, action_id, boundary):
+        """Return a registered Action's status, or ``None`` if not present."""
+        if type(action_id) is not str or not action_id:
+            raise NativeHistoryRejected("Action state requires a stable identity")
+        schedule = self.schedule_at(boundary)
+        fields_value = schedule.get("fields", {})
+        states = fields_value.get("action_states", {})
+        if type(states) is not dict:
+            raise NativeHistoryRejected("native schedule Action states are malformed")
+        return states.get(action_id)
+
+    def choice_state_at(self, choice_id, boundary):
+        """Return a retained Choice status, or ``None`` if it is not present."""
+        if type(choice_id) is not str or not choice_id:
+            raise NativeHistoryRejected("Choice state requires a stable identity")
+        schedule = self.schedule_at(boundary)
+        fields_value = schedule.get("fields", {})
+        states = fields_value.get("choice_states", {})
+        if type(states) is not dict:
+            raise NativeHistoryRejected("native schedule Choice states are malformed")
+        return states.get(choice_id)
+
     def target_history_at(self, target_id, boundary=None):
         """Return ordered TargetCandidate facts through a checked boundary."""
         if boundary is None:
@@ -2139,6 +2166,21 @@ def objective_at(log, boundary):
 def objective_use_at(log, boundary):
     """Return detached objective-fact use rows at a committed boundary."""
     return NativeHistoryQuery(log).objective_use_at(boundary)
+
+
+def schedule_at(log, boundary):
+    """Return the detached committed scheduler/Choice projection."""
+    return NativeHistoryQuery(log).schedule_at(boundary)
+
+
+def action_state_at(log, action_id, boundary):
+    """Return one committed scheduled Action status, when present."""
+    return NativeHistoryQuery(log).action_state_at(action_id, boundary)
+
+
+def choice_state_at(log, choice_id, boundary):
+    """Return one committed Choice status, when present."""
+    return NativeHistoryQuery(log).choice_state_at(choice_id, boundary)
 
 
 def target_history_at(log, target_id, boundary=None):

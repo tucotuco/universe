@@ -35,7 +35,8 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             INITIAL_RNG_SCHEMA, SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
                             entity_at, entity_history_at, objective_at,
-                            objective_use_at, _plain, _expand_rows, _target_candidates)
+                            objective_use_at, schedule_at, action_state_at,
+                            choice_state_at, _plain, _expand_rows, _target_candidates)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -143,6 +144,33 @@ class NativeHistoryTests(unittest.TestCase):
         detached = query.objective_at(1)
         detached.clear()
         self.assertTrue(query.objective_at(1))
+
+    def test_schedule_query_preserves_finished_and_future_accepted_choice_states(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        fixture.enable()
+        from activities import DelayAction, RunAction
+        first = RunAction(fixture.world, fixture.a.id, 0, 1, .5, experience=1)
+        second = DelayAction(fixture.enc, fixture.b.id, defense=0, start_time=0)
+        future = RunAction(fixture.world, fixture.c.id, 3, 1, .5, experience=1)
+        for action in (first, second, future):
+            fixture.enc.schedule_action(action)
+        fixture.enc.step(1)
+        log = capture(fixture.enc)
+        query = NativeHistoryQuery(log)
+        expected = _plain(fixture.enc._atomic_interval_history[0].inspection.schedule)
+        self.assertEqual(query.schedule_at(1), expected)
+        self.assertEqual(schedule_at(log, 1), expected)
+        fields_value = expected["fields"]
+        self.assertEqual(query.action_state_at(first.id, 1), "finished")
+        self.assertEqual(query.action_state_at(second.id, 1), "finished")
+        self.assertIsNone(query.action_state_at(future.id, 1))
+        accepted = [identity for identity, state in fields_value["choice_states"].items()
+                    if state == "accepted"]
+        self.assertTrue(accepted)
+        self.assertEqual(query.choice_state_at(accepted[0], 1), "accepted")
+        self.assertEqual(choice_state_at(log, accepted[0], 1), "accepted")
+        self.assertIsNone(query.choice_state_at("unregistered-choice", 1))
 
     def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
         log = decode(self.wire)
