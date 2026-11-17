@@ -1783,10 +1783,22 @@ Added `test_native_being_abilities_states_speed_and_posture_restore`. It authors
 - From `tests/`, `PYTHONPATH=.:../src:../examples ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_being_abilities_states_speed_and_posture_restore test_native_persistence.NativePersistenceTests.test_running_action_history_and_pending_continuation_in_fresh_process test_persistence_capability_matrix -v` — **5 passed / 4.398s**.
 - `git diff --check` — passed.
 
-The field rows now cite the focused source and test. This verifies these configured Being fields for native restoration and continuation and checks abilities/state/posture through the supported historical EntityInspection query; it does not establish every legal combination or claim movement speed is a field of the narrower EntityInspection projection. The complete capability matrix, all-family historical read parity, durable journal recovery, compatibility/security breadth and production application Save/Load cutover remain open implementation work. U-PER-SCALE-001 remains ACTIVE with no rules or external blocker identified. The initial current-state test and matrix update are committed as `fe5c04c`; the historical query extension plus reconciliation of the already-tested mid-Run Skill/Practice families are under the current scoped audit and commit.
+The field rows now cite the focused source and test. This verifies these configured Being fields for native restoration and continuation and checks abilities/state/posture through the supported historical EntityInspection query; it does not establish every legal combination or claim movement speed is a field of the narrower EntityInspection projection. The complete capability matrix, all-family historical read parity, durable journal recovery, compatibility/security breadth and production application Save/Load cutover remain open implementation work. U-PER-SCALE-001 remains ACTIVE with no rules or external blocker identified. The initial current-state test and matrix update are committed as `fe5c04c`; the historical query and mid-Run Skill/Practice reconciliation are committed as `c85968d`; the nonparticipant scenario and expanded registry matrix rows are under the current scoped audit and commit.
 
 ### Execution interval
 
 - Start: `2026-11-17T22:55:59Z`.
 - End: to be recorded immediately before this execution interval's closeout.
 - Elapsed: to be calculated from the recorded timestamps.
+
+
+## Problems-first — preserve registered Universe entities outside an Encounter
+
+The matrix requires native Saves to preserve Universe-level state without imposing an Arena participant allowlist. Existing scenarios contained weapons/scenery outside selected Encounter membership, but no focused fresh-process assertion proved a separate Being and standalone Object remain registered, identity-stable, and untouched while the selected Encounter continues.
+
+Added `test_native_save_preserves_registered_nonparticipants_in_fresh_process`. It registers an INT 14, HP 23 Being at an authored position and a standalone Linen pillow at a separate position, leaves both outside the Encounter membership lists, strictly saves, and loads in a new OS process. The child confirms their IDs, exact shared definition identities, current properties, and continued nonparticipation, then runs an ordinary native Delay for a participant. The test compares the Universe/Encounter IDs, participant set, outsider state, RNG, Action receipt and complete native-history digest against uninterrupted execution.
+
+- From `tests/`, `PYTHONPATH=.:../src:../examples ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_preserves_registered_nonparticipants_in_fresh_process -v` — **1 passed / 2.104s**; the corrected combined Being, Run/Practice, nonparticipant and matrix gate — **6 passed / 5.922s**. An initial combined matrix run rejected status descriptions that omitted the test-enforced Arena-schema classification phrase; the descriptions were corrected and the combined suite rerun green.
+- `git diff --check` — passed.
+
+The Being/Universe/ObjectRegistry/standalone Object matrix rows now cite this exact scenario; the universe still persists the broader native registry rather than filtering to Encounter members. This closes only the nonparticipant-preservation case, not the entire optional field family, graph-free historical reconstruction, receipt duplication, durable recovery, security/legacy breadth or application cutover. U-PER-SCALE-001 remains ACTIVE and no external or rules blocker is identified. The test/matrix/report/TASKS increment remains pending scoped commit.

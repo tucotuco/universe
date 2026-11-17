@@ -2306,6 +2306,67 @@ print(json.dumps({'encounter_id':encounter.id,'time':encounter.time,
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
 
+    def test_native_save_preserves_registered_nonparticipants_in_fresh_process(self):
+        world,encounter,rng,actor,_target,_weapon_id=self._combat_encounter()
+        outsider_id=world.make_being('Human','Registered nonparticipant')
+        outsider=world.get_object_by_id(outsider_id)
+        outsider.set_position(CartesianPosition(8,9,1))
+        outsider.set_hit_points(23)
+        outsider.set_ability('INT',14)
+        scenery_id=world.make_object('Linen pillow','Uninvolved scenery')
+        scenery=world.get_object_by_id(scenery_id)
+        scenery.set_position(CartesianPosition(-4,2,0))
+        self.assertNotIn(outsider_id,encounter.being_list)
+        self.assertNotIn(scenery_id,encounter.non_being_object_list)
+        encounter.step(1)
+        wire=export_save(encounter)
+        continuation=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
+            id='native-nonparticipant-continuation')
+        encounter.schedule_action(continuation);encounter.step(1)
+        expected={'world_id':world.id,'encounter_id':encounter.id,'time':encounter.time,
+            'participants':list(encounter.being_list),'outsider':{
+                'id':outsider.id,'position':outsider.get_position().as_tuple(),
+                'hp':outsider.get_hit_points(),'intelligence':outsider.INT(),
+                'definition':outsider.original.obj_type},
+            'scenery':{'id':scenery.id,'position':scenery.get_position().as_tuple(),
+                'definition':scenery.original.obj_type},
+            'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'actions':list(encounter._atomic_interval_history[-1].action_ids)}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-nonparticipants.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+outsider=world.get_object_by_id(sys.argv[2]);scenery=world.get_object_by_id(sys.argv[3])
+actor=encounter.get_being(encounter.being_list[0])
+assert outsider.id not in encounter.being_list
+assert scenery.id not in encounter.non_being_object_list
+assert outsider.original is world.library.get_being_definition('Human')
+assert scenery.original is world.library.get_object_definition('Linen pillow')
+action=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
+ id='native-nonparticipant-continuation')
+encounter.schedule_action(action);encounter.step(1)
+print(json.dumps({'world_id':world.id,'encounter_id':encounter.id,
+ 'time':encounter.time,'participants':list(encounter.being_list),
+ 'outsider':{'id':outsider.id,'position':outsider.get_position().as_tuple(),
+  'hp':outsider.get_hit_points(),'intelligence':outsider.INT(),
+  'definition':outsider.original.obj_type},
+ 'scenery':{'id':scenery.id,'position':scenery.get_position().as_tuple(),
+  'definition':scenery.original.obj_type},'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(
+  native_history.capture(encounter))).hexdigest(),
+ 'actions':list(encounter._atomic_interval_history[-1].action_ids)},sort_keys=True))'''
+            import os
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path),
+                outsider_id,scenery_id],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=45)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
+
     def test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()
