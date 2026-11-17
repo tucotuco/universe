@@ -78,6 +78,8 @@ The same Arena gate was also unnecessary for `PickUpAction`: the native evaluato
 
 The readiness lifecycle also now has an Arena-independent proof. A fresh process restores a pending native Ready, commits its effect, and matches preparation/RNG/history; after that, another pending native Strike is restored and resolved, consuming the same preparation and matching the uninterrupted state. The source-linked `ReadyPreparationAction`, `ReadyPreparationEffect`, and `ReadyConsumptionEffect` rows point to this test. This remains selected evidence; all supported Action variants and query consumers are still not closed.
 
+Native Object-strike persistence now has a consequential path as well. With ordinary seed 5, the existing hit/damage evaluator applies the authored Object's hardness and changes HP from 6 to 2. The saved pending Action restores in a fresh process and yields identical identity, Object damage effect, HP, RNG and history. The fixture was narrowed after a first draft made the held weapon an extra Encounter obstacle; `physical_path()` correctly refused that unmodeled path. The accepted test now leaves the same weapon in its represented carried/held state without registering it as an independent Encounter obstacle, and explicitly asserts a clear path before scheduling. No uncertainty rule was weakened. The matrix describes this as one `strike object` event profile only; broader base `Action.event_type` closure remains open.
+
 
 ## 2026-11-16 continuation addendum
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -12,6 +13,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "examples")]
 
+from action import Action
 from activities import PickUpAction, ReadyWeaponAction
 from library import Library
 from arena_hex_map import ArenaHexLayout, HexAddress
@@ -19,7 +21,10 @@ from melee_combat import MeleeStrike
 from native_history import capture, encode
 from native_persistence import export_save
 from native_scenario import NativeScenarioBuilder
+from object import ObjectDefinition, ObjectInstance
+from spatial.state import CartesianPosition
 from strategy import Strategy
+from melee_combat import effective_melee_reach_meters
 from weapon import author_worn_sheath_draw_location, native_weapon_draw_location
 
 
@@ -369,6 +374,84 @@ print(json.dumps({'time':enc.time,'ready_id':ready_id,'strike_id':strike.id,
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path), attacker.id,
                  defender.id, weapon.id, ready.id, strike.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
+    def test_headless_object_strike_hit_and_damage_restore_with_exact_facts(self):
+        builder = NativeScenarioBuilder(
+            "native-object-strike", Library(config_dir=str(ROOT / "src/config")),
+            seed=5, encounter_id="native-object-strike-encounter")
+        attacker = builder.add_being("Human", "Object Striker", position=(0, 0, 0),
+                                     radius=.25, hit_points=100)
+        weapon = builder.make_weapon(attacker.id, "Longsword", "Object-strike Longsword",
+                                     hand="right hand")
+        target = ObjectInstance(ObjectDefinition(
+            "authored hardwood save target", 12, 12, 12, 20, 1, 2, 6),
+            name="Native hardwood target")
+        target.set_position(CartesianPosition(.5, 0, 0))
+        builder.world.add_object(target)
+        builder.add_object(target.id)
+        builder.mark_aware(attacker.id, target.id)
+        path = builder.encounter.physical_path(attacker.id, target.id)
+        self.assertEqual(path.intersections, ())
+        self.assertEqual(path.unmodeled_entity_ids, ())
+        builder.enable()
+        action = Action(builder.world, 0, 1, "strike object", attacker.id,
+                        target.id, weapon.id, id="native-object-strike-action")
+        action.object_motion = "thrust"
+        action.reach = effective_melee_reach_meters(attacker.current, weapon.current)
+        action.end_time = max(1, math.ceil(weapon.Tt()))
+        builder.schedule(action)
+        pending = export_save(builder.encounter)
+        builder.step(action.end_time - action.start_time)
+        receipt = builder.encounter.inspect_committed(action.end_time).action(action.id)
+        damage = [effect for effect in receipt.facts.effects
+                  if getattr(effect, "component", None) == "object"]
+        self.assertEqual(receipt.facts.outcome, "normal")
+        self.assertEqual(len(damage), 1)
+        self.assertEqual(target.hit_points(), 2)
+        expected = {
+            "time": builder.encounter.time,
+            "action_id": action.id,
+            "object_id": target.id,
+            "outcome": receipt.facts.outcome,
+            "object_damage": damage[0].amount,
+            "object_hp": target.hit_points(),
+            "position": target.get_position().as_tuple(),
+            "parent": target.parent_container_id,
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+object_id,action_id=sys.argv[2:]
+target=world.get_object_by_id(object_id)
+choice=enc.choice_for_action(action_id)
+assert choice.state=='accepted'
+action=next(member.action for member in enc._choice_book._choices[choice.id].members
+            if member.action.id==action_id)
+assert action.id==action_id and target.hit_points()==6
+enc.step(int(action.end_time-enc.time))
+receipt=enc.inspect_committed(int(action.end_time)).action(action.id)
+damage=[effect for effect in receipt.facts.effects
+        if getattr(effect,'component',None)=='object']
+print(json.dumps({'time':enc.time,'action_id':action.id,'object_id':target.id,
+ 'outcome':receipt.facts.outcome,'object_damage':damage[0].amount,
+ 'object_hp':target.hit_points(),'position':target.get_position().as_tuple(),
+ 'parent':target.parent_container_id,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-object-strike.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id, action.id],
+                cwd=directory,
                 env={**os.environ,
                      "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=60)
