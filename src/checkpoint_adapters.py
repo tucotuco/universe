@@ -222,12 +222,13 @@ class NativeInventory(_Inventory):
     types = _TYPES | {ConditionalAttributes}
 
     def __init__(self, world, encounter, bindings, *, rng_owner=None,
-                 full_native=False):
+                 full_native=False, compact_native_target_history=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
         self.rng_owner=rng_owner
         self.full_native=full_native
+        self.compact_native_target_history=compact_native_target_history
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -368,6 +369,39 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if (self.compact_native_target_history and field == '_atomic_target_history'
+                and tag in ('being.BeingInstance', 'object.ObjectInstance',
+                            'weapon.WeaponInstance', 'armor.ArmorInstance',
+                            'statistical_group.StatisticalGroup')):
+            from action_settlement import TargetCandidate
+            from atomic_publication import TargetIntervalRecord
+            owner = self._objects_by_identity.get(self._owner_identity(ref))
+            _require(type(item) is list and owner is not None
+                     and all(type(row) is TargetIntervalRecord
+                         and row.encounter_id in self.world.event_history
+                         and type(row.boundary) is int and row.boundary > 0
+                         and type(row.state) is TargetCandidate
+                         and row.state.target_id == owner.id
+                         for row in item),
+                     'native Target history cannot be compacted from unreviewed records')
+            # The replacement token below is synthetic. Keep the actual
+            # source list in the candidate seal so any Target append between
+            # capture and publication makes this exact cut stale.
+            self.dependencies.append((id(item), id(type(item))))
+            # TargetCandidate receipts have an exact, independently validated
+            # representation in NativeHistory. The graph keeps the field in
+            # its closed schema but stores an empty list; restore repopulates
+            # this exact target-owned history before issuing receipt anchors.
+            empty_history = []
+            encoded = super().field(tag, field, empty_history, ref, path, depth)
+            # The replacement is a serialization token, not part of the live
+            # source read set. The source's actual list remains covered by the
+            # candidate freshness snapshot and by the validated history log.
+            token_id = id(empty_history)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            return encoded
         if self.full_native and tag=='history_conversation.AskAboutPastAction' and field in (
                 'generate','received_accounts'):
             _require(self.full_native,
@@ -1180,4 +1214,6 @@ class NativeInventory(_Inventory):
                 from observer_proposals import _capture_belief
                 _capture_belief(b.recipient,b.observer_ids[0])
             descriptions.append((b.namespace,b.name,b.role,b.observer_ids,ref))
-        return body+(('native-adapters',ADAPTER_VERSION),('host-bindings',tuple(descriptions)))
+        native_adapters = ((ADAPTER_VERSION, 'target-candidate-history/1')
+            if self.compact_native_target_history else (ADAPTER_VERSION,))
+        return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))

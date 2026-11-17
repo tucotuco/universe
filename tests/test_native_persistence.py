@@ -731,6 +731,103 @@ print(json.dumps({'time':enc.time,
             post_world, post_encounter, _post_rng = load_path(after_path)
             self.assertIs(post_world.event_history[post_encounter.id], post_encounter)
 
+    def test_native_save_stores_target_facts_once_and_rebuilds_history(self):
+        """TargetIntervalRecord history lives in the fact stream, not graph twice."""
+        import base64
+        from native_graph_snapshot import decode as decode_graph
+        from native_graph_snapshot import encode as encode_graph
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from being import BeingInstance
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        # A registered but inactive Being has no Target intervals. Compaction
+        # must preserve the distinction between an absent field and an empty
+        # one so a canonical second Save remains byte-for-byte identical.
+        definition = encounter.universe.library.being_dictionary.get_object_definition("Human")
+        inactive = BeingInstance(definition, "Inactive registered Being",
+                                 id="native-persist/inactive-being")
+        encounter.universe.add_object(inactive)
+        self.assertNotIn("_atomic_target_history", inactive.__dict__)
+        original_candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, rng_owner=native_persistence._native_rng_owner(encounter))
+        original_graph_bytes = len(encode_graph(original_candidate.envelope, native=True))
+        expected = {}
+        for identity, entity in encounter.universe.object_registry.object_instances.items():
+            rows = [row for row in getattr(entity, "_atomic_target_history", ())
+                    if row.encounter_id == encounter.id]
+            if rows:
+                expected[identity] = [native_history._plain(row) for row in rows]
+
+        wire = export_save(encounter)
+        save = json.loads(wire)
+        graph_wire = base64.b64decode(save["graph_b64"], validate=True)
+        self.assertLess(len(graph_wire), original_graph_bytes)
+        inventory = decode_graph(graph_wire, native=True)
+        nodes = next(row[1] for row in inventory[1] if row[0] == "nodes")
+        self.assertFalse(any(tag == "atomic_publication.TargetIntervalRecord"
+                             for _reference, tag, _content in nodes))
+
+        world, restored, _rng = load_save(wire)
+        actual = {}
+        for identity, entity in world.object_registry.object_instances.items():
+            rows = [row for row in getattr(entity, "_atomic_target_history", ())
+                    if row.encounter_id == restored.id]
+            if rows:
+                actual[identity] = [native_history._plain(row) for row in rows]
+        self.assertEqual(actual, expected)
+        restored_inactive = world.get_object_by_id(inactive.id)
+        self.assertNotIn("_atomic_target_history", restored_inactive.__dict__)
+        query = native_history.NativeHistoryQuery(
+            native_history.capture(restored))
+        for boundary in range(1, restored.last_processed_boundary + 1):
+            self.assertEqual(query.boundary_facts_at(boundary)["target_states"],
+                native_history._plain(native_history._target_candidates(restored).get(
+                    boundary, {})))
+        self.assertEqual(export_save(restored), wire)
+
+    def test_uncompacted_native_graph_v1_from_last_writer_migrates_strictly(self):
+        """The immediately previous accepted /1 graph rewrites to compact /2."""
+        import base64
+        import native_graph_snapshot
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        current_wire = export_save(encounter)
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, rng_owner=native_persistence._native_rng_owner(encounter))
+        self.assertEqual(candidate.diagnostics, ())
+        old_graph_data = json.loads(encode_graph(candidate.envelope, native=True))
+        old_graph_data["schema"] = native_graph_snapshot._LEGACY_NATIVE_SCHEMA_V1
+        old_compatibility = (
+            native_graph_snapshot._LEGACY_NATIVE_GRAPH_V1_BFC_COMPATIBILITY)
+        old_graph_data["compatibility"] = old_compatibility
+        current_inventory = native_graph_snapshot._expand_compact_inventory(
+            native_graph_snapshot._tuples(old_graph_data["inventory"]), native=True)
+        old_inventory = (old_compatibility, current_inventory[1])
+        old_graph_data["inventory"] = native_graph_snapshot._compact_inventory(
+            old_inventory, native=True)
+        unsigned_graph = {key: value for key, value in old_graph_data.items()
+                          if key != "sha256"}
+        old_graph_data["sha256"] = hashlib.sha256(
+            native_graph_snapshot._canonical(unsigned_graph)).hexdigest()
+        old_graph = native_graph_snapshot._canonical(old_graph_data)
+
+        old_save = json.loads(current_wire)
+        old_save["graph_b64"] = base64.b64encode(old_graph).decode("ascii")
+        unsigned_save = {key: value for key, value in old_save.items()
+                         if key != "sha256"}
+        old_save["sha256"] = hashlib.sha256(
+            native_persistence._canonical(unsigned_save)).hexdigest()
+        restored_world, restored, _rng = load_save(
+            native_persistence._canonical(old_save))
+        self.assertIs(restored_world.event_history[restored.id], restored)
+        self.assertEqual(export_save(restored), current_wire)
+
     def test_missed_projectile_continues_with_native_unresolved_destination(self):
         """A miss preserves its adopted direction and unresolved landing in Load."""
         import random

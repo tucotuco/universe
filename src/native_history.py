@@ -9,7 +9,7 @@ or evaluating Actions. This module does not yet replace production Save/Load.
 """
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from bisect import bisect_right
 import hashlib
 import json
@@ -84,7 +84,7 @@ def _native_types():
     for tag in FIELD_ADAPTERS:
         module, name = tag.rsplit(".", 1)
         cls = getattr(importlib.import_module(module), name)
-        if type(cls) is not type or cls.__module__ != module or cls.__name__ != name:
+        if not isinstance(cls, type) or cls.__module__ != module or cls.__name__ != name:
             raise NativeHistoryRejected("native history type registry changed")
         result[tag] = cls
     return result
@@ -199,6 +199,104 @@ def _measure(value):
         else:
             raise NativeHistoryRejected("native history contains an invalid JSON value")
     return count
+
+
+def _materialize_plain(value, depth=0):
+    """Rehydrate one validated tagged native fact using exact closed types."""
+    if depth > MAX_DEPTH:
+        raise NativeHistoryRejected("native history fact nesting limit exceeded")
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if type(value) is list:
+        return [_materialize_plain(item, depth + 1) for item in value]
+    if type(value) is not dict:
+        raise NativeHistoryRejected("native history fact has an unsupported value")
+    if "$number" in value:
+        if set(value) != {"$number"} or type(value["$number"]) is not str:
+            raise NativeHistoryRejected("native history fact number is malformed")
+        try:
+            number = float.fromhex(value["$number"])
+        except ValueError as exc:
+            raise NativeHistoryRejected("native history fact number is malformed") from exc
+        if not math.isfinite(number) or number.hex() != value["$number"]:
+            raise NativeHistoryRejected("native history fact number is noncanonical")
+        return number
+    if "$tuple" in value or "$list" in value or "$set" in value or "$frozenset" in value:
+        if len(value) != 1:
+            raise NativeHistoryRejected("native history fact sequence tag is ambiguous")
+        tag, rows = next(iter(value.items()))
+        if type(rows) is not list:
+            raise NativeHistoryRejected("native history fact sequence is malformed")
+        materialized = [_materialize_plain(item, depth + 1) for item in rows]
+        if tag == "$tuple":
+            return tuple(materialized)
+        if tag == "$list":
+            return materialized
+        try:
+            result = set(materialized)
+        except TypeError as exc:
+            raise NativeHistoryRejected("native history fact set is not hashable") from exc
+        if len(result) != len(materialized):
+            raise NativeHistoryRejected("native history fact set has duplicate members")
+        return result if tag == "$set" else frozenset(result)
+    if "$map" in value:
+        if set(value) != {"$map"} or type(value["$map"]) is not list:
+            raise NativeHistoryRejected("native history fact map is malformed")
+        result = {}
+        for pair in value["$map"]:
+            if type(pair) is not list or len(pair) != 2:
+                raise NativeHistoryRejected("native history fact map entry is malformed")
+            key = _materialize_plain(pair[0], depth + 1)
+            item = _materialize_plain(pair[1], depth + 1)
+            try:
+                if key in result:
+                    raise NativeHistoryRejected("native history fact map repeats a key")
+                result[key] = item
+            except TypeError as exc:
+                raise NativeHistoryRejected("native history fact map key is not hashable") from exc
+        return result
+    if "$record" in value:
+        if set(value) != {"$record", "fields"} or type(value["$record"]) is not str:
+            raise NativeHistoryRejected("native history fact record tag is malformed")
+        tag = value["$record"]
+        from encounter_inspection import (
+            ActionInspection, BoundaryInspection, DisarmLandingReceipt,
+            EncounterInspection, EntityInspection, ObjectiveFactInspection,
+            ObjectiveInspection, TargetInspection,
+        )
+        inspection_types = {cls.__module__ + "." + cls.__name__: cls for cls in (
+            ActionInspection, BoundaryInspection, DisarmLandingReceipt,
+            EncounterInspection, EntityInspection, ObjectiveFactInspection,
+            ObjectiveInspection, TargetInspection,
+        )}
+        cls = inspection_types.get(tag)
+        if cls is None:
+            cls = _native_types().get(tag)
+        if (cls is None or not is_dataclass(cls)
+                or getattr(cls, "__dataclass_params__", None) is None
+                or cls.__dataclass_params__.frozen is not True
+                or type(value["fields"]) is not dict):
+            raise NativeHistoryRejected("native history fact record type is not admitted")
+        expected = {field.name for field in fields(cls)}
+        encoded_fields = value["fields"]
+        if (tag == "observer_proposals.RecipientIdentity"
+                and set(encoded_fields) == {"role"}
+                and expected == {"role", "object_identity"}):
+            # `_plain` deliberately omits id(handle). Historical Target facts
+            # retain this type only as a role marker; 0 is a fail-closed
+            # process-local sentinel and is never rebound or dereferenced.
+            encoded_fields = {**encoded_fields, "object_identity": 0}
+        if set(encoded_fields) != expected:
+            raise NativeHistoryRejected("native history fact record fields differ")
+        record = object.__new__(cls)
+        for name in expected:
+            object.__setattr__(record, name,
+                               _materialize_plain(encoded_fields[name], depth + 1))
+        return record
+    if all(type(key) is str for key in value):
+        return {key: _materialize_plain(item, depth + 1)
+                for key, item in value.items()}
+    raise NativeHistoryRejected("native history fact mapping is unsupported")
 
 
 def _diff(before, after, path=()):
@@ -2624,6 +2722,144 @@ class NativeHistoryQuery:
             self._knowledge_boundary = boundary
         result = self._copy(context)
         return result if observer_id is None else result.get(observer_id, {})
+
+
+def restore_compacted_target_history(world, histories):
+    """Rebuild Target-owned rows omitted from the marked compact native graph.
+
+    This restoration adapter consumes the separately validated current native
+    fact logs and the exact committed receipt boundaries already present in
+    the private graph. It does not evaluate or replay an Action.
+    """
+    from action_settlement import TargetCandidate
+    from atomic_publication import TargetIntervalRecord
+    from encounter import Encounter
+    from object import ObjectInstance
+    from weapon import WeaponInstance
+    from armor import ArmorInstance
+    from being import BeingInstance
+    from statistical_group import StatisticalGroup
+
+    if type(histories) is not dict:
+        raise NativeHistoryRejected("compacted Target restoration requires Encounter histories")
+    encounters = {row.id: row for row in world.event_history.values()
+                  if type(row) is Encounter}
+    if set(histories) != set(encounters):
+        raise NativeHistoryRejected("compacted Target histories do not cover the Universe Encounters")
+    supported = (BeingInstance, ObjectInstance, WeaponInstance, ArmorInstance,
+                 StatisticalGroup)
+    objects = world.object_registry.object_instances
+    storage_by_id = {}
+    absent_storage_ids = set()
+    for identity, value in objects.items():
+        if type(value) not in supported:
+            continue
+        data = object.__getattribute__(value, "__dict__")
+        prior = data.get("_atomic_target_history", [])
+        if type(prior) is not list or prior:
+            raise NativeHistoryRejected(
+                "compacted native graph contains nonempty Target history")
+        rows = []
+        if "_atomic_target_history" in data:
+            object.__setattr__(value, "_atomic_target_history", rows)
+        else:
+            absent_storage_ids.add(identity)
+        storage_by_id[identity] = rows
+
+    for encounter_id in sorted(encounters):
+        encounter = encounters[encounter_id]
+        log = histories[encounter_id]
+        receipts = encounter.__dict__.get("_atomic_interval_history")
+        if log is None:
+            if receipts or encounter.time != encounter.start_time:
+                raise NativeHistoryRejected(
+                    "compacted history-free Encounter has committed boundaries")
+            continue
+        upgraded = upgrade(log)
+        validate(upgraded)
+        expected_boundaries = list(range(
+            math.floor(_number_value(upgraded["initial"]["start"])) + 1,
+            upgraded["latest_boundary"] + 1))
+        if (upgraded["schema"] != SCHEMA
+                or upgraded["initial"]["encounter_id"] != encounter_id
+                or upgraded["latest_boundary"] != encounter.last_processed_boundary
+                or type(receipts) is not list
+                or [row.boundary for row in receipts] != expected_boundaries):
+            raise NativeHistoryRejected(
+                "compacted Target history does not match its committed receipt chain")
+        query = NativeHistoryQuery(upgraded)
+        from observer_proposals import RecipientIdentity
+        recipient_identities = {}
+        for receipt in receipts:
+            for identity, projection in receipt.inspection.recipients.items():
+                if type(identity) is not RecipientIdentity:
+                    raise NativeHistoryRejected(
+                        "compacted receipt has an unreviewed recipient identity")
+                role = identity.role
+                owner_id = (getattr(projection, "observer_id", None)
+                            or getattr(projection, "listener_id", None))
+                if type(owner_id) is str:
+                    recipient_identities.setdefault((role, owner_id), {})[
+                        identity.object_identity] = identity
+        for receipt in receipts:
+            if (receipt.encounter_id != encounter_id
+                    or type(receipt.boundary) is not int):
+                raise NativeHistoryRejected(
+                    "compacted Target history receipt identity differs")
+            meta = receipt.inspection
+            state = query.state_at(receipt.boundary)["entities"]
+            candidates = {identity: _materialize_plain(value)
+                for identity, value in state.items()
+                if type(value) is dict and value.get("$record") ==
+                "action_settlement.TargetCandidate"}
+            expected_ids = set(meta.entities)
+            if set(candidates) != expected_ids:
+                raise NativeHistoryRejected(
+                    "compacted Target facts do not cover the receipt Entity set")
+            for identity, candidate in candidates.items():
+                if (type(candidate) is not TargetCandidate
+                        or candidate.target_id != identity
+                        or identity not in storage_by_id):
+                    raise NativeHistoryRejected(
+                        "compacted Target fact has an unknown native owner")
+                incoming = []
+                for row in candidate.incoming:
+                    authoritative = meta.effects.get(row.identity)
+                    if (authoritative is None
+                            or _plain(authoritative) != _plain(row)):
+                        raise NativeHistoryRejected(
+                            "compacted Target Effect differs from its committed receipt")
+                    incoming.append(authoritative)
+                observer = candidate.observer_state
+                if observer is not None:
+                    bound_identities = []
+                    for marker in observer.belief_recipient_ids:
+                        matches = recipient_identities.get(
+                            (marker.role, observer.observer_id), {})
+                        if len(matches) != 1:
+                            raise NativeHistoryRejected(
+                                "compacted Target observer recipient is unavailable or ambiguous")
+                        bound_identities.append(next(iter(matches.values())))
+                    observer = replace(observer,
+                        belief_recipient_ids=tuple(bound_identities))
+                candidate = replace(candidate, incoming=tuple(incoming),
+                                    observer_state=observer)
+                if identity in absent_storage_ids:
+                    object.__setattr__(objects[identity],
+                                       "_atomic_target_history",
+                                       storage_by_id[identity])
+                    absent_storage_ids.remove(identity)
+                storage_by_id[identity].append(TargetIntervalRecord(
+                    encounter_id, receipt.boundary, candidate))
+        for receipt in receipts:
+            for identity in receipt.inspection.entities:
+                rows = storage_by_id.get(identity)
+                if (rows is None or not any(type(row) is TargetIntervalRecord
+                        and row.encounter_id == encounter_id
+                        and row.boundary == receipt.boundary for row in rows)):
+                    raise NativeHistoryRejected(
+                        "compacted Target reconstruction is incomplete")
+    return True
 
 
 def events_at(log, boundary):

@@ -29,13 +29,17 @@ for path in (ROOT / 'src', ROOT / 'examples'):
 from action import Action
 from activities import DelayAction
 from atomic_publication import RNGCursor
+from checkpoint_inventory import (capture_checkpoint_candidate,
+                                  validate_checkpoint_candidate)
 from encounter import Encounter
 from library import Library
 from melee_combat import effective_melee_reach_meters
 from native_history import (encode as encode_history, capture as capture_history,
                             NativeHistoryQuery, _plain,
                             _target_candidates)
-from native_persistence import export_save, load_path
+from native_graph_snapshot import encode as encode_native_graph
+from native_persistence import (export_save, load_path,
+                                _native_rng_owner)
 from spatial import CartesianPosition, Sphere
 from universe import Universe
 
@@ -162,7 +166,17 @@ def run(action_count=64, registry_count=2):
     _verify_history_boundaries(encounter)
     history_query_seconds = time.perf_counter() - history_query_started
     export_started = time.perf_counter()
+    uncompacted_candidate = capture_checkpoint_candidate(
+        world, encounter, quiescent=True, rng_scope='exclusive_encounter',
+        native_adapters=True, full_native=True,
+        rng_owner=_native_rng_owner(encounter))
+    if uncompacted_candidate.diagnostics:
+        raise RuntimeError('uncompacted comparison candidate was not admitted')
+    uncompacted_graph_bytes = len(encode_native_graph(
+        uncompacted_candidate.envelope, native=True))
     wire = export_save(encounter)
+    validate_checkpoint_candidate(world, encounter, uncompacted_candidate,
+                                  quiescent=True)
     export_seconds = time.perf_counter() - export_started
     body = json.loads(wire)
     history_bytes = len(json.dumps(body['history'], sort_keys=True,
@@ -218,6 +232,10 @@ def run(action_count=64, registry_count=2):
         'committed_boundaries': encounter.last_processed_boundary,
         'history_boundaries_checked': encounter.last_processed_boundary,
         'save_bytes': len(wire), 'graph_bytes': graph_bytes,
+        'uncompacted_graph_bytes': uncompacted_graph_bytes,
+        'target_history_graph_bytes_saved': uncompacted_graph_bytes - graph_bytes,
+        'target_history_graph_reduction': round(
+            (uncompacted_graph_bytes - graph_bytes) / uncompacted_graph_bytes, 4),
         'history_bytes': history_bytes,
         'scenario_seconds': round(authored_seconds, 3),
         'history_query_seconds': round(history_query_seconds, 3),

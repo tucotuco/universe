@@ -15,7 +15,8 @@ import threading
 from types import MappingProxyType
 
 SCHEMA = 'universe.generated-arena-native-state/5'
-NATIVE_SCHEMA = 'universe.native-encounter-graph/1'
+NATIVE_SCHEMA = 'universe.native-encounter-graph/2'
+_LEGACY_NATIVE_SCHEMA_V1 = 'universe.native-encounter-graph/1'
 _LEGACY_SCHEMAS = ('universe.generated-arena-native-state/4',
                    'universe.generated-arena-native-state/3')
 _COMPACT_INVENTORY = 'universe.generated-arena-compact-inventory/1'
@@ -80,6 +81,37 @@ _LEGACY_NATIVE_BRIDGE_COMPATIBILITY = (
     ('numeric', 'IEEE754-binary64-hex'),
     ('python-native-rng', 'MT19937-state-v3'),
     ('restore-adapters', 'not-implemented'),
+)
+# Exact inventory fingerprint emitted by the last un-compacted native graph
+# writer. Schema /1 remains a strict read path and migrates only this reviewed
+# source version (plus the older explicitly enumerated compatibility tuples).
+_LEGACY_NATIVE_GRAPH_V1_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', '69edc9bbca2b98a5e5a0ee0b95a9e3a495efade103c6843765f9ac8a519fa4ae'),
+    ('rule-kernel-source', '661905a7826fc109055595c63778cec56d4502efc942116e3b23fb71ea025f1c'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
+# Exact fingerprint of native graph /1 as written by repository HEAD
+# immediately before graph /2 compaction began. `native_history.py` had
+# changed since the earlier /1 writer above, so both emitted contracts need
+# explicit strict migration entries.
+_LEGACY_NATIVE_GRAPH_V1_BFC_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', 'f9c7b2771e9a5b31be89170755f2adca077ca2fd4d8c04fd5081e0b50c813ceb'),
+    ('rule-kernel-source', '661905a7826fc109055595c63778cec56d4502efc942116e3b23fb71ea025f1c'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
+_LEGACY_NATIVE_GRAPH_V1_COMPATIBILITIES = (
+    _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITY,
+    _LEGACY_NATIVE_GRAPH_V1_BFC_COMPATIBILITY,
 )
 
 # Exact native type closure exercised by the current Arena UI: generated
@@ -305,7 +337,8 @@ def decode(wire, *, native=False):
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise ArenaNativeSnapshotRejected(f'native Arena state JSON is invalid: {exc}') from exc
     _tree(data)
-    schemas = (NATIVE_SCHEMA,) if native else (SCHEMA, *_LEGACY_SCHEMAS)
+    schemas = ((NATIVE_SCHEMA, _LEGACY_NATIVE_SCHEMA_V1) if native
+               else (SCHEMA, *_LEGACY_SCHEMAS))
     _need(type(data) is dict and set(data) == _FIELDS
           and data['schema'] in schemas,
           'native Arena state has an unknown schema or field set')
@@ -318,6 +351,9 @@ def decode(wire, *, native=False):
     expected_compatibility = (_LEGACY_COMPATIBILITY
         if legacy_schema == 'universe.generated-arena-native-state/3' else
         _LEGACY_V4_COMPATIBILITY if legacy_schema else
+        saved_compatibility
+        if native and data['schema'] == _LEGACY_NATIVE_SCHEMA_V1
+            and saved_compatibility in _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITIES else
         _LEGACY_V5_COMPATIBILITY if saved_compatibility == _LEGACY_V5_COMPATIBILITY
         else _LEGACY_NATIVE_BRIDGE_COMPATIBILITY
         if saved_compatibility == _LEGACY_NATIVE_BRIDGE_COMPATIBILITY
@@ -330,7 +366,12 @@ def decode(wire, *, native=False):
         raise ArenaNativeSnapshotRejected('native Arena state nesting exceeds limits') from exc
     if native:
         inventory = _expand_compact_inventory(inventory, native=True)
+        _validate_inventory(inventory,
+                            expected_compatibility=saved_compatibility,
+                            native=True)
         _validate_arena_field_schema(inventory, native=True)
+        if saved_compatibility != _compatibility():
+            inventory = (_compatibility(), inventory[1])
     elif legacy_schema == 'universe.generated-arena-native-state/3':
         _need(type(inventory) is tuple and len(inventory) == 2
               and inventory[0] == _LEGACY_COMPATIBILITY,
@@ -525,7 +566,9 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
     _need(set(sections) == expected_sections,
           'native inventory sections are incomplete or unknown')
     if native:
-        _need(sections['native-adapters'] == ('native-closure-recipes/1',),
+        _need(sections['native-adapters'] in (
+                  ('native-closure-recipes/1',),
+                  ('native-closure-recipes/1', 'target-candidate-history/1')),
               'native adapter recipe version differs')
         _validate_host_binding_descriptors(sections['host-bindings'])
     _need(sections['readiness'] == (False, False, False), 'unsupported inventory readiness claim')
@@ -651,7 +694,8 @@ def _walk_refs(value, refs):
             _walk_refs(row, refs)
 
 
-def restore(envelope, *, native=False, companion_rng_owners=None):
+def restore(envelope, *, native=False, companion_rng_owners=None,
+            native_histories=None):
     """Materialize an exact private graph and bind ordinary native progression."""
     from checkpoint_inventory import _TYPES
     from atomic_publication import RNGCursor
@@ -673,6 +717,13 @@ def restore(envelope, *, native=False, companion_rng_owners=None):
                                  allow_rebuilt_fields=True, native=native)
     body = envelope[1]
     sections = {row[0]: row[1:] for row in body[1:]}
+    compact_target_history = (native and sections.get('native-adapters') ==
+        ('native-closure-recipes/1', 'target-candidate-history/1'))
+    history_map_supplied = native_histories is not None
+    if native_histories is None:
+        native_histories = {}
+    _need(type(native_histories) is dict,
+          'native history restoration map is malformed')
     nodes = sections['nodes'][0]
     by_ref = {row[0]: row for row in nodes}
     classes = {f'{cls.__module__}.{cls.__name__}': cls for cls in _TYPES}
@@ -878,6 +929,23 @@ def restore(envelope, *, native=False, companion_rng_owners=None):
                 target = None
             _need(target is not None, 'native committed fence reference cannot be rebound')
             object.__setattr__(reference, 'identity', id(target))
+
+    if compact_target_history:
+        if not history_map_supplied:
+            _need(all(not saved.__dict__.get('_atomic_interval_history')
+                      and saved.time == saved.start_time
+                      for saved in encounters),
+                  'committed compact native graph requires its fact histories')
+            native_histories = {saved.id: None for saved in encounters}
+        _need(set(native_histories) == set(by_encounter_id),
+              'compacted native graph requires histories for every Encounter')
+        import native_history as history_codec
+        try:
+            history_codec.restore_compacted_target_history(world,
+                                                            native_histories)
+        except history_codec.NativeHistoryRejected as exc:
+            raise ArenaNativeSnapshotRejected(
+                f'compacted native Target history cannot be restored: {exc}') from exc
 
     # Native inventory intentionally excludes pointer anchors. Recreate them
     # from the restored objects, then verify the whole history with native inspection.

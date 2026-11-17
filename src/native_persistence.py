@@ -118,7 +118,8 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
         candidate = capture_checkpoint_candidate(
             encounter.universe, encounter, quiescent=True,
             rng_scope="exclusive_encounter", native_adapters=True,
-            full_native=True, bindings=recipient_bindings,
+            full_native=True, compact_native_target_history=True,
+            bindings=recipient_bindings,
             rng_owner=_native_rng_owner(encounter))
         if candidate.diagnostics:
             codes = ", ".join(sorted({row.code for row in candidate.diagnostics}))
@@ -225,6 +226,7 @@ def _load_v2_save(wire, value):
     rows = value["encounters"]
     ids = []
     companion_owners = {}
+    restore_histories = {}
     from atomic_publication import RNGCursor
     for row in rows:
         if type(row) is not dict or set(row) != {"encounter_id", "rng_state", "history"}:
@@ -241,10 +243,13 @@ def _load_v2_save(wire, value):
             raise NativeSaveRejected("native Save Encounter RNG state is invalid") from exc
         if row["history"] is not None:
             native_history.validate(row["history"])
+            restore_histories[identity] = native_history.upgrade(row["history"])
             initial = row["history"]["initial"]
             if (initial["encounter_id"] != identity
                     or row["history"]["latest_boundary"] < 0):
                 raise NativeSaveRejected("native history belongs to another Encounter")
+        else:
+            restore_histories[identity] = None
         if identity != value["selected_encounter_id"]:
             companion_owners[identity] = RNGCursor(state)
     if ids != sorted(set(ids)) or value["selected_encounter_id"] not in ids:
@@ -256,7 +261,8 @@ def _load_v2_save(wire, value):
         from native_graph_snapshot import decode as decode_graph, restore as restore_graph
         world, selected, selected_rng = restore_graph(
             decode_graph(graph_wire, native=True), native=True,
-            companion_rng_owners=companion_owners)
+            companion_rng_owners=companion_owners,
+            native_histories=restore_histories)
         from encounter import Encounter
         encounters = {event.id: event for event in world.event_history.values()
                       if type(event) is Encounter}
@@ -331,8 +337,13 @@ def _load_v1_save(wire):
             native_history.validate(value["history"])
             expected_history_log = native_history.upgrade(value["history"])
             expected_history = native_history.encode(expected_history_log)
+        else:
+            expected_history_log = None
         world, encounter, rng_owner = restore_graph(
-            decode_graph(graph_wire, native=True), native=True)
+            decode_graph(graph_wire, native=True), native=True,
+            native_histories=(None if expected_history_log is None else
+                {expected_history_log["initial"]["encounter_id"]:
+                 expected_history_log}))
         if value["history"] is None:
             if (encounter.__dict__.get("_atomic_interval_history")
                     or encounter.time != encounter.start_time
