@@ -688,6 +688,49 @@ print(json.dumps({'time':enc.time,
         self.assertEqual(expected["armor_durability"], [1])
         self.assertEqual(expected["armor_hp"], expected["initial_armor_hp"] - 1)
 
+    def test_native_file_write_recovers_across_pre_and_post_link_faults(self):
+        """A failed publication leaves either no file or a valid complete Save."""
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo["encounter"]
+        with tempfile.TemporaryDirectory() as directory:
+            before_path = Path(directory) / "pre-link.json"
+            with patch.object(native_persistence.os, "link",
+                              side_effect=OSError("injected link failure")):
+                with self.assertRaisesRegex(NativeSaveRejected,
+                                            "before publication"):
+                    write_save(encounter, before_path)
+            self.assertFalse(before_path.exists())
+            self.assertEqual(sorted(path.name for path in Path(directory).iterdir()), [])
+
+            expected_wire = export_save(encounter)
+            self.assertEqual(write_save(encounter, before_path), len(expected_wire))
+            self.assertEqual(before_path.read_bytes(), expected_wire)
+            loaded_world, loaded_encounter, _loaded_rng = load_path(before_path)
+            self.assertIs(loaded_world.event_history[loaded_encounter.id], loaded_encounter)
+
+            after_path = Path(directory) / "post-link.json"
+            original_fsync = native_persistence.os.fsync
+            calls = []
+
+            def fail_directory_sync(fd):
+                calls.append(fd)
+                if len(calls) == 2:
+                    raise OSError("injected directory fsync failure")
+                return original_fsync(fd)
+
+            with patch.object(native_persistence.os, "fsync",
+                              side_effect=fail_directory_sync):
+                with self.assertRaisesRegex(NativeSaveRejected,
+                                            "after atomic publication"):
+                    write_save(encounter, after_path)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(after_path.exists())
+            self.assertEqual(after_path.read_bytes(), expected_wire)
+            self.assertEqual(sorted(path.name for path in Path(directory).iterdir()),
+                             ["post-link.json", "pre-link.json"])
+            post_world, post_encounter, _post_rng = load_path(after_path)
+            self.assertIs(post_world.event_history[post_encounter.id], post_encounter)
+
     def test_missed_projectile_continues_with_native_unresolved_destination(self):
         """A miss preserves its adopted direction and unresolved landing in Load."""
         import random

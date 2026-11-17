@@ -445,3 +445,9 @@ Focused verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/
 The initial native-history state records `EntityInspection` facts, while Target history begins only when a `TargetCandidate` is published. Before this fix, `NativeHistoryQuery.target_at(entity_id, 0)` returned the initial `EntityInspection` mapping under a TargetCandidate API. `target_at` now requires the closed `action_settlement.TargetCandidate` tag and rejects boundary-zero Entity facts explicitly; initial Entity information remains available through `entity_at`/`entity_context_at`. This preserves the no-inference rule and avoids returning a structurally unrelated record as a Target.
 
 Verification: `test_target_query_refuses_initial_entity_projection_as_target_candidate` and the existing receipt-to-Target round-trip regression each passed (**1 / 0.973s**, **1 / 1.110s**); full `test_native_history.py` passed **29 / 22.012s**. No persisted bytes or native Action behavior changed.
+
+## Problems-first — native portable Save write faults
+
+`write_save()` already used a same-directory temporary, file fsync, atomic no-overwrite hard-link publication and directory fsync, but native persistence had not injected faults at either side of the publication point. The new regression makes the contract explicit: a pre-link failure leaves neither target nor temporary file and an immediate retry publishes a strict-loadable Save; if the directory fsync fails after linking, the API reports that publication already occurred while the byte-exact complete artifact remains present and strict-loadable. This does not emulate power loss or guarantee behavior on every filesystem, and it does not implement an append journal.
+
+Focused test `test_native_file_write_recovers_across_pre_and_post_link_faults` passed **1 / 3.486s**. The implementation was not changed; the test distinguishes prepublication refusal from a valid artifact whose directory durability confirmation failed.
