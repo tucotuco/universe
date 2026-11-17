@@ -162,6 +162,9 @@ def load_save(wire):
             elif source_schema == native_history.FATIGUE_CONTEXT_SCHEMA:
                 compatible_actual = native_history.encode(
                     native_history._without_initial_rng(actual_log))
+            elif source_schema == native_history.INITIAL_RNG_SCHEMA:
+                compatible_actual = native_history.encode(
+                    native_history._without_receipt_facts(actual_log))
             if compatible_actual != expected_history:
                 raise NativeSaveRejected("restored native graph disagrees with saved history")
         if encounter.id != value["history"]["initial"]["encounter_id"]:

@@ -2,9 +2,9 @@
 
 The history wire stores an initial committed-boundary projection, atomic
 state changes, sparse EntityInspection context changes, and native
-Action/Effect/observation facts for each commit. ``NativeHistoryQuery`` provides
-validated repeated historical reads without re-expanding quiet spans or
-evaluating Actions. This module does not yet replace production Save/Load.
+Action/Effect/observation/receipt facts for each commit. ``NativeHistoryQuery``
+provides validated repeated historical reads without re-expanding quiet spans
+or evaluating Actions. This module does not yet replace production Save/Load.
 """
 from __future__ import annotations
 
@@ -28,9 +28,11 @@ PREVIOUS_SCHEMA = "universe.native-encounter-history/2"
 QUIET_SPAN_SCHEMA = "universe.native-encounter-history/3"
 ENTITY_CONTEXT_SCHEMA = "universe.native-encounter-history/4"
 FATIGUE_CONTEXT_SCHEMA = "universe.native-encounter-history/5"
-SCHEMA = "universe.native-encounter-history/6"
+INITIAL_RNG_SCHEMA = "universe.native-encounter-history/6"
+SCHEMA = "universe.native-encounter-history/7"
 LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA,
-                  ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA)
+                  ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
+                  INITIAL_RNG_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
@@ -246,12 +248,16 @@ def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
     effects = {effect_id: latest_view.effects[effect_id]
                for effect_id in timeline.effect_ids}
     targets = targets_by_boundary.get(receipt.boundary, {})
+    landing_rows = tuple(row for row in encounter.__dict__.get(
+        "_disarm_landing_receipts", ()) if row.boundary == receipt.boundary)
     return {
         "boundary": receipt.boundary,
         "start": _plain(meta.start),
         "end": _plain(meta.end),
         "action_ids": list(receipt.action_ids),
         "effect_ids": [_plain(value) for value in receipt.effect_ids],
+        "notification_intents": _plain(receipt.notification_intents),
+        "disarm_landings": _plain(landing_rows),
         "actions": _plain(actions),
         "effects": _plain(effects),
         "target_states": _plain(targets),
@@ -373,6 +379,8 @@ def _quiet_changes(row):
     """Return numeric metadata increments safe to derive across a quiet run."""
     events = row.get("events")
     if (not _quiet_events(events) or row.get("rng_after") != SAME_RNG
+            or row.get("notification_intents", {"$tuple": []}) != {"$tuple": []}
+            or row.get("disarm_landings", {"$tuple": []}) != {"$tuple": []}
             or not row.get("changes")):
         return None
     increments = []
@@ -426,6 +434,8 @@ def _compact_quiet_rows(rows):
                     != first["end"] - first["start"]
                     or [item[0] for item in candidate_changes]
                     != [item[0] for item in first_changes]
+                    or candidate.get("receipt_facts_available", False)
+                    != first.get("receipt_facts_available", False)
                     or [item[2] for item in candidate_changes]
                     != [item[2] for item in first_changes]):
                 break
@@ -440,6 +450,7 @@ def _compact_quiet_rows(rows):
                 "step": first["end"] - first["start"],
                 "quiet_events": {"starts": first["events"]["starts"],
                                  "participants": first["events"]["participants"]},
+                "receipt_facts_available": first.get("receipt_facts_available", False),
                 "increments": [{"path": list(path), "first_before": before,
                                 "step": delta}
                                for path, before, delta in first_changes],
@@ -454,9 +465,11 @@ def _compact_quiet_rows(rows):
 
 
 def _apply_quiet_span(state, row, through_boundary):
-    if (type(row) is not dict or set(row) != {
+    if (type(row) is not dict or set(row) not in ({
             "kind", "from_boundary", "to_boundary", "start", "step", "quiet_events",
-            "increments", "rng_after", "state_sha256"}
+            "increments", "rng_after", "state_sha256"}, {
+            "kind", "from_boundary", "to_boundary", "start", "step", "quiet_events",
+            "increments", "rng_after", "state_sha256", "receipt_facts_available"})
             or row["kind"] != "quiet_span"
             or type(row["from_boundary"]) is not int
             or type(row["to_boundary"]) is not int
@@ -556,18 +569,22 @@ def upgrade(log):
     validate(log)
     if log["schema"] == SCHEMA:
         return decode(encode(log))
-    previous = None
+    previous = log["initial"].get("rng_before_first_commit")
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["schema"] = SCHEMA
-    if log["schema"] != SCHEMA:
+    if log["schema"] not in (INITIAL_RNG_SCHEMA, SCHEMA):
         body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     if log["schema"] == ENTITY_CONTEXT_SCHEMA:
         body["entity_context"] = dict(log["entity_context"], fatigue_available=False)
-    elif log["schema"] not in (FATIGUE_CONTEXT_SCHEMA, SCHEMA):
+    elif log["schema"] not in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA):
         body["entity_context"] = _unavailable_entity_context()
+    body["receipt_facts_complete"] = False
     rows = []
     for original in _expand_rows(log):
         row = dict(original)
+        row["notification_intents"] = {"$tuple": []}
+        row["disarm_landings"] = {"$tuple": []}
+        row["receipt_facts_available"] = False
         encoded_rng = original["rng_after"]
         actual_rng = previous if encoded_rng == SAME_RNG else encoded_rng
         if actual_rng is None:
@@ -587,10 +604,14 @@ def _without_entity_context(log):
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     body["entity_context"] = _unavailable_entity_context()
+    body["receipt_facts_complete"] = False
     rows = []
     previous = None
     for row, actual in _resolved_rng_rows(log):
         current = dict(row)
+        current["notification_intents"] = {"$tuple": []}
+        current["disarm_landings"] = {"$tuple": []}
+        current["receipt_facts_available"] = False
         current["rng_after"] = _rng_record(actual, previous, SCHEMA)
         previous = actual
         rows.append(current)
@@ -605,10 +626,14 @@ def _without_initial_rng(log):
     validate(log)
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["initial"] = dict(body["initial"], rng_before_first_commit=None)
+    body["receipt_facts_complete"] = False
     rows = []
     previous = None
     for row, actual in _resolved_rng_rows(log):
         current = dict(row)
+        current["notification_intents"] = {"$tuple": []}
+        current["disarm_landings"] = {"$tuple": []}
+        current["receipt_facts_available"] = False
         current["rng_after"] = _rng_record(actual, previous, SCHEMA)
         previous = actual
         rows.append(current)
@@ -664,13 +689,35 @@ def _without_fatigue_context(log):
     body["initial"] = dict(body["initial"], rng_before_first_commit=None)
     body["entity_context"] = {"available": True, "fatigue_available": False,
                               "initial": strip(context["initial"]), "changes": changes}
+    body["receipt_facts_complete"] = False
     rows = []
     previous_rng = None
     for row, actual_rng in _resolved_rng_rows(log):
         current = dict(row)
+        current["notification_intents"] = {"$tuple": []}
+        current["disarm_landings"] = {"$tuple": []}
+        current["receipt_facts_available"] = False
         current["rng_after"] = _rng_record(actual_rng, previous_rng, SCHEMA)
         previous_rng = actual_rng
         rows.append(current)
+    body["boundaries"] = _compact_quiet_rows(rows)
+    result = _seal(body)
+    validate(result)
+    return result
+
+
+def _without_receipt_facts(log):
+    """Normalize current facts to a legacy receipt-free `/6` history view."""
+    validate(log)
+    body = {key: value for key, value in log.items() if key != "sha256"}
+    body["receipt_facts_complete"] = False
+    rows = []
+    for original in _expand_rows(log):
+        row = dict(original)
+        row["notification_intents"] = {"$tuple": []}
+        row["disarm_landings"] = {"$tuple": []}
+        row["receipt_facts_available"] = False
+        rows.append(row)
     body["boundaries"] = _compact_quiet_rows(rows)
     result = _seal(body)
     validate(result)
@@ -824,6 +871,9 @@ def capture(encounter):
                        "effects": payload["effects"],
                        "starts": payload["starts"],
                        "participants": payload["participants"]},
+            "notification_intents": payload["notification_intents"],
+            "disarm_landings": payload["disarm_landings"],
+            "receipt_facts_available": True,
             "rng_after": _rng_record(payload["rng_after"], previous_rng),
             "state_sha256": hashlib.sha256(_canonical(state)).hexdigest(),
         })
@@ -833,6 +883,7 @@ def capture(encounter):
     body = {"schema": SCHEMA, "initial": initial,
             "boundaries": _compact_quiet_rows(boundaries),
             "latest_boundary": previous_boundary,
+            "receipt_facts_complete": True,
             "entity_context": {"available": True,
                                "fatigue_available": True,
                                "initial": initial_entity_context,
@@ -860,6 +911,9 @@ def _expand_rows(log):
                            "effects": {},
                            "starts": row["quiet_events"]["starts"],
                            "participants": row["quiet_events"]["participants"]},
+                "notification_intents": {"$tuple": []},
+                "disarm_landings": {"$tuple": []},
+                "receipt_facts_available": row.get("receipt_facts_available", False),
                 "rng_after": dict(SAME_RNG),
                 "state_sha256": hashlib.sha256(_canonical(next_state)).hexdigest(),
             })
@@ -896,6 +950,8 @@ def _append_compact_row(boundaries, row):
                 and row["end"] - row["start"] == previous["step"]
                 and row["events"]["starts"] == previous["quiet_events"]["starts"]
                 and row["events"]["participants"] == previous["quiet_events"]["participants"]
+                and row.get("receipt_facts_available", False)
+                    == previous.get("receipt_facts_available", False)
                 and [(path, delta) for path, _before, delta in candidate] == expected):
             for index, (path, _before, _delta) in enumerate(candidate):
                 change = row["changes"][index]
@@ -976,12 +1032,17 @@ def append_committed(log, encounter):
                     "effects": payload["effects"],
                     "starts": payload["starts"],
                     "participants": payload["participants"]},
+        "notification_intents": payload["notification_intents"],
+        "disarm_landings": payload["disarm_landings"],
+        "receipt_facts_available": True,
         "rng_after": _rng_record(payload["rng_after"], previous_rng),
         "state_sha256": hashlib.sha256(_canonical(state)).hexdigest(),
     }
     body = {key: value for key, value in log.items() if key != "sha256"}
     body["boundaries"] = _append_compact_row(log["boundaries"], row)
     body["latest_boundary"] = expected
+    body["receipt_facts_complete"] = bool(
+        log["receipt_facts_complete"] and row["receipt_facts_available"])
     entity_context = json.loads(_canonical(log["entity_context"]).decode("ascii"))
     if entity_context["available"]:
         prior_context = entity_context_at(log, log["latest_boundary"])
@@ -1145,9 +1206,14 @@ def validate(log):
     base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
     current_keys = base_keys | {"entity_context"}
     version = log.get("schema") if type(log) is dict else None
-    has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA, SCHEMA)
+    has_receipt_facts = version == SCHEMA
+    has_entity_context = version in (ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
+                                     INITIAL_RNG_SCHEMA, SCHEMA)
+    expected_envelope = (current_keys | {"receipt_facts_complete"}
+                         if has_receipt_facts else current_keys if has_entity_context
+                         else base_keys)
     if (type(log) is not dict
-            or set(log) != (current_keys if has_entity_context else base_keys)):
+            or set(log) != expected_envelope):
         raise NativeHistoryRejected("native history envelope schema differs")
     unsigned = dict(log)
     digest = unsigned.pop("sha256")
@@ -1158,14 +1224,16 @@ def validate(log):
     initial = log["initial"]
     expected_initial = {"encounter_id", "universe_id", "start", "entities",
                         "participants", "initial_schedule"}
-    if version == SCHEMA:
+    if version in (INITIAL_RNG_SCHEMA, SCHEMA):
         expected_initial.add("rng_before_first_commit")
     if (type(initial) is not dict or set(initial) != expected_initial or type(initial["encounter_id"]) is not str
             or not initial["encounter_id"] or type(initial["universe_id"]) is not str
             or not initial["universe_id"]):
         raise NativeHistoryRejected("native history initial state schema differs")
-    if version == SCHEMA and initial["rng_before_first_commit"] is not None:
+    if version in (INITIAL_RNG_SCHEMA, SCHEMA) and initial["rng_before_first_commit"] is not None:
         _validate_rng_cursor(initial["rng_before_first_commit"])
+    if has_receipt_facts and type(log["receipt_facts_complete"]) is not bool:
+        raise NativeHistoryRejected("native receipt-fact completeness marker is malformed")
     state = _initial_state(initial)
     boundaries = log["boundaries"]
     if type(boundaries) is not list:
@@ -1174,10 +1242,20 @@ def validate(log):
     seen_effects = set()
     prior_rng = initial.get("rng_before_first_commit")
     covered = 0
+    receipt_completeness = []
     for row in boundaries:
         if type(row) is dict and row.get("kind") == "quiet_span":
+            if has_receipt_facts:
+                if (set(row) != {"kind", "from_boundary", "to_boundary", "start",
+                                 "step", "quiet_events", "increments", "rng_after",
+                                 "state_sha256", "receipt_facts_available"}
+                        or type(row.get("receipt_facts_available")) is not bool):
+                    raise NativeHistoryRejected("quiet-span receipt availability is malformed")
+                receipt_completeness.append(row["receipt_facts_available"])
+            elif "receipt_facts_available" in row:
+                raise NativeHistoryRejected("legacy quiet span contains a future receipt field")
             if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
-                                      FATIGUE_CONTEXT_SCHEMA, SCHEMA):
+                                      FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA):
                 raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
             if row.get("rng_after") != SAME_RNG or prior_rng is None:
                 raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
@@ -1189,14 +1267,17 @@ def validate(log):
             covered = row["to_boundary"]
             continue
         expected = covered + 1
-        if (type(row) is not dict or set(row) != {
-                "boundary", "start", "end", "changes", "events", "rng_after",
-                "state_sha256"} or type(row["boundary"]) is not int
+        expected_row_keys = {"boundary", "start", "end", "changes", "events",
+                             "rng_after", "state_sha256"}
+        if has_receipt_facts:
+            expected_row_keys |= {"notification_intents", "disarm_landings",
+                                  "receipt_facts_available"}
+        if (type(row) is not dict or set(row) != expected_row_keys or type(row["boundary"]) is not int
                 or row["boundary"] != expected):
             raise NativeHistoryRejected("native history boundary is missing, repeated, or malformed")
         if row["rng_after"] == SAME_RNG:
             if log["schema"] not in (QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA,
-                                      FATIGUE_CONTEXT_SCHEMA, SCHEMA) or prior_rng is None:
+                                      FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA) or prior_rng is None:
                 raise NativeHistoryRejected("native history RNG reference is not versioned or anchored")
         else:
             if (type(row["rng_after"]) is not dict
@@ -1235,6 +1316,45 @@ def validate(log):
                 or fact_effect_ids & seen_effects):
             raise NativeHistoryRejected("native history Effect facts disagree with receipt identities")
         seen_effects.update(fact_effect_ids)
+        if has_receipt_facts:
+            if type(row["receipt_facts_available"]) is not bool:
+                raise NativeHistoryRejected("receipt-fact availability is malformed")
+            receipt_completeness.append(row["receipt_facts_available"])
+            for field in ("notification_intents", "disarm_landings"):
+                facts = row[field]
+                if type(facts) is not dict or set(facts) != {"$tuple"} or type(facts["$tuple"]) is not list:
+                    raise NativeHistoryRejected("native committed receipt facts are malformed")
+                _validate_plain_record(facts)
+                if not row["receipt_facts_available"] and facts["$tuple"]:
+                    raise NativeHistoryRejected("legacy receipt facts were inferred during upgrade")
+            for intent in row["notification_intents"]["$tuple"]:
+                fields_value = (intent.get("fields", {})
+                                if type(intent) is dict else {})
+                if (type(intent) is not dict
+                        or intent.get("$record") != "observer_proposals.PostCommitNotificationIntent"
+                        or fields_value.get("source_action_id") not in seen_actions
+                        or fields_value.get("action_id") not in seen_actions):
+                    raise NativeHistoryRejected("post-commit notification references an unknown Action")
+            for landing in row["disarm_landings"]["$tuple"]:
+                if (type(landing) is not dict
+                        or landing.get("$record") != "encounter_inspection.DisarmLandingReceipt"
+                        or landing.get("fields", {}).get("boundary") != expected):
+                    raise NativeHistoryRejected("Disarm landing receipt boundary or type differs")
+                fields_value = landing["fields"]
+                if (any(type(fields_value.get(key)) is not str or not fields_value[key]
+                        for key in ("source_action_id", "target_id", "owner_id", "actor_id"))
+                        or fields_value["source_action_id"] not in seen_actions
+                        or any(type(fields_value.get(key)) is not int
+                               for key in ("boundary", "margin", "maximum_landing_hexes"))
+                        or fields_value["maximum_landing_hexes"] < 0
+                        or any(type(fields_value.get(key)) is not dict
+                               or set(fields_value[key]) != {"$tuple"}
+                               or type(fields_value[key]["$tuple"]) is not list
+                               or len(fields_value[key]["$tuple"]) != 2
+                               or any(type(part) is not int
+                                      for part in fields_value[key]["$tuple"])
+                               for key in ("origin_cell", "landing_cell"))):
+                    raise NativeHistoryRejected("Disarm landing receipt fields are malformed")
         covered = expected
     if (type(log["latest_boundary"]) is not int
             or not 0 <= log["latest_boundary"] <= MAX_BOUNDARIES
@@ -1242,6 +1362,8 @@ def validate(log):
         raise NativeHistoryRejected("native history latest boundary differs")
     if has_entity_context:
         _validate_entity_context(log["entity_context"], log["latest_boundary"], version)
+    if has_receipt_facts and log["receipt_facts_complete"] != all(receipt_completeness):
+        raise NativeHistoryRejected("receipt-fact completeness marker disagrees with boundaries")
     return True
 
 
@@ -1251,12 +1373,12 @@ def _validate_entity_context(context, latest_boundary, schema):
                      {"available", "fatigue_available", "initial", "changes"})
     if (type(context) is not dict or set(context) != expected_keys
             or type(context["available"]) is not bool or type(context["changes"]) is not list
-            or schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA)
+            or schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA)
             and type(context["fatigue_available"]) is not bool):
         raise NativeHistoryRejected("native EntityInspection history schema differs")
     if not context["available"]:
         if (context["initial"] is not None or context["changes"]
-                or schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA)
+                or schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA)
                 and context["fatigue_available"]):
             raise NativeHistoryRejected("legacy EntityInspection history marker is inconsistent")
         return
@@ -1264,7 +1386,7 @@ def _validate_entity_context(context, latest_boundary, schema):
         raise NativeHistoryRejected("native EntityInspection initial state is missing")
     _validate_plain_record(context["initial"])
     state = context["initial"]
-    if schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA) and context["fatigue_available"]:
+    if schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA) and context["fatigue_available"]:
         _validate_fatigue_context_entities(state)
     previous = 0
     for row in context["changes"]:
@@ -1276,7 +1398,7 @@ def _validate_entity_context(context, latest_boundary, schema):
             raise NativeHistoryRejected("native EntityInspection change chronology differs")
         state = _apply(state, row["changes"])
         _validate_plain_record(state)
-        if schema in (FATIGUE_CONTEXT_SCHEMA, SCHEMA) and context["fatigue_available"]:
+        if schema in (FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA, SCHEMA) and context["fatigue_available"]:
             _validate_fatigue_context_entities(state)
         if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
             raise NativeHistoryRejected("native EntityInspection state digest differs")
@@ -1426,6 +1548,7 @@ class NativeHistoryQuery:
                          if self._context_available else None)
         self._context_changes = {row["boundary"]: row
                                  for row in context["changes"]}
+        self._has_receipt_facts = self._log.get("schema") == SCHEMA
 
     def _boundary(self, boundary):
         if type(boundary) is not int or not 0 <= boundary <= self._latest:
@@ -1464,6 +1587,33 @@ class NativeHistoryQuery:
             self._state_boundary = boundary
         return self._copy(state)
 
+    def target_at(self, target_id, boundary):
+        """Return one authoritative TargetCandidate at a committed boundary."""
+        self._boundary(boundary)
+        if type(target_id) is not str or not target_id:
+            raise NativeHistoryRejected("Target history requires a stable identity")
+        target = self.state_at(boundary)["entities"].get(target_id)
+        if target is None:
+            raise NativeHistoryRejected("requested Target is absent at this boundary")
+        return target
+
+    def target_history_at(self, target_id, boundary=None):
+        """Return ordered TargetCandidate facts through a checked boundary."""
+        if boundary is None:
+            boundary = self._latest
+        self._boundary(boundary)
+        if type(target_id) is not str or not target_id:
+            raise NativeHistoryRejected("Target history requires a stable identity")
+        rows = []
+        for current in range(1, boundary + 1):
+            state = self.state_at(current)
+            target = state["entities"].get(target_id)
+            if target is not None:
+                rows.append({"boundary": current, "state": target})
+        if not rows:
+            raise NativeHistoryRejected("requested Target has no committed history")
+        return rows
+
     def events_at(self, boundary):
         self._boundary(boundary)
         if boundary == 0:
@@ -1478,6 +1628,33 @@ class NativeHistoryQuery:
         else:
             events = row["events"]
         return self._copy(events)
+
+    def receipt_facts_at(self, boundary):
+        """Return committed notification and Disarm landing facts, if retained."""
+        self._boundary(boundary)
+        if not self._has_receipt_facts:
+            return None
+        if boundary == 0:
+            return {"notification_intents": {"$tuple": []},
+                    "disarm_landings": {"$tuple": []}}
+        _index, row = self._segment(boundary)
+        if not row.get("receipt_facts_available", False):
+            return None
+        if row.get("kind") == "quiet_span":
+            facts = {"notification_intents": {"$tuple": []},
+                     "disarm_landings": {"$tuple": []}}
+        else:
+            facts = {"notification_intents": row["notification_intents"],
+                     "disarm_landings": row["disarm_landings"]}
+        return self._copy(facts)
+
+    def disarm_landings_at(self, boundary):
+        facts = self.receipt_facts_at(boundary)
+        return None if facts is None else facts["disarm_landings"]
+
+    def notification_intents_at(self, boundary):
+        facts = self.receipt_facts_at(boundary)
+        return None if facts is None else facts["notification_intents"]
 
     def committed_actions_at(self, boundary):
         """Return cumulative committed Action/Event/Effect facts through a boundary.
@@ -1532,6 +1709,12 @@ class NativeHistoryQuery:
         return self._copy({"action_ids": self._action_ids,
                            "effect_ids": self._effect_ids,
                            "actions": self._actions, "effects": effects})
+
+    def committed_action_at(self, action_id, boundary):
+        """Return the latest committed Action fact through a boundary."""
+        if type(action_id) is not str or not action_id:
+            raise NativeHistoryRejected("Action history requires a stable identity")
+        return self.committed_actions_at(boundary)["actions"].get(action_id)
 
     def rng_state_at(self, boundary):
         self._boundary(boundary)
@@ -1615,9 +1798,29 @@ def events_at(log, boundary):
     raise NativeHistoryRejected("requested native boundary is not committed")
 
 
+def receipt_facts_at(log, boundary):
+    """Return a detached committed receipt-fact row, or None for old logs."""
+    return NativeHistoryQuery(log).receipt_facts_at(boundary)
+
+
 def committed_actions_at(log, boundary):
     """Return detached cumulative committed Action/Event/Effect records."""
     return NativeHistoryQuery(log).committed_actions_at(boundary)
+
+
+def committed_action_at(log, action_id, boundary):
+    """Return the latest committed fact for one Action, or None if uncommitted."""
+    return NativeHistoryQuery(log).committed_action_at(action_id, boundary)
+
+
+def target_at(log, target_id, boundary):
+    """Return one detached historical TargetCandidate."""
+    return NativeHistoryQuery(log).target_at(target_id, boundary)
+
+
+def target_history_at(log, target_id, boundary=None):
+    """Return detached ordered TargetCandidate rows through a boundary."""
+    return NativeHistoryQuery(log).target_history_at(target_id, boundary)
 
 
 def observer_facts_at(log, boundary, observer_id):

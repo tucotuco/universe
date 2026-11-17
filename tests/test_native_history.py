@@ -13,11 +13,24 @@ sys.path.insert(0, str(ROOT / "examples"))
 
 import encounter_delta_headless
 import native_persistence_scale
+
+
+def _legacy_shape(body):
+    """Strip fields introduced by history `/7` when constructing old fixtures."""
+    body.pop("receipt_facts_complete", None)
+    for row in body.get("boundaries", ()):
+        row.pop("notification_intents", None)
+        row.pop("disarm_landings", None)
+        row.pop("receipt_facts_available", None)
+        if row.get("kind") == "quiet_span":
+            row.pop("receipt_facts_available", None)
+    return body
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
                             NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
-                            QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA, SCHEMA, SAME_RNG, _seal,
+                            QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
+                            INITIAL_RNG_SCHEMA, SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
                             _plain, _expand_rows, _target_candidates)
 
@@ -41,14 +54,26 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(len(events_at(log, 4)["action_ids"]), 2)
         self.assertEqual(len(events_at(log, 4)["effect_ids"]), 6)
         self.assertEqual(state_at(log, 4)["boundary"], 4)
+        query = NativeHistoryQuery(log)
+        target_rows = {}
         for boundary in range(1, 5):
             expected = _target_candidates(self.demo["encounter"]).get(boundary, {})
             self.assertEqual(state_at(log, boundary)["entities"], _plain(expected))
+            target_rows[boundary] = expected
+            for target_id, candidate in expected.items():
+                self.assertEqual(query.target_at(target_id, boundary), _plain(candidate))
             receipt = next(row for row in self.demo["encounter"]._atomic_interval_history
                            if row.boundary == boundary)
             self.assertEqual(entity_context_at(log, boundary),
                              _plain(receipt.inspection.entities))
             self.assertEqual(events_at(log, boundary)["action_ids"], list(receipt.action_ids))
+            self.assertEqual(NativeHistoryQuery(log).notification_intents_at(boundary),
+                             _plain(receipt.notification_intents))
+        for target_id in target_rows[1]:
+            expected_history = [
+                {"boundary": boundary, "state": _plain(rows[target_id])}
+                for boundary, rows in target_rows.items() if target_id in rows]
+            self.assertEqual(query.target_history_at(target_id), expected_history)
 
     def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
         log = decode(self.wire)
@@ -66,6 +91,9 @@ class NativeHistoryTests(unittest.TestCase):
                 continue
             inspection = self.demo["encounter"].inspect_committed(boundary)
             self.assertEqual(actual["actions"], _plain(inspection.actions))
+            for action_id in inspection.actions:
+                self.assertEqual(query.committed_action_at(action_id, boundary),
+                                 _plain(inspection.actions[action_id]))
             self.assertEqual(actual["effects"], _plain(inspection.effects))
             self.assertEqual(actual["action_ids"],
                              [identity for row in inspection.timeline
@@ -192,8 +220,8 @@ class NativeHistoryTests(unittest.TestCase):
                 self.assertNotEqual(row['rng_after'], SAME_RNG)
             previous = current
 
-        legacy = {key: copy.deepcopy(value) for key, value in log.items()
-                  if key not in ('sha256', 'entity_context')}
+        legacy = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
+                  if key not in ('sha256', 'entity_context')})
         legacy['schema'] = LEGACY_SCHEMA
         legacy['initial'].pop('rng_before_first_commit')
         previous = None
@@ -212,8 +240,8 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertIsNone(fatigue_context_at(upgraded_legacy, 4))
 
         old_context = __import__('native_history')._without_fatigue_context(log)
-        old_context_body = {key: copy.deepcopy(value) for key, value in old_context.items()
-                            if key != 'sha256'}
+        old_context_body = _legacy_shape({key: copy.deepcopy(value) for key, value in old_context.items()
+                            if key != 'sha256'})
         old_context_body['schema'] = ENTITY_CONTEXT_SCHEMA
         old_context_body['entity_context'].pop('fatigue_available')
         old_context_body['initial'].pop('rng_before_first_commit')
@@ -226,11 +254,12 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(entity_context_at(upgraded_context, 4),
                          entity_context_at(old_context, 4))
 
-        fatigue_schema = {key: copy.deepcopy(value) for key, value in log.items()
-                          if key != 'sha256'}
+        fatigue_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
+                          if key != 'sha256'})
         fatigue_schema['schema'] = FATIGUE_CONTEXT_SCHEMA
         fatigue_schema['initial'].pop('rng_before_first_commit')
         fatigue_schema['boundaries'] = _expand_rows(log)
+        _legacy_shape({"boundaries": fatigue_schema['boundaries']})
         for index, row in enumerate(fatigue_schema['boundaries']):
             actual = rng_state_at(log, row['boundary'])
             row['rng_after'] = (actual if index == 0 else
@@ -241,9 +270,9 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertIsNone(upgrade(fatigue_schema)['initial']['rng_before_first_commit'])
 
         prior_fatigue = __import__('native_history')._without_initial_rng(log)
-        prior_fatigue_body = {key: copy.deepcopy(value)
+        prior_fatigue_body = _legacy_shape({key: copy.deepcopy(value)
                               for key, value in prior_fatigue.items()
-                              if key != 'sha256'}
+                              if key != 'sha256'})
         prior_fatigue_body['schema'] = FATIGUE_CONTEXT_SCHEMA
         prior_fatigue_body['initial'].pop('rng_before_first_commit')
         prior_fatigue = _seal(prior_fatigue_body)
@@ -259,8 +288,8 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(events_at(upgraded_fatigue, boundary),
                              events_at(log, boundary))
 
-        previous_schema = {key: copy.deepcopy(value) for key, value in log.items()
-                           if key not in ('sha256', 'entity_context')}
+        previous_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
+                           if key not in ('sha256', 'entity_context')})
         previous_schema['schema'] = PREVIOUS_SCHEMA
         previous_schema['initial'].pop('rng_before_first_commit')
         previous = None
@@ -275,11 +304,12 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(encode(upgrade(previous_schema)),
                          encode(__import__('native_history')._without_entity_context(log)))
 
-        quiet_schema = {key: copy.deepcopy(value) for key, value in log.items()
-                        if key not in ('sha256', 'entity_context')}
+        quiet_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
+                        if key not in ('sha256', 'entity_context')})
         quiet_schema['schema'] = QUIET_SPAN_SCHEMA
         quiet_schema['initial'].pop('rng_before_first_commit')
         quiet_schema['boundaries'] = _expand_rows(log)
+        _legacy_shape({"boundaries": quiet_schema['boundaries']})
         for index, row in enumerate(quiet_schema['boundaries']):
             actual = rng_state_at(log, row['boundary'])
             row['rng_after'] = (actual if index == 0 else
@@ -339,11 +369,12 @@ class NativeHistoryTests(unittest.TestCase):
                                              if key != 'sha256'}))), len(encode(log)))
         self.assertLess(len(log['boundaries']), log['latest_boundary'])
         self.assertTrue(validate(decode(encode(log))))
-        previous_schema = {key: copy.deepcopy(value) for key, value in log.items()
-                           if key not in ('sha256', 'entity_context')}
+        previous_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
+                           if key not in ('sha256', 'entity_context')})
         previous_schema['schema'] = PREVIOUS_SCHEMA
         previous_schema['initial'].pop('rng_before_first_commit')
         previous_schema['boundaries'] = _expand_rows(log)
+        _legacy_shape({"boundaries": previous_schema['boundaries']})
         for row in previous_schema['boundaries']:
             row['rng_after'] = rng_state_at(log, row['boundary'])
         previous_schema = _seal({key: value for key, value in previous_schema.items()
@@ -351,11 +382,12 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertTrue(validate(previous_schema))
         self.assertEqual(encode(upgrade(previous_schema)),
                          encode(__import__('native_history')._without_entity_context(log)))
-        quiet_span_schema = {key: copy.deepcopy(value) for key, value in log.items()
-                             if key not in ('sha256', 'entity_context')}
+        quiet_span_schema = _legacy_shape({key: copy.deepcopy(value) for key, value in log.items()
+                             if key not in ('sha256', 'entity_context')})
         quiet_span_schema['schema'] = QUIET_SPAN_SCHEMA
         quiet_span_schema['initial'].pop('rng_before_first_commit')
         quiet_span_schema['boundaries'] = _expand_rows(log)
+        _legacy_shape({"boundaries": quiet_span_schema['boundaries']})
         for index, row in enumerate(quiet_span_schema['boundaries']):
             actual = rng_state_at(log, row['boundary'])
             row['rng_after'] = (actual if index == 0 else
@@ -363,6 +395,7 @@ class NativeHistoryTests(unittest.TestCase):
                                 else actual)
         quiet_span_schema['boundaries'] = __import__('native_history')._compact_quiet_rows(
             quiet_span_schema['boundaries'])
+        _legacy_shape({"boundaries": quiet_span_schema['boundaries']})
         quiet_span_schema = _seal(quiet_span_schema)
         self.assertTrue(validate(quiet_span_schema))
         self.assertEqual(encode(upgrade(quiet_span_schema)),
@@ -384,6 +417,52 @@ class NativeHistoryTests(unittest.TestCase):
         span['increments'][0]['path'] = ['entities', 'missing', 'fields', 'hit_points']
         with self.assertRaises(NativeHistoryRejected):
             validate(_seal(bad_body))
+
+    def test_schema_six_upgrade_preserves_rng_and_marks_receipt_facts_unavailable(self):
+        log = capture(encounter_delta_headless.build_demo(until=4)["encounter"])
+        body = {key: copy.deepcopy(value) for key, value in log.items()
+                if key != "sha256"}
+        body.pop("receipt_facts_complete")
+        body["schema"] = INITIAL_RNG_SCHEMA
+        for row in body["boundaries"]:
+            row.pop("notification_intents", None)
+            row.pop("disarm_landings", None)
+            row.pop("receipt_facts_available", None)
+        legacy_six = _seal(body)
+        self.assertTrue(validate(legacy_six))
+        upgraded = upgrade(legacy_six)
+        self.assertEqual(upgraded["schema"], SCHEMA)
+        self.assertEqual(upgraded["initial"]["rng_before_first_commit"],
+                         log["initial"]["rng_before_first_commit"])
+        self.assertEqual(rng_state_at(upgraded, 0), rng_state_at(log, 0))
+        self.assertFalse(upgraded["receipt_facts_complete"])
+        self.assertIsNone(NativeHistoryQuery(upgraded).receipt_facts_at(4))
+
+    def test_appending_after_schema_six_keeps_known_and_unknown_receipts_distinct(self):
+        from activities import DelayAction
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        current = capture(encounter)
+        body = {key: copy.deepcopy(value) for key, value in current.items()
+                if key != "sha256"}
+        body.pop("receipt_facts_complete")
+        body["schema"] = INITIAL_RNG_SCHEMA
+        for row in body["boundaries"]:
+            row.pop("notification_intents", None)
+            row.pop("disarm_landings", None)
+            row.pop("receipt_facts_available", None)
+        upgraded = upgrade(_seal(body))
+        actor = encounter.being_list[1]
+        encounter.schedule_action(DelayAction(
+            encounter, actor, defense=0, start_time=encounter.time,
+            id="history-v6-followup-delay"))
+        encounter.step(1)
+        appended = append_committed(upgraded, encounter)
+        query = NativeHistoryQuery(appended)
+        self.assertIsNone(query.receipt_facts_at(4))
+        self.assertEqual(query.receipt_facts_at(5), {
+            "notification_intents": {"$tuple": []},
+            "disarm_landings": {"$tuple": []}})
+        self.assertFalse(appended["receipt_facts_complete"])
 
     def test_append_after_quiet_span_preserves_expanded_boundary_semantics(self):
         demo = encounter_delta_headless.build_demo(until=4)

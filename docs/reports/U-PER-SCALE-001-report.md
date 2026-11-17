@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native history `/5` now records Q/B and resolved ordinary/running physiology versions; `/10`–`/12` archives have a strict native graph reader; 64-Action / 2, 20 and 200 registry-Beings plus 200 quiet-boundary fresh-process runs pass. A pending projectile with a real shield interception also continues exactly after native restore. Generated `/10`/`/11` pristine fixtures now have an explicit no-Action native-mode migration and fresh-process first-Delay continuation; a generated `/12` first-Run Choice has native Save→Load→canonical-resave evidence with observer ledgers and IDs preserved. However this remains a selected-family graph plus duplicated receipt/Target history. The complete supported Action/state-family query matrix, graph-free historical reconstruction, durable history journal recovery, and ordinary application cutover are not complete. No rules or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
+**Problems first — status ACTIVE and incomplete.** Native history `/7` now records Q/B and resolved ordinary/running physiology versions plus per-boundary notification and Disarm landing receipts; `/10`–`/12` archives have a strict native graph reader; 64-Action / 2, 20 and 200 registry-Beings plus 200 quiet-boundary fresh-process runs pass. A pending projectile with a real shield interception also continues exactly after native restore. Generated `/10`/`/11` pristine fixtures now have an explicit no-Action native-mode migration and fresh-process first-Delay continuation; a generated `/12` first-Run Choice has native Save→Load→canonical-resave evidence with observer ledgers and IDs preserved. However this remains a selected-family graph plus duplicated receipt/Target history. The complete supported Action/state-family query matrix, graph-free historical reconstruction, durable history journal recovery, and ordinary application cutover are not complete. No rules or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
@@ -981,3 +981,32 @@ Verification after the change: `.venv/bin/python -B tests/test_native_history.py
 Both scale commands passed. Each fresh process reported the same saved logical Encounter and matched its uninterrupted continuation; the quiet case checked all 200 logical boundaries represented partly by compressed spans. The Action case establishes cumulative Action/Effect history parity for the Feint profile at scale, not every implemented Action family. The significant graph component remains duplicated historical receipt/Target state and resumable state; this result does not establish the required compact production format. Multiple Encounters, broader historical consumer parity, native legacy migration/resave, durable recovery and ordinary application cutover remain open.
 
 Verification: `.venv/bin/python -B examples/native_persistence_scale.py` passed; `.venv/bin/python -B examples/native_persistence_scale.py --quiet-boundaries 200` passed; the strengthened verifier's native-history unit test passed (**1 / 4.394s**); full `.venv/bin/python -B tests/test_native_history.py -v` passed **19 / 18.554s**; `.venv/bin/python -B tests/test_persistence_capability_matrix.py -v` passed **3 / 0.005s**; compilation of the verifier/query and tests passed. The scale implementation and this report/TASKS/matrix update are prepared for an audited commit; U-PER-SCALE-001 remains ACTIVE.
+
+
+## Current continuation — native committed receipt facts
+
+### Problems first
+
+- U-PER-SCALE-001 remains ACTIVE. Native history is still paired with the full `_atomic_interval_history` and `_atomic_target_history` runtime graph in the portable Save; consumers such as `Encounter.inspect_committed()` still depend on that graph. This increment improves fidelity of the independent history stream but does not remove duplicate history, reconstruct all historical readers from deltas, cover every field family, complete durable recovery, or cut over ordinary app Save/Load.
+- Legacy history `/1`–`/6` is kept strict. History-only upgrade does not invent notification or Disarm landing facts. Native Save Load may recover those facts only from the independently authenticated receipt graph that those legacy Saves actually contain.
+- No rules decision or external blocker prevents further persistence engineering.
+
+### Receipt-fact extension
+
+Native history schema `/7` now captures `PublishedInterval.notification_intents` and the `DisarmLandingReceipt` rows committed at each boundary. `NativeHistoryQuery.receipt_facts_at()`, `notification_intents_at()` and `disarm_landings_at()` return detached tagged facts; rows upgraded from older history carry `receipt_facts_available=false`, so absence is not misrepresented as an empty known receipt. Newly appended rows record their own availability, allowing mixed known/unknown history without relabeling old boundaries. The top-level `receipt_facts_complete` marker is validated against all regular rows and quiet spans. Quiet-span compaction only combines rows with matching availability.
+
+The current strict validator checks closed record types, field allowlists, Action references, unique source chronology, Disarm boundary identity, integer landing cells, nonnegative range, canonical digests and tamper refusal. `native_persistence.load_save()` accepts `/6` by comparing the current graph-derived history with a normalized `/6` projection, then installs the authenticated graph-derived facts for continued native recording. No existing `/12` behavior changed.
+
+### Verification
+
+- `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — **21 passed / 22.622s**, including exact current receipt parity, `/6` history upgrade with RNG-origin preservation, and appending new known facts after an older boundary while keeping its unavailable marker.
+- `.venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py'` — **31 passed / 89.307s**, including strict native `/6` Save restoration and pending post-roll Disarm landing continuation with exact receipt parity.
+- Focused recheck of `/6` native Save and pending Disarm — **2 passed / 5.482s**.
+- The full field-family matrix and acceptance gate remain open; the matrix now identifies `/7` and links the new receipt evidence.
+
+This execution preserved the four unrelated staged historical archive paths and all pre-existing untracked assignments/saves. The three scale/history commits preceding this increment are `250cbc2`, `cfacad9`, and `110d862`; this receipt-fact increment is not yet committed.
+
+
+### Historical Target and Action queries
+
+`NativeHistoryQuery.target_at()` and `target_history_at()` expose the committed `TargetCandidate` facts directly from the validated delta reconstruction; `committed_action_at()` returns the latest committed `ActionInspection` through a selected boundary. These complement `state_at()` and cumulative Action/Effect history without consulting the current Encounter graph or resolving old Actions. The four-boundary native fixture now compares every Target fact and ordered Target history with the authenticated `TargetIntervalRecord` values, and compares each Action projection with `Encounter.inspect_committed()`. Focused checks: `test_native_inspection_boundaries_round_trip_as_atomic_history` and `test_committed_action_effect_read_model_matches_inspection_at_each_boundary` — **2 passed / 1.475s**. Full state-at-time and Action/Target consumer parity across the implemented matrix remains open.

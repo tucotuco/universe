@@ -41,6 +41,15 @@ from location_observation import LocationEvidenceLedger
 from object_observation import ObjectObservationLedger
 
 
+def _legacy_history_shape(value):
+    value.pop("receipt_facts_complete", None)
+    for row in value.get("boundaries", ()):
+        row.pop("notification_intents", None)
+        row.pop("disarm_landings", None)
+        row.pop("receipt_facts_available", None)
+    return value
+
+
 class NativePersistenceTests(unittest.TestCase):
     def _combat_encounter(self):
         world = Universe("native-combat", library=Library(config_dir=str(ROOT / "src/config")))
@@ -1663,11 +1672,16 @@ print(json.dumps({'time':enc.time,'rng':rng_digest(rng),
             encounter, actor_id, defense=0, start_time=encounter.time,
             id='native-disarm-landing-continuation'))
         encounter.step(1)
+        committed_history = native_history.capture(encounter)
+        landing_receipt = encounter._disarm_landing_receipts[-1]
+        self.assertEqual(
+            native_history.NativeHistoryQuery(committed_history).disarm_landings_at(
+                landing_receipt.boundary),
+            native_history._plain((landing_receipt,)))
         expected = {
             'time': encounter.time,
             'rng': hashlib.sha256(json.dumps(builder.rng.state).encode()).hexdigest(),
-            'history': hashlib.sha256(native_history.encode(
-                native_history.capture(encounter))).hexdigest(),
+            'history': hashlib.sha256(native_history.encode(committed_history)).hexdigest(),
             'object_id': object_id,
             'position': list(world.get_object_by_id(object_id).get_position().as_tuple()),
             'parent': world.get_object_by_id(object_id).parent_container_id,
@@ -1908,8 +1922,8 @@ print(json.dumps({'time':enc.time,
         boundary_rngs = {row['boundary']: native_history.rng_state_at(
             body['history'], row.get('to_boundary', row.get('boundary')))
             for row in native_history._expand_rows(body['history'])}
-        legacy = {key: value for key, value in body['history'].items()
-                  if key not in ('sha256', 'entity_context')}
+        legacy = _legacy_history_shape({key: value for key, value in body['history'].items()
+                  if key not in ('sha256', 'entity_context')})
         legacy['schema'] = LEGACY_SCHEMA
         legacy['initial'].pop('rng_before_first_commit')
         previous = None
@@ -1943,7 +1957,8 @@ print(json.dumps({'time':enc.time,
         original = demo["encounter"]
         body = json.loads(export_save(original))
         history = native_history._without_fatigue_context(body["history"])
-        legacy = {key: value for key, value in history.items() if key != "sha256"}
+        legacy = _legacy_history_shape({key: value for key, value in history.items()
+                                        if key != "sha256"})
         legacy["schema"] = ENTITY_CONTEXT_SCHEMA
         legacy["entity_context"].pop("fatigue_available")
         legacy["initial"].pop("rng_before_first_commit")
@@ -1998,7 +2013,8 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         original = demo["encounter"]
         body = json.loads(export_save(original))
         prior = native_history._without_initial_rng(body["history"])
-        legacy = {key: value for key, value in prior.items() if key != "sha256"}
+        legacy = _legacy_history_shape({key: value for key, value in prior.items()
+                                       if key != "sha256"})
         legacy["schema"] = FATIGUE_CONTEXT_SCHEMA
         legacy["initial"].pop("rng_before_first_commit")
         body["history"] = _seal(legacy)
@@ -2013,6 +2029,34 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         self.assertEqual(current["initial"]["rng_before_first_commit"],
                          native_history._plain(demo["rng_owner"].state))
         self.assertEqual(restored_world.event_history[restored.id], restored)
+
+    def test_native_history_v6_save_preserves_origin_and_rebinds_graph_receipts(self):
+        from native_history import INITIAL_RNG_SCHEMA, _seal
+        from native_persistence import _canonical
+        demo = encounter_delta_headless.build_demo(until=4)
+        body = json.loads(export_save(demo["encounter"]))
+        history = {key: item for key, item in body["history"].items()
+                   if key != "sha256"}
+        history.pop("receipt_facts_complete")
+        history["schema"] = INITIAL_RNG_SCHEMA
+        for row in history["boundaries"]:
+            row.pop("notification_intents", None)
+            row.pop("disarm_landings", None)
+            row.pop("receipt_facts_available", None)
+        body["history"] = _seal(history)
+        unsigned = {key: item for key, item in body.items() if key != "sha256"}
+        body["sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+
+        world, restored, rng = load_save(_canonical(body))
+        current = native_history.current_recording(restored)
+        self.assertEqual(current["schema"], native_history.SCHEMA)
+        self.assertEqual(current["initial"]["rng_before_first_commit"],
+                         body["history"]["initial"]["rng_before_first_commit"])
+        self.assertTrue(current["receipt_facts_complete"])
+        self.assertTrue(native_history.NativeHistoryQuery(current).receipt_facts_at(4))
+        self.assertEqual(restored.id, demo["encounter"].id)
+        self.assertIs(world.event_history[restored.id], restored)
+        self.assertEqual(rng.state, demo["rng_owner"].state)
 
 
 if __name__ == "__main__":
