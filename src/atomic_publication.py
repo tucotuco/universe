@@ -309,6 +309,8 @@ def choose_disarm_landing(encounter, weapon_id, column, row):
     _DISARM_LANDING_RECEIPTS[key]=(weakref.ref(receipt,
         lambda ref,key=key:_DISARM_LANDING_RECEIPTS.pop(key,None)),
         weakref.ref(encounter),fingerprint(receipt))
+    import native_history
+    native_history.record_committed_disarm_landing(encounter)
     return receipt
 
 

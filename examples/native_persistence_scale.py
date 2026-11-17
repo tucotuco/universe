@@ -245,7 +245,7 @@ def run(action_count=64, registry_count=2):
         'target_compact_graph_bytes': target_compact_graph_bytes,
         'target_history_graph_bytes_saved':
             uncompacted_graph_bytes - target_compact_graph_bytes,
-        'receipt_facts_graph_bytes_saved':
+        'receipt_and_publication_facts_graph_bytes_saved':
             target_compact_graph_bytes - graph_bytes,
         'total_history_graph_bytes_saved': uncompacted_graph_bytes - graph_bytes,
         'total_history_graph_reduction': round(

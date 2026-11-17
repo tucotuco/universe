@@ -224,7 +224,9 @@ class NativeInventory(_Inventory):
     def __init__(self, world, encounter, bindings, *, rng_owner=None,
                  full_native=False, compact_native_target_history=False,
                  compact_native_entity_context=False,
-                 compact_native_receipt_facts=False):
+                 compact_native_receipt_facts=False,
+                 compact_native_publication_facts=False,
+                 compact_native_disarm_landings=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
@@ -233,6 +235,8 @@ class NativeInventory(_Inventory):
         self.compact_native_target_history=compact_native_target_history
         self.compact_native_entity_context=compact_native_entity_context
         self.compact_native_receipt_facts=compact_native_receipt_facts
+        self.compact_native_publication_facts=compact_native_publication_facts
+        self.compact_native_disarm_landings=compact_native_disarm_landings
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -423,6 +427,43 @@ class NativeInventory(_Inventory):
                 replacement = ()
             encoded = super().field(tag, field, replacement, ref, path, depth)
             token_id = id(replacement)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
+        if (self.compact_native_publication_facts
+                and tag == 'atomic_publication.PublishedInterval'
+                and field in ('action_ids', 'effect_ids', 'rng_state',
+                              'notification_intents')):
+            from native_history import _canonical, _plain
+            _require(type(item) is tuple,
+                     'committed publication fact cannot be compacted from unreviewed tuple')
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            empty_facts = ()
+            encoded = super().field(tag, field, empty_facts, ref, path, depth)
+            token_id = id(empty_facts)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
+        if (self.compact_native_disarm_landings
+                and tag == 'encounter.Encounter'
+                and field == '_disarm_landing_receipts'):
+            from encounter_inspection import DisarmLandingReceipt
+            from native_history import _canonical, _plain
+            _require(type(item) is list and all(
+                type(row) is DisarmLandingReceipt for row in item),
+                'Disarm landing history cannot be compacted from unreviewed records')
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            empty_facts = []
+            encoded = super().field(tag, field, empty_facts, ref, path, depth)
+            token_id = id(empty_facts)
             self.dependencies = [row for row in self.dependencies
                                  if row[0] != token_id]
             self._objects_by_identity.pop(token_id, None)
@@ -1284,5 +1325,9 @@ class NativeInventory(_Inventory):
             *(('entity-context-history/1',)
               if self.compact_native_entity_context else ()),
             *(('committed-receipt-facts/1',)
-              if self.compact_native_receipt_facts else ()))
+              if self.compact_native_receipt_facts else ()),
+            *(('published-interval-facts/1',)
+              if self.compact_native_publication_facts else ()),
+            *(('disarm-landing-facts/1',)
+              if self.compact_native_disarm_landings else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))

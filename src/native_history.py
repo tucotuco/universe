@@ -1711,6 +1711,66 @@ def record_committed_boundary(encounter, *, initial_schedule=None):
                 recorder.failure = f"{type(exc).__name__}: {exc}"
 
 
+def record_committed_disarm_landing(encounter):
+    """Amend the current cut with a committed no-time Disarm landing.
+
+    Choosing the landing has no Encounter-time cost and does not publish a new
+    interval boundary.  The existing latest history cut must nevertheless
+    retain its newly committed receipt and any corresponding current-state
+    facts.  Re-capture from authenticated native receipts, then prove that the
+    update is confined to that cut and did not change earlier history, event
+    identity, RNG, or timeline.
+    """
+    with _RECORDER_LOCK:
+        recorder = _RECORDERS.get(encounter)
+    if recorder is None:
+        return
+    try:
+        prior = upgrade(recorder._log)
+        if prior["latest_boundary"] != encounter.last_processed_boundary:
+            raise NativeHistoryRejected(
+                "Disarm landing cannot amend a history recorder behind its Encounter")
+        updated = capture(encounter,
+                          initial_schedule=recorder._initial_schedule)
+        if (updated["initial"] != prior["initial"]
+                or updated["latest_boundary"] != prior["latest_boundary"]):
+            raise NativeHistoryRejected(
+                "Disarm landing changed the native history origin or boundary")
+        before_rows = list(_expand_rows(prior))
+        after_rows = list(_expand_rows(updated))
+        boundary = prior["latest_boundary"]
+        if len(before_rows) != boundary or len(after_rows) != boundary:
+            raise NativeHistoryRejected(
+                "Disarm landing history cut has an incomplete boundary sequence")
+        if before_rows[:-1] != after_rows[:-1]:
+            raise NativeHistoryRejected(
+                "Disarm landing changed a previously recorded history boundary")
+        before, after = before_rows[-1], after_rows[-1]
+        for field in ("boundary", "start", "end", "events", "rng_after"):
+            if before[field] != after[field]:
+                raise NativeHistoryRejected(
+                    "Disarm landing changed the latest boundary's timeline or events")
+        old_facts = before["disarm_landings"]["$tuple"]
+        new_facts = after["disarm_landings"]["$tuple"]
+        current = [_plain(row) for row in encounter.__dict__.get(
+            "_disarm_landing_receipts", ()) if row.boundary == boundary]
+        if (new_facts != current or new_facts[:len(old_facts)] != old_facts
+                or len(new_facts) <= len(old_facts)):
+            raise NativeHistoryRejected(
+                "Disarm landing receipt was not added exactly to the current history cut")
+        validate(updated)
+        with _RECORDER_LOCK:
+            recorder._log = updated
+            _remember_record_initial_schedule(encounter, updated)
+    except Exception as exc:
+        # The no-time publication has already committed.  Match interval
+        # recording semantics: preserve the authoritative result and fail
+        # subsequent Save closed if its authenticated history cannot be
+        # advanced safely.
+        with _RECORDER_LOCK:
+            recorder.failure = f"{type(exc).__name__}: {exc}"
+
+
 def validate(log):
     """Strictly validate identity, chronology, atomic deltas, and integrity."""
     base_keys = {"schema", "initial", "boundaries", "latest_boundary", "sha256"}
@@ -2831,6 +2891,127 @@ def restore_compacted_entity_context(world, histories):
                 raise NativeHistoryRejected(
                     "compacted EntityInspection identities are duplicated")
             object.__setattr__(meta, "entities", MappingProxyType(entities))
+    return True
+
+
+def restore_compacted_publication_facts(world, histories):
+    """Rebuild repeated PublishedInterval facts from the validated history.
+
+    The native history is the independently checksummed source for each
+    boundary's Event/Effect identities, RNG cursor and notification intents.
+    The graph keeps the receipt envelope and committed inspection shell, then
+    restores these fields before receipt projections and publication anchors
+    are validated.
+    """
+    from atomic_publication import PublishedInterval
+    from encounter import Encounter
+    if type(histories) is not dict:
+        raise NativeHistoryRejected(
+            "compacted publication restoration requires Encounter histories")
+    encounters = {row.id: row for row in world.event_history.values()
+                  if type(row) is Encounter}
+    if set(histories) != set(encounters):
+        raise NativeHistoryRejected(
+            "compacted publication histories do not cover the Universe Encounters")
+    for encounter_id in sorted(encounters):
+        encounter = encounters[encounter_id]
+        log = histories[encounter_id]
+        receipts = encounter.__dict__.get("_atomic_interval_history")
+        if log is None:
+            if receipts or encounter.time != encounter.start_time:
+                raise NativeHistoryRejected(
+                    "compacted history-free Encounter has committed boundaries")
+            continue
+        upgraded = upgrade(log)
+        validate(upgraded)
+        if (upgraded["schema"] != SCHEMA
+                or upgraded["initial"]["encounter_id"] != encounter_id
+                or upgraded["latest_boundary"] != encounter.last_processed_boundary
+                or type(receipts) is not list
+                or [row.boundary for row in receipts]
+                    != list(range(1, upgraded["latest_boundary"] + 1))):
+            raise NativeHistoryRejected(
+                "compacted publication facts differ from their boundary history")
+        query = NativeHistoryQuery(upgraded)
+        restored = []
+        for shell in receipts:
+            if (type(shell) is not PublishedInterval
+                    or shell.encounter_id != encounter_id
+                    or shell.action_ids != () or shell.effect_ids != ()
+                    or shell.rng_state != ()
+                    or shell.notification_intents != ()
+                    or shell.committed is not True):
+                raise NativeHistoryRejected(
+                    "compacted publication receipt shell is malformed")
+            facts = query.boundary_facts_at(shell.boundary)
+            if (facts is None or facts.get("notification_intents") is None
+                    or type(facts.get("action_ids")) is not list
+                    or type(facts.get("effect_ids")) is not list):
+                raise NativeHistoryRejected(
+                    "committed publication facts are unavailable")
+            action_ids = tuple(facts["action_ids"])
+            effect_ids = tuple(_materialize_plain(facts["effect_ids"]))
+            rng_record = query.rng_state_at(shell.boundary)
+            rng_state = None if rng_record is None else _decode_rng_cursor(rng_record)
+            notification_intents = _materialize_plain(
+                facts["notification_intents"])
+            if (any(type(identity) is not str or not identity
+                    for identity in action_ids)
+                    or type(rng_state) is not tuple
+                    or type(notification_intents) is not tuple):
+                raise NativeHistoryRejected(
+                    "reconstructed publication facts have invalid shapes")
+            restored.append(PublishedInterval(
+                encounter_id, shell.boundary, action_ids, effect_ids, rng_state,
+                notification_intents, shell.committed, shell.inspection))
+        encounter.__dict__["_atomic_interval_history"] = restored
+    return True
+
+
+def restore_compacted_disarm_landings(world, histories):
+    """Rebuild Encounter-level Disarm landing indexes from exact boundary facts."""
+    from encounter import Encounter
+    from encounter_inspection import DisarmLandingReceipt
+    if type(histories) is not dict:
+        raise NativeHistoryRejected(
+            "compacted Disarm restoration requires Encounter histories")
+    encounters = {row.id: row for row in world.event_history.values()
+                  if type(row) is Encounter}
+    if set(histories) != set(encounters):
+        raise NativeHistoryRejected(
+            "compacted Disarm histories do not cover the Universe Encounters")
+    for encounter_id in sorted(encounters):
+        encounter = encounters[encounter_id]
+        log = histories[encounter_id]
+        current = encounter.__dict__.get("_disarm_landing_receipts")
+        if log is None:
+            if current or encounter.time != encounter.start_time:
+                raise NativeHistoryRejected(
+                    "compacted history-free Encounter has Disarm landings")
+            continue
+        upgraded = upgrade(log)
+        validate(upgraded)
+        if (upgraded["schema"] != SCHEMA
+                or upgraded["initial"]["encounter_id"] != encounter_id
+                or upgraded["latest_boundary"] != encounter.last_processed_boundary
+                or type(current) is not list or current):
+            raise NativeHistoryRejected(
+                "compacted Disarm landing shell differs from native history")
+        query = NativeHistoryQuery(upgraded)
+        restored = []
+        for boundary in range(1, upgraded["latest_boundary"] + 1):
+            facts = query.receipt_facts_at(boundary)
+            if facts is None or facts.get("disarm_landings") is None:
+                raise NativeHistoryRejected(
+                    "committed Disarm landing facts are unavailable")
+            rows = _materialize_plain(facts["disarm_landings"])
+            if (type(rows) is not tuple
+                    or any(type(row) is not DisarmLandingReceipt
+                           or row.boundary != boundary for row in rows)):
+                raise NativeHistoryRejected(
+                    "reconstructed Disarm landing facts are malformed")
+            restored.extend(rows)
+        encounter.__dict__["_disarm_landing_receipts"] = restored
     return True
 
 

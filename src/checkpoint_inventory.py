@@ -360,14 +360,16 @@ def _candidate_seal(candidate):
     _require(type(candidate.schema) is str and candidate.schema==SCHEMA and type(candidate.content_digest)is str,'unsupported inventory schema')
     _require(type(candidate.diagnostics) is tuple and all(type(d)is CheckpointDiagnostic for d in candidate.diagnostics),'unsupported diagnostics')
     diagnostics=tuple(tuple(object.__getattribute__(d,'__dict__')[f.name] for f in fields(CheckpointDiagnostic)) for d in candidate.diagnostics)
-    return _digest((candidate.schema,candidate.envelope,diagnostics,candidate.content_digest,False,False,False,False))
+    return _digest((candidate.schema,candidate.envelope,diagnostics,candidate.content_digest,False,False,False,False,False,False))
 
 
 def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              bindings=(),rng_owner=None,full_native=False,
              compact_native_target_history=False,
              compact_native_entity_context=False,
-             compact_native_receipt_facts=False):
+             compact_native_receipt_facts=False,
+             compact_native_publication_facts=False,
+             compact_native_disarm_landings=False):
     from universe import Universe
     from encounter import Encounter
     from transactional_progression import _BINDINGS,_all_declarations
@@ -394,6 +396,14 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              and (not compact_native_receipt_facts
                   or native_adapters and full_native and compact_native_entity_context),
              'compact native receipt facts require full native EntityInspection history')
+    _require(type(compact_native_publication_facts) is bool
+             and (not compact_native_publication_facts
+                  or native_adapters and full_native and compact_native_receipt_facts),
+             'compact publication facts require full native receipt history')
+    _require(type(compact_native_disarm_landings) is bool
+             and (not compact_native_disarm_landings
+                  or native_adapters and full_native and compact_native_receipt_facts),
+             'compact Disarm landings require full native receipt history')
     _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
     _require(native_adapters or bindings == (), 'bindings require explicit native adapter mode')
     _require(quiescent is True,'explicit quiescent/coordinated read ownership is required')
@@ -456,7 +466,9 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
                                       full_native=full_native,
                                       compact_native_target_history=compact_native_target_history,
                                       compact_native_entity_context=compact_native_entity_context,
-                                      compact_native_receipt_facts=compact_native_receipt_facts)
+                                      compact_native_receipt_facts=compact_native_receipt_facts,
+                                      compact_native_publication_facts=compact_native_publication_facts,
+                                      compact_native_disarm_landings=compact_native_disarm_landings)
         else:
             inventory=_Inventory()
         body=inventory.build(world,encounter,role,rng,rng_scope)
@@ -472,7 +484,9 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
 def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=None,
         native_adapters=False,bindings=(),rng_owner=None,full_native=False,
         compact_native_target_history=False,compact_native_entity_context=False,
-        compact_native_receipt_facts=False):
+        compact_native_receipt_facts=False,
+        compact_native_publication_facts=False,
+        compact_native_disarm_landings=False):
     """Return an inactive partial inventory; all readiness flags remain false.
 
     rng_scope is an explicit caller assertion, not evidence of global privacy.
@@ -483,14 +497,17 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         rng_owner=rng_owner,full_native=full_native,
         compact_native_target_history=compact_native_target_history,
         compact_native_entity_context=compact_native_entity_context,
-        compact_native_receipt_facts=compact_native_receipt_facts)
+        compact_native_receipt_facts=compact_native_receipt_facts,
+        compact_native_publication_facts=compact_native_publication_facts,
+        compact_native_disarm_landings=compact_native_disarm_landings)
     candidate=CheckpointCandidate(SCHEMA,envelope,diagnostics,_digest(envelope))
     key=id(candidate)
     _ISSUED[key]=(weakref.ref(candidate,lambda ref,key=key:_ISSUED.pop(key,None)),
         weakref.ref(world),weakref.ref(encounter),stamp,_candidate_seal(candidate),
         rng_scope,native_adapters,bindings,full_native,
         compact_native_target_history,compact_native_entity_context,
-        compact_native_receipt_facts)
+        compact_native_receipt_facts,compact_native_publication_facts,
+        compact_native_disarm_landings)
     return candidate
 
 
@@ -503,6 +520,8 @@ def validate_checkpoint_candidate(world,encounter,candidate,*,quiescent=False):
         rng_scope=issued[5],native_adapters=issued[6],bindings=issued[7],
         full_native=issued[8],compact_native_target_history=issued[9],
         compact_native_entity_context=issued[10],
-        compact_native_receipt_facts=issued[11])
+        compact_native_receipt_facts=issued[11],
+        compact_native_publication_facts=issued[12],
+        compact_native_disarm_landings=issued[13])
     _require(stamp==issued[3] and envelope==candidate.envelope and diagnostics==candidate.diagnostics,'stale checkpoint inventory; recapture after correction')
     return CheckpointValidation(not any(d.code=='unsupported_native_value' for d in diagnostics),diagnostics)

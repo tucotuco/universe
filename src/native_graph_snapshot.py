@@ -129,9 +129,20 @@ _LEGACY_NATIVE_GRAPH_V2_ENTITY_COMPATIBILITY = (
     ('python-native-rng', 'MT19937-state-v3'),
     ('restore-adapters', 'not-implemented'),
 )
+_LEGACY_NATIVE_GRAPH_V2_RECEIPT_FACTS_COMPATIBILITY = (
+    'compatibility-draft', 'universe.checkpoint-inventory-draft/1',
+    ('implementation-source', '93ced5a707ba326e7aa56b3e07221bf03102a3ac66ea447dfaf690fb4cef642b'),
+    ('rule-kernel-source', '661905a7826fc109055595c63778cec56d4502efc942116e3b23fb71ea025f1c'),
+    ('authoritative-decisions', '65539e8eef0e4a56601f0811ca2c1d262c696fbc7372d17335510f73e749ee44'),
+    ('python-runtime', 'cpython', (3, 14, 3, 'final', 0)),
+    ('numeric', 'IEEE754-binary64-hex'),
+    ('python-native-rng', 'MT19937-state-v3'),
+    ('restore-adapters', 'not-implemented'),
+)
 _LEGACY_NATIVE_GRAPH_V2_COMPATIBILITIES = (
     _LEGACY_NATIVE_GRAPH_V2_TARGET_COMPATIBILITY,
     _LEGACY_NATIVE_GRAPH_V2_ENTITY_COMPATIBILITY,
+    _LEGACY_NATIVE_GRAPH_V2_RECEIPT_FACTS_COMPATIBILITY,
 )
 _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITIES = (
     _LEGACY_NATIVE_GRAPH_V1_COMPATIBILITY,
@@ -602,7 +613,23 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
                   ('native-closure-recipes/1', 'entity-context-history/1',
                    'committed-receipt-facts/1'),
                   ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1', 'committed-receipt-facts/1')),
+                   'entity-context-history/1', 'committed-receipt-facts/1'),
+                  ('native-closure-recipes/1', 'entity-context-history/1',
+                   'committed-receipt-facts/1', 'published-interval-facts/1'),
+                  ('native-closure-recipes/1', 'target-candidate-history/1',
+                   'entity-context-history/1', 'committed-receipt-facts/1',
+                   'published-interval-facts/1'),
+                  ('native-closure-recipes/1', 'entity-context-history/1',
+                   'committed-receipt-facts/1', 'disarm-landing-facts/1'),
+                  ('native-closure-recipes/1', 'target-candidate-history/1',
+                   'entity-context-history/1', 'committed-receipt-facts/1',
+                   'disarm-landing-facts/1'),
+                  ('native-closure-recipes/1', 'entity-context-history/1',
+                   'committed-receipt-facts/1', 'published-interval-facts/1',
+                   'disarm-landing-facts/1'),
+                  ('native-closure-recipes/1', 'target-candidate-history/1',
+                   'entity-context-history/1', 'committed-receipt-facts/1',
+                   'published-interval-facts/1', 'disarm-landing-facts/1')),
               'native adapter recipe version differs')
         _validate_host_binding_descriptors(sections['host-bindings'])
     _need(sections['readiness'] == (False, False, False), 'unsupported inventory readiness claim')
@@ -758,8 +785,16 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'entity-context-history/1' in native_adapter_markers)
     compact_receipt_facts = (native and
         'committed-receipt-facts/1' in native_adapter_markers)
+    compact_publication_facts = (native and
+        'published-interval-facts/1' in native_adapter_markers)
+    compact_disarm_landings = (native and
+        'disarm-landing-facts/1' in native_adapter_markers)
     _need(not compact_receipt_facts or compact_entity_context,
           'compacted native receipt facts require EntityInspection history')
+    _need(not compact_publication_facts or compact_receipt_facts,
+          'compacted publication facts require committed receipt history')
+    _need(not compact_disarm_landings or compact_receipt_facts,
+          'compacted Disarm landing facts require committed receipt history')
     history_map_supplied = native_histories is not None
     if native_histories is None:
         native_histories = {}
@@ -985,6 +1020,12 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
             if compact_entity_context:
                 history_codec.restore_compacted_entity_context(world,
                                                                native_histories)
+            if compact_publication_facts:
+                history_codec.restore_compacted_publication_facts(world,
+                                                                  native_histories)
+            if compact_disarm_landings:
+                history_codec.restore_compacted_disarm_landings(world,
+                                                                native_histories)
             if compact_receipt_facts:
                 history_codec.restore_compacted_receipt_facts(world,
                                                                native_histories)

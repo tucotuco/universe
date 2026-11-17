@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -42,6 +43,34 @@ from activities import SpotAction
 from location_observation import LocationEvidenceLedger
 from object_observation import ObjectObservationLedger
 from statistical_group import GroupMember, MembershipChange, StatisticalGroup
+
+
+def _previous_entity_compact_graph(encounter):
+    """Build the pinned `/2` Entity writer used by legacy-history fixtures."""
+    import base64
+    import native_graph_snapshot
+    from checkpoint_inventory import capture_checkpoint_candidate
+    from native_graph_snapshot import encode as encode_graph
+
+    candidate = capture_checkpoint_candidate(
+        encounter.universe, encounter, quiescent=True,
+        rng_scope="exclusive_encounter", native_adapters=True,
+        full_native=True, compact_native_target_history=True,
+        compact_native_entity_context=True,
+        rng_owner=native_persistence._native_rng_owner(encounter))
+    graph = json.loads(encode_graph(candidate.envelope, native=True))
+    compatibility = (
+        native_graph_snapshot._LEGACY_NATIVE_GRAPH_V2_ENTITY_COMPATIBILITY)
+    graph["compatibility"] = compatibility
+    inventory = native_graph_snapshot._expand_compact_inventory(
+        native_graph_snapshot._tuples(graph["inventory"]), native=True)
+    graph["inventory"] = native_graph_snapshot._compact_inventory(
+        (compatibility, inventory[1]), native=True)
+    unsigned = {key: value for key, value in graph.items() if key != "sha256"}
+    graph["sha256"] = hashlib.sha256(
+        native_graph_snapshot._canonical(unsigned)).hexdigest()
+    return base64.b64encode(
+        native_graph_snapshot._canonical(graph)).decode("ascii")
 
 
 def _legacy_history_shape(value):
@@ -853,6 +882,14 @@ print(json.dumps({'time':enc.time,
             }
             for receipt in encounter._atomic_interval_history
         }
+        expected_publication = {
+            receipt.boundary: {
+                name: native_history._plain(getattr(receipt, name))
+                for name in ("action_ids", "effect_ids", "rng_state",
+                             "notification_intents")
+            }
+            for receipt in encounter._atomic_interval_history
+        }
 
         wire = export_save(encounter)
         save = json.loads(wire)
@@ -862,6 +899,8 @@ print(json.dumps({'time':enc.time,
         marker = next(row[1:] for row in inventory[1]
                       if row[0] == "native-adapters")
         self.assertIn("committed-receipt-facts/1", marker)
+        self.assertIn("published-interval-facts/1", marker)
+        self.assertIn("disarm-landing-facts/1", marker)
 
         world, restored, _rng = load_save(wire)
         actual = {
@@ -871,7 +910,16 @@ print(json.dumps({'time':enc.time,
             }
             for receipt in restored._atomic_interval_history
         }
+        actual_publication = {
+            receipt.boundary: {
+                name: native_history._plain(getattr(receipt, name))
+                for name in ("action_ids", "effect_ids", "rng_state",
+                             "notification_intents")
+            }
+            for receipt in restored._atomic_interval_history
+        }
         self.assertEqual(actual, expected)
+        self.assertEqual(actual_publication, expected_publication)
         self.assertIs(world.event_history[restored.id], restored)
         self.assertEqual(export_save(restored), wire)
 
@@ -1016,6 +1064,47 @@ print(json.dumps({'time':enc.time,
         prior_graph = json.loads(encode_graph(candidate.envelope, native=True))
         legacy_compatibility = (
             native_graph_snapshot._LEGACY_NATIVE_GRAPH_V2_ENTITY_COMPATIBILITY)
+        prior_graph["compatibility"] = legacy_compatibility
+        old_inventory = native_graph_snapshot._expand_compact_inventory(
+            native_graph_snapshot._tuples(prior_graph["inventory"]), native=True)
+        prior_graph["inventory"] = native_graph_snapshot._compact_inventory(
+            (legacy_compatibility, old_inventory[1]), native=True)
+        unsigned_graph = {key: value for key, value in prior_graph.items()
+                          if key != "sha256"}
+        prior_graph["sha256"] = hashlib.sha256(
+            native_graph_snapshot._canonical(unsigned_graph)).hexdigest()
+
+        prior_save = json.loads(current_wire)
+        prior_save["graph_b64"] = base64.b64encode(
+            native_graph_snapshot._canonical(prior_graph)).decode("ascii")
+        unsigned_save = {key: value for key, value in prior_save.items()
+                         if key != "sha256"}
+        prior_save["sha256"] = hashlib.sha256(
+            native_persistence._canonical(unsigned_save)).hexdigest()
+        restored_world, restored, _rng = load_save(
+            native_persistence._canonical(prior_save))
+        self.assertIs(restored_world.event_history[restored.id], restored)
+        self.assertEqual(export_save(restored), current_wire)
+
+    def test_receipt_fact_compact_native_graph_v2_from_previous_writer_migrates(self):
+        """The last receipt-fact `/2` writer remains a strict migration input."""
+        import base64
+        import native_graph_snapshot
+        from checkpoint_inventory import capture_checkpoint_candidate
+        from native_graph_snapshot import encode as encode_graph
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        current_wire = export_save(encounter)
+        candidate = capture_checkpoint_candidate(
+            encounter.universe, encounter, quiescent=True,
+            rng_scope="exclusive_encounter", native_adapters=True,
+            full_native=True, compact_native_target_history=True,
+            compact_native_entity_context=True,
+            compact_native_receipt_facts=True,
+            rng_owner=native_persistence._native_rng_owner(encounter))
+        prior_graph = json.loads(encode_graph(candidate.envelope, native=True))
+        legacy_compatibility = (
+            native_graph_snapshot._LEGACY_NATIVE_GRAPH_V2_RECEIPT_FACTS_COMPATIBILITY)
         prior_graph["compatibility"] = legacy_compatibility
         old_inventory = native_graph_snapshot._expand_compact_inventory(
             native_graph_snapshot._tuples(prior_graph["inventory"]), native=True)
@@ -4175,6 +4264,19 @@ print(json.dumps({'time':enc.time,'rng':rng_digest(rng),
         saved_options = disarm_landing_options(encounter, object_id)
         chosen = saved_options[0]
         choose_disarm_landing(encounter, object_id, chosen.column, chosen.row)
+        chosen_receipt = encounter._disarm_landing_receipts[-1]
+        choice_history = native_history.current_recording(encounter)
+        self.assertEqual(
+            native_history.NativeHistoryQuery(choice_history).disarm_landings_at(
+                chosen_receipt.boundary),
+            native_history._plain((chosen_receipt,)))
+        post_choice_wire = export_save(encounter)
+        _choice_world, post_choice_restore, post_choice_rng = load_save(
+            post_choice_wire)
+        self.assertEqual(
+            native_history._plain(post_choice_restore._disarm_landing_receipts),
+            native_history._plain(encounter._disarm_landing_receipts))
+        self.assertEqual(export_save(post_choice_restore), post_choice_wire)
         encounter.schedule_action(DelayAction(
             encounter, actor_id, defense=0, start_time=encounter.time,
             id='native-disarm-landing-continuation'))
@@ -4185,6 +4287,34 @@ print(json.dumps({'time':enc.time,'rng':rng_digest(rng),
             native_history.NativeHistoryQuery(committed_history).disarm_landings_at(
                 landing_receipt.boundary),
             native_history._plain((landing_receipt,)))
+        committed_wire = export_save(encounter)
+        committed_body = json.loads(committed_wire)
+        saved_facts = native_history.NativeHistoryQuery(
+            committed_body["history"]).disarm_landings_at(
+                landing_receipt.boundary)
+        self.assertEqual(saved_facts, native_history._plain((landing_receipt,)))
+        from native_graph_snapshot import decode as decode_graph
+        committed_graph = decode_graph(
+            base64.b64decode(committed_body["graph_b64"],
+                             validate=True), native=True)
+        committed_marker = next(row[1:] for row in committed_graph[1]
+                                if row[0] == "native-adapters")
+        self.assertIn("disarm-landing-facts/1", committed_marker)
+        restored_world, restored, restored_rng = load_save(committed_wire)
+        self.assertIs(restored_world.event_history[restored.id], restored)
+        self.assertEqual(
+            native_history._plain(restored._disarm_landing_receipts),
+            native_history._plain(encounter._disarm_landing_receipts))
+        self.assertEqual(restored_rng.state, builder.rng.state)
+        self.assertEqual(export_save(restored), committed_wire)
+        continuation_id = 'native-disarm-landing-continuation'
+        post_choice_restore.schedule_action(DelayAction(
+            post_choice_restore, actor_id, defense=0,
+            start_time=post_choice_restore.time, id=continuation_id))
+        post_choice_restore.step(1)
+        self.assertEqual(post_choice_rng.state, builder.rng.state)
+        self.assertEqual(native_history.encode(native_history.capture(
+            post_choice_restore)), native_history.encode(committed_history))
         from native_history import NativeHistoryRejected, _seal
         corrupted = json.loads(json.dumps(committed_history))
         landing_row = next(row for row in corrupted["boundaries"]
@@ -4575,6 +4705,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         legacy["schema"] = FATIGUE_CONTEXT_SCHEMA
         legacy["initial"].pop("rng_before_first_commit")
         body["history"] = _seal(legacy)
+        body["graph_b64"] = _previous_entity_compact_graph(original)
         unsigned = {key: value for key, value in body.items() if key != "sha256"}
         body["sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
 
@@ -4603,6 +4734,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
             row.pop("disarm_landings", None)
             row.pop("receipt_facts_available", None)
         body["history"] = _seal(history)
+        body["graph_b64"] = _previous_entity_compact_graph(demo["encounter"])
         unsigned = {key: item for key, item in body.items() if key != "sha256"}
         body["sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
 
