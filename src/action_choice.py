@@ -654,6 +654,7 @@ class ChoiceBook:
         from action import Action
         from copy import copy
         from identifiable import Identifiable
+        import uuid
 
         with self.lock:
             completed = tuple(record for record in self._choices.values()
@@ -697,7 +698,10 @@ class ChoiceBook:
                                  '_atomic_acknowledged_boundary', '_atomic_effect_ids',
                                  '_atomic_lifecycle'):
                         data.pop(name, None)
-                    Identifiable.__init__(action, data.get('name'))
+                    repeat_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                        f'universe:multiple-action-repeat:{self.encounter.id}:'
+                        f'{record.view.id}:{boundary}:{member.key}'))
+                    Identifiable.__init__(action, data.get('name'), repeat_id)
                     if data.get('strategy') is not None:
                         data['strategy'] = data['strategy'].copy()
                     members.append(ChoiceMember(member.key, action,

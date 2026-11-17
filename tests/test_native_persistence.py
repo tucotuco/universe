@@ -1594,6 +1594,100 @@ print(json.dumps({'time':enc.time,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
+    def test_repeating_multiple_action_successor_choice_resumes_natively(self):
+        """The immutable next cycle survives Load and resolves as declared."""
+        from action_choice import ChoiceMember
+        from action import Action
+        from native_scenario import NativeScenarioBuilder
+        builder = NativeScenarioBuilder(
+            'Native repeated Multiple-action cycle',
+            Library(config_dir=str(ROOT / 'src/config')), end_time=3, seed=61)
+        actor = builder.add_being('Human', 'Repeated actor',
+            position=(0, 0, 0), radius=.2, hit_points=100)
+        targets = (
+            builder.add_being('Human', 'First target',
+                position=(.3, 0, 0), radius=.2, hit_points=100),
+            builder.add_being('Human', 'Second target',
+                position=(0, .3, 0), radius=.2, hit_points=100),
+        )
+        for target in targets:
+            builder.mark_aware(actor.id, target.id)
+        actor.set_skill_level(builder.world.get_skill_dictionary(), 'multi-action', 1)
+        builder.enable()
+        first_cycle = []
+        for key, target in zip(('first', 'second'), targets):
+            action = Action(builder.world, 0, 1, 'touch', actor.id, target.id, None,
+                            id=f'native-repeat-{key}')
+            action.touch_willing = True
+            first_cycle.append(action)
+        builder.schedule_choice((
+            ChoiceMember('first', first_cycle[0], priority_penalty=0),
+            ChoiceMember('second', first_cycle[1], priority_penalty=3),
+        ))
+        builder.step(1)
+        active = [record for record in builder.encounter._choice_book._choices.values()
+                  if record.view.state == 'accepted']
+        self.assertEqual(len(active), 1)
+        successor = active[0]
+        self.assertEqual(tuple(member.priority_penalty for member in successor.members), (0, 3))
+        successor_action_ids = [member.action.id for member in successor.members]
+        self.assertTrue(set(successor_action_ids).isdisjoint(
+            {action.id for action in first_cycle}))
+        wire = export_save(builder.encounter)
+        builder.step(1)
+
+        def state(world, encounter, rng):
+            rows = sorted(encounter._choice_book.summary()['choices'],
+                          key=lambda row: row['id'])
+            action_ids = sorted(identity for identity in world.event_history
+                                if getattr(world.get_event_by_id(identity),
+                                           'event_type', None) == 'touch')
+            return {
+                'time': encounter.time,
+                'rng': hashlib.sha256(json.dumps(rng.state).encode()).hexdigest(),
+                'history': hashlib.sha256(native_history.encode(
+                    native_history.capture(encounter))).hexdigest(),
+                'choices': rows,
+                'successor_actions': successor_action_ids,
+                'touch_actions': action_ids,
+                'outcomes': [world.get_event_by_id(identity).resolution.outcome
+                             for identity in action_ids],
+            }
+        expected = state(builder.world, builder.encounter, builder.rng)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-repeat-choice.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+successor_id,*action_ids=sys.argv[2:]
+choice=enc._choice_book._choices[successor_id]
+assert choice.view.state=='accepted'
+assert [member.action.id for member in choice.members]==action_ids
+assert [member.priority_penalty for member in choice.members]==[0,3]
+enc.step(1)
+rows=sorted(enc._choice_book.summary()['choices'],key=lambda row:row['id'])
+touch_ids=sorted(identity for identity in world.event_history
+ if getattr(world.get_event_by_id(identity),'event_type',None)=='touch')
+print(json.dumps({'time':enc.time,
+ 'rng':hashlib.sha256(json.dumps(rng.state).encode()).hexdigest(),
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'choices':rows,'successor_actions':action_ids,'touch_actions':touch_ids,
+ 'outcomes':[world.get_event_by_id(identity).resolution.outcome
+  for identity in touch_ids]},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path), successor.view.id,
+                 *successor_action_ids], cwd=ROOT,
+                env={**os.environ, 'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        for key, value in expected.items():
+            with self.subTest(field=key):
+                self.assertEqual(actual[key], value)
+
     def test_native_history_v1_save_upgrades_and_resumes_commit_recording(self):
         from native_history import LEGACY_SCHEMA, SAME_RNG, _seal
         from native_persistence import _canonical
