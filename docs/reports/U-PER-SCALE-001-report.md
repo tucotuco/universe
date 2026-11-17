@@ -1760,3 +1760,15 @@ Reconciled `FrozenFatigueFrame`, `FrozenFatigueView`, `PhysicalFatigueState`, `E
 - `git diff --check` — passed.
 
 The LastSeenLocation test/documentation increment is committed as `571bea5`. This fatigue/physiology matrix and report/TASKS reconciliation is pending scoped commit. U-PER-SCALE-001 remains ACTIVE; the matrix still contains many supported-state families and application/history/security gates requiring work.
+
+
+## Problems-first — explicit native geometry and occlusion state
+
+The closed type matrix included sphere, global-axis box, Cartesian/SpatialState and declarative opacity, but its generic “only exercised fields” rows did not cite a native Save/Load case. Geometry and visual opacity are separate represented facts; using geometry to infer occlusion would exceed the model.
+
+Added `test_native_spatial_primitives_round_trip_and_continue`, which explicitly authors a radius-.37 Sphere, a 1.25 × 2.5 × 3.75 global-axis Box, and independent opacity .375. It performs a strict Save, loads in a fresh OS process, checks exact concrete geometry types and values, then continues through a native Delay and compares positions, RNG, Action identity and complete history digest with uninterrupted control. No sightline, cover, or optical rule is introduced.
+
+- `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_spatial_primitives_round_trip_and_continue test_persistence_capability_matrix -v` (from `tests/`) — **4 passed / 1.639s**.
+- `git diff --check` — passed.
+
+Fatigue/physiology matrix reconciliation is committed as `08dee4c`. The geometry test and matrix/report/TASKS update are pending scoped commit. LocalFrame continuation remains separately tested under `a42c44b`; U-PER-SCALE-001 remains ACTIVE.

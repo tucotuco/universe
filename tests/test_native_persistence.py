@@ -2200,6 +2200,56 @@ print(json.dumps({'encounter_id':enc.id,'time':enc.time,'frame':frame.to_dict(),
         actual=json.loads(result.stdout)
         self.assertEqual(actual,json.loads(json.dumps(expected)))
 
+    def test_native_spatial_primitives_round_trip_and_continue(self):
+        world,encounter,rng,actor,target,_weapon_id=self._combat_encounter()
+        from spatial.geometry import AxisAlignedBox
+        from spatial.occlusion import VisualOcclusion
+        actor.set_geometry(Sphere(.37))
+        target.set_geometry(AxisAlignedBox(1.25,2.5,3.75))
+        target.set_visual_occlusion(VisualOcclusion(.375))
+        encounter.step(1)
+        wire=export_save(encounter)
+        continuation=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
+            id='native-spatial-primitives-continuation')
+        encounter.schedule_action(continuation);encounter.step(1)
+        expected={'encounter_id':encounter.id,'time':encounter.time,
+            'geometries':[actor.geometry.to_dict(),target.geometry.to_dict()],
+            'occlusion':target.visual_occlusion.opacity,
+            'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+            'rng':rng.state,
+            'history':hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+            'actions':list(encounter._atomic_interval_history[-1].action_ids)}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-spatial-primitives.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+actor=encounter.get_being(encounter.being_list[0])
+target=encounter.get_being(encounter.being_list[1])
+assert type(actor.geometry).__name__=='Sphere'
+assert type(target.geometry).__name__=='AxisAlignedBox'
+assert target.visual_occlusion.opacity==.375
+action=DelayAction(encounter,actor.id,defense=0,start_time=encounter.time,
+ id='native-spatial-primitives-continuation')
+encounter.schedule_action(action);encounter.step(1)
+print(json.dumps({'encounter_id':encounter.id,'time':encounter.time,
+ 'geometries':[actor.geometry.to_dict(),target.geometry.to_dict()],
+ 'occlusion':target.visual_occlusion.opacity,
+ 'positions':[actor.get_position().as_tuple(),target.get_position().as_tuple()],
+ 'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(
+  native_history.capture(encounter))).hexdigest(),
+ 'actions':list(encounter._atomic_interval_history[-1].action_ids)},sort_keys=True))'''
+            import os
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path)],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=45)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
+
     def test_statistical_group_facts_and_keyed_realization_resume_in_fresh_process(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()
