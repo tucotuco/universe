@@ -458,6 +458,94 @@ print(json.dumps({'time':enc.time,'action_id':action.id,'object_id':target.id,
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
 
+    def test_headless_simultaneous_object_strikes_preserve_common_snapshot_durability(self):
+        builder = NativeScenarioBuilder(
+            "native-simultaneous-object-strikes",
+            Library(config_dir=str(ROOT / "src/config")), seed=5,
+            encounter_id="native-simultaneous-object-encounter")
+        actors = [builder.add_being("Human", name, position=position,
+                                    radius=.25, hit_points=100)
+                  for name, position in (("Left Striker", (0, 0, 0)),
+                                         ("Right Striker", (1.5, 0, 0)))]
+        weapons = [builder.make_weapon(actor.id, "Longsword", f"Longsword {index}",
+                                       hand="right hand")
+                   for index, actor in enumerate(actors, 1)]
+        target = ObjectInstance(ObjectDefinition(
+            "simultaneous hardwood target", 12, 12, 12, 20, 1, 1, 3),
+            name="Simultaneous native target")
+        target.set_position(CartesianPosition(.75, 0, 0))
+        builder.world.add_object(target)
+        builder.add_object(target.id)
+        actions = []
+        for index, (actor, weapon) in enumerate(zip(actors, weapons), 1):
+            builder.mark_aware(actor.id, target.id)
+            clear = builder.encounter.physical_path(actor.id, target.id)
+            self.assertEqual(clear.intersections, ())
+            self.assertEqual(clear.unmodeled_entity_ids, ())
+            action = Action(builder.world, 0, 1, "strike object", actor.id,
+                            target.id, weapon.id, id=f"native-object-batch-{index}")
+            action.object_motion = "thrust"
+            action.reach = effective_melee_reach_meters(actor.current, weapon.current)
+            action.end_time = math.ceil(weapon.Tt())
+            actions.append(action)
+        builder.enable()
+        for action in actions:
+            builder.schedule(action)
+        pending = export_save(builder.encounter)
+        builder.step(actions[0].end_time)
+        receipt = builder.encounter.inspect_committed(int(builder.encounter.time))
+        outcomes = [receipt.action(action.id).facts.outcome for action in actions]
+        damage = [[effect.amount for effect in receipt.action(action.id).facts.effects
+                   if getattr(effect, "component", None) == "object"]
+                  for action in actions]
+        self.assertEqual(outcomes, ["normal", "normal"])
+        self.assertEqual([sum(row) for row in damage], [5, 6])
+        self.assertEqual(target.hit_points(), -8)
+        expected = {
+            "time": builder.encounter.time,
+            "object_id": target.id,
+            "action_ids": [action.id for action in actions],
+            "outcomes": outcomes,
+            "damage": damage,
+            "target_hp": target.hit_points(),
+            "parent": target.parent_container_id,
+            "position": target.get_position().as_tuple(),
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(encode(capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+object_id=sys.argv[2];action_ids=sys.argv[3:5];target=world.get_object_by_id(object_id)
+actions=[]
+for action_id in action_ids:
+ choice=enc.choice_for_action(action_id);assert choice.state=='accepted'
+ actions.append(next(m.action for m in enc._choice_book._choices[choice.id].members
+                     if m.action.id==action_id))
+enc.step(int(actions[0].end_time-enc.time))
+receipt=enc.inspect_committed(int(enc.time))
+print(json.dumps({'time':enc.time,'object_id':target.id,
+ 'action_ids':[action.id for action in actions],
+ 'outcomes':[receipt.action(action.id).facts.outcome for action in actions],
+ 'damage':[[effect.amount for effect in receipt.action(action.id).facts.effects
+            if getattr(effect,'component',None)=='object'] for action in actions],
+ 'target_hp':target.hit_points(),'parent':target.parent_container_id,
+ 'position':target.get_position().as_tuple(),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-simultaneous-object-strikes.json"
+            path.write_bytes(pending)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), target.id,
+                 actions[0].id, actions[1].id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()

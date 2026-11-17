@@ -80,6 +80,8 @@ The readiness lifecycle also now has an Arena-independent proof. A fresh process
 
 Native Object-strike persistence now has a consequential path as well. With ordinary seed 5, the existing hit/damage evaluator applies the authored Object's hardness and changes HP from 6 to 2. The saved pending Action restores in a fresh process and yields identical identity, Object damage effect, HP, RNG and history. The fixture was narrowed after a first draft made the held weapon an extra Encounter obstacle; `physical_path()` correctly refused that unmodeled path. The accepted test now leaves the same weapon in its represented carried/held state without registering it as an independent Encounter obstacle, and explicitly asserts a clear path before scheduling. No uncertainty rule was weakened. The matrix describes this as one `strike object` event profile only; broader base `Action.event_type` closure remains open.
 
+Two simultaneous seeded Object strikes against one shared low-durability target now restore from the initial Save and resolve as one atomic boundary. The two per-action Object damage facts (5 and 6 after hardness), final -8 HP, same Object ID, RNG and history match the uninterrupted control. This verifies multiplicity/causality and same-snapshot durability for this Action profile only, not every DamageEffect subtype or event family.
+
 
 ## 2026-11-16 continuation addendum
 
