@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native History `/11` is paired with strict native graph `/2`. The graph reconstructs Target rows, EntityInspection contexts, publication receipt fields, and Disarm landing indexes from authenticated facts; exact prior graph-writer fingerprints remain migration inputs. The `/11` boundary-zero Entity projection is now captured at the true pre-movement start fence; strict `/1`–`/10` upgrades explicitly mark that fact unavailable rather than exposing a first-commit projection as initial state. The graph still retains the complete current snapshot, pending/accepted scheduler commitments, native Event objects and explicit observer bindings. The 159-type field matrix is source-linked but is not closed end-to-end for every reachable field/history consumer. Ordinary application Save/Load still writes Arena `/12`; broad family, corruption/security, compatibility and integration coverage remain open. Controlled 64-Action and quiet scale gates pass. No unresolved rule or external blocker is identified; remaining work is engineering. U-PER-SCALE-001 remains ACTIVE and sole.
+**Problems first — status ACTIVE and incomplete.** Native History `/11` is paired with strict native graph `/2`. The `/11` boundary-zero Entity projection is captured at the true pre-movement start fence; strict `/1`–`/10` upgrades preserve unavailable boundary-zero facts. A new native graph recipe reconstructs complete `PublishedInterval`/`CommittedBoundaryRecord` objects from authenticated history without storing those graph nodes for eligible histories. It deliberately retains receipt maps when observer-owned recipients are present because split listener history cannot yet reconstruct exact original shared-list aliasing/order. The current snapshot and pending commitments remain complete; the 159-type field matrix is source-linked but not closed end-to-end for every reachable field/history consumer. Ordinary application Save/Load still writes Arena `/12`; broad family, corruption/security, compatibility and integration coverage remain open. No unresolved rule or external blocker is identified; remaining work is engineering. U-PER-SCALE-001 remains ACTIVE and sole.
 
 ## Problems-first — exact boundary-zero Entity baseline and legacy fidelity
 
@@ -18,6 +18,40 @@ Verified results:
 - A follow-up audit found no direct `/10` native-history Save test. Added `test_native_history_v10_save_migrates_without_inventing_initial_entities`: `/10` upgrades to `/11` without publishing boundary-zero Entity data, committed boundary facts match the uninterrupted control, a fresh OS process continues through native Delay, and migrated Save→Load→Save is byte-identical. Focused result: **1 passed / 4.911s**. The matrix now requires live local source/test links for all 159 rows; the first audit found zero missing evidence links and zero broken targets, and the enforcement test passes in the **3-test matrix suite**.
 
 Remaining acceptance is not met: complete family/query parity, durable independently recoverable history, broad adversarial security and legacy migration coverage, and normal application Save/Load cutover remain open. The matrix and native integration findings need to distinguish proven `/11` initial-state behavior from unavailable pre-`/11` boundary-zero facts. This is a verified implementation increment, not assignment completion.
+
+## Problems-first — reconstruct committed boundary records instead of persisting graph rows
+
+Although most receipt payloads had already moved into native history, strict Saves still carried one `PublishedInterval` and one `CommittedBoundaryRecord` graph node per committed boundary. Those nodes duplicated an authenticated commit stream and kept historical projections coupled to an object graph. The new `committed-boundary-history/1` native adapter omits both per-boundary nodes for histories whose receipt maps contain no observer-owned recipient projection. Strict Load validates native history, builds exact ordered receipt shells from each fact row, restores Entity/action/effect/objective/schedule/projectile facts, then rebinds Target/action anchors and runs the existing committed inspection validator. It does not re-evaluate old Actions. The same-Encounter IDs and strict graph/legacy compatibility remain unchanged.
+
+The first integration run demonstrated why the eligibility condition matters: rebuilding only from current recipient history lost exact `CommittedBoundaryRecord.recipients` alias shape in 11 observer/account tests. Those failures were preserved and diagnosed. Saves with nonempty recipient projections now retain their exact authenticated receipt graph; ordinary histories use the new graph-free receipt reconstruction. This is a correct fail-closed boundary, but it leaves recipient-alias reconstruction as independent engineering work rather than claiming a complete de-duplicated history architecture.
+
+Verified integration after the correction:
+
+- `test_native_persistence` — **60 passed / 220.013s**, including same-Encounter and multiple-Encounter fresh-process Save/Load, `/1`–`/10` native-history migrations, accepted Arena `/10`–`/12` readers, observer-owned evidence and the omitted-receipt-node assertion.
+- `test_native_draw_persistence` — **25 passed / 144.919s**, all current tested native Action continuations.
+- `test_native_history` — **31 passed / 26.068s**.
+- `test_checkpoint_adapters test_persistence_capability_matrix` — **53 passed / 21.455s**.
+- The 11 observer/account cases from the first red full run passed after enabling the strict receipt-retention condition (**11 passed / 47.078s**). `.venv` compilation and `git diff --check` pass.
+
+Fresh `/11` graph measurements are recorded in the following subsection. Complete recipient-map reconstruction, the remaining matrix families, adversarial compatibility breadth and application cutover are open. No source-rule decision is needed.
+
+### Latest `/11` boundary-graph compaction measurements
+
+The first post-change measurements establish the effect of omitting both per-boundary native receipt object families. The accepted `--registry-count` scale command measures 64 actual Feint Actions, 129 committed boundaries, full boundary-by-boundary history comparison, strict fresh-process native Load, one additional Delay, and comparison against uninterrupted continuation. In the 200-Being registry profile, uncompacted graph size was **7,527,151 B**; the exported graph was **3,789,953 B** (a **49.65%** graph reduction), fact history was **1,193,049 B**, and the complete Save was **6,246,468 B**. Scenario, history-query, export, and fresh-process Load+continue took **71.169 s**, **2.798 s**, **13.529 s**, and **9.959 s**; peak RSS was **225,525,760 bytes**. All 129 boundary checks and same-Encounter continuation matched.
+
+For comparison, current reruns at 2 and 20 registered Beings measured graph reduction from **4,859,442 B to 1,128,349 B (76.78%)** and **5,094,837 B to 1,370,227 B (73.11%)**, respectively; each retained **1,193,049 B** history and had exact 129-boundary/fresh-process parity. Their complete Save sizes were **2,697,664 B** and **3,020,168 B**. The older measurements in the preceding table reflect pre-`/11` graph compaction and are retained as historical comparison only.
+
+A strict 200-quiet-boundary run retained **34,563 B** of history in a **1,152,566 B** complete Save, queried every logical boundary in **1.061 s**, exported in **2.413 s**, and loaded/continued in a fresh process in **3.722 s**; the history remained a compact quiet span and the continuation matched. Scenario stepping took **47.150 s**, peak RSS **79,773,696 bytes**. This command used the supported default 2-Being quiet fixture; the command-line runner does not expose a quiet-registry-count option, so no larger quiet-registry claim is made.
+
+The recipient-heavy graph-retention path remains intentionally exact and is excluded from these compaction percentages. These controlled profiles establish storage reduction and resumption only for their represented families; they do not close the matrix, general historical-reader parity, adversarial archive portfolio, or `/12` application-writer cutover.
+
+### Focused verification for this increment
+
+- Five strict Save/Load regressions covering omitted receipt nodes and multi-Encounter observer recipient/account bindings: **5 passed / 23.848s**.
+- `test_native_history` in its required isolated process: **31 passed / 22.865s**.
+- `test_persistence_capability_matrix` in its own process: **3 passed / 0.017s**.
+- Python compilation of all changed native persistence modules and `git diff --check`: passed.
+- A combined native-history + matrix invocation produced **33 passed / 1 failure / 22.714s** because the matrix test imports `arena_native_snapshot` before a native-history test asserts that the process has not imported Arena. Both suites pass separately; this is test-process import-order coupling, not a persistence failure, and tests are run in isolation as the report's established workflow requires.
 
 ## Current continuation — committed receipt compaction and no-time Disarm history
 

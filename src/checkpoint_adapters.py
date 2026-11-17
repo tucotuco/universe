@@ -226,7 +226,8 @@ class NativeInventory(_Inventory):
                  compact_native_entity_context=False,
                  compact_native_receipt_facts=False,
                  compact_native_publication_facts=False,
-                 compact_native_disarm_landings=False):
+                 compact_native_disarm_landings=False,
+                 compact_native_boundary_history=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
@@ -237,6 +238,7 @@ class NativeInventory(_Inventory):
         self.compact_native_receipt_facts=compact_native_receipt_facts
         self.compact_native_publication_facts=compact_native_publication_facts
         self.compact_native_disarm_landings=compact_native_disarm_landings
+        self.compact_native_boundary_history=compact_native_boundary_history
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -377,6 +379,28 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if (self.compact_native_boundary_history
+                and tag == 'encounter.Encounter'
+                and field == '_atomic_interval_history'):
+            from atomic_publication import PublishedInterval
+            from encounter_inspection import CommittedBoundaryRecord
+            from native_history import _canonical, _plain
+            _require(type(item) is list and all(
+                type(row) is PublishedInterval and row.committed is True
+                and type(row.inspection) is CommittedBoundaryRecord
+                for row in item),
+                'native committed boundary history cannot be compacted from unreviewed receipts')
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            replacement = []
+            encoded = super().field(tag, field, replacement, ref, path, depth)
+            token_id = id(replacement)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
         if (self.compact_native_entity_context and
                 tag == 'encounter_inspection.CommittedBoundaryRecord'
                 and field == 'entities'):
@@ -705,7 +729,7 @@ class NativeInventory(_Inventory):
         if field in ('ledger','received_accounts') and tag in ('group_observation.ObserveGroupAction','history_conversation.AskAboutPastAction','activities.SpotAction') and item is not None:
             b=self.recipient_by_id.get(id(item));action=self._objects_by_identity[self._owner_identity(ref)]
             role='in_world_belief_ledger' if field=='ledger' else 'in_world_received_accounts'
-            _require(b is not None and b.role==role and action.actor_id in b.observer_ids,'missing or mismatched external recipient binding')
+            _require(b is not None and b.role==role and action.actor_id in b.observer_ids,'missing durable committed recipient binding: external Action owner/role does not match')
             return self.value(item,path+(field,),depth+1)
         return super().field(tag,field,item,ref,path,depth)
 
@@ -1329,5 +1353,7 @@ class NativeInventory(_Inventory):
             *(('published-interval-facts/1',)
               if self.compact_native_publication_facts else ()),
             *(('disarm-landing-facts/1',)
-              if self.compact_native_disarm_landings else ()))
+              if self.compact_native_disarm_landings else ()),
+            *(('committed-boundary-history/1',)
+              if self.compact_native_boundary_history else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))

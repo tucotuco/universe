@@ -83,6 +83,13 @@ def _entity_context_history_available(world):
     for encounter in encounters:
         if not encounter.__dict__.get("_atomic_interval_history"):
             continue
+        if any(receipt.inspection.recipients
+               for receipt in encounter.__dict__["_atomic_interval_history"]):
+            # History currently splits shared listener account projections for
+            # observer queries, so it cannot yet reconstruct the exact native
+            # receipt owner-map alias shape. Keep that authenticated projection
+            # in the graph until the lossless recipient-map migration lands.
+            return False
         history = current_recording(encounter)
         if history is None:
             history = capture(encounter)
@@ -158,6 +165,7 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
             compact_native_receipt_facts=compact_entity_context,
             compact_native_publication_facts=compact_entity_context,
             compact_native_disarm_landings=compact_entity_context,
+            compact_native_boundary_history=compact_entity_context,
             bindings=recipient_bindings,
             rng_owner=_native_rng_owner(encounter))
         if candidate.diagnostics:

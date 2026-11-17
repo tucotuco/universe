@@ -629,7 +629,11 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
                    'disarm-landing-facts/1'),
                   ('native-closure-recipes/1', 'target-candidate-history/1',
                    'entity-context-history/1', 'committed-receipt-facts/1',
-                   'published-interval-facts/1', 'disarm-landing-facts/1')),
+                   'published-interval-facts/1', 'disarm-landing-facts/1'),
+                  ('native-closure-recipes/1', 'target-candidate-history/1',
+                   'entity-context-history/1', 'committed-receipt-facts/1',
+                   'published-interval-facts/1', 'disarm-landing-facts/1',
+                   'committed-boundary-history/1')),
               'native adapter recipe version differs')
         _validate_host_binding_descriptors(sections['host-bindings'])
     _need(sections['readiness'] == (False, False, False), 'unsupported inventory readiness claim')
@@ -789,12 +793,19 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'published-interval-facts/1' in native_adapter_markers)
     compact_disarm_landings = (native and
         'disarm-landing-facts/1' in native_adapter_markers)
+    compact_boundary_history = (native and
+        'committed-boundary-history/1' in native_adapter_markers)
     _need(not compact_receipt_facts or compact_entity_context,
           'compacted native receipt facts require EntityInspection history')
     _need(not compact_publication_facts or compact_receipt_facts,
           'compacted publication facts require committed receipt history')
     _need(not compact_disarm_landings or compact_receipt_facts,
           'compacted Disarm landing facts require committed receipt history')
+    _need(not compact_boundary_history or
+          compact_target_history and compact_entity_context
+          and compact_receipt_facts and compact_publication_facts
+          and compact_disarm_landings,
+          'compacted committed boundaries require complete native fact history')
     history_map_supplied = native_histories is not None
     if native_histories is None:
         native_histories = {}
@@ -1006,7 +1017,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
             _need(target is not None, 'native committed fence reference cannot be rebound')
             object.__setattr__(reference, 'identity', id(target))
 
-    if compact_target_history or compact_entity_context:
+    if (compact_target_history or compact_entity_context
+            or compact_boundary_history):
         if not history_map_supplied:
             _need(all(not saved.__dict__.get('_atomic_interval_history')
                       and saved.time == saved.start_time
@@ -1017,10 +1029,13 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
               'compacted native graph requires histories for every Encounter')
         import native_history as history_codec
         try:
+            if compact_boundary_history:
+                history_codec.restore_compacted_boundary_history(world,
+                                                                 native_histories)
             if compact_entity_context:
                 history_codec.restore_compacted_entity_context(world,
                                                                native_histories)
-            if compact_publication_facts:
+            if compact_publication_facts and not compact_boundary_history:
                 history_codec.restore_compacted_publication_facts(world,
                                                                   native_histories)
             if compact_disarm_landings:

@@ -2934,6 +2934,72 @@ class NativeHistoryQuery:
         return result if observer_id is None else result.get(observer_id, {})
 
 
+def restore_compacted_boundary_history(world, histories):
+    """Rebuild committed receipt shells from authenticated native fact rows.
+
+    The compact graph omits its per-boundary ``PublishedInterval`` and
+    ``CommittedBoundaryRecord`` object graph. This restores typed shells from
+    the separately validated fact stream; later adapters bind Entity, Target,
+    Action, Effect, scheduler and process-local authority references.
+    """
+    from atomic_publication import PublishedInterval
+    from action_evaluation import EffectIdentity
+    from encounter import Encounter
+    from encounter_inspection import CommittedBoundaryRecord
+    if type(histories) is not dict:
+        raise NativeHistoryRejected(
+            "compacted committed-boundary restore requires Encounter histories")
+    encounters = {row.id: row for row in world.event_history.values()
+                  if type(row) is Encounter}
+    if set(histories) != set(encounters):
+        raise NativeHistoryRejected(
+            "compacted committed-boundary histories do not cover the Universe")
+    for encounter_id, encounter in encounters.items():
+        log = histories[encounter_id]
+        existing = encounter.__dict__.get("_atomic_interval_history", ())
+        if log is None:
+            if existing or encounter.time != encounter.start_time:
+                raise NativeHistoryRejected(
+                    "history-free compact Encounter has committed boundaries")
+            continue
+        upgraded = upgrade(log)
+        validate(upgraded)
+        if (existing or upgraded["initial"]["encounter_id"] != encounter_id
+                or upgraded["latest_boundary"] != encounter.last_processed_boundary):
+            raise NativeHistoryRejected(
+                "compacted committed-boundary origin differs from the restored Encounter")
+        query = NativeHistoryQuery(upgraded)
+        receipts = []
+        for boundary in range(1, upgraded["latest_boundary"] + 1):
+            facts = query.boundary_facts_at(boundary)
+            action_ids = tuple(facts["action_ids"])
+            effect_ids = tuple(_materialize_plain(facts["effect_ids"]))
+            rng_state = _materialize_plain(facts["rng_after"])
+            notification_intents = _materialize_plain(
+                facts["notification_intents"])
+            if (type(action_ids) is not tuple
+                    or any(type(identity) is not str or not identity
+                           for identity in action_ids)
+                    or type(effect_ids) is not tuple
+                    or any(type(identity) is not EffectIdentity
+                           for identity in effect_ids)
+                    or type(rng_state) is not tuple
+                    or type(notification_intents) is not tuple):
+                raise NativeHistoryRejected(
+                    "compacted committed-boundary identity facts are malformed")
+            metadata = CommittedBoundaryRecord(
+                _materialize_plain(facts["start"]), boundary,
+                MappingProxyType({}), MappingProxyType({}),
+                MappingProxyType({}), MappingProxyType({}),
+                MappingProxyType({}), MappingProxyType({}), (),
+                MappingProxyType({}), (), (), None, MappingProxyType({}))
+            receipts.append(PublishedInterval(
+                encounter_id, boundary, action_ids, effect_ids, rng_state,
+                notification_intents, True, metadata))
+        encounter.__dict__["_atomic_interval_history"] = receipts
+    return True
+
+
 def restore_compacted_entity_context(world, histories):
     """Rebuild receipt EntityInspection maps from their authenticated history.
 

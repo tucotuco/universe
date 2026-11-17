@@ -902,6 +902,12 @@ print(json.dumps({'time':enc.time,
         nodes = next(row[1] for row in inventory[1] if row[0] == "nodes")
         self.assertFalse(any(tag == "encounter_inspection.EntityInspection"
                              for _reference, tag, _content in nodes))
+        self.assertFalse(any(tag in ("encounter_inspection.CommittedBoundaryRecord",
+                                     "atomic_publication.PublishedInterval")
+                             for _reference, tag, _content in nodes))
+        markers = next(row[1:] for row in inventory[1]
+                       if row[0] == "native-adapters")
+        self.assertIn("committed-boundary-history/1", markers)
 
         world, restored, _rng = load_save(wire)
         actual = {
