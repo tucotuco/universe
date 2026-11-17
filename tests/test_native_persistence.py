@@ -54,6 +54,24 @@ def _legacy_history_shape(value):
 
 
 class NativePersistenceTests(unittest.TestCase):
+    def _assert_recipient_history_matches_receipts(self, encounter):
+        """Check detached recipient history against every authoritative cut."""
+        log = native_history.capture(encounter)
+        query = native_history.NativeHistoryQuery(log)
+        self.assertEqual(query.state_at(0)["recipients"], {})
+        self.assertEqual(query.observer_facts_at(0, encounter.being_list[0]), [])
+        for boundary in range(1, log["latest_boundary"] + 1):
+            receipt_view = encounter.inspect_committed(boundary)
+            expected = native_history._stable_recipients(receipt_view.recipients)
+            self.assertEqual(query.state_at(boundary)["recipients"], expected,
+                             f"recipient projection at boundary {boundary}")
+            owners = set(encounter.being_list)
+            owners.update(row["owner_id"] for row in expected
+                          if row["owner_id"] is not None)
+            for owner_id in owners:
+                self.assertEqual(query.observer_facts_at(boundary, owner_id),
+                    [row for row in expected if row["owner_id"] == owner_id])
+
     def _combat_encounter(self):
         world = Universe("native-combat", library=Library(config_dir=str(ROOT / "src/config")))
         attacker = world.get_object_by_id(world.make_being("Human", "Attacker"))
@@ -1880,6 +1898,7 @@ print(json.dumps({'times':[r[0].time for r in rows],
             output = []
             for row in rows:
                 encounter, rng, action, recipient = row[:4]
+                self._assert_recipient_history_matches_receipts(encounter)
                 if type(recipient) is list:
                     observations = recipient[0].to_dict()
                     target = encounter.universe.get_object_by_id(action.target_id)
@@ -1899,6 +1918,60 @@ print(json.dumps({'times':[r[0].time for r in rows],
                 historical_facts = [
                     query.observer_facts_at(boundary, action.actor_id)
                     for boundary in (0, 1, 6)]
+                if action is rows[2][2]:
+                    # Emulate the prior /9 writer, which retained only each
+                    # boundary's touched recipient rows and had no listener
+                    # owner field. The strict upgrade must recover ownership
+                    # from recorded HeardAccount facts and carry state forward.
+                    def legacy_recipients(value):
+                        output = []
+                        for identity, projection in value.items():
+                            role = object.__getattribute__(identity, "__dict__")["role"]
+                            data = dict(object.__getattribute__(projection, "__dict__"))
+                            data.pop("identity", None)
+                            data.pop("listener_ids", None)
+                            owner = data.get("observer_id") or data.get("listener_id")
+                            output.append({"role": role, "owner_id": owner,
+                                           "projection": native_history._plain(data)})
+                        return sorted(output, key=lambda item:
+                            (item["role"], item["owner_id"] or ""))
+                    with patch("native_history._stable_recipients", legacy_recipients), \
+                            patch("native_history._merge_recipient_rows",
+                                  side_effect=lambda _old, touched: touched):
+                        old_log = native_history.capture(encounter)
+                    unsigned = {key: value for key, value in old_log.items()
+                                if key != "sha256"}
+                    unsigned["schema"] = native_history.RECIPIENT_HISTORY_SCHEMA
+                    old_log = native_history._seal(unsigned)
+                    upgraded = native_history.upgrade(old_log)
+                    upgraded_query = native_history.NativeHistoryQuery(upgraded)
+                    self.assertTrue(upgraded["initial"]["initial_schedule_available"])
+                    for boundary in range(encounter.last_processed_boundary + 1):
+                        self.assertEqual(
+                            upgraded_query.observer_facts_at(boundary, action.actor_id),
+                            query.observer_facts_at(boundary, action.actor_id))
+                    corrupted = native_history.decode(native_history.encode(upgraded))
+                    expanded = native_history._expand_rows(corrupted)
+                    state = native_history._initial_state(corrupted["initial"])
+                    for row_value in expanded:
+                        state = upgraded_query.state_at(row_value["boundary"])
+                        if state["recipients"]:
+                            state["recipients"][0]["owner_id"] = "forged-listener"
+                            state["recipients"][0]["projection"]["listener_id"] = "forged-listener"
+                        row_value["changes"] = native_history._diff(
+                            native_history._initial_state(corrupted["initial"])
+                            if row_value["boundary"] == 1 else previous_corrupt_state,
+                            state)
+                        row_value["state_sha256"] = hashlib.sha256(
+                            native_history._canonical(state)).hexdigest()
+                        previous_corrupt_state = state
+                    unsigned = {key: value for key, value in corrupted.items()
+                                if key not in ("sha256", "boundaries")}
+                    unsigned["boundaries"] = expanded
+                    with self.assertRaisesRegex(
+                            native_history.NativeHistoryRejected,
+                            "native recipient owner or projection is malformed"):
+                        native_history.validate(native_history._seal(unsigned))
                 output.append([encounter.time, action.resolution.outcome,
                     observations, facts, historical_facts, rng.state,
                     hashlib.sha256(native_history.encode(
@@ -1923,6 +1996,19 @@ for index in range(3):
  action=world.get_event_by_id(sys.argv[index+2])
  ledger=(action.object_ledger if index==0 else action.location_ledger) if index<2 else action.received_accounts
  while enc.time<6: enc.step(1)
+ # Every native owner-filtered historical projection matches the receipts
+ # after restoration, at each cut rather than only the selected 0/1/6 cuts.
+ log=native_history.capture(enc)
+ query=native_history.NativeHistoryQuery(log)
+ assert query.state_at(0)['recipients']=={}
+ for boundary in range(1,log['latest_boundary']+1):
+  expected=native_history._stable_recipients(enc.inspect_committed(boundary).recipients)
+  assert query.state_at(boundary)['recipients']==expected
+  owners=set(enc.being_list)|{row['owner_id'] for row in expected
+   if row['owner_id'] is not None}
+  for owner in owners:
+   assert query.observer_facts_at(boundary,owner)==[row for row in expected
+    if row['owner_id']==owner]
  if index<2:
   observations=[[o.id,o.observer_id,getattr(o,'object_id',None),
    getattr(o,'being_id',None),o.source_action_id,o.encounter_id,o.boundary,
@@ -2124,6 +2210,31 @@ print(json.dumps({'being_id':being.id,'name':being.name,'request':record.request
             world, 'history', 'listener-accounts', 'in_world_received_accounts',
             (listener.id,), accounts)
         wire = export_save(encounter, recipient_bindings=(binding,))
+        # Present a valid prior /9 native Save: its receipt stores only the
+        # touched recipient row and has no explicit row owner. The recorded
+        # HeardAccount itself is sufficient to recover this listener.
+        document = json.loads(wire)
+        legacy_history = {key: value for key, value in document['history'].items()
+                          if key != 'sha256'}
+        legacy_history['schema'] = native_history.RECIPIENT_HISTORY_SCHEMA
+        history_state = native_history._initial_state(legacy_history['initial'])
+        for history_row in legacy_history['boundaries']:
+            for change in history_row['changes']:
+                if change['path'] != ['recipients'] or not change['after']:
+                    continue
+                for recipient in change['value']:
+                    if recipient['role'] == 'in_world_received_accounts':
+                        recipient['owner_id'] = None
+                        recipient['projection'].pop('listener_id', None)
+            history_state = native_history._apply(history_state, history_row['changes'])
+            history_row['state_sha256'] = hashlib.sha256(
+                native_history._canonical(history_state)).hexdigest()
+        document['history'] = native_history._seal(legacy_history)
+        unsigned_document = {key: value for key, value in document.items()
+                             if key != 'sha256'}
+        document['sha256'] = hashlib.sha256(
+            native_persistence._canonical(unsigned_document)).hexdigest()
+        wire = native_persistence._canonical(document)
         next_action = DelayAction(encounter, listener.id, defense=0,
                                   start_time=1, id='native-inquiry-continuation')
         encounter.schedule_action(next_action)
@@ -2144,6 +2255,10 @@ world,enc,rng=load_path(sys.argv[1])
 inquiry=next(a for a in world.event_history.values()
  if type(a).__name__=='AskAboutPastAction')
 assert inquiry.generate is not None and len(inquiry.received_accounts)==1
+query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
+facts=query.observer_facts_at(1,inquiry.actor_id)
+assert len(facts)==1 and facts[0]['owner_id']==inquiry.actor_id
+assert facts[0]['projection']['accounts']['$tuple'][0]['fields']['listener_id']==inquiry.actor_id
 account=inquiry.received_accounts[0].to_dict()
 action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
  id='native-inquiry-continuation')

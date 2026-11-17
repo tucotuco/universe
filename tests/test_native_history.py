@@ -201,6 +201,52 @@ class NativeHistoryTests(unittest.TestCase):
         del fixture
         self.assertEqual(query.objective_at(1), current)
 
+    def test_shared_testimony_container_remains_listener_separated_in_history(self):
+        """One registered list can carry accounts for two private listeners."""
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        fixture.enable()
+        from history_conversation import AskAboutPastAction
+        from objective_reality import EpisodeFacts
+        from personal_history import PersonalHistory
+        from realization import Fact
+
+        speaker = fixture.c
+        speaker.personal_history = PersonalHistory(
+            speaker, earliest=-10, known_through=0, nondeclining_skills=())
+        first_key = speaker.personal_history.episode_key(-1, "shared-first")
+        second_key = speaker.personal_history.episode_key(-2, "shared-second")
+        accounts = []
+        first = AskAboutPastAction(fixture.world, fixture.a.id, speaker.id, 0,
+            episode_time=-1, topic="shared-first", received_accounts=accounts,
+            generate=EpisodeFacts((Fact(first_key, {"description": "first"},
+                                        origin="shared-listener-test"),)))
+        second = AskAboutPastAction(fixture.world, fixture.b.id, speaker.id, 0,
+            episode_time=-2, topic="shared-second", received_accounts=accounts,
+            generate=EpisodeFacts((Fact(second_key, {"description": "second"},
+                                        origin="shared-listener-test"),)))
+        fixture.enc.schedule_choice((first, second))
+        fixture.enc.step(1)
+        self.assertEqual((first.resolution.outcome, second.resolution.outcome),
+                         ("heard", "heard"))
+        query = NativeHistoryQuery(capture(fixture.enc))
+        first_rows = query.observer_facts_at(1, fixture.a.id)
+        second_rows = query.observer_facts_at(1, fixture.b.id)
+        self.assertEqual([row["owner_id"] for row in first_rows], [fixture.a.id])
+        self.assertEqual([row["owner_id"] for row in second_rows], [fixture.b.id])
+        self.assertEqual([row["fields"]["listener_id"]
+                          for row in first_rows[0]["projection"]["accounts"]["$tuple"]],
+                         [fixture.a.id])
+        self.assertEqual([row["fields"]["listener_id"]
+                          for row in second_rows[0]["projection"]["accounts"]["$tuple"]],
+                         [fixture.b.id])
+        self.assertEqual(len(query.state_at(1)["recipients"]), 2)
+
+        fixture.enc.step(1)
+        later = NativeHistoryQuery(capture(fixture.enc))
+        self.assertEqual(later.observer_facts_at(2, fixture.a.id), first_rows)
+        self.assertEqual(later.observer_facts_at(2, fixture.b.id), second_rows)
+
     def test_schedule_query_preserves_finished_and_future_accepted_choice_states(self):
         fixture = inspection_fixtures.InspectionFixture()
         fixture.setUp()

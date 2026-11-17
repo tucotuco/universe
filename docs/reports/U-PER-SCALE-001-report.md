@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native history is schema `/9`. Selected-family graph plus fact history still duplicates committed receipt/Target projections; complete supported Action/state-family history reconstruction, durable history journal recovery, production application cutover and remaining multi-Encounter recipient combinations remain incomplete. Native Save `/2` preserves independent RNG/history for multiple progressing Encounters. Separate tests cover four recipient families across companion roots, and a three-root bundle combines ObjectEvidence, LocationEvidence and listener-account bindings; this narrows, but does not close, generic multi-Encounter recipient coverage. A new fresh-process test proves current native `/1` Saves carry their shared Library definitions without config reads, preserve exact Being/Weapon definition aliases and round-trip canonically. Prior scale and `/10`–`/12` compatibility evidence remains relevant, not sufficient for this revised all-or-nothing assignment. No unresolved rule or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
+**Problems first — status ACTIVE and incomplete.** Native history is schema `/10`, and still duplicates committed receipt/Target projections in the resumable graph. Complete supported Action/state-family history reconstruction, durable history journal recovery, production application cutover, broad scale/security, and some native recipient/query combinations remain incomplete. The new `/10` fixes cumulative recipient-state loss across quiet boundaries and preserves listener-specific testimony; it does not close the overall matrix. Native Save `/2` preserves independent RNG/history for multiple progressing Encounters. Prior scale and accepted `/10`–`/12` compatibility evidence remain relevant, not sufficient for this revised all-or-nothing assignment. No unresolved rule or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
@@ -25,6 +25,34 @@
 | Native history bridge continuation | 2026-11-16T13:49:14-08:00 | IN PROGRESS | Recorded at closeout |
 | Full native bridge continuation | 2026-11-17T06:10:55Z | Not recorded in the prior closeout | Elapsed unavailable; no estimate added |
 | Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | IN PROGRESS | End and elapsed recorded at closeout |
+
+## Problems-first — cumulative observer-recipient history and `/9` migration
+
+### Gap
+
+Every-boundary receipt comparison exposed two related defects that had passed selected-cut observer tests. Native history stored the recipient projection touched by each receipt as if it were the complete recipient state, so a later quiet receipt could erase a testimony account from historical query. Also, `AccountsProjection` dropped the listener ID, making `observer_facts_at(boundary, listener_id)` unable to return the listener's own received account. A shared account list created a further privacy risk if one listener's account data were exposed to another listener.
+
+### Correction
+
+Native history schema `/10` now folds recipient updates forward to the last committed projection. `FrozenAccounts` and `AccountsProjection` carry all registered listener IDs for an explicitly shared list. The stable history reader emits distinct per-listener account/effect projections, so `observer_facts_at()` remains owner-filtered even when the in-world container is shared. The `AccountsProjection.listener_ids` field is optional in the graph adapter to preserve decoding of older native graph records.
+
+The strict `/9` history upgrade replays old boundary-local recipient deltas into a cumulative read state. It recovers a testimony owner only where the legacy `HeardAccount` already carries `listener_id`; an empty ownerless legacy list is left ownerless. New validation checks the recipient role, participant IDs, listener/projection consistency and account/listener identity. A re-sealed forged listener ID is rejected.
+
+### Evidence
+
+The heterogeneous three-Encounter native Save now compares owner-specific recipient facts against the authoritative receipt projections at every cut from boundary 0 through the latest boundary, both before Save and after a fresh process loads and advances each Encounter. It also builds a realistic old `/9` boundary-local testimony stream, upgrades it, and checks every historical listener query plus preservation of the known initial scheduler projection. A two-listener simultaneous AskAboutPast test shares one received-account list and verifies that each listener sees only their own account at the committed Action boundary and after a later quiet boundary.
+
+Exact verification:
+
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence` — **39 passed / 114.127s** (includes strict old `/10`–`/12` Arena readers, native Save/Load, and fresh-process continuations).
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_combines_object_and_location_recipients` — **1 passed / 10.075s**, including all-cut owner queries, `/9` upgrade, tampered owner rejection and fresh-process continuation.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_completed_ask_about_past_and_listener_accounts_resume_with_binding` — **1 passed / 1.615s**; a checksummed native `/1` file with `/9` recipient rows loads in a fresh process, recovers the listener from the recorded HeardAccount, and continues exactly.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history.NativeHistoryTests.test_shared_testimony_container_remains_listener_separated_in_history` — **1 passed / 1.536s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history -v` — **28 passed / 21.060s**; `test_checkpoint_adapters -v` — **50 passed / 19.317s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_draw_persistence -v` — **25 passed / 116.775s**; all current Action-history parity fixtures remain green with schema `/10`.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_persistence_capability_matrix` — **3 passed / 0.024s**.
+
+Remaining gaps are still material: the 157-type family inventory is not closed end-to-end, history remains coupled to the runtime receipt/Target graph, durable append-journal crash recovery is not proven, broad state-family and corruption/scale portfolios remain, and the successful native path has not been cut over to ordinary application Save/Load. These are engineering gaps with no external or adopted-rule blocker identified; U-PER-SCALE-001 stays ACTIVE.
 
 
 ## Native action-family continuation — contact history and Break Weapon

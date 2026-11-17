@@ -84,6 +84,7 @@ class FrozenBelief:
 class FrozenAccounts:
     identity: RecipientIdentity
     accounts: tuple
+    listener_ids: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -257,6 +258,7 @@ class AccountsProjection:
     identity: RecipientIdentity
     accounts: tuple
     delivery_effect_ids: tuple
+    listener_ids: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -461,7 +463,13 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
                     raise UnsupportedEvaluation('received_accounts must be a reviewed in-world native list')
                 _check(all(type(a) is HeardAccount for a in values), 'opaque in-world account contents')
                 recipient = RecipientIdentity('in_world_received_accounts', id(values))
-                recipients[recipient] = FrozenAccounts(recipient, frozen_value(values))
+                existing = recipients.get(recipient)
+                listener_ids = set(() if type(existing) is not FrozenAccounts
+                                   else existing.listener_ids)
+                listener_ids.add(view.actor_id)
+                listener_ids.update(account.listener_id for account in values)
+                recipients[recipient] = FrozenAccounts(
+                    recipient, frozen_value(values), tuple(sorted(listener_ids)))
             claim = data['substituted_claim']
             _check(claim is None or type(claim) is str and bool(claim.strip()), 'unsupported claim')
             actions[aid] = ObserverActionInputs(aid, account_recipient=recipient, substituted_claim=claim)
@@ -826,7 +834,9 @@ def build_supported_candidate(context, *, notify=False):
                 key, state.observer_id, state.observations,
                 tuple(object_effect_ids.get(key, ())))
         else:
-            recipients[key] = AccountsProjection(key,state.accounts,tuple(account_delivery_ids.get(key,())))
+            recipients[key] = AccountsProjection(
+                key, state.accounts, tuple(account_delivery_ids.get(key,())),
+                state.listener_ids)
     all_rows = tuple(boundary.effects.values())+tuple(rows)
     _validate_effect_rows(all_rows,snapshot,due,recipients,inputs=inputs,proposals=core_proposals,notify=notify)
     _check(set(core_proposals) == due and set(lifecycle) == due, 'incomplete supported-family coverage')

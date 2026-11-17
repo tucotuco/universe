@@ -318,3 +318,26 @@ Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -
 ## Problems-first: self-contained shared Library definitions
 
 The current native `/1` artifact had not been tested for definition portability in a fresh process that could not consult source configuration, nor for canonical native Save→Load→Save byte equivalence at the exact initial pending-Choice cut. A new headless test creates a Human/Dagger world, records a native pending Delay, and loads in a fresh process with the configuration directory's file opens blocked. The restored Being and Weapon `original` references alias the exact objects in the bundled Library. The child re-saves byte-for-byte identically, then advances the native pending Action with matching time, outcome, Action ID, RNG and history digest. Focused test passes **1 / 1.482s**; full `test_native_persistence` passes **39 / 111.178s**; matrix validator passes **3 / 0.006s**. This evidence proves self-contained definitions and aliases for the admitted Library graph, not every external definition family or the broader persistence gate; U-PER-SCALE-001 remains ACTIVE. Implementation and evidence await the scoped audit and commit.
+
+## Problems-first: cumulative recipient history and listener ownership
+
+### Defect
+
+Every-cut comparison against native `EncounterInspection.recipients` exposed that schema `/9` treated each receipt's touched recipient map as the full state. A successful AskAboutPast account was therefore absent from a later quiet boundary's `observer_facts_at()` projection. The same audit found that `AccountsProjection` dropped the listener ID, so its testimony row had `owner_id: null`; a shared `received_accounts` list also needed a representation that could not expose one listener's account to another.
+
+### Implementation
+
+Native history schema `/10` now merges touched owner projections forward in both full capture and append-after-publication. `FrozenAccounts` and `AccountsProjection` carry the listeners that reference a shared in-world account list. The history encoder emits a distinct owner-filtered row for each listener, including only that listener's HeardAccount facts and their causally linked delivery Effect IDs. The closed native field table admits `AccountsProjection.listener_ids` optionally so older graph records remain loadable.
+
+The strict `/9` history upgrade replays authenticated boundary-local recipient values into a cumulative state. It recovers testimony ownership only from an already-recorded `HeardAccount.listener_id`; empty ownerless legacy records remain ownerless. The `/10` validator checks recipient type/role, participant ownership, listener/projection consistency and account ownership. A re-sealed forged listener ID is rejected.
+
+### Verification
+
+- Mixed three-Encounter Save, every cut 0–6, original and fresh-process continuation: **1 passed / 10.075s**. ObjectEvidence, LocationEvidence and listener testimony are checked against committed receipts, `/9`→`/10` migration preserves known owner and initial scheduler facts, and a forged owner is rejected.
+- A checksummed native `/1` Save downgraded to the prior `/9` recipient representation strictly loads in a separate process, recovers the listener only from its existing `HeardAccount.listener_id`, answers the listener-scoped history query, and continues the Action stream: **1 passed / 1.615s**.
+- Two simultaneous listeners sharing one account list, then a quiet boundary: **1 passed / 1.536s**. Each observer query returns only its own HeardAccount rows.
+- Full native Save/Load: **39 passed / 114.127s**, including accepted `/10`–`/12` Arena reads and fresh-process continuation.
+- Native history: **28 passed / 21.060s**; strict checkpoint adapters: **50 passed / 19.317s**; capability matrix: **3 passed / 0.024s**.
+- Native Action-history parity: **25 passed / 116.775s** on schema `/10`.
+
+This resolves the identified cumulative-recipient defect and the tested single/shared-list listener attribution paths only. Full family history/query parity, receipt/Target graph removal, durable append journal, broad security/scale, and application Save/Load cutover remain open. No rules or external blocker is identified.

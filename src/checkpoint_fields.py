@@ -367,7 +367,7 @@ FIELD_ADAPTERS = {
         "required": '_observations observer_id'.split(),
     },
     'observer_proposals.AccountsProjection': {
-        "allowed": 'accounts delivery_effect_ids identity'.split(),
+        "allowed": 'accounts delivery_effect_ids identity listener_ids'.split(),
         "required": 'accounts delivery_effect_ids identity'.split(),
     },
     'observer_proposals.ActionOutcomeEffect': {
