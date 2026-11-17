@@ -141,6 +141,9 @@ class NativeHistoryTests(unittest.TestCase):
             def events_at(self, _boundary):
                 return {}
 
+            def committed_actions_at(self, _boundary):
+                return {}
+
             def entity_context_at(self, _boundary):
                 return None
 

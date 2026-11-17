@@ -51,11 +51,23 @@ def _verify_history_boundaries(encounter):
     history = NativeHistoryQuery(log)
     candidates = _target_candidates(encounter)
     receipts = {row.boundary: row for row in encounter._atomic_interval_history}
+    inspection = encounter.inspect_committed()
     if set(receipts) != set(range(1, encounter.last_processed_boundary + 1)):
         raise RuntimeError('native receipt boundaries are not contiguous')
+    action_prefix = []
+    effect_prefix = []
     for boundary, receipt in receipts.items():
+        action_prefix.extend(receipt.action_ids)
+        effect_prefix.extend(receipt.effect_ids)
         state = history.state_at(boundary)
         events = history.events_at(boundary)
+        cumulative = history.committed_actions_at(boundary)
+        action_ids = list(dict.fromkeys(action_prefix))
+        effect_ids = list(dict.fromkeys(effect_prefix))
+        expected_actions = {identity: inspection.actions[identity]
+                            for identity in action_ids}
+        expected_effects = {identity: inspection.effects[identity]
+                            for identity in effect_ids}
         meta = receipt.inspection
         if (state['boundary'] != boundary
                 or state['time'] != meta.end
@@ -67,8 +79,13 @@ def _verify_history_boundaries(encounter):
                 or history.entity_context_at(boundary) != _plain(meta.entities)
                 or events['action_ids'] != list(receipt.action_ids)
                 or events['effect_ids'] != [_plain(item) for item in receipt.effect_ids]
+                or cumulative['action_ids'] != action_ids
+                or cumulative['effect_ids'] != [_plain(item) for item in effect_ids]
+                or cumulative['actions'] != _plain(expected_actions)
+                or cumulative['effects'] != _plain(expected_effects)
                 or history.rng_state_at(boundary) != _plain(receipt.rng_state)):
-            raise RuntimeError(f'native history differs from committed receipt at {boundary}')
+            raise RuntimeError(
+                f'native state/Event/Action/Effect history differs from committed receipt at {boundary}')
     return log
 
 
