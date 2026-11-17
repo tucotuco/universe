@@ -1949,6 +1949,105 @@ print(json.dumps(output,sort_keys=True))'''
         self.assertEqual(json.loads(result.stdout),
                          json.loads(json.dumps(expected)))
 
+    def test_native_save_is_self_contained_for_shared_library_definitions(self):
+        """Fresh Load uses the bundled Library, not files from its old path."""
+        import os
+        from native_scenario import NativeScenarioBuilder
+
+        builder = NativeScenarioBuilder(
+            'native-portable-definitions',
+            Library(config_dir=str(ROOT / 'src/config')),
+            seed=74, encounter_id='native-portable-definitions-encounter')
+        actor = builder.add_being('Human', 'Portable-definition Being')
+        weapon = builder.make_weapon(
+            actor.id, 'Dagger', 'Portable-definition Dagger',
+            hand='right hand', participant=True)
+        builder.enable()
+        pending = DelayAction(builder.encounter, actor.id, defense=0,
+                              start_time=builder.encounter.time,
+                              id='native-portable-definitions-delay')
+        builder.schedule(pending)
+        wire = export_save(builder.encounter)
+
+        self.assertIs(actor.original,
+                      builder.world.library.get_being_definition('Human'))
+        self.assertIs(weapon.original,
+                      builder.world.library.get_weapon_definition('Dagger'))
+        builder.step(1)
+        expected = {
+            'changed_nodes': [],
+            'shared_actor_definition': True,
+            'shared_weapon_definition': True,
+            'time': builder.encounter.time,
+            'outcome': pending.resolution.outcome,
+            'action_id': pending.id,
+            'rng': builder.rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import base64
+import native_history
+from native_persistence import load_path,rng_owner_for,export_save
+from native_graph_snapshot import decode as decode_graph
+# The restored graph must contain definitions without consulting source config.
+import builtins,io
+from pathlib import Path
+config_root=Path(sys.argv[2]).resolve()
+original_open=builtins.open;original_io_open=io.open
+def guarded_open(path,*args,**kwargs):
+ try: selected=Path(path).resolve()
+ except (TypeError,ValueError): selected=None
+ if selected==config_root or (selected is not None and config_root in selected.parents):
+  raise AssertionError('native Load consulted an external Library definition file')
+ return original_open(path,*args,**kwargs)
+def guarded_io_open(path,*args,**kwargs):
+ try: selected=Path(path).resolve()
+ except (TypeError,ValueError): selected=None
+ if selected==config_root or (selected is not None and config_root in selected.parents):
+  raise AssertionError('native Load consulted an external Library definition file')
+ return original_io_open(path,*args,**kwargs)
+builtins.open=guarded_open;io.open=guarded_io_open
+world,enc,rng=load_path(sys.argv[1])
+actor=world.get_object_by_id(sys.argv[3]);weapon=world.get_object_by_id(sys.argv[4])
+assert actor.original is world.library.get_being_definition('Human')
+assert weapon.original is world.library.get_weapon_definition('Dagger')
+original_save=open(sys.argv[1],'rb').read()
+resaved=export_save(enc)
+original_value=json.loads(original_save);resaved_value=json.loads(resaved)
+def graph_nodes(value):
+ envelope=decode_graph(base64.b64decode(value['graph_b64']),native=True)
+ rows=next(section[1] for section in envelope[1][1:] if section[0]=='nodes')
+ return {row[0]:row[1:] for row in rows}
+before=graph_nodes(original_value);after=graph_nodes(resaved_value)
+changed_nodes=[[repr(ref), before.get(ref,(None,None))[0],
+ after.get(ref,(None,None))[0]] for ref in
+ sorted(set(before)|set(after),key=repr) if before.get(ref)!=after.get(ref)]
+choice=enc.choice_for_action(sys.argv[5])
+action=next(member.action for member in enc._choice_book._choices[choice.id].members
+ if member.action.id==sys.argv[5])
+assert choice.state=='accepted'
+enc.step(1)
+print(json.dumps({'changed_nodes':changed_nodes,
+ 'shared_actor_definition':actor.original is world.library.get_being_definition('Human'),
+ 'shared_weapon_definition':weapon.original is world.library.get_weapon_definition('Dagger'),
+ 'time':enc.time,'outcome':action.resolution.outcome,'action_id':action.id,
+ 'rng':rng_owner_for(enc).state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
+ sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-self-contained-definitions.json'
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path),
+                 str(ROOT / 'src/config'), actor.id, weapon.id, pending.id], cwd=directory,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))
