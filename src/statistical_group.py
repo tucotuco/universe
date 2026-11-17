@@ -181,6 +181,9 @@ def validate_membership_history(group, objects):
                     or isinstance(count_record.value, bool)
                     or count_record.value < 0):
         raise ValueError("native Group materialized member has no committed household count")
+    if (StatisticalGroup._rng is not _NATIVE_GROUP_RNG
+            or "_rng" in object.__getattribute__(group, "__dict__")):
+        raise ValueError("native Group member placement RNG is unreviewed")
     members_by_id = {}
     for key, member in members.items():
         if (type(key) is not tuple or len(key) != 3
@@ -207,6 +210,12 @@ def validate_membership_history(group, objects):
                 or type(household_record.value.get(key[1])) is not int
                 or not 0 <= key[2] < household_record.value[key[1]]):
             raise ValueError("native Group member is outside committed composition")
+        member_rng = _NATIVE_GROUP_RNG(group, "member", *key)
+        angle = 2 * math.pi * member_rng.random()
+        radius = group.footprint_radius * math.sqrt(member_rng.random())
+        expected_offset = (radius * math.cos(angle), radius * math.sin(angle), 0.0)
+        if member.offset != expected_offset:
+            raise ValueError("native Group member offset differs from its keyed realization")
         members_by_id[member.id] = member
     attached = group._motion_attached_native_ids
     if (type(realized) is not dict
@@ -915,3 +924,8 @@ class StatisticalGroup(ObjectInstance):
         center = CartesianPosition(*(p + v * dt for p, v in zip(
             self.get_position().as_tuple(), self.velocity)))
         return ReachableRegion(center, .5 * self.max_acceleration * dt * dt, float(time))
+
+
+# Native Save validation uses this exact keyed provider without calling
+# ``member()`` (which would mutate the lazy realization cache).
+_NATIVE_GROUP_RNG = StatisticalGroup._rng

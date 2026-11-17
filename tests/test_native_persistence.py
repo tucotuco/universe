@@ -1019,6 +1019,14 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         with self.assertRaises(NativeSaveRejected):
             export_save(fixture.enc)
         group._members[member_key] = original_group_member
+        group._members[member_key] = GroupMember(
+            original_group_member.id, original_group_member.household,
+            original_group_member.category, original_group_member.index,
+            (original_group_member.offset[0] + 0.01,
+             original_group_member.offset[1], original_group_member.offset[2]))
+        with self.assertRaises(NativeSaveRejected):
+            export_save(fixture.enc)
+        group._members[member_key] = original_group_member
         wire = export_save(fixture.enc)
         group.advance(1)
         expected_group_continuation = {
