@@ -3340,6 +3340,10 @@ print(json.dumps(output,sort_keys=True))'''
         builder.encounter.add_object(scenery_id)
         armor = builder.world.get_object_by_id(armor_id)
         scenery = builder.world.get_object_by_id(scenery_id)
+        action_definition = builder.world.library.get_action_definition(
+            'break weapon (armed)')
+        skill_definition = builder.world.library.skill_dictionary.get_skill_definition(
+            'unarmed combat')
         builder.enable()
         pending = DelayAction(builder.encounter, actor.id, defense=0,
                               start_time=builder.encounter.time,
@@ -3355,6 +3359,8 @@ print(json.dumps(output,sort_keys=True))'''
                       builder.world.library.get_armor_definition('Gauntlet'))
         self.assertIs(scenery.original,
                       builder.world.library.get_object_definition('Linen pillow'))
+        self.assertIsNotNone(action_definition)
+        self.assertIsNotNone(skill_definition)
         builder.step(1)
         expected = {
             'changed_nodes': [],
@@ -3362,6 +3368,8 @@ print(json.dumps(output,sort_keys=True))'''
             'shared_weapon_definition': True,
             'shared_armor_definition': True,
             'shared_object_definition': True,
+            'shared_action_definition': True,
+            'shared_skill_definition': True,
             'time': builder.encounter.time,
             'outcome': pending.resolution.outcome,
             'action_id': pending.id,
@@ -3395,10 +3403,14 @@ builtins.open=guarded_open;io.open=guarded_io_open
 world,enc,rng=load_path(sys.argv[1])
 actor=world.get_object_by_id(sys.argv[3]);weapon=world.get_object_by_id(sys.argv[4])
 armor=world.get_object_by_id(sys.argv[6]);scenery=world.get_object_by_id(sys.argv[7])
+action_definition=world.library.get_action_definition('break weapon (armed)')
+skill_definition=world.library.skill_dictionary.get_skill_definition('unarmed combat')
 assert actor.original is world.library.get_being_definition('Human')
 assert weapon.original is world.library.get_weapon_definition('Dagger')
 assert armor.original is world.library.get_armor_definition('Gauntlet')
 assert scenery.original is world.library.get_object_definition('Linen pillow')
+assert action_definition is world.library.action_dictionary.get_action_definition('break weapon (armed)')
+assert skill_definition is world.library.skill_dictionary.get_skill_definition('unarmed combat')
 original_save=open(sys.argv[1],'rb').read()
 resaved=export_save(enc)
 original_value=json.loads(original_save);resaved_value=json.loads(resaved)
@@ -3420,6 +3432,8 @@ print(json.dumps({'changed_nodes':changed_nodes,
  'shared_weapon_definition':weapon.original is world.library.get_weapon_definition('Dagger'),
  'shared_armor_definition':armor.original is world.library.get_armor_definition('Gauntlet'),
  'shared_object_definition':scenery.original is world.library.get_object_definition('Linen pillow'),
+ 'shared_action_definition':action_definition is world.library.action_dictionary.get_action_definition('break weapon (armed)'),
+ 'shared_skill_definition':skill_definition is world.library.skill_dictionary.get_skill_definition('unarmed combat'),
  'time':enc.time,'outcome':action.resolution.outcome,'action_id':action.id,
  'rng':rng_owner_for(enc).state,
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},
