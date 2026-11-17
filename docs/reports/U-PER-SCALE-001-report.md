@@ -1,6 +1,6 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native history `/5` now records Q/B and resolved ordinary/running physiology versions; `/10`–`/12` archives have a strict native graph reader; 64-Action / 2, 20 and 200 registry-Beings plus 200 quiet-boundary fresh-process runs pass. A pending projectile with a real shield interception also continues exactly after native restore. However this remains a selected-family graph plus duplicated receipt/Target history. The complete supported Action/state-family query matrix, graph-free historical reconstruction, native-format legacy migration/resave equivalence, durable history journal recovery, and ordinary application cutover are not complete. No rules or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
+**Problems first — status ACTIVE and incomplete.** Native history `/5` now records Q/B and resolved ordinary/running physiology versions; `/10`–`/12` archives have a strict native graph reader; 64-Action / 2, 20 and 200 registry-Beings plus 200 quiet-boundary fresh-process runs pass. A pending projectile with a real shield interception also continues exactly after native restore. A generated `/12` first-Run Choice can now migrate to native format and strict Save→Load→canonical-resave with observer ledgers and IDs preserved. However this remains a selected-family graph plus duplicated receipt/Target history. The complete supported Action/state-family query matrix, graph-free historical reconstruction, `/10`–`/11` native-format resave, durable history journal recovery, and ordinary application cutover are not complete. No rules or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
 
 **Program:** U-PER-SCALE-001 is the sole ACTIVE implementation program. U-ACT-GATE-001 remains FUTURE/unpassed, U-NET-001 remains DEFERRED, and U-ACT-FULL-003 remains DEFERRED. Shield completion is the next implementation priority; ranged Actions follow the shared 3-D geometry work.
 
@@ -17,6 +17,7 @@
 | Headless initial/delta proof | 2026-11-16T04:59:08-08:00 | 2026-11-16T05:13:46-08:00 | PT14M38S |
 | Full native-history capability continuation | 2026-11-16T18:34:14-08:00 | IN PROGRESS | Recorded at closeout |
 | Native action-family breadth continuation | 2026-11-16T21:04:56-08:00 | IN PROGRESS | Recorded at closeout |
+| Arena activation and native `/12` migration slice | 2026-11-16T21:30:36-08:00 | IN PROGRESS | Recorded at closeout |
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
@@ -782,3 +783,32 @@ The Arena-independent case uses native Dagger skill and seed 3. A successful Fei
 Verification: `.venv/bin/python -B tests/test_native_draw_persistence.py NativeDrawPersistenceTests.test_headless_feint_and_one_followup_continue_with_original_action_identity -v` — **1 passed in 3.831s**. The Action matrix row now cites both one zero-diff Feint profile and native Object-strike profiles while retaining its explicit partial-coverage qualification.
 
 Latest family-increment integration: the existing adopted Feint success/one-use follow-up regression passed **1 test in 1.525s**; the complete Arena-independent native family file passed **8 tests in 47.195s**; capability-matrix validation passed **3 tests in 0.006s**.
+
+## Generated Arena first-Choice restoration and `/12` native migration
+
+### Problems first
+
+- Before this increment, a generated Arena saved after its first accepted Run Choice could be read through the `/12` path but could not be exported as the native format. Full native inventory rejected `ArenaActionActivation`, and strict native restore lacked an owner-bound reconstruction recipe for observer-owned Arena perception ledgers.
+- `/10` and `/11` pristine fixtures remain strict legacy-reader/coexistence cases only. The native writer requires ordinary transactional progression, which an uninitiated pristine legacy Encounter does not yet establish. No adopted rule defines a migration-time first Action; do not synthesize one.
+- The full native history/query model, durable history-journal recovery, all-family parity, and production ordinary Save/Load cutover remain incomplete. U-PER-SCALE-001 stays ACTIVE; no rule or external blocker is identified.
+
+### Delivered in this increment
+
+`ArenaActionActivation` is now admitted only in full native capture after validation against the exact generated Arena Encounter, actor, first accepted Choice, start cursor, single Action identity and shared event-history object. The narrower bounded Run/Spot checkpoint still refuses this activation. Observer ledgers are serialized as owner-bound native recipes and restored only after checking the exact participant/awareness owner, registered Being identity, current Entity/visible sets, time and boundary; the restored ledger must re-encode identically before being attached to its owner.
+
+A fresh-process native test generates seed 20261116, declares the actual first Run Choice, saves before resolution, then compares uninterrupted native `Encounter.step(1)` against a fresh OS process loading the native Save. It checks literal World, Encounter, actor, Action, Choice and activation identities, outcome, position, RNG and canonical history digest; the child imports no Arena app, server or npcgen module. A separate `/12` migration test loads a generated and advanced Arena file with the legacy reader, exports the same logical Encounter in native format, strict-loads it, and requires byte-identical canonical Save→Load→Save plus identical activation, awareness, observer-ledger history, RNG and World/Encounter IDs.
+
+The adjacent checkpoint perception test's old expected refusal was reproduced on committed baseline `307f378`: the exact bounded Run/Spot subset already emitted `bounded_run_spot_closure_verified`, while `semantic_closure_adapter_incomplete` independently kept the whole candidate unready. The test now asserts that exact state (including `closure_validated`, `portable_schema_defined`, and `restore_verified` remaining false); this changes no checkpoint admission behavior.
+
+### Verification
+
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_native_persistence.py' -v` — **27 passed in 77.763s**.
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_arena_persistence.py'` — **22 passed in 407.729s** (includes the 64-Action/quiet-history cases; Python zipfile emitted the existing duplicate `snapshot.json` warning in its tamper fixture).
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_native_history.py'` — **17 passed in 18.049s**.
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_adapters.py'` — **48 passed in 21.182s**.
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_checkpoint_arena_perception.py' -v` — **7 passed in 2.378s**.
+- `PYTHONPATH=tests .venv/bin/python -B -m unittest discover -s tests -p 'test_persistence_capability_matrix.py'` — **3 passed**.
+- `.venv/bin/python -B tests/test_native_draw_persistence.py -v` — previously verified in this active continuation: **11 passed in 64.418s**.
+- `git diff --check` passed before this report edit. Staged publication-safety and scoped commit evidence will be recorded after reviewing the staged paths.
+
+The generated `/12`→native conversion is now demonstrated for a first-Run Choice state, not every `/12` Action/state family. `/10`–`/11` still have tested strict reader coexistence but not native resave. The report, matrix and TASKS entry continue to identify duplicate runtime receipt/Target history, incomplete graph-free historical query parity, journal recovery, broad family coverage, and production app cutover as open engineering work.

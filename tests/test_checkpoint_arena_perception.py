@@ -334,7 +334,7 @@ print(repr(roundtrip))
             encounter.arena_activation_enabled = True
             encounter.arena_movement_activation = original
 
-    def test_activated_capture_reports_incomplete_encounter_field_policy(self):
+    def test_activated_capture_keeps_bounded_subset_separate_from_whole_checkpoint(self):
         session = GeneratedArenaSession(root_seed_factory=lambda: 20261120)
         session.generate({"starting_experience": "10000",
                           "width_cells": "5", "height_cells": "5"})
@@ -454,11 +454,13 @@ print(repr(roundtrip))
             checkpoint, quiescent=True)
         self.assertTrue(validation.inventory_validated)
         closure_codes = {row.code for row in checkpoint.diagnostics}
-        self.assertIn("bounded_run_spot_closure_refused", closure_codes)
-        closure_refusal = next(row.reason for row in checkpoint.diagnostics
-                               if row.code == "bounded_run_spot_closure_refused")
-        self.assertEqual(closure_refusal,
-            "Run/Spot A/D/T/U field policy does not exactly cover the native closed-field adapter: encounter.Encounter")
+        self.assertIn("bounded_run_spot_closure_verified", closure_codes)
+        self.assertNotIn("bounded_run_spot_closure_refused", closure_codes)
+        bounded_closure = next(row.reason for row in checkpoint.diagnostics
+                               if row.code == "bounded_run_spot_closure_verified")
+        self.assertEqual(bounded_closure,
+            "The exact native Run/Spot field, definition and alias subset passed; "
+            "this is not checkpoint readiness.")
         self.assertFalse(checkpoint.closure_validated)
         self.assertFalse(checkpoint.portable_schema_defined)
         self.assertFalse(checkpoint.restore_verified)

@@ -115,7 +115,7 @@ def _definition_values_equal(first, second, active=None):
         active.remove(pair)
 
 
-def _movement_activation_state(encounter):
+def _movement_activation_state(encounter, *, allow_first_choice=False):
     """Validate the existing movement-start record without adding authority."""
     from encounter import ArenaMovementActivation
 
@@ -125,6 +125,11 @@ def _movement_activation_state(encounter):
     record = encounter.arena_movement_activation
     if record is None:
         if enabled:
+            if encounter.arena_activation is not None:
+                _require(allow_first_choice,
+                         'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+                _action_activation_state(encounter, encounter.arena_activation)
+                return None
             _require(encounter.initiated is False and encounter.arena_activation is None
                      and encounter.initiation is None and encounter.time==encounter.start_time
                      and encounter.last_processed_boundary==math.floor(encounter.start_time)
@@ -150,6 +155,45 @@ def _movement_activation_state(encounter):
              and type(data['activation_kind']) is str
              and data['activation_kind'] == 'first_player_movement',
              'Arena movement activation record is inconsistent with its Encounter phase')
+    return record
+
+
+def _action_activation_state(encounter, record):
+    """Validate the exact first-Arena-Choice binding for full native Saves."""
+    from encounter import ArenaActionActivation
+    from activities import (DelayAction, ReadyPreparationAction,
+                            ReadyWeaponAction, RunAction)
+
+    _require(type(encounter.arena_activation_enabled) is bool
+             and encounter.arena_activation_enabled
+             and encounter.initiated is True
+             and encounter.arena_movement_activation is None
+             and encounter.initiation is None,
+             'Arena first-Choice activation conflicts with Encounter phase')
+    _require(type(record) is ArenaActionActivation,
+             'unsupported Arena first-Choice activation record')
+    data = _fields(record)
+    _require(data['encounter_id'] == encounter.id
+             and type(data['actor_id']) is str
+             and data['actor_id'] in encounter.being_list
+             and type(data['choice_id']) is str and data['choice_id']
+             and type(data['time']) in (int, float) and math.isfinite(data['time'])
+             and data['time'] == encounter.start_time
+             and data['activation_kind'] == 'first_player_choice',
+             'Arena first-Choice activation identity or start cursor is invalid')
+    record_choice = encounter._choice_book._choices.get(data['choice_id'])
+    _require(record_choice is not None
+             and record_choice.view.id == data['choice_id']
+             and record_choice.origin == 'arena-first-player-choice'
+             and record_choice.view.first_start == encounter.start_time
+             and len(record_choice.members) == 1
+             and record_choice.view.action_ids == (record_choice.members[0].action.id,)
+             and record_choice.members[0].action.actor_id == data['actor_id']
+             and type(record_choice.members[0].action) in
+                 (RunAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction)
+             and encounter.universe.event_history.get(
+                 record_choice.members[0].action.id) is record_choice.members[0].action,
+             'Arena activation does not name its exact first native Choice')
     return record
 
 
@@ -360,6 +404,10 @@ class NativeInventory(_Inventory):
                     portable)
         if tag=='being.BeingInstance' and field=='_arena_perception_ledger':
             if item is None:
+                if self.full_native:
+                    _require(not self.encounter.arena_activation_enabled,
+                             'Arena-enabled Being has no observer-owned perception ledger')
+                    return super().field(tag,field,item,ref,path,depth)
                 _require(not self.encounter.arena_activation_enabled,
                          'Arena-enabled Being has no observer-owned perception ledger')
                 return ('null-arena-perception-ledger',1)
@@ -378,14 +426,20 @@ class NativeInventory(_Inventory):
             except ArenaPerceptionCheckpointRejected as exc:
                 raise CheckpointRejected(str(exc)) from exc
             self.dependencies.append(('arena-perception-ledger',id(item),owner.id,encoded[0]))
+            if self.full_native:
+                return ('native-recipe', ADAPTER_VERSION,
+                        'arena.perception_ledger', ('object', owner.id), encoded)
             return ('arena-perception-ledger',encoded)
         if tag=='encounter.Encounter' and field=='arena_activation_enabled':
             _require(type(item) is bool,'Arena activation-enabled flag must be an explicit native Boolean')
         if tag=='encounter.Encounter' and field=='arena_activation' and item is not None:
-            raise CheckpointRejected(
-                'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+            if not self.full_native:
+                raise CheckpointRejected(
+                    'activated Arena Encounter cannot be resumed by the bounded Run/Spot checkpoint')
+            _require(_action_activation_state(self.encounter, item) is item,
+                     'Arena first-Choice activation failed native validation')
         if tag=='encounter.Encounter' and field=='arena_movement_activation':
-            _require(_movement_activation_state(self.encounter) is item,
+            _require(_movement_activation_state(self.encounter, allow_first_choice=self.full_native) is item,
                      'Arena movement activation field differs from its owning Encounter state')
         if tag=='being.BeingInstance' and field=='_posture':
             _require(item is None or type(item) is str and item in ('standing', 'crouching', 'lying'),

@@ -63,6 +63,39 @@ class NativePersistenceTests(unittest.TestCase):
         encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
         return world, encounter, rng, attacker, defender, weapon_id
 
+    def test_generated_v12_arena_save_migrates_to_canonical_native_save(self):
+        """A current legacy /12 Arena artifact can enter native Save/Load losslessly."""
+        from arena_browser_session import GeneratedArenaSession
+
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
+        session.generate({"starting_experience": "10000", "width_cells": "5",
+                          "height_cells": "5"})
+        session.choose_run()
+        session.advance_one_second()
+        legacy_wire = session.save_encounter_bytes()
+        world, encounter, rng = load_legacy_arena_save(legacy_wire)
+        self.assertIs(world.event_history[encounter.id], encounter)
+        self.assertIsNotNone(encounter.arena_activation)
+        activation = encounter.arena_activation.to_dict()
+        awareness = {key: tuple(sorted(value))
+                     for key, value in sorted(encounter.awareness.items())}
+        ledgers = {being_id: world.get_object_by_id(being_id)._arena_perception_ledger
+                   for being_id in encounter.being_list}
+        native_wire = export_save(encounter)
+        restored_world, restored_encounter, restored_rng = load_save(native_wire)
+        self.assertEqual(export_save(restored_encounter), native_wire)
+        self.assertEqual(restored_world.id, world.id)
+        self.assertEqual(restored_encounter.id, encounter.id)
+        self.assertEqual(restored_encounter.arena_activation.to_dict(), activation)
+        self.assertEqual({key: tuple(sorted(value)) for key, value in
+                          sorted(restored_encounter.awareness.items())}, awareness)
+        self.assertEqual(restored_rng.state, rng.state)
+        for being_id, ledger in ledgers.items():
+            restored = restored_world.get_object_by_id(being_id)._arena_perception_ledger
+            self.assertIsNotNone(restored)
+            self.assertEqual(restored.observer_id, ledger.observer_id)
+            self.assertEqual(restored._history, ledger._history)
+
     def test_legacy_arena_v10_v11_v12_read_through_native_graph_api(self):
         """The native consumer can strictly coexist with all accepted old Saves."""
         from arena_browser_session import GeneratedArenaSession
@@ -210,6 +243,67 @@ print(json.dumps({'world':world.id,'encounter':encounter.id,'time':encounter.tim
         self.assertEqual(restored["history"], expected["history"])
         self.assertEqual(restored["receipt_actions"], expected["receipt_actions"])
         self.assertEqual(restored["arena_app_imports"], [])
+
+    def test_generated_arena_first_choice_native_save_round_trips_and_continues(self):
+        from arena_browser_session import GeneratedArenaSession
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
+        session.generate({"starting_experience": "10000", "width_cells": "5",
+                          "height_cells": "5"})
+        session.choose_run()
+        candidate = session.active_candidate
+        encounter, world = candidate.encounter, candidate.universe
+        activation = encounter.arena_activation
+        self.assertIsNotNone(activation)
+        action = world.get_event_by_id(
+            encounter._choice_book._choices[activation.choice_id].view.action_ids[0])
+        self.assertIs(type(action), RunAction)
+        save = export_save(encounter)
+
+        encounter.step(1)
+        receipt = encounter.inspect_committed(1).action(action.id)
+        expected = {
+            "world_id": world.id,
+            "encounter_id": encounter.id,
+            "activation": activation.to_dict(),
+            "action_id": action.id,
+            "outcome": receipt.facts.outcome,
+            "actor_id": action.actor_id,
+            "position": world.get_object_by_id(action.actor_id).get_position().as_tuple(),
+            "rng": session._rng_cursor.state,
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+from native_persistence import load_save
+import native_history
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+actor_id,action_id,choice_id=sys.argv[2:]
+activation=enc.arena_activation
+assert activation is not None and activation.actor_id==actor_id
+assert activation.choice_id==choice_id and activation.encounter_id==enc.id
+assert enc.choice_for_action(action_id).state in ('accepted','executing')
+enc.step(1);receipt=enc.inspect_committed(1).action(action_id)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'activation':activation.to_dict(),'action_id':action_id,
+ 'outcome':receipt.facts.outcome,'actor_id':actor_id,
+ 'position':world.get_object_by_id(actor_id).get_position().as_tuple(),
+ 'rng':rng.state,'history':hashlib.sha256(native_history.encode(
+  native_history.capture(enc))).hexdigest(),
+ 'arena_app_imports':sorted(set(sys.modules)&{'arena_browser_session','arena_server','npcgen'})},sort_keys=True))'''
+        import os
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "arena-native-initial.json"
+            path.write_bytes(save)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), action.actor_id,
+                 action.id, activation.choice_id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        restored = json.loads(result.stdout)
+        self.assertEqual(restored.pop("arena_app_imports"), [])
+        self.assertEqual(restored, json.loads(json.dumps(expected)))
 
     def test_projectile_shield_interception_continues_after_native_fresh_process_load(self):
         """A saved in-flight projectile retains its later native shield result."""
