@@ -1198,6 +1198,130 @@ print(json.dumps({'revision':world.reproduction_group_snapshot().revision,
         self.assertEqual(restored['offspring'], ['C1'])
         self.assertEqual(restored['time'], 2)
 
+    def test_native_save_restores_a_pristine_companion_encounter_and_refuses_progressed_one(self):
+        import os
+        import random
+
+        world = Universe('native-multiple-encounters', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        identities = [world.make_being('Human', f'Native Encounter {index}')
+                      for index in range(2)]
+        companion = Encounter(world, 10, 0, initiated=True,
+                              id='native-multi-pristine-companion')
+        companion.add_being(identities[1])
+        world.add_event(companion)
+        # The selected Encounter is deliberately not the first Encounter in
+        # event-history order; the portable root role must remain unambiguous.
+        selected = Encounter(world, 10, 0, initiated=True,
+                             id='native-multi-selected')
+        selected.add_being(identities[0])
+        world.add_event(selected)
+        selected_rng = RNGCursor(random.Random(700).getstate())
+        selected.enable_transactional_progression(
+            quiescent=True, rng_owner=selected_rng)
+        initial = DelayAction(selected, identities[0], defense=0, start_time=0,
+                              id='native-multi-selected-initial')
+        selected.schedule_action(initial)
+        selected.step(1)
+        wire = export_save(selected)
+
+        companion_rng_state = random.Random(701).getstate()
+
+        def continue_both(native_world, first, second, first_rng,
+                          second_rng_state):
+            selected_next = DelayAction(
+                first, identities[0], defense=0, start_time=first.time,
+                id='native-multi-selected-next')
+            first.schedule_action(selected_next)
+            first.step(1)
+            second_rng = RNGCursor(second_rng_state)
+            second.enable_transactional_progression(
+                quiescent=True, rng_owner=second_rng)
+            companion_next = DelayAction(
+                second, identities[1], defense=0, start_time=second.time,
+                id='native-multi-companion-next')
+            second.schedule_action(companion_next)
+            second.step(1)
+            return {
+                'encounters': sorted(
+                    event.id for event in native_world.event_history.values()
+                    if type(event) is Encounter),
+                'books': len(native_world._choice_books),
+                'times': [first.time, second.time],
+                'results': [selected_next.resolution.outcome,
+                            companion_next.resolution.outcome],
+                'rng': [first_rng.state, second_rng.state],
+                'histories': [
+                    hashlib.sha256(native_history.encode(
+                        native_history.capture(first))).hexdigest(),
+                    hashlib.sha256(native_history.encode(
+                        native_history.capture(second))).hexdigest(),
+                ],
+            }
+
+        expected = continue_both(world, selected, companion, selected_rng,
+                                 companion_rng_state)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-multiple-encounters.json'
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,random,sys
+from atomic_publication import RNGCursor
+from activities import DelayAction
+from encounter import Encounter
+import native_history
+from native_persistence import load_path
+world,selected,selected_rng=load_path(sys.argv[1])
+encounters={event.id:event for event in world.event_history.values()
+ if type(event) is Encounter}
+assert set(encounters)=={'native-multi-selected','native-multi-pristine-companion'}
+companion=encounters['native-multi-pristine-companion']
+assert len(world._choice_books)==2
+assert all(book.lock is world._schedule_lock for book in world._choice_books)
+first=DelayAction(selected,sys.argv[2],defense=0,start_time=selected.time,
+ id='native-multi-selected-next')
+selected.schedule_action(first);selected.step(1)
+second_rng=RNGCursor(random.Random(701).getstate())
+companion.enable_transactional_progression(quiescent=True,rng_owner=second_rng)
+second=DelayAction(companion,sys.argv[3],defense=0,start_time=companion.time,
+ id='native-multi-companion-next')
+companion.schedule_action(second);companion.step(1)
+print(json.dumps({'encounters':sorted(encounters),'books':len(world._choice_books),
+ 'times':[selected.time,companion.time],
+ 'results':[first.resolution.outcome,second.resolution.outcome],
+ 'rng':[selected_rng.state,second_rng.state],
+ 'histories':[hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()
+  for enc in (selected,companion)]},sort_keys=True))'''
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path),
+                 identities[0], identities[1]], cwd=ROOT,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
+
+        # A second Encounter with prior committed state has its own RNG/history
+        # obligation, which this one-Encounter Save does not yet serialize.
+        companion_delay = DelayAction(
+            companion, identities[1], defense=0, start_time=companion.time,
+            id='native-multi-companion-before-refusal')
+        companion.schedule_action(companion_delay)
+        companion.step(1)
+        before = (selected.time, companion.time, selected_rng.state,
+                  companion_delay.resolution.outcome,
+                  hashlib.sha256(native_history.encode(
+                      native_history.capture(selected))).hexdigest())
+        with self.assertRaisesRegex(
+                NativeSaveRejected,
+                'only a pristine companion Encounter without prior Actions'):
+            export_save(selected)
+        after = (selected.time, companion.time, selected_rng.state,
+                 companion_delay.resolution.outcome,
+                 hashlib.sha256(native_history.encode(
+                     native_history.capture(selected))).hexdigest())
+        self.assertEqual(after, before)
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))

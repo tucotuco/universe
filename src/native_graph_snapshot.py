@@ -784,46 +784,71 @@ def restore(envelope, *, native=False):
                     'native geometry measurement is not canonically truncated')
 
     world = next(cache[ref] for ref, tag, _ in nodes if tag == 'universe.Universe')
-    encounter = next(cache[ref] for ref, tag, _ in nodes if tag == 'encounter.Encounter')
+    selected_encounters = [cache[ref] for ref, tag, _ in nodes
+                           if tag == 'encounter.Encounter'
+                           and type(ref) is tuple and ref
+                           and ref[0] == 'encounter']
+    _need(len(selected_encounters) == 1,
+          'native graph must contain exactly one selected Encounter root')
+    encounter = selected_encounters[0]
     _need(type(world) is Universe and type(encounter) is Encounter
           and encounter.universe is world, 'native Arena roots disagree')
     # Recreate process-local synchronization/runtime state omitted by inventory.
     world._schedule_lock = threading.RLock()
     from reproduction_group import ReproductionGroupRegistry
     world._reproduction_group_registry = ReproductionGroupRegistry(world)
-    encounter._transactional_mode = None
-    encounter._active_fatigue_frame = None
-    encounter._boundary_context = None
-    encounter._advancing = encounter._running = encounter._dispatching = False
-    if '_coordinator_time' not in encounter.__dict__:
-        encounter._coordinator_time = encounter.time
-    if '_interval_start' not in encounter.__dict__:
-        encounter._interval_start = encounter.time
-    if '_physiology_registry' not in encounter.__dict__:
-        encounter._physiology_registry = None
-    if '_atomic_interval_history' not in encounter.__dict__:
-        encounter._atomic_interval_history = []
+    encounters = [value for value in cache.values()
+                  if type(value) is Encounter]
+    for saved_encounter in encounters:
+        saved_encounter._transactional_mode = None
+        saved_encounter._active_fatigue_frame = None
+        saved_encounter._boundary_context = None
+        saved_encounter._advancing = saved_encounter._running = False
+        saved_encounter._dispatching = False
+        if '_coordinator_time' not in saved_encounter.__dict__:
+            saved_encounter._coordinator_time = saved_encounter.time
+        if '_interval_start' not in saved_encounter.__dict__:
+            saved_encounter._interval_start = saved_encounter.time
+        if '_physiology_registry' not in saved_encounter.__dict__:
+            saved_encounter._physiology_registry = None
+        if '_atomic_interval_history' not in saved_encounter.__dict__:
+            saved_encounter._atomic_interval_history = []
     if native:
         _rehydrate_native_services(cache, nodes, native_recipes,
                                    sections['host-bindings'][0])
-    book = encounter._choice_book
-    _need(type(book) is ChoiceBook and book.encounter is encounter,
-          'native ChoiceBook owner is inconsistent')
-    book.lock = world._schedule_lock
-    book._drafts = {}; book._closed_drafts = set(); book._tokens = {}
-    # Accepted declarations contain process-local class/object identity data.
-    for accepted in book._choices.values():
-        _need(type(accepted) is _Accepted, 'unknown accepted Choice record')
-        signatures = tuple(
-            (member.key, member.priority_penalty, declaration(member.action))
-            if member.priority_penalty is not None else
-            (member.key, declaration(member.action))
-            for member in accepted.members)
-        object.__setattr__(accepted, 'signatures', signatures)
-    for action_id, row in tuple(book._registered.items()):
-        choice_id, packet, _signature = row
-        action = world.get_event_by_id(action_id)
-        book._registered[action_id] = (choice_id, packet, declaration(action))
+    books = world.__dict__.get('_choice_books')
+    _need(type(books) is list
+          and len(books) == len(encounters)
+          and len({id(book) for book in books}) == len(books)
+          and {id(book) for book in books}
+              == {id(saved._choice_book) for saved in encounters},
+          'native Encounter/ChoiceBook registry ownership is inconsistent')
+    by_encounter_id = {saved.id: saved for saved in encounters}
+    book_by_action = {}
+    for saved in encounters:
+        book = saved._choice_book
+        _need(type(book) is ChoiceBook and book.encounter is saved,
+              'native ChoiceBook owner is inconsistent')
+        book.lock = world._schedule_lock
+        book._drafts = {}; book._closed_drafts = set(); book._tokens = {}
+        # Accepted declarations contain process-local class/object identity data.
+        for accepted in book._choices.values():
+            _need(type(accepted) is _Accepted, 'unknown accepted Choice record')
+            signatures = tuple(
+                (member.key, member.priority_penalty, declaration(member.action))
+                if member.priority_penalty is not None else
+                (member.key, declaration(member.action))
+                for member in accepted.members)
+            object.__setattr__(accepted, 'signatures', signatures)
+        for action_id, row in tuple(book._registered.items()):
+            _need(action_id not in book_by_action,
+                  'native Action is registered to multiple Encounter ChoiceBooks')
+            choice_id, packet, _signature = row
+            action = world.get_event_by_id(action_id)
+            _need(action is not None,
+                  'native registered Action is absent from the Universe')
+            book._registered[action_id] = (choice_id, packet, declaration(action))
+            book_by_action[action_id] = (book, packet)
 
     from interval_staging import AuthorityReference
     for ref, tag, _content in nodes:
@@ -832,10 +857,10 @@ def restore(envelope, *, native=False):
             if reference.role == 'event':
                 target = world.get_event_by_id(reference.key)
             elif reference.role == 'accepted_packet':
-                registered = book._registered.get(reference.key)
+                registered = book_by_action.get(reference.key)
                 target = None if registered is None else registered[1]
             elif reference.role == 'encounter':
-                target = encounter if reference.key == encounter.id else None
+                target = by_encounter_id.get(reference.key)
             elif reference.role == 'universe':
                 target = world if reference.key == world.id else None
             else:
@@ -846,34 +871,37 @@ def restore(envelope, *, native=False):
     # Native inventory intentionally excludes pointer anchors. Recreate them
     # from the restored objects, then verify the whole history with native inspection.
     entities = world.object_registry.object_instances
-    history = encounter.__dict__.get('_atomic_interval_history', [])
-    for receipt in history:
-        meta = receipt.inspection
-        _need(type(meta) is CommittedBoundaryRecord,
-              'unsupported Arena committed inspection record')
-        targets = {}
-        for entity_id in meta.entities:
-            entity = entities.get(entity_id)
-            _need(entity is not None, 'committed Target owner is not registered')
-            storage = entity.__dict__.get('_atomic_target_history')
-            record = next((row for row in storage if row.encounter_id == encounter.id
-                           and row.boundary == receipt.boundary), None)
-            _need(record is not None, 'committed Target history is missing')
-            targets[entity_id] = (id(entity), id(entity.current), id(entity.spatial_state),
-                                  id(storage), id(record), fingerprint(record))
-        actions = {action_id: id(world.get_event_by_id(action_id))
-                   for action_id in meta.actions}
-        object.__setattr__(meta, 'target_anchors', MappingProxyType(targets))
-        object.__setattr__(meta, 'action_anchors', MappingProxyType(actions))
+    for saved_encounter in encounters:
+        for receipt in saved_encounter.__dict__.get('_atomic_interval_history', ()):
+            meta = receipt.inspection
+            _need(type(meta) is CommittedBoundaryRecord,
+                  'unsupported Arena committed inspection record')
+            targets = {}
+            for entity_id in meta.entities:
+                entity = entities.get(entity_id)
+                _need(entity is not None, 'committed Target owner is not registered')
+                storage = entity.__dict__.get('_atomic_target_history')
+                record = next((row for row in storage if row.encounter_id == saved_encounter.id
+                               and row.boundary == receipt.boundary), None)
+                _need(record is not None, 'committed Target history is missing')
+                targets[entity_id] = (id(entity), id(entity.current), id(entity.spatial_state),
+                                      id(storage), id(record), fingerprint(record))
+            actions = {action_id: id(world.get_event_by_id(action_id))
+                       for action_id in meta.actions}
+            object.__setattr__(meta, 'target_anchors', MappingProxyType(targets))
+            object.__setattr__(meta, 'action_anchors', MappingProxyType(actions))
 
     rng_data = sections['rng']
     rng_owner = RNGCursor(_decode_rng(rng_data[2]))
+    book = encounter._choice_book
+    history = encounter.__dict__.get('_atomic_interval_history', [])
     # Re-issue exact receipts only under this restoration owner, and require
     # the complete native inspection gate before exposing the graph.
     from atomic_publication import (_register_arena_restored_receipts,
                                     _register_arena_restored_disarm_landings)
-    _register_arena_restored_receipts(encounter, _ARENA_RESTORE_AUTHORITY)
-    _register_arena_restored_disarm_landings(encounter, _ARENA_RESTORE_AUTHORITY)
+    for saved_encounter in encounters:
+        _register_arena_restored_receipts(saved_encounter, _ARENA_RESTORE_AUTHORITY)
+        _register_arena_restored_disarm_landings(saved_encounter, _ARENA_RESTORE_AUTHORITY)
     pristine = (not encounter.initiated and encounter.time == encounter.start_time
         and not history and not encounter.pending_action_list
         and not encounter.finished_action_list and not encounter.cancelled_action_list
@@ -887,14 +915,16 @@ def restore(envelope, *, native=False):
         # pristine, nontransactional coexistence behavior.
         if native or not pristine:
             _bind_restored_arena_progression(encounter, rng_owner, _ARENA_RESTORE_AUTHORITY)
-        if history:
-            inspect_encounter(encounter)
+        for saved_encounter in encounters:
+            if saved_encounter.__dict__.get('_atomic_interval_history'):
+                inspect_encounter(saved_encounter)
     except Exception:
         _unbind_restored_arena_progression(encounter, _ARENA_RESTORE_AUTHORITY)
         from atomic_publication import (_unregister_arena_restored_receipts,
                                         _unregister_arena_restored_disarm_landings)
-        _unregister_arena_restored_receipts(encounter, _ARENA_RESTORE_AUTHORITY)
-        _unregister_arena_restored_disarm_landings(encounter, _ARENA_RESTORE_AUTHORITY)
+        for saved_encounter in encounters:
+            _unregister_arena_restored_receipts(saved_encounter, _ARENA_RESTORE_AUTHORITY)
+            _unregister_arena_restored_disarm_landings(saved_encounter, _ARENA_RESTORE_AUTHORITY)
         raise
     return world, encounter, rng_owner
 
@@ -971,10 +1001,12 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
           'native received-account bindings are malformed or duplicated')
     expected_recipes.extend(account_recipes)
     from encounter import Encounter
-    encounters = [value for value in cache.values() if type(value) is Encounter]
-    _need(len(encounters) == 1,
-          'native Save has no unique Encounter for observer-ledger restoration')
-    encounter = encounters[0]
+    selected = [cache[ref] for ref, tag, _ in nodes
+                if tag == 'encounter.Encounter'
+                and type(ref) is tuple and ref and ref[0] == 'encounter']
+    _need(len(selected) == 1,
+          'native Save has no unique selected Encounter for observer-ledger restoration')
+    encounter = selected[0]
     arena_recipes = [recipe for recipe in recipes
                      if len(recipe) >= 3 and recipe[2] == 'arena.perception_ledger']
     expected_observers = (tuple(encounter.being_list)
