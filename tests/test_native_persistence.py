@@ -758,8 +758,10 @@ print(json.dumps({'time':enc.time,
             path.write_bytes(wire)
             child = r'''import hashlib,json,sys
 import native_history
-from native_persistence import load_path
+from native_persistence import load_path,export_save
+saved_wire=open(sys.argv[1],'rb').read()
 world,enc,rng=load_path(sys.argv[1])
+assert export_save(enc)==saved_wire
 thrown=world.get_object_by_id(sys.argv[2]); victim=world.get_object_by_id(sys.argv[3])
 for _ in range(6):
  if thrown.__dict__['_projectile_flight'].impact_outcome is not None: break
