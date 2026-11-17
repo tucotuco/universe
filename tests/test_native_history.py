@@ -15,7 +15,8 @@ import encounter_delta_headless
 from native_history import (NativeHistoryRejected, capture, decode, encode,
                             append_committed, events_at, state_at, validate,
                             NativeHistoryRecorder, write, rng_state_at, upgrade,
-                            LEGACY_SCHEMA, SAME_RNG, _seal, _plain)
+                            LEGACY_SCHEMA, PREVIOUS_SCHEMA, SAME_RNG, _seal,
+                            _plain, _expand_rows)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -65,7 +66,7 @@ class NativeHistoryTests(unittest.TestCase):
 
     def test_unchanged_rng_cursor_is_referenced_and_legacy_history_upgrades(self):
         log = decode(self.wire)
-        self.assertEqual(log['schema'], 'universe.native-encounter-history/2')
+        self.assertEqual(log['schema'], 'universe.native-encounter-history/3')
         previous = None
         for boundary, row in enumerate(log['boundaries'], 1):
             current = rng_state_at(log, boundary)
@@ -87,11 +88,93 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertTrue(validate(legacy))
         self.assertEqual(encode(upgrade(legacy)), self.wire)
 
+        previous_schema = copy.deepcopy(log)
+        previous_schema['schema'] = PREVIOUS_SCHEMA
+        previous = None
+        for row in previous_schema['boundaries']:
+            if row['rng_after'] == SAME_RNG:
+                row['rng_after'] = previous
+            previous = row['rng_after']
+        previous_schema = _seal({key: value for key, value in previous_schema.items()
+                                  if key != 'sha256'})
+        self.assertTrue(validate(previous_schema))
+        self.assertEqual(encode(upgrade(previous_schema)), self.wire)
+
         corrupt = copy.deepcopy(log)
         corrupt['boundaries'][0]['rng_after'] = dict(SAME_RNG)
         with self.assertRaisesRegex(NativeHistoryRejected, 'RNG reference'):
             validate(_seal({key: value for key, value in corrupt.items()
                             if key != 'sha256'}))
+
+    def test_consecutive_empty_boundaries_use_lossless_quiet_span(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo['encounter']
+        encounter.step(8)
+        log = capture(encounter)
+        spans = [row for row in log['boundaries'] if row.get('kind') == 'quiet_span']
+        self.assertTrue(spans)
+        expanded = dict(log)
+        expanded['boundaries'] = _expand_rows(log)
+        self.assertGreater(len(encode(_seal({key: value for key, value in expanded.items()
+                                             if key != 'sha256'}))), len(encode(log)))
+        self.assertLess(len(log['boundaries']), log['latest_boundary'])
+        self.assertTrue(validate(decode(encode(log))))
+        previous_schema = dict(log)
+        previous_schema['schema'] = PREVIOUS_SCHEMA
+        previous_schema['boundaries'] = _expand_rows(log)
+        for row in previous_schema['boundaries']:
+            row['rng_after'] = rng_state_at(log, row['boundary'])
+        previous_schema = _seal({key: value for key, value in previous_schema.items()
+                                  if key != 'sha256'})
+        self.assertTrue(validate(previous_schema))
+        self.assertEqual(encode(upgrade(previous_schema)), encode(log))
+        view = encounter.inspect_committed()
+        receipts = {row.boundary: row for row in encounter._atomic_interval_history}
+        for boundary in range(1, encounter.last_processed_boundary + 1):
+            expected = {}
+            for target_id, history in view.histories.items():
+                for target in history:
+                    if target.boundary == boundary:
+                        expected[target_id] = target
+            state = state_at(log, boundary)
+            self.assertEqual(state['entities'], _plain(expected))
+            self.assertEqual(state['time'], receipts[boundary].inspection.end)
+            self.assertEqual(events_at(log, boundary)['action_ids'],
+                             list(receipts[boundary].action_ids))
+            self.assertEqual(rng_state_at(log, boundary), _plain(receipts[boundary].rng_state))
+
+        span = copy.deepcopy(spans[0])
+        bad_body = {key: value for key, value in log.items() if key != 'sha256'}
+        bad_body['boundaries'][log['boundaries'].index(spans[0])] = span
+        span['increments'][0]['path'] = ['entities', 'missing', 'fields', 'hit_points']
+        with self.assertRaises(NativeHistoryRejected):
+            validate(_seal(bad_body))
+
+    def test_append_after_quiet_span_preserves_expanded_boundary_semantics(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo['encounter']
+        encounter.step(8)
+        log = capture(encounter)
+        self.assertTrue(any(row.get('kind') == 'quiet_span'
+                            for row in log['boundaries']))
+        encounter.step(1)
+        quiet_appended = append_committed(log, encounter)
+        self.assertEqual(quiet_appended['latest_boundary'], log['latest_boundary'] + 1)
+        self.assertTrue(any(row.get('kind') == 'quiet_span'
+                            and row['to_boundary'] == quiet_appended['latest_boundary']
+                            for row in quiet_appended['boundaries']))
+        from activities import DelayAction
+        action = DelayAction(encounter, encounter.being_list[1], defense=0,
+                             start_time=encounter.time, id='append-after-quiet-span')
+        encounter.schedule_action(action)
+        encounter.step(1)
+        appended = append_committed(quiet_appended, encounter)
+        self.assertEqual(appended['latest_boundary'], encounter.last_processed_boundary)
+        self.assertEqual(events_at(appended, appended['latest_boundary'])['action_ids'],
+                         [action.id])
+        for boundary in range(1, encounter.last_processed_boundary + 1):
+            self.assertEqual(state_at(appended, boundary)['boundary'], boundary)
+        self.assertTrue(validate(decode(encode(appended))))
 
     def test_wire_omits_process_pointer_anchors(self):
         forbidden = {"object_identity", "ledger_identity", "target_anchors", "action_anchors"}

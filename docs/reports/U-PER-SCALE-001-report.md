@@ -80,6 +80,30 @@ The `/2` fact history is **86.28% smaller** and its total Save **16.69% smaller*
 
 The Arena `/12` compatibility checks above remain evidence for the legacy Arena reader; they do **not** demonstrate migration through the separate native Save API. Native `/1` to `/2` upgrade is instead covered by `test_native_history.py` and `test_native_persistence.py`. This continuation has no standalone native `/10`–`/12` compatibility claim.
 
+### Quiet-span history `/3` continuation — 2026-11-16
+
+#### Problems first
+
+- U-PER-SCALE-001 remains ACTIVE and incomplete. Even when no Action, Event, Effect, or domain property changed, `/2` used one full row per committed boundary (212,318 bytes for 200 quiet boundaries). The saved receipt/Target graph still dominates total Save bytes, and native history is not the ordinary production Save path.
+- This is a persistence representation gap, not an adopted-rule ambiguity. Full state-family/query parity, durable history recovery, legacy migration through the native API, and ordinary app/Universe Save/Load remain open engineering work.
+
+#### Implemented and measured
+
+Native history `/3` retains the `/1` and `/2` readers and losslessly upgrades them. It references an unchanged RNG cursor and coalesces only consecutive rows with no Action/Event/Effect facts, unchanged RNG, identical participant/starts facts, and numeric changes limited to root time/boundary, entity inspection-boundary or scheduler-revision cursors. Span validation checks exact path allowlists, numeric preimages and increments, chronology, participants, end-state digest, and unchanged RNG. `state_at`, `events_at`, `rng_state_at`, and recorder append preserve the logical boundary view. Any Action/Event/Effect or changed domain property stays as an ordinary atomic row.
+
+The reproducible 200-boundary headless quiet fixture was rerun through strict fresh-process Save/Load and a native Delay continuation. It exactly matched uninterrupted time, RNG, HP and semantic history. The 64-Action scenario was rerun through native `/3`, also matching the uninterrupted control and same-Encounter identities.
+
+| Scenario | Graph bytes | Fact-history bytes | Total Save | Scenario | Export | Fresh-process Load+continue | Peak RSS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 200 quiet boundaries | 4,837,221 | 32,763 | 6,482,538 | 40.531s | 2.758s | 3.033s | 151,109,632 |
+| 64 lawful Feint Actions, 129 boundaries, 2 registered Beings | 4,841,057 | 1,232,823 | 7,687,714 | 61.127s | 4.649s | 6.936s | 187,842,560 |
+| 64 lawful Feint Actions, 129 boundaries, 20 registered Beings | 5,084,906 | 1,232,823 | 8,012,846 | 60.551s | 4.588s | 7.065s | 190,218,240 |
+| 64 lawful Feint Actions, 129 boundaries, 200 registered Beings | 7,505,766 | 1,232,823 | 11,240,658 | 60.671s | 5.391s | 7.490s | 230,899,712 |
+
+The 200-boundary history is **84.57% smaller than `/2`** and **97.88% smaller than `/1`**. Total Save fell **2.71% from `/2`** and **18.95% from `/1`**. All three current `/3` 64-Action registry cases continued identically in fresh processes. Their fact-history bytes remain equal across registry sizes because they contain the same Action/event workload; the graph grows with the registered Being population. The graph still contains the whole receipt/Target history, so this is not the requested final architecture.
+
+Focused results: `test_native_history.py` — **13 passed in 15.793s**; `test_native_persistence.py` — **16 passed in 44.936s**; `test_persistence_capability_matrix.py` — **3 passed**. The 64-Action native scale scenarios also passed for registered Being counts **2, 20, and 200**; the 200-quiet-boundary Save/Load continuation passed. History tests check each represented boundary against authoritative inspection, RNG, participants, Events, strict refusal of invalid span paths, strict `/1` and `/2` migration including v2 quiet-span upgrade, and append after/through a compressed span. Earlier in this same execution, field inventory — **30 passed in 12.179s**; checkpoint adapters — **48 passed in 18.431s**; selected Arena `/12` integrity/corruption/pinned-v4/v10/v11 compatibility — **5 passed in 6.962s**. These do not claim native-format `/10`–`/12` migration. `py_compile`, relative Markdown links, and `git diff --check` passed. No push was performed.
+
 ## Latest continuation — revised full native-history bridge
 
 ### Problems first

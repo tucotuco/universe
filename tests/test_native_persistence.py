@@ -922,7 +922,7 @@ print(json.dumps({'time':enc.time,'rng':rng.state,'hp':victim.get_hit_points(),
         migrated_world, migrated, _ = load_save(_canonical(body))
         self.assertEqual(migrated.id, original.id)
         self.assertEqual(native_history.current_recording(migrated)['schema'],
-                         'universe.native-encounter-history/2')
+                         'universe.native-encounter-history/3')
         action_id = 'native-history-v1-migrated-delay'
         actor_id = original.being_list[1]
         for encounter in (original, migrated):

@@ -20,10 +20,15 @@ from checkpoint_fields import FIELD_ADAPTERS
 
 
 LEGACY_SCHEMA = "universe.native-encounter-history/1"
-SCHEMA = "universe.native-encounter-history/2"
+PREVIOUS_SCHEMA = "universe.native-encounter-history/2"
+SCHEMA = "universe.native-encounter-history/3"
+LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
+_EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
+                 "effects": {}, "starts": [], "participants": []}
 MAX_BYTES = 64 * 1024 * 1024
 MAX_NODES = 10_000_000
+MAX_BOUNDARIES = 10_000_000
 MAX_DEPTH = 128
 
 
@@ -302,18 +307,177 @@ def _rng_record(value, previous, schema=SCHEMA):
     return value
 
 
+def _quiet_changes(row):
+    """Return numeric metadata increments safe to derive across a quiet run."""
+    events = row.get("events")
+    if (not _quiet_events(events) or row.get("rng_after") != SAME_RNG
+            or not row.get("changes")):
+        return None
+    increments = []
+    for change in row["changes"]:
+        path = change.get("path")
+        if (type(path) is not list or not path or change.get("before") is not True
+                or change.get("after") is not True
+                or "before_value" not in change or "value" not in change):
+            return None
+        allowed = (path == ["time"] or path == ["boundary"]
+                   or path == ["schedule", "fields", "schedule_revision"]
+                   or (len(path) == 4 and path[0] == "entities"
+                       and path[2:] == ["fields", "boundary"]))
+        before, after = change["before_value"], change["value"]
+        if (not allowed or type(before) is not int
+                or type(after) is not int or after == before):
+            return None
+        increments.append((tuple(path), before, after - before))
+    increments.sort(key=lambda item: item[0])
+    return increments
+
+
+def _quiet_events(events):
+    return (type(events) is dict and set(events) == set(_EMPTY_EVENTS)
+            and events["action_ids"] == [] and events["effect_ids"] == []
+            and events["actions"] == {} and events["effects"] == {}
+            and events["starts"] == {"$tuple": []}
+            and type(events["participants"]) is dict
+            and set(events["participants"]) == {"$tuple"}
+            and type(events["participants"]["$tuple"]) is list)
+
+
+def _compact_quiet_rows(rows):
+    """Replace only repeated clock/cursor-only rows with checked linear spans."""
+    output = []
+    index = 0
+    while index < len(rows):
+        first = rows[index]
+        first_changes = _quiet_changes(first)
+        group = [first] if first_changes is not None else []
+        next_index = index + 1
+        while group and next_index < len(rows):
+            previous = group[-1]
+            candidate = rows[next_index]
+            candidate_changes = _quiet_changes(candidate)
+            if (candidate_changes is None
+                    or candidate["boundary"] != previous["boundary"] + 1
+                    or candidate["events"] != first["events"]
+                    or candidate["start"] != previous["end"]
+                    or candidate["end"] - candidate["start"]
+                    != first["end"] - first["start"]
+                    or [item[0] for item in candidate_changes]
+                    != [item[0] for item in first_changes]
+                    or [item[2] for item in candidate_changes]
+                    != [item[2] for item in first_changes]):
+                break
+            group.append(candidate)
+            next_index += 1
+        if len(group) >= 2:
+            output.append({
+                "kind": "quiet_span",
+                "from_boundary": first["boundary"],
+                "to_boundary": group[-1]["boundary"],
+                "start": first["start"],
+                "step": first["end"] - first["start"],
+                "quiet_events": {"starts": first["events"]["starts"],
+                                 "participants": first["events"]["participants"]},
+                "increments": [{"path": list(path), "first_before": before,
+                                "step": delta}
+                               for path, before, delta in first_changes],
+                "rng_after": dict(SAME_RNG),
+                "state_sha256": group[-1]["state_sha256"],
+            })
+            index = next_index
+        else:
+            output.append(first)
+            index += 1
+    return output
+
+
+def _apply_quiet_span(state, row, through_boundary):
+    if (type(row) is not dict or set(row) != {
+            "kind", "from_boundary", "to_boundary", "start", "step", "quiet_events",
+            "increments", "rng_after", "state_sha256"}
+            or row["kind"] != "quiet_span"
+            or type(row["from_boundary"]) is not int
+            or type(row["to_boundary"]) is not int
+            or type(row["start"]) is not int
+            or type(row["step"]) is not int
+            or row["step"] <= 0 or type(row["increments"]) is not list
+            or type(row["quiet_events"]) is not dict
+            or set(row["quiet_events"]) != {"starts", "participants"}
+            or not row["increments"] or row["to_boundary"] <= row["from_boundary"]
+            or row["rng_after"] != SAME_RNG
+            or type(row["state_sha256"]) is not str):
+        raise NativeHistoryRejected("native quiet span schema is invalid")
+    quiet_events = {"action_ids": [], "effect_ids": [], "actions": {},
+                    "effects": {}, "starts": row["quiet_events"]["starts"],
+                    "participants": row["quiet_events"]["participants"]}
+    if (not _quiet_events(quiet_events)
+            or any(type(identity) is not str or not identity
+                   for identity in quiet_events["participants"]["$tuple"])):
+        raise NativeHistoryRejected("native quiet span participation facts are malformed")
+    prior_boundary = state["boundary"]
+    if (type(prior_boundary) is not int
+            or not row["from_boundary"] - 1 <= prior_boundary < through_boundary
+            or not row["from_boundary"] <= through_boundary <= row["to_boundary"]):
+        raise NativeHistoryRejected("native quiet span chronology differs")
+    first_start = row["start"]
+    time_offset = max(0, prior_boundary - row["from_boundary"] + 1)
+    expected_prior_time = first_start + time_offset * row["step"]
+    if state["time"] != expected_prior_time:
+        raise NativeHistoryRejected("native quiet span start time differs")
+    result = json.loads(_canonical(state).decode("ascii"))
+    seen = set()
+    for item in row["increments"]:
+        if (type(item) is not dict or set(item) != {"path", "first_before", "step"}
+                or type(item["path"]) is not list or not item["path"]
+                or any(type(part) is not str for part in item["path"])
+                or type(item["first_before"]) is not int
+                or type(item["step"]) is not int or item["step"] == 0):
+            raise NativeHistoryRejected("native quiet span increment is malformed")
+        path = item["path"]
+        allowed = (path == ["time"] or path == ["boundary"]
+                   or path == ["schedule", "fields", "schedule_revision"]
+                   or (len(path) == 4 and path[0] == "entities"
+                       and path[2:] == ["fields", "boundary"]))
+        key = tuple(path)
+        if not allowed or key in seen:
+            raise NativeHistoryRejected("native quiet span includes a non-cursor property")
+        seen.add(key)
+        parent = result
+        for part in path[:-1]:
+            if type(parent) is not dict or part not in parent:
+                raise NativeHistoryRejected("native quiet span property owner is absent")
+            parent = parent[part]
+        if type(parent) is not dict or path[-1] not in parent:
+            raise NativeHistoryRejected("native quiet span property is absent")
+        expected_before = item["first_before"] + time_offset * item["step"]
+        if parent[path[-1]] != expected_before:
+            raise NativeHistoryRejected("native quiet span property preimage differs")
+        count = through_boundary - prior_boundary
+        parent[path[-1]] = item["first_before"] + (time_offset + count) * item["step"]
+    time_increment = next((item for item in row["increments"]
+                           if item["path"] == ["time"]), None)
+    if time_increment is None or time_increment["step"] != row["step"]:
+        raise NativeHistoryRejected("native quiet span does not advance time")
+    result["boundary"] = through_boundary
+    return result
+
+
 def rng_state_at(log, boundary):
     """Return the exact RNG cursor after a committed boundary."""
     validate(log)
-    if type(boundary) is not int or not 1 <= boundary <= len(log["boundaries"]):
+    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native RNG boundary is not committed")
     current = None
-    for row in log["boundaries"][:boundary]:
+    for row in log["boundaries"]:
         if row["rng_after"] == SAME_RNG:
             if current is None:
                 raise NativeHistoryRejected("native RNG reference has no prior state")
         else:
             current = row["rng_after"]
+        to_boundary = row.get("to_boundary", row.get("boundary"))
+        if to_boundary == boundary or (row.get("from_boundary", boundary + 1)
+                                       <= boundary <= to_boundary):
+            break
     if current is None:
         raise NativeHistoryRejected("native RNG state is absent")
     return current
@@ -330,10 +494,14 @@ def upgrade(log):
     rows = []
     for original in log["boundaries"]:
         row = dict(original)
-        row["rng_after"] = _rng_record(row["rng_after"], previous, SCHEMA)
-        previous = original["rng_after"]
+        encoded_rng = original["rng_after"]
+        actual_rng = previous if encoded_rng == SAME_RNG else encoded_rng
+        if actual_rng is None:
+            raise NativeHistoryRejected("legacy native history RNG cursor is unanchored")
+        row["rng_after"] = _rng_record(actual_rng, previous, SCHEMA)
+        previous = actual_rng
         rows.append(row)
-    body["boundaries"] = rows
+    body["boundaries"] = _compact_quiet_rows(rows)
     result = _seal(body)
     validate(result)
     return result
@@ -349,8 +517,9 @@ def capture(encounter):
     """Capture committed facts from a native Encounter without resolving work.
 
     The returned format is a queryable historical record, not a resumable Save
-    yet. Every boundary remains one atomic record, including Event-free quiet
-    intervals, failed/no-diff Actions, and simultaneous batches.
+    yet. Every logical boundary remains queryable. Consecutive empty-event
+    intervals may use a validated numeric cursor span; Action/Event/Effect
+    boundaries remain individual atomic records.
     """
     from encounter import Encounter
     if type(encounter) is not Encounter:
@@ -412,10 +581,72 @@ def capture(encounter):
         prior = state
         previous_boundary = receipt.boundary
     body = {"schema": SCHEMA, "initial": initial,
-            "boundaries": boundaries,
+            "boundaries": _compact_quiet_rows(boundaries),
             "latest_boundary": previous_boundary}
     _measure(body)
     return _seal(body)
+
+
+def _expand_rows(log):
+    """Expand validated quiet spans for append/normalization operations."""
+    state = _initial_state(log["initial"])
+    output = []
+    for row in log["boundaries"]:
+        if row.get("kind") != "quiet_span":
+            output.append(json.loads(_canonical(row).decode("ascii")))
+            state = _apply(state, row["changes"])
+            continue
+        for boundary in range(row["from_boundary"], row["to_boundary"] + 1):
+            next_state = _apply_quiet_span(state, row, boundary)
+            output.append({
+                "boundary": boundary,
+                "start": state["time"], "end": next_state["time"],
+                "changes": _diff(state, next_state),
+                "events": {"action_ids": [], "effect_ids": [], "actions": {},
+                           "effects": {},
+                           "starts": row["quiet_events"]["starts"],
+                           "participants": row["quiet_events"]["participants"]},
+                "rng_after": dict(SAME_RNG),
+                "state_sha256": hashlib.sha256(_canonical(next_state)).hexdigest(),
+            })
+            state = next_state
+    return output
+
+
+def _append_compact_row(boundaries, row):
+    """Append one fact row, extending a quiet span without expanding its prefix."""
+    output = list(boundaries)
+    if not output:
+        return [row]
+    previous = output[-1]
+    candidate = _quiet_changes(row)
+    if previous.get("kind") == "quiet_span" and candidate is not None:
+        count = previous["to_boundary"] - previous["from_boundary"] + 1
+        expected = [(tuple(item["path"]), item["step"])
+                    for item in previous["increments"]]
+        if (row["boundary"] == previous["to_boundary"] + 1
+                and row["start"] == previous["start"] + count * previous["step"]
+                and row["end"] - row["start"] == previous["step"]
+                and row["events"]["starts"] == previous["quiet_events"]["starts"]
+                and row["events"]["participants"] == previous["quiet_events"]["participants"]
+                and [(path, delta) for path, _before, delta in candidate] == expected):
+            for index, (path, _before, _delta) in enumerate(candidate):
+                change = row["changes"][index]
+                stored = previous["increments"][index]
+                if change["before_value"] != (
+                        stored["first_before"] + count * stored["step"]):
+                    return output + [row]
+            extended = dict(previous)
+            extended["to_boundary"] = row["boundary"]
+            extended["state_sha256"] = row["state_sha256"]
+            output[-1] = extended
+            return output
+    if previous.get("kind") != "quiet_span":
+        pair = _compact_quiet_rows([previous, row])
+        if len(pair) == 1 and pair[0].get("kind") == "quiet_span":
+            output[-1] = pair[0]
+            return output
+    return output + [row]
 
 
 def append_committed(log, encounter):
@@ -487,7 +718,7 @@ def append_committed(log, encounter):
         "state_sha256": hashlib.sha256(_canonical(state)).hexdigest(),
     }
     body = {key: value for key, value in log.items() if key != "sha256"}
-    body["boundaries"] = list(log["boundaries"]) + [row]
+    body["boundaries"] = _append_compact_row(log["boundaries"], row)
     body["latest_boundary"] = expected
     _measure(body)
     result = _seal(body)
@@ -599,7 +830,7 @@ def validate(log):
         raise NativeHistoryRejected("native history envelope schema differs")
     unsigned = dict(log)
     digest = unsigned.pop("sha256")
-    if (log["schema"] not in (LEGACY_SCHEMA, SCHEMA) or type(digest) is not str
+    if (log["schema"] not in (*LEGACY_SCHEMAS, SCHEMA) or type(digest) is not str
             or hashlib.sha256(_canonical(unsigned)).hexdigest() != digest):
         raise NativeHistoryRejected("native history integrity digest differs")
     _measure(unsigned)
@@ -617,7 +848,21 @@ def validate(log):
     seen_actions = set()
     seen_effects = set()
     prior_rng = None
-    for expected, row in enumerate(boundaries, 1):
+    covered = 0
+    for row in boundaries:
+        if type(row) is dict and row.get("kind") == "quiet_span":
+            if log["schema"] != SCHEMA:
+                raise NativeHistoryRejected("legacy native history cannot contain quiet spans")
+            if row.get("rng_after") != SAME_RNG or prior_rng is None:
+                raise NativeHistoryRejected("native quiet span RNG reference is unanchored")
+            if type(row.get("from_boundary")) is not int or row["from_boundary"] != covered + 1:
+                raise NativeHistoryRejected("native quiet span boundary order differs")
+            state = _apply_quiet_span(state, row, row.get("to_boundary"))
+            if row["state_sha256"] != hashlib.sha256(_canonical(state)).hexdigest():
+                raise NativeHistoryRejected("native quiet span state digest differs")
+            covered = row["to_boundary"]
+            continue
+        expected = covered + 1
         if (type(row) is not dict or set(row) != {
                 "boundary", "start", "end", "changes", "events", "rng_after",
                 "state_sha256"} or type(row["boundary"]) is not int
@@ -663,7 +908,10 @@ def validate(log):
                 or fact_effect_ids & seen_effects):
             raise NativeHistoryRejected("native history Effect facts disagree with receipt identities")
         seen_effects.update(fact_effect_ids)
-    if log["latest_boundary"] != len(boundaries):
+        covered = expected
+    if (type(log["latest_boundary"]) is not int
+            or not 0 <= log["latest_boundary"] <= MAX_BOUNDARIES
+            or log["latest_boundary"] != covered):
         raise NativeHistoryRejected("native history latest boundary differs")
     return True
 
@@ -671,20 +919,36 @@ def validate(log):
 def state_at(log, boundary):
     """Reconstruct the historical property projection without Action resolution."""
     validate(log)
-    if type(boundary) is not int or not 1 <= boundary <= len(log["boundaries"]):
+    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
     initial = log["initial"]
     state = _initial_state(initial)
-    for row in log["boundaries"][:boundary]:
-        state = _apply(state, row["changes"])
+    for row in log["boundaries"]:
+        if row.get("kind") == "quiet_span":
+            if row["from_boundary"] <= boundary <= row["to_boundary"]:
+                return _apply_quiet_span(state, row, boundary)
+            state = _apply_quiet_span(state, row, row["to_boundary"])
+        else:
+            state = _apply(state, row["changes"])
+            if row["boundary"] == boundary:
+                return state
     return state
 
 
 def events_at(log, boundary):
     validate(log)
-    if type(boundary) is not int or not 1 <= boundary <= len(log["boundaries"]):
+    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
-    return log["boundaries"][boundary - 1]["events"]
+    for row in log["boundaries"]:
+        if row.get("kind") == "quiet_span":
+            if row["from_boundary"] <= boundary <= row["to_boundary"]:
+                return {"action_ids": [], "effect_ids": [], "actions": {},
+                        "effects": {},
+                        "starts": row["quiet_events"]["starts"],
+                        "participants": row["quiet_events"]["participants"]}
+        elif row["boundary"] == boundary:
+            return row["events"]
+    raise NativeHistoryRejected("requested native boundary is not committed")
 
 
 def encode(log):
