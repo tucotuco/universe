@@ -1,6 +1,53 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — status ACTIVE and incomplete.** Native History `/10` is paired with strict native graph `/2`, which reconstructs Target rows, EntityInspection contexts and Action/Effect/objective/use/start/participant/scheduler/projectile receipt projections from authenticated facts. The graph still retains Objective-recipient projections, receipt envelopes and complete current state; the 159-type capability matrix and application/history-reader coverage are not closed. Durable journal recovery, broad corruption/security testing and ordinary application Save/Load cutover also remain incomplete. Native Save `/2` preserves independent RNG/history for multiple progressing Encounters. Prior accepted Arena `/10`–`/12` compatibility evidence remains relevant, not sufficient for the revised all-or-nothing assignment. No unresolved rule or external blocker is identified. U-PER-SCALE-001 remains ACTIVE and sole; do not archive or mark complete.
+**Problems first — status ACTIVE and incomplete.** Native History `/10` is paired with strict native graph `/2`. The graph now reconstructs Target rows, EntityInspection contexts, publication receipt fields, and Disarm landing indexes from authenticated facts; exact prior graph-writer fingerprints remain accepted as migration inputs. This removes several repeated history projections, while the native graph still retains the complete current snapshot, pending/accepted scheduler commitments, native Event objects and explicit observer bindings. The 159-type field matrix is source-linked but not closed end-to-end for every reachable field/history consumer. Ordinary application Save/Load still writes Arena `/12`; the general native gate has not passed, so the planned application cutover is not yet eligible. Broad corruption/security and integration coverage remain open. The current controlled 64-Action and quiet scale gates pass. No unresolved rule or external blocker is identified; remaining work is engineering. U-PER-SCALE-001 remains ACTIVE and sole.
+
+## Current continuation — committed receipt compaction and no-time Disarm history
+
+### Problems first
+
+A strict Save after choosing the post-roll Disarm landing previously carried `disarm-landing-facts/1` in the native graph but its attached history recorder was stale: the choice changes custody and position without advancing Encounter time, so the interval-only append path never added its committed receipt to the current cut. Load therefore reconstructed an empty Disarm index. This was an implementation gap, not a missing rule. A second storage duplication remained in `PublishedInterval`: committed Action/Effect IDs, RNG cursor and notification intents were represented both in history and every saved receipt.
+
+### Correction and verification
+
+Native graph `/2` now compacts the repeated publication fields and authenticated Disarm landing index, rebuilding both before receipt/history validation. `record_committed_disarm_landing()` makes a no-time choice amend only the existing latest history boundary after the native publication succeeds. It verifies that the origin, boundary count, all prior expanded rows, event/effect projection, timeline and RNG remain unchanged, while the exact current-cut landing fact is added. A recording failure leaves the native committed choice intact but marks the recorder failed closed for subsequent Saves, matching interval-recording failure behavior. The no-time landing remains its own receipt; no Action resolution or time advance is invented.
+
+`test_pending_disarm_landing_choice_restores_and_commits_same_weapon` now checks the immediate same-boundary history query, post-choice strict Save/Load and byte-identical resave, continued native Delay state/history/RNG, plus a fresh-process Load of the pending choice followed by lawful landing selection and continuation. Re-sealed dangling-Being corruption remains rejected. Prior native graph `/2` writers are still covered by the pinned full-receipt-fact and Entity-only migration fixtures.
+
+Current focused verification:
+
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence -v` — **58 passed / 197.965s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_draw_persistence -v` — **25 passed / 134.121s**, including all-boundary facts, Action/Effect order, targets, entities, recipients, objectives, scheduler, RNG and continuation for the 25 implemented Action scenarios.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history -v` — **30 passed / 24.452s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_checkpoint_adapters -v` — **50 passed / 20.773s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_persistence_capability_matrix -v` — **3 passed / 0.008s**.
+- Disarm Save/Load regression alone — **1 passed / 5.935s**; compacted receipt publication-fact and prior-writer focused cases — **4 passed / 14.098s** before the continuation assertion was added.
+
+The history, adapter and matrix suites must run in separate processes: a combined invocation fails the history test's explicit “Arena application has not been imported” assertion because the matrix test imports Arena's field allowlist. Each suite passes in isolation; this is test-process import-order coupling, not a history implementation failure. The final report will retain this distinction.
+
+Current controlled scale reruns use the same lawful 64-Feint/129-boundary scenario and fresh-process continuation at each registry size:
+
+| Registry Beings | Graph bytes (uncompacted → final) | History bytes | Save bytes | Reduction | Scenario / query / export / fresh-load+continue (s) | Peak RSS bytes |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 4,853,146 → 1,554,196 | 1,193,015 | 3,265,426 | 67.98% | 65.741 / 2.594 / 10.617 / 8.974 | 203,358,208 |
+| 20 | 5,095,978 → 1,796,450 | 1,193,015 | 3,588,430 | 64.75% | 73.617 / 2.917 / 11.732 / 9.353 | 183,468,032 |
+| 200 | 7,522,170 → 4,215,975 | 1,193,015 | 6,814,462 | 43.95% | 73.897 / 2.479 / 13.299 / 10.121 | 237,469,696 |
+
+Each run resolved 64 actual Actions, checked all 129 cuts, preserved same-Encounter IDs, and matched uninterrupted control after fresh-process Load and continuation. The current 200-quiet-boundary run checked all cuts and fresh-process continuation: **34,529 history bytes; 1,504,437 graph bytes; 2,040,592 Save bytes; 49.328s scenario; 1.496s query; 2.832s export; 3.856s Load+continue; 75,972,608 peak RSS bytes**. The process-resource profile is practical for these controlled fixtures. It does not itself prove every native family or ordinary Arena cutover.
+
+### Acceptance status
+
+| Gate | Current evidence | Status |
+|---|---|---|
+| Closed field/source catalog | Exact 159-type registry equality and source-linked row table | **Open:** registry/row equality is not per-family end-to-end closure |
+| Native Actions and state families | 25 headless continuation scenarios; 58 native Save/Load cases; Groups, reproduction, history, observation, projectile, defense, custody, combat and pending workflows | **Open:** other reachable field readers/subtypes and full matrix evidence remain |
+| Historical fidelity | Every portable boundary fact compared against receipt inspection for each of 25 scenarios; query, identity, causal order and observer owner checks | **Open:** complete historical consumer parity across every reachable family is not yet established |
+| Fresh-process restoration | Pending, running, interrupted, simultaneous, changed-RNG and current-state continuation cases; exact IDs retained | **Open:** portfolio does not yet establish “any presently supported state” across all 159 types |
+| Replay, corruption, rollback, compatibility | Current-version replay and strict migration/corruption/fault cases exist; `/10`–`/12` Arena readers remain tested | **Open:** assignment-wide adversarial and legacy migration matrix is incomplete |
+| Scale | 2/20/200 registered Beings, 64 Actions/129 cuts, and 200 quiet boundaries all pass exact continuation | **Pass for measured profiles** |
+| Application integration | Native API exists; accepted legacy Arena formats remain readable | **Open:** ordinary Arena writing still uses `/12`, pending general native gate |
+
+No unresolved mechanics or external prerequisite currently blocks the open gates. Revision `4c9569b` compacts publication/Disarm receipt projections and adds the no-time boundary update. The report, matrix, findings and canonical task state are being updated in a separate documentation commit. No push has occurred.
 
 ## Current problems-first addendum — Group-owned membership continuation
 
@@ -59,17 +106,18 @@ Verification: `PYTHONPATH=tests:src:../examples:../npc-generator .venv/bin/pytho
 | Sufficiency addendum continuation | 2026-11-15T20:39:02-08:00 | 2026-11-16T03:09:14-08:00 | PT6H30M12S |
 | Exact serialized-field diagnostic audit | 2026-11-16T04:16:02-08:00 | 2026-11-16T04:24:43-08:00 | PT8M41S |
 | Headless initial/delta proof | 2026-11-16T04:59:08-08:00 | 2026-11-16T05:13:46-08:00 | PT14M38S |
-| Full native-history capability continuation | 2026-11-16T18:34:14-08:00 | IN PROGRESS | Recorded at closeout |
-| Native action-family breadth continuation | 2026-11-16T21:04:56-08:00 | IN PROGRESS | Recorded at closeout |
-| Arena activation and native `/12` migration slice | 2026-11-16T21:30:36-08:00 | IN PROGRESS | Recorded at closeout |
+| Full native-history capability continuation | 2026-11-16T18:34:14-08:00 | End not recorded | Elapsed unavailable; no estimate added |
+| Native action-family breadth continuation | 2026-11-16T21:04:56-08:00 | End not recorded | Elapsed unavailable; no estimate added |
+| Arena activation and native `/12` migration slice | 2026-11-16T21:30:36-08:00 | End not recorded | Elapsed unavailable; no estimate added |
 
 | Native headless resume slice | 2026-11-16T10:46:06-08:00 | 2026-11-16T11:27:35-08:00 | PT41M29S |
 
 | Faithful replay continuation | 2026-11-16T11:56:50-08:00 | 2026-11-16T12:35:58-08:00 | PT39M8S |
-| Native history bridge continuation | 2026-11-16T13:49:14-08:00 | IN PROGRESS | Recorded at closeout |
+| Native history bridge continuation | 2026-11-16T13:49:14-08:00 | End not recorded | Elapsed unavailable; no estimate added |
 | Full native bridge continuation | 2026-11-17T06:10:55Z | Not recorded in the prior closeout | Elapsed unavailable; no estimate added |
-| Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | IN PROGRESS | End and elapsed recorded at closeout |
-| Native projectile-history integration continuation | 2026-11-17T15:34:30Z | IN PROGRESS | End and elapsed recorded at closeout |
+| Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | End not recorded | Elapsed unavailable; no estimate added |
+| Native projectile-history integration continuation | 2026-11-17T15:34:30Z | End not recorded | Elapsed unavailable; no estimate added |
+| Native publication receipt and scale continuation | 2026-11-17T19:15:12Z | IN PROGRESS | Recorded at closeout |
 
 ## Problems-first — cumulative observer-recipient history in `/10`, with strict `/9` migration
 
