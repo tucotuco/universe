@@ -69,6 +69,18 @@ Expanded `test_native_save_is_self_contained_for_shared_library_definitions` wit
 
 Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_is_self_contained_for_shared_library_definitions -v` — **1 passed / 1.748s**. Current code HEAD is `cc692942c64e790fab7a67fd37c12154a5350f2c` (selective observer receipt compaction). This added test and matrix/report reconciliation are pending scoped documentation/test commit. This improves the immutable-definition evidence but does not establish all family behavior, definition evolution rules, every observer-binding combination or production `/12` writer cutover; U-PER-SCALE-001 remains ACTIVE.
 
+## Current continuation — broader headless scenario authoring
+
+### Problems first
+
+The native scenario builder could author Beings, Weapons and explicit geometry, but common Object and Armor setups still required tests to reach around it and mutate `Universe` directly. Its proposed carried-Object helper also needed care: the existing `Universe.make_object_for_being` records an inventory possession but does not set `parent_container_id`, so calling that physical custody would invent a fact.
+
+### Correction and verification
+
+`NativeScenarioBuilder` now exposes `make_object`, `make_possession_object`, `make_armor`, and `set_placement`. Placement accepts only explicitly supplied positions/geometries; it never derives world geometry from definition dimensions. The possession helper delegates to the existing Universe operation and its docstring calls out the list-only relationship. The headless persistence smoke now uses these methods to author a placed pillow, worn Gauntlet Armor and a separate inventory possession, then strict-loads and checks all identities and relationships while importing no Arena application or npcgen modules.
+
+Verification: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_scenario -v` — **2 passed / 2.461s**; module compilation and `git diff --check` passed. This improves the reusable test/scenario API and explicit-state fidelity, but leaves broad field-family and historical-read parity, archive recovery/security, migrations and application cutover open. Current code HEAD at this increment is `e2b0883`; the builder/test/docs changes are pending their own scoped commit. U-PER-SCALE-001 remains ACTIVE.
+
 ## Current continuation — committed receipt compaction and no-time Disarm history
 
 ### Problems first

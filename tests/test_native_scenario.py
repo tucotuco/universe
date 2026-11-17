@@ -23,6 +23,12 @@ scenario=NativeScenarioBuilder('native-scenario-smoke',
  Library(config_dir=sys.argv[1]),seed=731)
 first=scenario.add_being('Human','Scenario First',position=(0,0,0),radius=.25,hit_points=10)
 second=scenario.add_being('Human','Scenario Second',position=(.2,0,0),radius=.25,hit_points=10)
+pillow=scenario.make_object('Linen pillow','Scenario placed Object',
+ position=(2,0,0))
+armor=scenario.make_armor('Gauntlet','Scenario worn Armor',
+ wearer_id=first.id)
+carried=scenario.make_possession_object(first.id,'Linen pillow',
+ 'Scenario carried Object')
 scenario.mark_aware(first.id,second.id);scenario.mark_aware(second.id,first.id)
 scenario.enable()
 action=DelayAction(scenario.encounter,first.id,defense=0,start_time=0,id='scenario-delay')
@@ -30,6 +36,10 @@ scenario.schedule(action);scenario.step(1)
 wire=export_save(scenario.encounter)
 world,enc,rng=load_save(wire)
 assert enc.id==scenario.encounter.id and world.id==scenario.world.id
+assert world.get_object_by_id(pillow.id).get_position().as_tuple()==(2,0,0)
+assert world.get_object_by_id(armor.id).original is world.library.get_armor_definition('Gauntlet')
+assert world.get_object_by_id(first.id).get_armor_id()==armor.id
+assert carried.id in world.get_object_by_id(first.id).possessions
 assert enc._atomic_interval_history[-1].action_ids==('scenario-delay',)
 query=NativeHistoryQuery(capture(enc))
 assert query.events_at(1)['action_ids']==['scenario-delay']

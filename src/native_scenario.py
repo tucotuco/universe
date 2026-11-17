@@ -60,6 +60,63 @@ class NativeScenarioBuilder:
             self.encounter.add_object(object_id)
         return obj
 
+    def make_object(self, object_type, name, *, position=None, geometry=None,
+                    participant=True):
+        """Create a represented Object without inferring placement or geometry.
+
+        Definitions and identity come from the native Universe Library. A
+        position or geometry is added only when the scenario author supplies
+        it; definition dimensions are never converted to world geometry.
+        """
+        object_id = self.world.make_object(object_type, name)
+        if object_id is None:
+            raise ValueError(f"native Object definition is unavailable: {object_type}")
+        obj = self.world.get_object_by_id(object_id)
+        self.set_placement(obj.id, position=position, geometry=geometry)
+        if participant:
+            self.encounter.add_object(object_id)
+        return obj
+
+    def make_possession_object(self, being_id, object_type, name, *,
+                               participant=True):
+        """Create an Object using Universe's possession-list operation.
+
+        This preserves ``make_object_for_being`` semantics; it does not infer
+        a spatial or physical-carried relation from inventory membership.
+        """
+        object_id = self.world.make_object_for_being(being_id, object_type, name)
+        if object_id is None:
+            raise ValueError(f"native Object could not be carried: {object_type}")
+        obj = self.world.get_object_by_id(object_id)
+        if participant:
+            self.encounter.add_object(object_id)
+        return obj
+
+    def make_armor(self, armor_type, name, *, wearer_id=None, participant=True):
+        """Create native Armor, optionally wearing it on an identified Being."""
+        armor_id = self.world.make_armor(armor_type, name)
+        if armor_id is None:
+            raise ValueError(f"native Armor definition is unavailable: {armor_type}")
+        if wearer_id is not None and not self.world.armor_being(wearer_id, armor_id):
+            raise ValueError(f"native Armor could not be worn by {wearer_id}")
+        armor = self.world.get_object_by_id(armor_id)
+        if participant:
+            self.encounter.add_object(armor_id)
+        return armor
+
+    def set_placement(self, entity_id, *, position=None, geometry=None):
+        """Set only explicitly authored native location/geometry facts."""
+        entity = self.world.get_object_by_id(entity_id)
+        if entity is None:
+            raise ValueError("native placement Entity is not registered")
+        if position is not None:
+            if type(position) not in (tuple, list) or len(position) != 3:
+                raise ValueError("position must be a represented three-coordinate tuple")
+            entity.set_position(CartesianPosition(*position))
+        if geometry is not None:
+            entity.set_geometry(geometry)
+        return entity
+
     def arm(self, being_id, weapon_id, hand):
         """Use the native Universe equipment transition and retain Object identity."""
         if not self.world.arm_being(being_id, weapon_id, hand):
