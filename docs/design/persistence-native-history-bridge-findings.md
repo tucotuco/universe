@@ -348,4 +348,8 @@ The restore path now validates every `HeardAccount.listener_id` against the exac
 
 Affected integration results after the change: `test_native_persistence` **40 passed / 116.441s**, `test_native_history` **28 passed / 21.299s**, `test_checkpoint_adapters` **50 passed / 18.992s**, and capability matrix validation **3 passed / 0.007s**. The independent run boundaries also avoid a known cross-module import-isolation issue in the test harness.
 
+Further affected regressions: the full Arena-independent Action continuation/history parity suite passed **25 / 116.564s**; same-version faithful replay passed **5 / 8.616s**; the production generated-Arena persistence suite passed **22 / 375.021s**. The latter includes the 64-Action workload, 2/20/200 registry curve, accepted `/10`–`/12` restore paths, and segmented archive corruption checks. Its duplicate-`snapshot.json` warning is intentionally produced by the duplicate archive-entry refusal test, which passed. No production Save schema or user save file was changed by this correction.
+
+The correction is committed as `5a6447cac7d984087bc37caf0a6e5f17f99673db`. Staged publication safety passed with zero findings; the explicit-path commit excluded the unrelated staged archive operations.
+
 This resolves the identified cumulative-recipient defect and the tested single/shared-list listener attribution paths only. Full family history/query parity, receipt/Target graph removal, durable append journal, broad security/scale, and application Save/Load cutover remain open. No rules or external blocker is identified.

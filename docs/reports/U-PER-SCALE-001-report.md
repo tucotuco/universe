@@ -70,9 +70,14 @@ Regression verification after the correction:
 - `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history -v` — **28 passed / 21.299s**.
 - `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_checkpoint_adapters -v` — **50 passed / 18.992s**.
 - `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_persistence_capability_matrix -v` — **3 passed / 0.007s**.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_faithful_replay -v` — **5 passed / 8.616s**; playback, identity-map refusal, tamper refusal, and fresh-process same-version replay remain green.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_draw_persistence -v` — **25 passed / 116.564s**; all 25 implemented Action continuation scenarios retain all-boundary history parity after the restore change.
+- `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_arena_persistence -v` — **22 passed / 375.021s**, including 64 lawful native Feints, 2/20/200 registry scaling, strict `/10` and `/11` migration, current `/12` compatibility, and history integrity. Python emitted the expected duplicate `snapshot.json` warning from the duplicate-entry corruption test; that test passed.
 - `.venv/bin/python -B -m py_compile src/native_graph_snapshot.py tests/test_native_persistence.py` and `git diff --check` — passed.
 
 The history and adapter suites were run as separate processes to avoid their known test import isolation interaction.
+
+Implementation commit: `5a6447cac7d984087bc37caf0a6e5f17f99673db` (restore validator, regression, matrix, TASKS and findings). Before commit, `git diff --cached --check` passed and `python3 tools/check_publication_safety.py --staged` reported `files=12 findings=0 result=PASS`; `git commit --only` named six reviewed paths, so the five unrelated pre-staged archival operations were excluded.
 
 
 ## Native action-family continuation — contact history and Break Weapon
