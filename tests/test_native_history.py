@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 
 import encounter_delta_headless
 import native_persistence_scale
+import test_encounter_inspection as inspection_fixtures
 
 
 def _legacy_shape(body):
@@ -33,8 +34,8 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
                             INITIAL_RNG_SCHEMA, SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
-                            entity_at, entity_history_at, _plain, _expand_rows,
-                            _target_candidates)
+                            entity_at, entity_history_at, objective_at,
+                            objective_use_at, _plain, _expand_rows, _target_candidates)
 
 
 class NativeHistoryTests(unittest.TestCase):
@@ -117,6 +118,31 @@ class NativeHistoryTests(unittest.TestCase):
         identity = next(iter(self.log["entity_context"]["initial"]))
         self.assertIsNone(query.entity_at(identity, 0))
         self.assertIsNone(query.entity_history_at(identity))
+
+    def test_objective_fact_and_use_queries_match_committed_group_observation(self):
+        fixture = inspection_fixtures.InspectionFixture()
+        fixture.setUp()
+        group = fixture.f.f.f.group()
+        fixture.enable()
+        from field_observation import BeliefLedger
+        observation = fixture.f.f.observe(
+            fixture.a, group, ledger=BeliefLedger(fixture.a.id))
+        fixture.enc.schedule_choice((observation,))
+        fixture.enc.step(1)
+        log = capture(fixture.enc)
+        query = NativeHistoryQuery(log)
+        self.assertEqual(query.objective_at(0), {})
+        self.assertEqual(query.objective_use_at(0), {"$tuple": []})
+        receipt = fixture.enc._atomic_interval_history[0]
+        self.assertEqual(query.objective_at(1), _plain(receipt.inspection.objective))
+        self.assertEqual(objective_at(log, 1), _plain(receipt.inspection.objective))
+        self.assertEqual(query.objective_use_at(1), _plain(receipt.inspection.objective_use))
+        self.assertEqual(objective_use_at(log, 1), _plain(receipt.inspection.objective_use))
+        self.assertTrue(query.objective_at(1))
+        self.assertTrue(query.objective_use_at(1))
+        detached = query.objective_at(1)
+        detached.clear()
+        self.assertTrue(query.objective_at(1))
 
     def test_committed_action_effect_read_model_matches_inspection_at_each_boundary(self):
         log = decode(self.wire)

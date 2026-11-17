@@ -1832,6 +1832,16 @@ class NativeHistoryQuery:
             raise NativeHistoryRejected("requested Target is absent at this boundary")
         return target
 
+    def objective_at(self, boundary):
+        """Return detached committed objective-reality inspection facts."""
+        self._boundary(boundary)
+        return self._copy(self.state_at(boundary)["objective"])
+
+    def objective_use_at(self, boundary):
+        """Return detached committed objective-fact use/cause rows."""
+        self._boundary(boundary)
+        return self._copy(self.state_at(boundary)["objective_use"])
+
     def target_history_at(self, target_id, boundary=None):
         """Return ordered TargetCandidate facts through a checked boundary."""
         if boundary is None:
@@ -2119,6 +2129,16 @@ def committed_action_at(log, action_id, boundary):
 def target_at(log, target_id, boundary):
     """Return one detached historical TargetCandidate."""
     return NativeHistoryQuery(log).target_at(target_id, boundary)
+
+
+def objective_at(log, boundary):
+    """Return detached objective inspection facts at a committed boundary."""
+    return NativeHistoryQuery(log).objective_at(boundary)
+
+
+def objective_use_at(log, boundary):
+    """Return detached objective-fact use rows at a committed boundary."""
+    return NativeHistoryQuery(log).objective_use_at(boundary)
 
 
 def target_history_at(log, target_id, boundary=None):
