@@ -1019,6 +1019,24 @@ class Encounter(Event):
                for obj in self.universe.object_registry.object_instances.values()):
             raise RuntimeError('Resolve the pending Disarm landing before scheduling another Action')
 
+    def _ensure_arena_progression_mode(self, rng_owner):
+        """Select native mode or validate the existing restored RNG owner."""
+        from transactional_progression import (
+            _BINDINGS, _enable_transactional_progression_owned, mode_of,
+        )
+        mode = mode_of(self)
+        if mode == 'legacy':
+            _enable_transactional_progression_owned(self, rng_owner=rng_owner)
+            return 'legacy'
+        if mode == 'transactional':
+            binding = _BINDINGS.get(id(self))
+            if (binding is None or binding.encounter() is not self
+                    or binding.rng_owner is not rng_owner):
+                raise RuntimeError(
+                    'Arena activation RNG owner differs from restored native progression')
+            return 'transactional'
+        raise RuntimeError('Arena activation requires native transactional progression')
+
     def activate_arena_for_player_action(self, actor_id, action, *, rng_owner):
         """Atomically accept the first Run or owned-weapon Draw Choice.
 
@@ -1028,6 +1046,7 @@ class Encounter(Event):
         """
         from activities import RunAction, ReadyWeaponAction, ReadyPreparationAction, DelayAction
         from action_choice import ChoiceRejected
+        from transactional_progression import mode_of
 
         if not self.arena_activation_enabled:
             raise RuntimeError("target-free activation is unavailable for this Encounter")
@@ -1049,6 +1068,11 @@ class Encounter(Event):
                 "first Arena Choice must be this actor's native Run, Draw, held-weapon Ready, or Delay")
         if self.get_being(actor_id) is None or action.start_time != self.time:
             raise ValueError("Run actor must participate and begin at native Encounter time")
+        mode_before_activation = mode_of(self)
+        if mode_before_activation == 'transactional':
+            self._ensure_arena_progression_mode(rng_owner)
+        elif mode_before_activation != 'legacy':
+            raise RuntimeError('Arena first Choice cannot activate a quarantined Encounter')
 
         book = self._choice_book
         # One owner lock spans validation, acceptance, first Action publication,
@@ -1081,16 +1105,23 @@ class Encounter(Event):
                 self.initiated = True
                 self.arena_activation = activation
                 accepted = book.accept(validation, origin="arena-first-player-choice")
-                book.publish(accepted.id)
-                from transactional_progression import _enable_transactional_progression_owned
-                _enable_transactional_progression_owned(self, rng_owner=rng_owner)
+                if mode_before_activation == 'transactional':
+                    import transactional_progression as tp
+                    with tp._arena_first_choice_publication(
+                            self, accepted.id,
+                            authority=tp._ARENA_FIRST_CHOICE_AUTHORITY):
+                        book.publish(accepted.id)
+                else:
+                    book.publish(accepted.id)
+                self._ensure_arena_progression_mode(rng_owner)
                 return book.view(accepted.id), activation
             except BaseException:
                 # Transactional selection is the final operation. If it failed
                 # after binding, remove only this just-created pristine binding.
                 import transactional_progression as tp
                 binding = tp._BINDINGS.get(id(self))
-                if binding is not None and binding.mode.encounter_identity == id(self):
+                if (mode_before_activation == 'legacy' and binding is not None
+                        and binding.mode.encounter_identity == id(self)):
                     tp._BINDINGS.pop(id(self), None)
                     object.__getattribute__(self, "__dict__").pop("_transactional_mode", None)
                 self.initiated = state["initiated"]
@@ -1118,7 +1149,7 @@ class Encounter(Event):
         from target-directed EncounterInitiation and Action activation.
         """
         from atomic_publication import publication_boundary
-        from transactional_progression import _enable_transactional_progression_owned
+        from transactional_progression import mode_of
 
         if not self.arena_activation_enabled:
             raise RuntimeError("target-free movement activation is unavailable for this Encounter")
@@ -1129,6 +1160,11 @@ class Encounter(Event):
                 or type(movement_decision_id) is not str or not movement_decision_id.strip()
                 or self.time != self.start_time):
             raise ValueError("first Arena movement requires a participating actor, decision ID, and start-time plan")
+        mode_before_activation = mode_of(self)
+        if mode_before_activation == 'transactional':
+            self._ensure_arena_progression_mode(rng_owner)
+        elif mode_before_activation != 'legacy':
+            raise RuntimeError('Arena movement cannot activate a quarantined Encounter')
 
         book = self._choice_book
         with publication_boundary(self, quiescent=True), book.lock:
@@ -1144,16 +1180,17 @@ class Encounter(Event):
             try:
                 self.initiated = True
                 self.arena_movement_activation = record
-                _enable_transactional_progression_owned(self, rng_owner=rng_owner)
+                self._ensure_arena_progression_mode(rng_owner)
                 return record
             except BaseException:
                 import transactional_progression as tp
                 binding = tp._BINDINGS.get(id(self))
-                if binding is not None and binding.mode.encounter_identity == id(self):
+                if (mode_before_activation == 'legacy' and binding is not None
+                        and binding.mode.encounter_identity == id(self)):
                     tp._BINDINGS.pop(id(self), None)
-                object.__getattribute__(self, "__dict__").pop("_transactional_mode", None)
-                if state["transactional_mode"] is not None:
-                    object.__getattribute__(self, "__dict__")["_transactional_mode"] = state["transactional_mode"]
+                    object.__getattribute__(self, "__dict__").pop("_transactional_mode", None)
+                    if state["transactional_mode"] is not None:
+                        object.__getattribute__(self, "__dict__")["_transactional_mode"] = state["transactional_mode"]
                 self.initiated = state["initiated"]
                 self.arena_movement_activation = state["activation"]
                 raise

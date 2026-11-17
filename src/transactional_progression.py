@@ -11,6 +11,10 @@ import weakref
 from contextlib import contextmanager
 
 
+_ARENA_FIRST_CHOICE_AUTHORITY = object()
+_ARENA_FIRST_CHOICE_SCOPE = threading.local()
+
+
 class TransactionalProgressionError(ValueError):
     pass
 
@@ -401,7 +405,46 @@ def _restore_quarantined_movement_inspection(encounter, import_handle, receipt, 
 def guard_legacy_encounter(encounter, operation='legacy consumer'):
     assert_not_quarantined(encounter, operation)
     if mode_of(encounter)=='transactional':
+        scope = getattr(_ARENA_FIRST_CHOICE_SCOPE, 'active', None)
+        if (scope == (id(encounter), threading.get_ident())
+                and operation in ('direct ChoiceBook.publish',
+                                  'direct ChoiceBook._publish_updates',
+                                  'direct ChoiceBook._start_due')):
+            from atomic_publication import publication_owned
+            if publication_owned(encounter):
+                return
         raise TransactionalProgressionError(operation+' is unavailable on a transactional Encounter; native step() only (5C3A)')
+
+
+@contextmanager
+def _arena_first_choice_publication(encounter, choice_id, *, authority):
+    """Permit only Encounter-owned first-Choice publication in native mode."""
+    from atomic_publication import publication_owned
+    from encounter import ArenaActionActivation
+    if (authority is not _ARENA_FIRST_CHOICE_AUTHORITY
+            or not publication_owned(encounter)
+            or mode_of(encounter) != 'transactional'):
+        raise TransactionalProgressionError(
+            'Arena first-Choice publication scope is Encounter-owned')
+    activation = encounter.arena_activation
+    record = encounter._choice_book._choices.get(choice_id)
+    if (type(activation) is not ArenaActionActivation
+            or activation.choice_id != choice_id
+            or activation.encounter_id != encounter.id
+            or record is None or record.origin != 'arena-first-player-choice'
+            or record.view.state != 'accepted'
+            or record.view.first_start != encounter.time
+            or len(record.members) != 1
+            or record.members[0].action.actor_id != activation.actor_id):
+        raise TransactionalProgressionError(
+            'Arena first-Choice publication does not match its native activation')
+    if getattr(_ARENA_FIRST_CHOICE_SCOPE, 'active', None) is not None:
+        raise TransactionalProgressionError('nested Arena first-Choice publication is forbidden')
+    _ARENA_FIRST_CHOICE_SCOPE.active = (id(encounter), threading.get_ident())
+    try:
+        yield
+    finally:
+        del _ARENA_FIRST_CHOICE_SCOPE.active
 
 
 def register_legacy_facade(encounter,facade):

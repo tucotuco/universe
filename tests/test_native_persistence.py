@@ -96,6 +96,88 @@ class NativePersistenceTests(unittest.TestCase):
             self.assertEqual(restored.observer_id, ledger.observer_id)
             self.assertEqual(restored._history, ledger._history)
 
+    def test_legacy_v10_v11_pristine_arena_migrate_and_start_natively(self):
+        """Accepted pristine legacy files migrate without inventing an Action."""
+        import os
+        from activities import DelayAction
+
+        script = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from atomic_publication import RNGCursor
+from native_persistence import load_save,export_save
+wire=open(sys.argv[1],'rb').read();version=sys.argv[2]
+world,enc,rng=load_save(wire)
+assert enc.progression_mode=='transactional'
+assert export_save(enc)==wire
+actor_id=enc.being_list[0]
+action_id='legacy-migration-first-delay-'+version
+action=DelayAction(enc,actor_id,0,enc.time,id=action_id)
+wrong_rng=RNGCursor(rng.state)
+try:
+ enc.activate_arena_for_player_action(actor_id,action,rng_owner=wrong_rng)
+ raise AssertionError('foreign RNG owner was accepted')
+except RuntimeError as error:
+ assert 'RNG owner differs' in str(error)
+assert not enc.initiated and enc.arena_activation is None
+assert action_id not in world.event_history and not enc.pending_action_list
+_,activation=enc.activate_arena_for_player_action(actor_id,action,rng_owner=rng)
+enc.step(1);receipt=enc.inspect_committed(1).action(action.id)
+print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
+ 'being_ids':list(enc.being_list),'time':enc.time,'boundary':enc.last_processed_boundary,
+ 'activation':activation.to_dict(),'action_id':action.id,
+ 'outcome':receipt.facts.outcome,'position':world.get_object_by_id(actor_id).get_position().as_tuple(),
+ 'hp':world.get_object_by_id(actor_id).get_hit_points(),'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'observers':sorted((key,tuple(sorted(value))) for key,value in enc.awareness.items()),
+ 'arena_imports':sorted(set(sys.modules)&{'arena_browser_session','arena_server','npcgen'})},sort_keys=True))'''
+        for version, filename in (
+                ('v10', 'legacy-per-scale-010-v10.uarena'),
+                ('v11', 'legacy-per-scale-011-v11.uarena')):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                legacy_wire = (ROOT / 'tests/fixtures/arena' / filename).read_bytes()
+                control_world, control_encounter, control_rng = load_legacy_arena_save(legacy_wire)
+                control_encounter.enable_transactional_progression(
+                    quiescent=True, rng_owner=control_rng)
+                native_wire = export_save(control_encounter)
+                control_actor = control_encounter.being_list[0]
+                action_id = 'legacy-migration-first-delay-' + version
+                control_action = DelayAction(control_encounter, control_actor, 0,
+                                             control_encounter.time, id=action_id)
+                _, control_activation = control_encounter.activate_arena_for_player_action(
+                    control_actor, control_action, rng_owner=control_rng)
+                control_encounter.step(1)
+                control_receipt = control_encounter.inspect_committed(1).action(action_id)
+                expected = {
+                    'world_id': control_world.id,
+                    'encounter_id': control_encounter.id,
+                    'being_ids': list(control_encounter.being_list),
+                    'time': control_encounter.time,
+                    'boundary': control_encounter.last_processed_boundary,
+                    'activation': control_activation.to_dict(),
+                    'action_id': action_id,
+                    'outcome': control_receipt.facts.outcome,
+                    'position': control_world.get_object_by_id(control_actor).get_position().as_tuple(),
+                    'hp': control_world.get_object_by_id(control_actor).get_hit_points(),
+                    'rng': control_rng.state,
+                    'history': hashlib.sha256(native_history.encode(
+                        native_history.capture(control_encounter))).hexdigest(),
+                    'observers': sorted((key, tuple(sorted(value)))
+                                        for key, value in control_encounter.awareness.items()),
+                    'arena_imports': [],
+                }
+                source = Path(directory) / f'{version}.native.json'
+                source.write_bytes(native_wire)
+                result = subprocess.run(
+                    [sys.executable, '-B', '-c', script, str(source), version],
+                    cwd=directory,
+                    env={**os.environ,
+                         'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                    text=True, capture_output=True, check=False, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                restored = json.loads(result.stdout)
+                self.assertEqual(restored, json.loads(json.dumps(expected)))
+
     def test_legacy_arena_v10_v11_v12_read_through_native_graph_api(self):
         """The native consumer can strictly coexist with all accepted old Saves."""
         from arena_browser_session import GeneratedArenaSession

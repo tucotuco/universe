@@ -880,7 +880,12 @@ def restore(envelope, *, native=False):
         and not book._choices and encounter.arena_activation is None
         and encounter.arena_movement_activation is None)
     try:
-        if not pristine:
+        # Native Saves are resumable simulation state, including a pristine
+        # pre-Choice Encounter. Bind that exact initial state to its restored
+        # private RNG owner so its deferred history recorder can begin at the
+        # first real native commit. The legacy Arena reader keeps its existing
+        # pristine, nontransactional coexistence behavior.
+        if native or not pristine:
             _bind_restored_arena_progression(encounter, rng_owner, _ARENA_RESTORE_AUTHORITY)
         if history:
             inspect_encounter(encounter)
