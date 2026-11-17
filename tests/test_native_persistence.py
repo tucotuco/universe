@@ -32,14 +32,16 @@ from universe import Universe
 from native_persistence import (NativeSaveRejected, export_save, load_path,
                                 load_save, load_legacy_arena_save, write_save)
 from checkpoint_adapters import RecipientBinding
-from reproduction_group import ReproductionGroupProposal, prepare_reproduction_group
+from reproduction_group import (ReproductionGroupElaborationProposal,
+                                ReproductionGroupProposal,
+                                prepare_reproduction_group)
 from being import BeingDefinition
 from reproduction_being_bridge import materialize_reproductive_offspring
 from history_conversation import AskAboutPastAction
 from activities import SpotAction
 from location_observation import LocationEvidenceLedger
 from object_observation import ObjectObservationLedger
-from statistical_group import MembershipChange, StatisticalGroup
+from statistical_group import GroupMember, MembershipChange, StatisticalGroup
 
 
 def _legacy_history_shape(value):
@@ -986,6 +988,8 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         first_adult = next((household, index)
             for household in range(group.household_count)
             for index in range(group.household(household)["adults"]))
+        realized_member = group.realize_being(
+            fixture.world, first_adult[0], 'adults', first_adult[1])
         expected_voice = group.formation_attribute(first_adult[0], "adults",
             first_adult[1], "voice")
         fixture.enable()
@@ -1006,6 +1010,15 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         with self.assertRaises(NativeSaveRejected):
             export_save(fixture.enc)
         group.membership_history[1] = original_membership
+        member_key = (first_adult[0], "adults", first_adult[1])
+        original_group_member = group._members[member_key]
+        group._members[member_key] = GroupMember(
+            "forged-group-member-id", original_group_member.household,
+            original_group_member.category, original_group_member.index,
+            original_group_member.offset)
+        with self.assertRaises(NativeSaveRejected):
+            export_save(fixture.enc)
+        group._members[member_key] = original_group_member
         wire = export_save(fixture.enc)
         group.advance(1)
         expected_group_continuation = {
@@ -1014,6 +1027,8 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             "velocity": group.velocity,
             "state": group.state_at(3.5),
             "member_position": fixture.a.get_position().as_tuple(),
+            "realized_member_id": realized_member.id,
+            "realized_member_position": realized_member.get_position().as_tuple(),
         }
 
         continuation_id = "native-group-continuation-delay"
@@ -1045,6 +1060,8 @@ from activities import DelayAction
 from native_persistence import load_path
 world,enc,rng=load_path(sys.argv[1])
 group=world.object_registry.object_instances['group-one']
+realized_member=world.get_object_by_id(sys.argv[7])
+assert group._realized_beings[realized_member.id] is realized_member
 membership={str(time):group.state_at(time) for time in (0,0.5,1,2,3)}
 assert [row.action for row in group.membership_history]==['join','leave','join']
 assert [row.time for row in group.membership_history]==[0.0,1.0,3.0]
@@ -1052,7 +1069,9 @@ group.advance(1)
 group_continuation={'time':group.time,'position':group.get_position().as_tuple(),
  'velocity':group.velocity,'state':group.state_at(3.5),
  'member_position':world.object_registry.object_instances[
-  group.membership_history[0].being_id].get_position().as_tuple()}
+  group.membership_history[0].being_id].get_position().as_tuple(),
+ 'realized_member_id':realized_member.id,
+ 'realized_member_position':realized_member.get_position().as_tuple()}
 assert group.household_count == int(sys.argv[2])
 assert group.household(0) == json.loads(sys.argv[3])
 household,index=int(sys.argv[4]),int(sys.argv[5])
@@ -1074,7 +1093,8 @@ print(json.dumps({'world':world.id,'encounter':enc.id,'time':enc.time,
             result = subprocess.run(
                 [sys.executable, "-B", "-c", child, str(path),
                  str(expected_count), json.dumps(expected_household),
-                 str(first_adult[0]), str(first_adult[1]), expected_voice],
+                 str(first_adult[0]), str(first_adult[1]), expected_voice,
+                 realized_member.id],
                 cwd=ROOT, env={**os.environ,
                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
                 text=True, capture_output=True, check=False, timeout=45)
@@ -1670,6 +1690,7 @@ print(json.dumps({'times':[row[0].time for row in rows],
             encounter.enable_transactional_progression(quiescent=True,rng_owner=rng)
             ledger=BeliefLedger(actor_id)
             action=ObserveGroupAction(world,actor_id,group.id,0,seed=seed,
+                random_key=f'belief-observer-{index}',
                 observation={'coarse_range_m':100,'detailed_range_m':50},
                 ledger=ledger)
             encounter.schedule_action(action);encounter.step(1)
@@ -2182,13 +2203,23 @@ print(json.dumps({'changed_nodes':changed_nodes,
             ReproductionGroupProposal('RG-BINDING', ('P1', 'P2'), ('C1',),
                                       'native-save:binding')),
             request_key='native-binding-create', expected_revision=0)
+        world.publish_reproduction_group(prepare_reproduction_group(
+            ReproductionGroupProposal('RG-BINDING-ALIAS', ('P1',), ('C2',),
+                                      'native-save:alias', parents_complete=False)),
+            request_key='native-binding-alias-create', expected_revision=1)
+        world.resolve_reproduction_group_elaboration(
+            ReproductionGroupElaborationProposal(
+                'RG-BINDING-ALIAS', ('P1',), ('P2',), True),
+            request_key='native-binding-alias-complete', expected_revision=2)
+        reproduction_revision = world.reproduction_group_snapshot().revision
         definition = BeingDefinition(
             obj_type='Native reproduction fixture', length=1.8, weight=70,
             hit_points=12, hit_dice='1d8', alignment='Neutral',
             armor_class=10, challenge_rating=0)
         being = materialize_reproductive_offspring(
             world, 'C1', being_definition=definition, name='Child',
-            request_key='native-binding-materialize', expected_revision=1)
+            request_key='native-binding-materialize',
+            expected_revision=reproduction_revision)
         from encounter import Encounter
         encounter = Encounter(world, 10, 0, initiated=True,
                               id='native-reproduction-binding-encounter')
@@ -2230,14 +2261,16 @@ being=world.get_object_by_id('C1')
 record=registry._native_being_requests['native-binding-materialize']
 assert registry._native_beings_by_person_id['C1'] is being
 assert record.being is being and record.person_id == 'C1'
-assert world.get_reproduction_group('RG-BINDING').offspring_ids == ('C1',)
+assert world.canonical_reproduction_group_id('RG-BINDING-ALIAS')=='RG-BINDING'
+assert world.get_reproduction_group('RG-BINDING-ALIAS') is world.get_reproduction_group('RG-BINDING')
+assert world.get_reproduction_group('RG-BINDING').offspring_ids == ('C1','C2')
 definition=BeingDefinition(obj_type='Native reproduction fixture',length=1.8,
  weight=70,hit_points=12,hit_dice='1d8',alignment='Neutral',
  armor_class=10,challenge_rating=0)
 from reproduction_being_bridge import materialize_reproductive_offspring
 assert materialize_reproductive_offspring(world,'C1',being_definition=definition,
  name='Child',request_key='native-binding-materialize',
- expected_revision=1) is being
+ expected_revision=3) is being
 action=DelayAction(enc,being.id,defense=0,start_time=enc.time,
  id='native-reproduction-binding-continuation')
 enc.schedule_action(action)

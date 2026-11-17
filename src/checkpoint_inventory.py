@@ -72,7 +72,7 @@ _CATALOG = {
     'being':'BeingInstance BeingDefinition BeingDictionary',
     'object':'ObjectInstance ObjectDefinition ObjectRegistry ObjectDictionary',
     'weapon':'WeaponInstance WeaponDefinition WeaponDictionary',
-    'armor':'ArmorInstance ArmorDefinition ArmorDictionary', 'statistical_group':'MembershipChange StatisticalGroup',
+    'armor':'ArmorInstance ArmorDefinition ArmorDictionary', 'statistical_group':'GroupMember MembershipChange StatisticalGroup',
     'conditional_attributes':'ConditionalAttributes',
     'library':'Library', 'actiondictionary':'ActionDictionary ActionDefinition',
     'skill':'SkillDictionary SkillDefinition Skills', 'abilities':'Abilities', 'states':'States',

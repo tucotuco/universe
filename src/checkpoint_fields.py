@@ -530,6 +530,10 @@ FIELD_ADAPTERS = {
         "allowed": 'action being_id category group_id time'.split(),
         "required": 'action being_id category group_id time'.split(),
     },
+    'statistical_group.GroupMember': {
+        "allowed": 'category household id index offset'.split(),
+        "required": 'category household id index offset'.split(),
+    },
     'strategy.Strategy': {
         "allowed": 'attack defense extra_damage timing'.split(),
         "required": 'attack defense extra_damage timing'.split(),

@@ -152,6 +152,7 @@ def validate_membership_history(group, objects):
     infer travel, historical health, or any other Being state from affiliation.
     """
     from being import BeingInstance
+    from realization import CommittedFact, FactKey, RealityLedger
     if type(group) is not StatisticalGroup or type(objects) is not dict:
         raise ValueError("native Group membership owner or registry is invalid")
     records = group.membership_history
@@ -165,16 +166,61 @@ def validate_membership_history(group, objects):
         raise ValueError("native Group membership time range is invalid")
 
     realized = group._realized_beings
+    members = group._members
     departed = group._departed_member_ids
     incoming = group._incoming_beings
+    if type(members) is not dict:
+        raise ValueError("native Group materialized-member index is invalid")
+    composition = group._composition_reality
+    if type(composition) is not RealityLedger or type(composition._records) is not dict:
+        raise ValueError("native Group composition facts are invalid")
+    count_key = FactKey(group.id, "household_count", group.formation_time)
+    count_record = composition._records.get(count_key)
+    if members and (type(count_record) is not CommittedFact
+                    or type(count_record.value) is not int
+                    or isinstance(count_record.value, bool)
+                    or count_record.value < 0):
+        raise ValueError("native Group materialized member has no committed household count")
+    members_by_id = {}
+    for key, member in members.items():
+        if (type(key) is not tuple or len(key) != 3
+                or type(key[0]) is not int or isinstance(key[0], bool) or key[0] < 0
+                or key[1] not in StatisticalGroup.CATEGORIES
+                or type(key[2]) is not int or isinstance(key[2], bool) or key[2] < 0
+                or type(member) is not GroupMember
+                or type(member.household) is not int or isinstance(member.household, bool)
+                or type(member.category) is not str
+                or type(member.index) is not int or isinstance(member.index, bool)
+                or (member.household, member.category, member.index) != key
+                or type(member.id) is not str
+                or member.id != f"{group.id}/{key[0]}/{key[1]}/{key[2]}"
+                or member.id in members_by_id
+                or type(member.offset) is not tuple or len(member.offset) != 3
+                or any(type(value) not in (int, float) or not math.isfinite(value)
+                       for value in member.offset)):
+            raise ValueError("native Group materialized-member identity or offset is invalid")
+        household_key = FactKey(group.id, "household", group.formation_time,
+                                str(key[0]))
+        household_record = composition._records.get(household_key)
+        if (key[0] >= count_record.value or type(household_record) is not CommittedFact
+                or type(household_record.value) is not dict
+                or type(household_record.value.get(key[1])) is not int
+                or not 0 <= key[2] < household_record.value[key[1]]):
+            raise ValueError("native Group member is outside committed composition")
+        members_by_id[member.id] = member
+    attached = group._motion_attached_native_ids
     if (type(realized) is not dict
             or any(type(identity) is not str
                    or type(being) is not BeingInstance
                    or being.id != identity or objects.get(identity) is not being
+                   or identity not in members_by_id
                    for identity, being in realized.items())
             or type(departed) is not set
             or any(type(identity) is not str for identity in departed)
             or type(incoming) is not dict
+            or type(attached) is not set
+            or any(type(identity) is not str or identity not in realized
+                   for identity in attached)
             or set(realized) & set(incoming)):
         raise ValueError("native Group current membership containers conflict")
     initial_members = set(realized)
