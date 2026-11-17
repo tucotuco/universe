@@ -1505,6 +1505,83 @@ print(json.dumps({'times':[row[0].time for row in rows],
         self.assertEqual(json.loads(result.stdout),
                          json.loads(json.dumps(expected)))
 
+    def test_native_save_restores_location_ledgers_across_multiple_encounters(self):
+        import os
+        import random
+        from spatial.geometry import Sphere
+
+        world=Universe('native-multi-location-recipients',library=Library(
+            config_dir=str(ROOT/'src/config')))
+        rows=[];bindings=[]
+        for index,seed in ((0,31),(1,32)):
+            observer_id=world.make_being('Human',f'Location observer {index}')
+            target_id=world.make_being('Human',f'Location target {index}')
+            observer=world.get_object_by_id(observer_id);target=world.get_object_by_id(target_id)
+            observer.set_position(CartesianPosition(0,index*5,0))
+            target.set_position(CartesianPosition(1.5,index*5,0))
+            observer.set_geometry(Sphere(.25));target.set_geometry(Sphere(.25))
+            encounter=Encounter(world,10,0,initiated=True,
+                id=f'native-multi-location-encounter-{index}')
+            encounter.add_being(observer_id);encounter.add_being(target_id)
+            encounter.mark_aware(observer_id,target_id);encounter.mark_aware(target_id,observer_id)
+            world.add_event(encounter)
+            rng=RNGCursor(random.Random(seed).getstate())
+            encounter.enable_transactional_progression(quiescent=True,rng_owner=rng)
+            ledger=LocationEvidenceLedger(observer_id)
+            action=SpotAction(world,observer_id,target_id,0,die_roll=20,
+                location_ledger=ledger,id=f'native-multi-location-spot-{index}')
+            encounter.schedule_action(action);encounter.step(1)
+            rows.append((encounter,observer,target,rng,action,ledger))
+            bindings.append(RecipientBinding(world,'native-multi-location',f'ledger-{index}',
+                'observer_location_evidence',(observer_id,),ledger))
+        selected=rows[1][0]
+        wire=export_save(selected,recipient_bindings=tuple(bindings))
+
+        def projection():
+            return {'times':[row[0].time for row in rows],
+                'outcomes':[row[4].resolution.outcome for row in rows],
+                'rng':[row[3].state for row in rows],
+                'observations':[[ob.id,ob.observer_id,ob.being_id,ob.source_action_id,
+                    ob.encounter_id,ob.boundary,ob.time,list(ob.position.as_tuple()),ob.basis]
+                    for row in rows for ob in row[5].observations],
+                'histories':[hashlib.sha256(native_history.encode(
+                    native_history.capture(row[0]))).hexdigest() for row in rows]}
+
+        for encounter,*_ in rows:
+            while encounter.time<6:encounter.step(1)
+        expected=projection()
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'native-multi-location-save.json';path.write_bytes(wire)
+            child=r'''import hashlib,json,sys
+import native_history
+from encounter import Encounter
+from native_persistence import load_path,rng_owner_for
+world,selected,selected_rng=load_path(sys.argv[1])
+encounters={event.id:event for event in world.event_history.values() if type(event)is Encounter}
+assert len(encounters)==2
+rows=[]
+for index in range(2):
+ enc=encounters[f'native-multi-location-encounter-{index}']
+ action=world.get_event_by_id(f'native-multi-location-spot-{index}')
+ assert action.location_ledger.observer_id==action.actor_id
+ while enc.time<6:enc.step(1)
+ rows.append((enc,action,rng_owner_for(enc)))
+observations=[[ob.id,ob.observer_id,ob.being_id,ob.source_action_id,ob.encounter_id,
+ ob.boundary,ob.time,list(ob.position.as_tuple()),ob.basis]
+ for _enc,action,_rng in rows for ob in action.location_ledger.observations]
+assert all(all(ob.observer_id==action.actor_id
+ for ob in action.location_ledger.observations) for _enc,action,_rng in rows)
+print(json.dumps({'times':[row[0].time for row in rows],
+ 'outcomes':[row[1].resolution.outcome for row in rows],
+ 'rng':[row[2].state for row in rows],'observations':observations,
+ 'histories':[hashlib.sha256(native_history.encode(native_history.capture(row[0]))).hexdigest()
+ for row in rows]},sort_keys=True))'''
+            result=subprocess.run([sys.executable,'-B','-c',child,str(path)],cwd=ROOT,
+                env={**os.environ,'PYTHONPATH':f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True,capture_output=True,check=False,timeout=60)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))
