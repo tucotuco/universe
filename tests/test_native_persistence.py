@@ -166,6 +166,96 @@ print(json.dumps({'world':world.id,'encounter':encounter.id,'time':encounter.tim
         self.assertEqual(restored["receipt_actions"], expected["receipt_actions"])
         self.assertEqual(restored["arena_app_imports"], [])
 
+    def test_projectile_shield_interception_continues_after_native_fresh_process_load(self):
+        """A saved in-flight projectile retains its later native shield result."""
+        import random
+        from being import BeingInstance
+        from activities import ThrowAction
+        from native_throw_arena import build_native_scene
+
+        world, encounter, actor, projectile, rng, original = build_native_scene(seed=116)
+        encounter._choice_book.undo(encounter._choice_book.for_action(original.id).id)
+        definition = world.library.being_dictionary.get_object_definition("Human")
+        target = BeingInstance(definition, "Native Shielded Target",
+                              id="native-persist/shielded-target")
+        target.set_position(CartesianPosition(8.0, 0.0, 0.0))
+        world.add_object(target)
+        encounter.add_being(target.id)
+        shield_id = world.make_weapon_for_being(target.id, "Small shield",
+                                               "Native target shield")
+        world.arm_being(target.id, shield_id, "shield hand")
+        encounter.add_object(shield_id)
+        action = ThrowAction(world, actor.id, projectile.id, encounter.time,
+            heavy_load_reference_lb=100.0, elevation_degrees=45,
+            target_id=target.id, id="native-persist/shielded-throw")
+        encounter.schedule_choice((action,))
+        rng.state = random.Random(116).getstate()
+        encounter.step(4)
+        self.assertEqual(action.resolution.outcome, "released")
+        self.assertIsNone(projectile.__dict__["_projectile_flight"].impact_outcome)
+        wire = export_save(encounter)
+
+        def run_to_impact(enc, world, cursor):
+            from atomic_publication import target_effects_from
+            thrown = world.get_object_by_id(projectile.id)
+            victim = world.get_object_by_id(target.id)
+            shield = world.get_object_by_id(shield_id)
+            for _ in range(5):
+                if thrown.__dict__["_projectile_flight"].impact_outcome is not None:
+                    break
+                enc.step(1)
+            effects = [row.effect for row in target_effects_from(shield, action.id)]
+            protection = next(effect for effect in effects
+                              if type(effect).__name__ == "ProtectionEffect"
+                              and effect.layer == "shield")
+            durability = [effect.amount for effect in effects
+                          if type(effect).__name__ == "DamageEffect"
+                          and effect.component == "shield"]
+            return {"time": enc.time,
+                    "outcome": thrown.__dict__["_projectile_flight"].impact_outcome,
+                    "hp": victim.get_hit_points(), "shield_hp": shield.hit_points(),
+                    "intercepted": protection.intercepted,
+                    "incoming": protection.incoming, "passed": protection.passed,
+                    "durability": durability,
+                    "rng": cursor.state,
+                    "history": hashlib.sha256(native_history.encode(
+                        native_history.capture(enc))).hexdigest()}
+
+        expected = run_to_impact(encounter, world, rng)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-shielded-projectile.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from atomic_publication import target_effects_from
+from native_persistence import load_path
+world,enc,rng=load_path(sys.argv[1])
+thrown=world.get_object_by_id(sys.argv[2]); victim=world.get_object_by_id(sys.argv[3])
+shield=world.get_object_by_id(sys.argv[4])
+for _ in range(5):
+ if thrown.__dict__['_projectile_flight'].impact_outcome is not None: break
+ enc.step(1)
+effects=[row.effect for row in target_effects_from(shield,sys.argv[5])]
+protection=next(effect for effect in effects if type(effect).__name__=='ProtectionEffect' and effect.layer=='shield')
+durability=[effect.amount for effect in effects if type(effect).__name__=='DamageEffect' and effect.component=='shield']
+print(json.dumps({'time':enc.time,
+ 'outcome':thrown.__dict__['_projectile_flight'].impact_outcome,
+ 'hp':victim.get_hit_points(),'shield_hp':shield.hit_points(),
+ 'intercepted':protection.intercepted,'incoming':protection.incoming,
+ 'passed':protection.passed,'durability':durability,'rng':rng.state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+            import os
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path), projectile.id,
+                 target.id, shield_id, action.id], cwd=ROOT,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), json.loads(json.dumps(expected)))
+        self.assertEqual(expected["outcome"], "hit")
+        self.assertTrue(expected["intercepted"])
+
     def test_strict_outer_integrity_and_duplicate_keys_are_rejected(self):
         demo = encounter_delta_headless.build_demo(until=4)
         wire = export_save(demo["encounter"])
