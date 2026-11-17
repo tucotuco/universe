@@ -359,3 +359,15 @@ The stored native rows retained ordered boundary timing, starts, Actions and Eff
 Verification: native Action continuation/history suite **25 passed / 119.286s** with all expanded comparisons; initial-boundary plus quiet-span timeline tests **2 passed / 5.098s**; capability matrix/API checks **3 passed / 0.027s**. Code/test/matrix commit `1f51349721ce8789647fd001e97fb912fd278812` passed the staged publication audit with zero findings and excluded the unrelated archive operations. This materially strengthens reader parity for the 25 implemented Action scenarios but does not make the old `inspect_committed` consumer graph-free or close all type families/application cutover.
 
 This resolves the identified cumulative-recipient defect and the tested single/shared-list listener attribution paths only. Full family history/query parity, receipt/Target graph removal, durable append journal, broad security/scale, and application Save/Load cutover remain open. No rules or external blocker is identified.
+
+## Problems-first — current `/10` native scale evidence
+
+The current schema's behavior now has a controlled native scale rerun, eliminating the possibility that schema `/10`'s owner-aware history or per-boundary queries silently regressed the earlier `/7` measurements. `examples/native_persistence_scale.py` resolved the same 64 legal Feint Actions (129 boundaries) at 2, 20 and 200 registered Beings, compared every boundary, then strict-loaded and continued in a fresh process. All children matched uninterrupted controls and preserved same-Encounter identifiers.
+
+| Registry Beings | Graph bytes | History bytes | Save bytes | Scenario/query/export/Load+continue seconds | Peak RSS bytes |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 4,853,536 | 1,193,015 | 7,664,546 | 62.035 / 2.293 / 4.431 / 6.221 | 182,697,984 |
+| 20 | 5,102,250 | 1,193,015 | 7,996,162 | 60.354 / 2.290 / 4.528 / 6.347 | 183,943,168 |
+| 200 | 7,526,564 | 1,193,015 | 11,228,582 | 60.566 / 2.437 / 5.327 / 6.612 | 225,263,616 |
+
+The `/10` 200-quiet-boundary case checked every cut, stored 34,529 history bytes plus a 4,853,760-byte graph (6,506,356 total), queried in 0.940s, exported in 2.641s and strict-loaded/continued in 2.976s, matching uninterrupted execution. The fact stream remains constant as unused registry membership grows, as intended. The graph still dominates total file size and holds the old Target/receipt history, so these data support operational reliability but do not close sufficiency or graph removal.

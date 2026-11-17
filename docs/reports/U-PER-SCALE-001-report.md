@@ -85,6 +85,20 @@ The history format retained boundary starts, Action/Effect identities and start 
 
 Evidence: the 25-scenario native Action Save/Load suite passed with the expanded per-boundary comparisons (**25 / 119.286s**). The initial-boundary and quiet-span timeline cases passed **2 / 5.098s**. Capability-matrix/API validation passed **3 / 0.027s**. The comparison verifies the query result against `_plain(Encounter.inspect_committed(boundary).timeline)` for all available committed boundaries; boundary zero is explicitly the empty tuple because the native inspector has no committed receipt there. Code/test/matrix commit: `1f51349721ce8789647fd001e97fb912fd278812`. Before commit, staged check and publication safety passed (`files=11 findings=0`); explicit commit paths excluded all unrelated pre-staged archival changes. This closes a specific query/API gap, not graph-free `Encounter.inspect_committed`, complete family coverage, durable journaling, or production cutover.
 
+## Current `/10` scale rerun
+
+The current `/10` native API was measured using the same native scale runner and fixture at all registry sizes. It resolved 64 lawful Feint Actions, checked every one of 129 logical boundaries, then strictly restored and continued in a fresh OS process. Each child matched same-Encounter identifiers, native HP, RNG and history against uninterrupted control. The 200-quiet-boundary case also compared all logical cuts and continued exactly.
+
+| Registered Beings | Actions / boundaries | Graph bytes | History bytes | Save bytes | Scenario seconds | Query seconds | Export seconds | Fresh-process Load + continuation seconds | Peak RSS bytes |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 64 / 129 | 4,853,536 | 1,193,015 | 7,664,546 | 62.035 | 2.293 | 4.431 | 6.221 | 182,697,984 |
+| 20 | 64 / 129 | 5,102,250 | 1,193,015 | 7,996,162 | 60.354 | 2.290 | 4.528 | 6.347 | 183,943,168 |
+| 200 | 64 / 129 | 7,526,564 | 1,193,015 | 11,228,582 | 60.566 | 2.437 | 5.327 | 6.612 | 225,263,616 |
+
+The 200-quiet-boundary `/10` run checked all 200 cuts and produced **34,529 history bytes**, **4,853,760 graph bytes**, **6,506,356 total Save bytes**, **0.940s query**, **2.641s export**, **2.976s fresh-process Load + continuation**, and **157,253,632 peak RSS bytes**. The native simulation and strict Save/Load are reliable at this workload; the runtime graph still occupies 4–6 times as much as the 64-Action fact history and remains present beside it. The result therefore strengthens operation evidence without satisfying the compact, graph-free architecture requirement.
+
+Exact commands: `.venv/bin/python -B examples/native_persistence_scale.py`, the same command with `--registry-count 20` and `--registry-count 200`, and `.venv/bin/python -B examples/native_persistence_scale.py --quiet-boundaries 200`. All four completed successfully.
+
 
 ## Native action-family continuation — contact history and Break Weapon
 
