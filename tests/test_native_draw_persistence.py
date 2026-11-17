@@ -18,7 +18,7 @@ from activities import PickUpAction, ReadyWeaponAction
 from library import Library
 from arena_hex_map import ArenaHexLayout, HexAddress
 from melee_combat import MeleeStrike
-from native_history import capture, encode
+from native_history import NativeHistoryQuery, _plain, capture, decode, encode
 from native_persistence import export_save
 from native_scenario import NativeScenarioBuilder
 from object import ObjectDefinition, ObjectInstance
@@ -501,6 +501,17 @@ print(json.dumps({'time':enc.time,'action_id':action.id,'object_id':target.id,
         self.assertEqual(outcomes, ["normal", "normal"])
         self.assertEqual([sum(row) for row in damage], [5, 6])
         self.assertEqual(target.hit_points(), -8)
+        history_query = NativeHistoryQuery(decode(encode(capture(builder.encounter))))
+        historical_actions = history_query.committed_actions_at(
+            int(builder.encounter.time))
+        self.assertEqual(historical_actions["actions"], _plain(receipt.actions))
+        self.assertEqual(historical_actions["effects"], _plain(receipt.effects))
+        boundary_receipt = next(row for row in receipt.timeline
+                                if row.boundary == int(builder.encounter.time))
+        self.assertEqual(historical_actions["action_ids"],
+                         [action.id for action in actions])
+        self.assertEqual(historical_actions["effect_ids"],
+                         [_plain(identity) for identity in boundary_receipt.effect_ids])
         expected = {
             "time": builder.encounter.time,
             "object_id": target.id,
@@ -689,6 +700,23 @@ print(json.dumps({'time':enc.time,'delay_id':action.id,
         self.assertEqual(committed_feint.facts.outcome, "success")
         self.assertEqual(committed_feint.facts.effects, ())
         self.assertEqual(target.get_hit_points(), 100)
+        feint_history = NativeHistoryQuery(
+            decode(encode(capture(builder.encounter))))
+        historical_feint = feint_history.committed_actions_at(
+            int(builder.encounter.time))
+        self.assertEqual(historical_feint["actions"],
+                         _plain(builder.encounter.inspect_committed(
+                             int(builder.encounter.time)).actions))
+        self.assertEqual(historical_feint["effects"], _plain(
+            builder.encounter.inspect_committed(
+                int(builder.encounter.time)).effects))
+        self.assertEqual(historical_feint["action_ids"], [feint.id])
+        feint_receipt = builder.encounter.inspect_committed(
+            int(builder.encounter.time))
+        feint_boundary = next(row for row in feint_receipt.timeline
+                              if row.boundary == int(builder.encounter.time))
+        self.assertEqual(historical_feint["effect_ids"], [
+            _plain(identity) for identity in feint_boundary.effect_ids])
 
         strike = MeleeStrike(builder.encounter, actor.id, target.id, weapon.id,
                              motion="thrust", reach=2)
