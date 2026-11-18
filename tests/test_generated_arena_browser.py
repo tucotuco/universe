@@ -2883,7 +2883,15 @@ print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
         completed_handler.do_GET()
         self.assertEqual(completed_saved["status"], 200)
         completed_wire = completed_saved["body"]
-        self.assertEqual(json.loads(completed_wire)["schema"], _NATIVE_SESSION_SCHEMA)
+        completed_outer = json.loads(completed_wire)
+        self.assertEqual(completed_outer["schema"], _NATIVE_SESSION_SCHEMA)
+        completed_native = zlib.decompress(base64.b64decode(
+            completed_outer["native_state_zlib_base64"], validate=True))
+        from native_history import NativeHistoryQuery, _plain, current_recording
+        committed_roots = load_save(completed_native)
+        committed_history = NativeHistoryQuery(current_recording(committed_roots[1]))
+        self.assertEqual(committed_history.inspect_committed_at(1),
+            _plain(self.session.active_candidate.encounter.inspect_committed(1)))
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "arena-native-committed.uarena"
             source.write_bytes(completed_wire)
@@ -2891,13 +2899,16 @@ print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
 import json,sys
 from pathlib import Path
 from arena_browser_session import GeneratedArenaSession
+from native_history import NativeHistoryQuery, _plain, current_recording
 raw=Path(sys.argv[1]).read_bytes(); s=GeneratedArenaSession()
-view=s.load_encounter_bytes(raw)
+view=s.load_encounter_bytes(raw); e=s.active_candidate.encounter
 assert view['time_seconds']==1
 assert s.save_native_encounter_bytes()==raw
-print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
- 'finished':len(s.active_candidate.encounter.finished_action_list),
- 'boundary':s.active_candidate.encounter.last_processed_boundary}))
+q=NativeHistoryQuery(current_recording(e))
+assert q.inspect_committed_at(1)==_plain(e.inspect_committed(1))
+print(json.dumps({'encounter_id':e.id,
+ 'finished':len(e.finished_action_list),
+ 'boundary':e.last_processed_boundary}))
 """, str(source)], cwd=ROOT,
                 env={**os.environ, "PYTHONPATH": str(ROOT / "src") + os.pathsep
                      + str(ROOT / "examples") + os.pathsep
@@ -2936,6 +2947,14 @@ print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
         initial_restore.load_encounter_bytes(initial_wire)
         self.assertEqual(initial_restore.active_candidate.encounter.id,
                          pristine.active_candidate.encounter.id)
+        legacy_v10 = GeneratedArenaSession()
+        legacy_v10.load_encounter_bytes(
+            (ROOT / "tests/fixtures/arena/legacy-per-scale-010-v10.uarena").read_bytes())
+        legacy_http_compatible = legacy_v10.save_native_encounter_bytes()
+        self.assertTrue(legacy_http_compatible.startswith(b"PK\x03\x04"))
+        from arena_persistence import decode as decode_arena_save
+        self.assertEqual(decode_arena_save(legacy_http_compatible)["manifest"]["save_schema"],
+                         "universe.generated-arena-save/12")
 
         spectator = GeneratedArenaSession(root_seed_factory=lambda: 29)
         spectator.generate({"starting_experience": "10000", "width_cells": "5",

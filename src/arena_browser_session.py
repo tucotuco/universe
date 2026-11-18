@@ -318,26 +318,11 @@ class GeneratedArenaSession:
                 from transactional_progression import mode_of
                 encounter = self._active.encounter
                 if mode_of(encounter) == 'legacy':
-                    pristine = (not encounter.initiated
-                        and encounter.time == encounter.start_time
-                        and not encounter.__dict__.get('_atomic_interval_history')
-                        and not encounter.pending_action_list
-                        and not encounter.finished_action_list
-                        and not encounter.cancelled_action_list
-                        and not encounter._choice_book._choices
-                        and not encounter._choice_book._drafts
-                        and not encounter._choice_book._registered)
-                    if pristine:
-                        # Keep the established unstarted `/12` file contract.
-                        # The native writer takes over once native progression
-                        # is selected, including an accepted first Choice.
-                        from arena_native_snapshot import capture
-                        from arena_persistence import encode
-                        inventory = capture(self._active.universe, encounter,
-                                            self._rng_cursor)
-                        return encode(self, inventory)
-                    raise ArenaBrowserRequestError(
-                        "native Arena Save requires a transactional Encounter or an unstarted legacy state")
+                    # Preserve the complete established `/12` writer for any
+                    # live legacy-mode session, including old loaded files.
+                    # Native transactional progression is the only path that
+                    # switches the normal browser Save to native persistence.
+                    return self.save_encounter_bytes()
                 native_wire = export_save(self._active.encounter)
                 return encode_native_session(self, native_wire)
             except (TypeError, ValueError, RuntimeError) as exc:
