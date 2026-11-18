@@ -973,6 +973,27 @@ class NativeHistoryTests(unittest.TestCase):
         with self.assertRaises(NativeHistoryRejected):
             validate(reordered)
 
+    def test_history_parser_enforces_duplicate_and_resource_limits_before_write(self):
+        with self.assertRaisesRegex(NativeHistoryRejected, "duplicate JSON keys"):
+            decode(b'{"schema":"first","schema":"second"}')
+        with patch("native_history.MAX_NODES", 1):
+            with self.assertRaisesRegex(NativeHistoryRejected, "structural bounds"):
+                validate(self.log)
+        with patch("native_history.MAX_DEPTH", 1):
+            with self.assertRaises(NativeHistoryRejected):
+                validate(self.log)
+        with patch("native_history.MAX_BOUNDARIES", 0):
+            with self.assertRaises(NativeHistoryRejected):
+                validate(self.log)
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "oversized-history.json"
+            with patch("native_history.MAX_BYTES", 1):
+                with self.assertRaisesRegex(NativeHistoryRejected,
+                                            "portable byte limit"):
+                    write(self.log, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_standalone_write_does_not_overwrite_existing_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "history.json"
@@ -992,6 +1013,27 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
             write(self.log, path)
             self.assertEqual(decode(path.read_bytes()), self.log)
+
+    def test_directory_sync_failure_leaves_only_complete_published_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            original_fsync = __import__("os").fsync
+            calls = 0
+
+            def fail_directory_sync(fd):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("injected directory sync failure")
+                return original_fsync(fd)
+
+            with patch("native_history.os.fsync", side_effect=fail_directory_sync):
+                with self.assertRaisesRegex(NativeHistoryRejected,
+                                            "after atomic publication"):
+                    write(self.log, path)
+            self.assertTrue(path.exists())
+            self.assertEqual(decode(path.read_bytes()), self.log)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
 
     def test_append_accepts_only_the_next_authenticated_native_commit(self):
         demo = encounter_delta_headless.build_demo(until=4)

@@ -1858,7 +1858,20 @@ Added `test_native_save_preserves_registered_nonparticipants_in_fresh_process`. 
 - From `tests/`, `PYTHONPATH=.:../src:../examples ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_preserves_registered_nonparticipants_in_fresh_process -v` — **1 passed / 2.104s**; the corrected combined Being, Run/Practice, nonparticipant and matrix gate — **6 passed / 5.922s**. An initial combined matrix run rejected status descriptions that omitted the test-enforced Arena-schema classification phrase; the descriptions were corrected and the combined suite rerun green.
 - `git diff --check` — passed.
 
-The Being/Universe/ObjectRegistry/standalone Object matrix rows now cite this exact scenario; the universe still persists the broader native registry rather than filtering to Encounter members. This closes only the nonparticipant-preservation case, not the entire optional field family, graph-free historical reconstruction, receipt duplication, durable recovery, security/legacy breadth or application cutover. U-PER-SCALE-001 remains ACTIVE and no external or rules blocker is identified. The test/nonparticipant rows are committed as `6df0589` (`Verify native nonparticipant restoration`). The broader 64-test native suite and 31-test history suite passed at that revision. The follow-up report/TASKS and dictionary-family matrix citations reflect already-tested self-contained definition coverage; they are pending scoped documentation commit. The earlier staged safety audit passed with zero findings; the five unrelated archive paths remain staged and excluded.
+
+
+## Problems-first — native history input limits and publication fault boundary
+
+The prior native-history test set checked digest tampering, duplicate Action facts, reordered rows, existing-file refusal, and pre-link interruption, but did not explicitly prove the portable decoder's structural limits reject before publication or classify a directory-fsync failure after the atomic publication point. These are narrow safety gaps in the journal artifact API; they do not establish full production crash recovery.
+
+Added `test_history_parser_enforces_duplicate_and_resource_limits_before_write` to reject duplicate JSON keys, node/depth/boundary/byte-limit violations, and to verify a size refusal creates neither destination nor temporary artifact. Added `test_directory_sync_failure_leaves_only_complete_published_history`: inject failure on the directory `fsync` after the no-overwrite link, assert the API reports failure after atomic publication, then strictly decode the complete destination and confirm the temporary name is gone. The append-before/after-native-publication tests remain unchanged.
+
+- From `tests/`, `.venv` interpreter via `../.venv/bin/python -m unittest test_native_history.NativeHistoryTests.test_history_parser_enforces_duplicate_and_resource_limits_before_write test_native_history.NativeHistoryTests.test_directory_sync_failure_leaves_only_complete_published_history` — **2 passed / 0.999s**.
+- Focused integration: `test_native_history`, `test_persistence_capability_matrix`, and PersonalHistory strict fresh-process continuation — **39 passed / 26.170s**.
+- The publication-fault case is an API-level injected directory-sync failure, not physical power-loss testing. `/12` production Save/Load remains untouched; durable append recovery and full adversarial/migration coverage remain open.
+- Commits carrying the reader proof: `9649ce9`, `73cef99`, `a6ab6bf`; this safety regression and its matrix/findings/task updates are pending scoped audit and commit.
+
+No incompatible rule or external blocker is identified. U-PER-SCALE-001 remains the sole ACTIVE program; production Save/Load cutover remains gated on the complete capability matrix, compatibility and application integration criteria.
 
 
 ## Problems-first — broad native integration regression after registry coverage

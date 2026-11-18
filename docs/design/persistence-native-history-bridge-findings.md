@@ -538,6 +538,10 @@ Focused results for this increment: current native persistence **51 passed / 175
 
 This removes only duplicate Target interval records. Full `CommittedBoundaryRecord`/inspection histories, other receipt projections and current state remain graph-backed; all-family graph-free read/restore, durable append-journal recovery, broad security/scale verification and production Save/Load cutover remain incomplete. U-PER-SCALE-001 remains ACTIVE.
 
+## Problems-first — history parser bounds and post-publication failure
+
+Added hostile-input limits and publication-fault tests: duplicate JSON keys and patched node/depth/boundary/byte limits refuse; size refusal leaves no file or temporary artifact. An injected directory-fsync error after the atomic link is reported as post-publication, while the final history remains complete, strictly decodable, and has no temp name. The history, capability matrix and PersonalHistory fresh-process gate passes **39/39 in 26.170s**. This is API-level fault injection, not physical power-loss proof. Durable journal recovery, remaining security cases, the all-family matrix, and ordinary application Save/Load cutover remain open; `/12` production behavior was not changed.
+
 ## Problems-first — compact native EntityInspection history in strict Save graph
 
 After Target compaction, each committed receipt still duplicated its complete EntityInspection map in the native graph, while the same exact typed map was already independently recorded in validated native history. This projection includes every registered Entity in a cut and is distinct from the TargetCandidate timeline. The two sources must agree at every cut; a smaller serialized map alone would not be sufficient.
