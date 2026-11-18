@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -100,6 +101,49 @@ class NativeHistoryTests(unittest.TestCase):
                 {"boundary": boundary, "state": _plain(rows[target_id])}
                 for boundary, rows in target_rows.items() if target_id in rows]
             self.assertEqual(query.target_history_at(target_id), expected_history)
+
+    def test_defined_followup_evidence_records_have_closed_native_roundtrips(self):
+        from field_interpretation import FieldInterpretation
+        from field_observation import (CountReport, EvidenceReassessment,
+            InquiryProposal, InquiryRecord)
+        from native_history import (_canonical, _materialize_plain,
+                                    _validate_plain_record)
+
+        interpretation = FieldInterpretation(
+            "observation-one", "observer-one", "spot", 2,
+            {"dogs": CountReport(3, 1)}, {"dogs": 1})
+        proposal = InquiryProposal(
+            "observer-one", "group-one", "dogs", "uncertain_estimate",
+            ("observation-one",), 7.5)
+        records = (proposal, InquiryRecord(proposal, "ask-action-one"),
+                   EvidenceReassessment("observation-one", None,
+                                        interpretation))
+        for source in records:
+            encoded = json.loads(_canonical(_plain(source)))
+            _validate_plain_record(encoded)
+            restored = _materialize_plain(encoded)
+            self.assertIs(type(restored), type(source))
+            self.assertEqual(restored, source)
+
+        malformed = []
+        proposal_wire = json.loads(_canonical(_plain(proposal)))
+        invalid_reason = copy.deepcopy(proposal_wire)
+        invalid_reason["fields"]["reason"] = "objective_truth_lookup"
+        malformed.append(invalid_reason)
+        duplicate_evidence = copy.deepcopy(proposal_wire)
+        duplicate_evidence["fields"]["evidence_ids"]["$tuple"].append(
+            "observation-one")
+        malformed.append(duplicate_evidence)
+        inquiry_wire = json.loads(_canonical(_plain(records[1])))
+        inquiry_wire["fields"]["action_id"] = ""
+        malformed.append(inquiry_wire)
+        reassessment_wire = json.loads(_canonical(_plain(records[2])))
+        reassessment_wire["fields"]["observation_id"] = "foreign-observation"
+        malformed.append(reassessment_wire)
+        for value in malformed:
+            with self.subTest(value=value["$record"]):
+                with self.assertRaises(NativeHistoryRejected):
+                    _validate_plain_record(value)
 
     def test_target_query_refuses_initial_entity_projection_as_target_candidate(self):
         query = NativeHistoryQuery(self.log)

@@ -4,6 +4,10 @@
 
 `NativeHistoryQuery.skill_use_history_at()` now projects cumulative `SkillUse` and `BatchSkillUse` records from validated Being TargetCandidate practice facts. At the initial boundary it reads the first committed candidate's explicit pre-action `prior_uses`; it does not inspect the current Being or resolve Actions. The pending Run continuation checks boundaries 0–3 against native source state, with boundary-zero/current comparisons repeated in a fresh OS process. Repeated practice `prior_uses` remain duplicated in TargetCandidate history; this reader does not close the practice-family storage or general personal-history query gaps.
 
+The defined-but-not-produced follow-up observer facts now have strict record-level contracts. Native history closed-tag validation round-trips `InquiryProposal`, `InquiryRecord`, and `EvidenceReassessment`; it refuses unknown decision reasons, duplicate/empty evidence identities, empty Action identities, and an interpretation tied to another observation. This covers portable record shape/value validation only. These records remain without a native Action/publication producer, and no inquiry or reassessment behavior was inferred.
+
+Verification after the practice query and follow-up record contract changes: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history test_persistence_capability_matrix -v` — **36 passed / 22.929s**; `py_compile` and `git diff --check` passed. The specific pending-Run fresh-process continuation also passed **1 / 2.543s** after adding the boundary-zero query check.
+
 
 ## Problems-first — ChoiceBook and fatigue projections still duplicated in the graph
 

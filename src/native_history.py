@@ -1579,6 +1579,44 @@ def _validate_plain_record(value, depth=0):
         if (not set(fields_value) <= allowed or not required <= set(fields_value)
                 or "target_anchors" in fields_value or "action_anchors" in fields_value):
             raise NativeHistoryRejected("native EntityInspection fields differ from the closed schema")
+        if tag == "field_observation.InquiryProposal":
+            evidence = fields_value.get("evidence_ids")
+            if (any(type(fields_value.get(name)) is not str or not fields_value[name]
+                    for name in ("observer_id", "group_id", "category"))
+                    or fields_value.get("reason") not in
+                        ("conflicting_reports", "uncertain_estimate")
+                    or type(evidence) is not dict
+                    or set(evidence) != {"$tuple"}
+                    or type(evidence["$tuple"]) is not list
+                    or not evidence["$tuple"]
+                    or any(type(identity) is not str or not identity
+                           for identity in evidence["$tuple"])
+                    or len(set(evidence["$tuple"])) != len(evidence["$tuple"])
+                    or type(_number_value(fields_value.get("time"))) not in (int, float)):
+                raise NativeHistoryRejected("native InquiryProposal contract is malformed")
+        elif tag == "field_observation.InquiryRecord":
+            proposal = fields_value.get("proposal")
+            if (type(fields_value.get("action_id")) is not str
+                    or not fields_value["action_id"]
+                    or type(proposal) is not dict
+                    or proposal.get("$record") != "field_observation.InquiryProposal"):
+                raise NativeHistoryRejected("native InquiryRecord contract is malformed")
+        elif tag == "field_observation.EvidenceReassessment":
+            interpretation = fields_value.get("interpretation")
+            timestamp = fields_value.get("time")
+            interpretation_fields = (interpretation.get("fields")
+                                      if type(interpretation) is dict else None)
+            if (type(fields_value.get("observation_id")) is not str
+                    or not fields_value["observation_id"]
+                    or timestamp is not None
+                        and type(_number_value(timestamp)) not in (int, float)
+                    or type(interpretation) is not dict
+                    or interpretation.get("$record")
+                        != "field_interpretation.FieldInterpretation"
+                    or type(interpretation_fields) is not dict
+                    or interpretation_fields.get("observation_id")
+                        != fields_value["observation_id"]):
+                raise NativeHistoryRejected("native EvidenceReassessment contract is malformed")
         for item in fields_value.values():
             _validate_plain_record(item, depth + 1)
         return
