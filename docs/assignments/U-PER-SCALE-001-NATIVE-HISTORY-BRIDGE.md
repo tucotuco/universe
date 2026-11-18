@@ -6,6 +6,17 @@
 **Install as:** `docs/assignments/U-PER-SCALE-001-NATIVE-HISTORY-BRIDGE.md` (replace the narrower version)
 **Authoritative context:** `docs/assignments/U-PER-SCALE-001.md`, the sufficiency addendum; accepted Universe/Encounter rules and supplements; `docs/design/persistence-sufficiency-inventory.md`, `persistence-node-field-catalog.md`, `persistence-headless-delta-findings.md`, `persistence-headless-resume-findings.md`, `persistence-faithful-replay-findings.md`; `docs/reports/U-PER-SCALE-001-report.md`; `TASKS.md`; `docs/process/DEVELOPMENT-PROCESS.md` when present. Inspect live source/contracts rather than taking document descriptions as proof of current behavior.
 
+## Binding scope clarification — 2026-11-18
+
+This clarification supersedes conflicting acceptance language below and narrows unnecessary compatibility and testing obligations without reducing required persistence behavior:
+
+- The compatibility inventory established from repository/interface history is: generated-Arena portable Saves `/10`–`/12` remain accepted user formats; native Save `/2`, graph `/2`, history `/12`, wrapped by Arena native-session `/1`, are the native format first emitted through the generated Arena Save interface at commit `820c4d1`. Native envelope `/1`, graph `/1`, and history `/1`–`/11` predate that interface and were transitional development formats. Their existing readers/tests are not an acceptance gate unless evidence identifies an actually delivered user file in one of those formats. Do not expand, preserve by default, or block completion on migrations for such transient versions. Keep explicit readers for `/10`–`/12` Arena Saves and native formats actually emitted through an application interface.
+- Require complete integrity-checked atomic Save publication, preservation/loading of the last complete Save, and rollback of failed native transactions. A continuously durable history journal, autosave, or recovery of unsaved progress is not required absent another adopted source requirement.
+- Support existing implemented native historical consumers and reconstruct projections on demand from recorded facts. Do not expand the query API speculatively. Structured current authoritative state and necessary native references may remain in the Save; remove only demonstrated redundant historical graph copies.
+- Cover distinct currently implemented and legally reachable state transitions and failure semantics. Use representative source-linked field-contract validation and end-to-end cases for semantically distinct paths; do not require exhaustive combinations of equivalent cases or add gameplay/perception/world-generation/scheduling behavior solely to create persistence tests.
+- Use focused and affected regression suites during development, reserving long comprehensive suites for architectural changes, high-risk integration, or final acceptance. Preserve strict integrity, privacy, compatibility, and resource-safety gates.
+- `TASKS.md` remains a concise current-state register. Put incremental measurements, commit history, and detailed test chronology in the engineering report. Current-version replay is a test of save correctness only; do not require deterministic replay across rule versions.
+
 ## 1. User decision and required finished outcome
 
 Deliver a **fully functional, production-quality, Arena-independent native Universe/Encounter persistence implementation** based on:
