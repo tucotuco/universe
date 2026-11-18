@@ -4456,6 +4456,115 @@ print(json.dumps({'changed_nodes':changed_nodes,
         self.assertEqual(json.loads(result.stdout),
                          json.loads(json.dumps(expected)))
 
+    def test_native_save_preserves_user_added_library_definition_in_fresh_process(self):
+        """Caller-added immutable definitions travel with the native Save."""
+        import os
+        from native_scenario import NativeScenarioBuilder
+        from object import ObjectDefinition
+
+        builder = NativeScenarioBuilder(
+            'user-added portable definition',
+            Library(config_dir=str(ROOT / 'src/config')),
+            seed=20261118, encounter_id='user-definition-encounter')
+        library = builder.world.library
+        being_definition = library.get_being_definition('Human').copy()
+        being_definition.obj_type = 'User-authored Person'
+        being_definition.hit_points = 13
+        being_definition.traits = {'user_trait': 'quiet'}
+        library.being_dictionary.objects[being_definition.obj_type] = being_definition
+        actor = builder.add_being(being_definition.obj_type,
+                                  'Definition test subject')
+        definition = ObjectDefinition(
+            'User-authored lantern', length=7, width=2, height=3, weight=4,
+            cost=9, hardness=1, hit_points=5,
+            tags={'user_authored': True, 'light_source': 'unlit'},
+            discovery_dc=17)
+        library.object_dictionary.objects[definition.obj_type] = definition
+        object_id = builder.world.make_object(definition.obj_type, 'Brass lantern')
+        builder.enable()
+        pending = DelayAction(builder.encounter, actor.id, defense=0,
+                              start_time=builder.encounter.time,
+                              id='user-definition-delay')
+        builder.schedule(pending)
+        wire = export_save(builder.encounter)
+
+        builder.step(1)
+        expected_outcome = pending.resolution.outcome
+        expected = {
+            'object_id': object_id,
+            'being_id': actor.id,
+            'definition_type': definition.obj_type,
+            'definition_fields': [7, 2, 3, 4, 9, 1, 5,
+                                  {'user_authored': True,
+                                   'light_source': 'unlit'}, 17],
+            'definition_shared': True,
+            'action_id': pending.id,
+            'outcome': expected_outcome,
+            'time': builder.encounter.time,
+            'rng': builder.rng.state,
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path,rng_owner_for
+world,enc,_=load_path(sys.argv[1])
+obj=world.get_object_by_id(sys.argv[2])
+being=world.get_object_by_id(sys.argv[3])
+definition=obj.original
+being_definition=being.original
+assert being_definition is world.library.get_being_definition('User-authored Person')
+assert [being_definition.obj_type,being_definition.hit_points,
+ being_definition.traits]==['User-authored Person',13,{'user_trait':'quiet'}]
+assert definition is world.library.get_object_definition('User-authored lantern')
+assert [definition.length,definition.width,definition.height,definition.weight,
+ definition.cost,definition.hardness,definition.hit_points,definition.tags,
+ definition.discovery_dc]==[7,2,3,4,9,1,5,
+ {'user_authored':True,'light_source':'unlit'},17]
+choice=enc.choice_for_action(sys.argv[4])
+assert choice.state=='accepted'
+action=next(member.action for member in enc._choice_book._choices[choice.id].members
+ if member.action.id==sys.argv[4])
+enc.step(1)
+print(json.dumps({'object_id':obj.id,'being_id':being.id,
+ 'being_definition':[being_definition.obj_type,being_definition.hit_points,
+  being_definition.traits],
+ 'definition_type':definition.obj_type,
+ 'definition_fields':[definition.length,definition.width,definition.height,
+ definition.weight,definition.cost,definition.hardness,definition.hit_points,
+ definition.tags,definition.discovery_dc],
+ 'definition_shared':definition is world.library.get_object_definition(definition.obj_type),
+ 'action_id':action.id,'outcome':action.resolution.outcome,'time':enc.time,
+ 'rng':rng_owner_for(enc).state,
+ 'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
+ 'has_history':bool(enc.__dict__.get('_atomic_interval_history'))},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'user-definition.native'
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path), object_id,
+                 actor.id, pending.id],
+                cwd=directory,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        expected = json.loads(json.dumps(expected))
+        self.assertEqual(actual['object_id'], expected['object_id'])
+        self.assertEqual(actual['being_id'], expected['being_id'])
+        self.assertEqual(actual['being_definition'],
+                         ['User-authored Person', 13, {'user_trait': 'quiet'}])
+        self.assertEqual(actual['definition_type'], expected['definition_type'])
+        self.assertEqual(actual['definition_fields'], expected['definition_fields'])
+        self.assertTrue(actual['definition_shared'])
+        self.assertEqual(actual['action_id'], expected['action_id'])
+        self.assertEqual(actual['outcome'], expected['outcome'])
+        self.assertEqual(actual['time'], expected['time'])
+        self.assertEqual(actual['rng'], expected['rng'])
+        self.assertEqual(actual['history'], expected['history'])
+        self.assertTrue(actual['has_history'])
+
     def test_native_save_round_trips_every_built_in_entity_definition_family(self):
         """The native root accepts all shipped Being/Object/Weapon/Armor definitions."""
         import os
