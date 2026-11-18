@@ -1420,7 +1420,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             release_path = Path(release_directory) / "arena-released.json"
             release_path.write_bytes(release_wire)
             restore_release = (
-                "import json,sys; import tests.test_generated_arena_browser; "
+                "import base64,json,sys; import tests.test_generated_arena_browser; "
                 "from arena_browser_session import GeneratedArenaSession; "
                 "from physical_contact import active_contact_state; "
                 "s=GeneratedArenaSession(root_seed_factory=lambda:10); "
@@ -2119,6 +2119,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             self.assertEqual(evidence['attack'],'weapon_unavailable')
 
     def test_armed_feint_uses_browser_route_and_pending_save_load(self):
+        import base64
         status, page = self.request("/")
         self.assertEqual(status, 200)
         self.assertIn("function submitFeint(handle,motion,unarmed=false", page)
@@ -2155,15 +2156,16 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             save_path = Path(directory) / "pending-feint.json"
             save_path.write_bytes(pending)
             script = (
-                "import json,sys; import tests.test_generated_arena_browser; "
+                "import base64,json,sys; import tests.test_generated_arena_browser; "
                 "from arena_browser_session import GeneratedArenaSession; "
                 "s=GeneratedArenaSession(root_seed_factory=lambda:8); "
                 "s.load_encounter_bytes(open(sys.argv[1],'rb').read()); "
                 "v=s._view_unlocked();\n"
                 "while v['feint_action']['status']=='executing':\n v=s.advance_one_second()\n"
-                "print(json.dumps({'view':v,'save':s.save_encounter_bytes().decode('utf8')}))")
+                "print(json.dumps({'view':v,'save':base64.b64encode(s.save_encounter_bytes()).decode('ascii')}))")
             process = subprocess.run([sys.executable, "-c", script, str(save_path)],
-                cwd=ROOT, check=True, capture_output=True, text=True)
+                cwd=ROOT, check=False, capture_output=True, text=True)
+            self.assertEqual(process.returncode, 0, process.stderr)
             restored = json.loads(process.stdout)
         completed = self.session._view_unlocked()
         while completed["feint_action"]["status"] == "executing":
@@ -2181,7 +2183,7 @@ class TestGeneratedArenaBrowser(unittest.TestCase):
             self.assertEqual(restored["view"]["player"][key], completed["player"][key])
         completed_restore = GeneratedArenaSession(root_seed_factory=lambda: 9)
         restored_completed = completed_restore.load_encounter_bytes(
-            restored["save"].encode("utf-8"))
+            base64.b64decode(restored["save"], validate=True))
         self.assertEqual(restored_completed["time_seconds"], completed["time_seconds"])
         self.assertEqual(restored_completed["feint_action"], completed["feint_action"])
 
@@ -2765,8 +2767,11 @@ print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':sh
         self.assertGreater(len(resumed.save_encounter_bytes()), 0)
 
     def test_http_save_and_load_use_binary_portable_file_and_atomic_replacement(self):
+        import base64
+        import hashlib
         self.session.generate({"starting_experience": "10000",
             "width_cells": "5", "height_cells": "5"})
+        self.session.choose_run()
         handler_type = make_handler(self.session)
         save_handler = object.__new__(handler_type)
         save_handler.path = "/api/generated/save"
@@ -2779,7 +2784,47 @@ print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':sh
         self.assertEqual(saved["status"], 200)
         self.assertEqual(saved["content_type"], "application/octet-stream")
         wire = saved["body"]
-        self.assertTrue(wire.startswith(b'PK\x03\x04'))
+        from arena_persistence import _NATIVE_SESSION_SCHEMA
+        from arena_persistence import ArenaSaveRejected, _canonical as save_canonical
+        native_envelope = json.loads(wire)
+        self.assertEqual(native_envelope["schema"], _NATIVE_SESSION_SCHEMA)
+        self.assertIn("native_state_zlib_base64", native_envelope)
+        from native_persistence import load_save
+        import zlib
+        native_inner = zlib.decompress(base64.b64decode(
+            native_envelope["native_state_zlib_base64"], validate=True))
+        self.assertGreater(len(native_inner), len(wire))
+        native_roots = load_save(native_inner)
+        self.assertEqual(native_roots[1].id,
+                         self.session.active_candidate.encounter.id)
+        malformed_metadata = dict(native_envelope)
+        malformed_metadata["session"] = dict(native_envelope["session"])
+        malformed_metadata["session"]["player_id"] = ""
+        unsigned_metadata = {key: value for key, value in malformed_metadata.items()
+                             if key != "sha256"}
+        malformed_metadata["sha256"] = hashlib.sha256(
+            save_canonical(unsigned_metadata)).hexdigest()
+        with patch("native_persistence.load_save",
+                   side_effect=AssertionError("invalid session loaded native Save")):
+            with self.assertRaisesRegex(ArenaSaveRejected, "player_id is malformed"):
+                __import__("arena_persistence").decode(
+                    save_canonical(malformed_metadata))
+        with patch("arena_persistence.MAX_BYTES", len(wire)):
+            with patch("native_persistence.load_save",
+                       side_effect=AssertionError("oversized inner Save was loaded")):
+                with self.assertRaisesRegex(ArenaSaveRejected,
+                                            "exceeds bounds or has trailing data"):
+                    __import__("arena_persistence").decode(wire)
+        trailing = dict(native_envelope)
+        compressed = base64.b64decode(
+            trailing["native_state_zlib_base64"], validate=True) + b"trailing"
+        trailing["native_state_zlib_base64"] = base64.b64encode(compressed).decode("ascii")
+        unsigned_trailing = {key: value for key, value in trailing.items()
+                             if key != "sha256"}
+        trailing["sha256"] = hashlib.sha256(save_canonical(unsigned_trailing)).hexdigest()
+        with self.assertRaisesRegex(ArenaSaveRejected,
+                                    "exceeds bounds or has trailing data"):
+            __import__("arena_persistence").decode(save_canonical(trailing))
 
         replacement = GeneratedArenaSession(root_seed_factory=lambda: 1)
         replacement.generate({"starting_experience": "10000",
@@ -2799,6 +2844,53 @@ print(json.dumps({'time':c.encounter.time,'outcome':facts.outcome,'shield_id':sh
         self.assertEqual(result["status"], 200)
         self.assertIsNot(replacement.active_candidate, original_candidate)
         self.assertEqual(result["body"]["time_seconds"], 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "arena-native-save.uarena"
+            source.write_bytes(wire)
+            child = subprocess.run([sys.executable, "-B", "-c", """
+import json,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+p=Path(sys.argv[1]); raw=p.read_bytes(); s=GeneratedArenaSession()
+view=s.load_encounter_bytes(raw)
+assert view['time_seconds']==0
+assert s.save_native_encounter_bytes()==raw
+print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
+ 'beings':list(s.active_candidate.encounter.being_list),
+ 'boundary':s.active_candidate.encounter.last_processed_boundary}))
+""", str(source)], cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "src") + os.pathsep
+                     + str(ROOT / "examples") + os.pathsep
+                     + str(ROOT.parent / "npc-generator"),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+                capture_output=True, text=True, timeout=60)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(json.loads(child.stdout)["encounter_id"],
+                         self.session.active_candidate.encounter.id)
+
+        pristine = GeneratedArenaSession(root_seed_factory=lambda: 19)
+        pristine.generate({"starting_experience": "10000",
+                           "width_cells": "5", "height_cells": "5"})
+        initial_wire = pristine.save_native_encounter_bytes()
+        self.assertTrue(initial_wire.startswith(b'PK\x03\x04'))
+        initial_restore = GeneratedArenaSession()
+        initial_restore.load_encounter_bytes(initial_wire)
+        self.assertEqual(initial_restore.active_candidate.encounter.id,
+                         pristine.active_candidate.encounter.id)
+
+        spectator = GeneratedArenaSession(root_seed_factory=lambda: 29)
+        spectator.generate({"starting_experience": "10000", "width_cells": "5",
+            "height_cells": "5", "equipment_mode": "equipped",
+            "encounter_mode": "arena_vs_arena",
+            "strategy_a": "attack_only", "strategy_b": "defense_only"})
+        spectator.advance_one_second()
+        spectator_wire = spectator.save_native_encounter_bytes()
+        spectator_restore = GeneratedArenaSession()
+        spectator_restore.load_encounter_bytes(spectator_wire)
+        self.assertEqual(spectator_restore._encounter_mode, "arena_vs_arena")
+        self.assertEqual(spectator_restore._arena_strategies,
+                         ["attack_only", "defense_only"])
 
         bad_handler = object.__new__(make_handler(replacement))
         bad_handler.path = "/api/generated/load"

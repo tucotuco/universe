@@ -306,6 +306,46 @@ class GeneratedArenaSession:
                     "This Arena state cannot be saved yet; native checkpoint validation refused it: "
                     +detail) from exc
 
+    def save_native_encounter_bytes(self):
+        """Export the Arena consumer envelope around the native persistence API."""
+        from arena_persistence import encode_native_session
+        from native_persistence import export_save
+        with self._lock:
+            if self._active is None:
+                raise ArenaBrowserRequestError("Generate an Encounter before saving")
+            try:
+                self._validate_initial_equipment_provenance(self._active)
+                from transactional_progression import mode_of
+                encounter = self._active.encounter
+                if mode_of(encounter) == 'legacy':
+                    pristine = (not encounter.initiated
+                        and encounter.time == encounter.start_time
+                        and not encounter.__dict__.get('_atomic_interval_history')
+                        and not encounter.pending_action_list
+                        and not encounter.finished_action_list
+                        and not encounter.cancelled_action_list
+                        and not encounter._choice_book._choices
+                        and not encounter._choice_book._drafts
+                        and not encounter._choice_book._registered)
+                    if pristine:
+                        # Keep the established unstarted `/12` file contract.
+                        # The native writer takes over once native progression
+                        # is selected, including an accepted first Choice.
+                        from arena_native_snapshot import capture
+                        from arena_persistence import encode
+                        inventory = capture(self._active.universe, encounter,
+                                            self._rng_cursor)
+                        return encode(self, inventory)
+                    raise ArenaBrowserRequestError(
+                        "native Arena Save requires a transactional Encounter or an unstarted legacy state")
+                native_wire = export_save(self._active.encounter)
+                return encode_native_session(self, native_wire)
+            except (TypeError, ValueError, RuntimeError) as exc:
+                detail = str(exc)
+                raise ArenaBrowserRequestError(
+                    "This Arena state cannot be saved yet; native persistence refused it: "
+                    + detail) from exc
+
     @staticmethod
     def _validate_initial_equipment_provenance(candidate):
         from arena_initial_equipment import validate_saved_equipment_row
@@ -400,7 +440,11 @@ class GeneratedArenaSession:
         try:
             data=decode(wire)
             meta=data['session']
-            universe,encounter,rng_owner=restore_native(data['decoded_native'])
+            roots = data.get('native_roots')
+            if roots is None:
+                universe,encounter,rng_owner=restore_native(data['decoded_native'])
+            else:
+                universe,encounter,rng_owner=roots
             if (len(encounter.being_list)!=2 or meta['player_id']!=encounter.being_list[0]
                     or meta['opponent_id']!=encounter.being_list[1]
                     or meta['starting_experience']!=universe.get_object_by_id(meta['player_id']).original.experience):

@@ -530,7 +530,7 @@ def make_handler(session):
                     if path == "/api/generated/profiles": return self._send(200, session.ground_profile_catalog())
                     if path == "/api/generated/save":
                         try:
-                            wire = session.save_encounter_bytes()
+                            wire = session.save_native_encounter_bytes()
                         except ArenaBrowserRequestError as exc:
                             return self._send(409, {"error": str(exc)})
                         return self._send(200, wire, "application/octet-stream",

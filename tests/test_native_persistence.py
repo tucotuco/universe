@@ -468,10 +468,6 @@ print(json.dumps({'encounter':encounter.id,
         self.assertFalse(any(tag == "arena_perception.ArenaPerceptionLedger"
                              for _ref, tag, _content in saved_nodes))
         self.assertIn(b"arena.perception_ledger_from_history/1", saved_graph_wire)
-        from checkpoint_arena_perception import (
-            ArenaPerceptionCheckpointRejected,
-            restore_arena_perception_ledger_from_history,
-        )
         def find_compacted_recipe(value):
             if type(value) is tuple:
                 if (len(value) == 5 and value[0] == "native-recipe"
@@ -486,24 +482,31 @@ print(json.dumps({'encounter':encounter.id,
         self.assertIsNotNone(compact_recipe)
         compact_observer_id = compact_recipe[3][1]
         compact_current, compact_order = compact_recipe[4]
-        compact_history = native_history.current_recording(encounter)
-        compact_entities = tuple(sorted(encounter.entity_ids()))
-        compact_visible = tuple(sorted(encounter.awareness[compact_observer_id]))
-        with self.assertRaisesRegex(ArenaPerceptionCheckpointRejected,
-                                    "malformed or duplicate reference"):
-            restore_arena_perception_ledger_from_history(
-                compact_current, compact_order + (compact_order[0],),
-                compact_history, observer_id=compact_observer_id,
-                entity_ids=compact_entities, visible_entity_ids=compact_visible,
-                boundary=encounter.last_processed_boundary, time=encounter.time)
-        forged_order = (("missing-native-entity", compact_order[0][1]),)
-        with self.assertRaisesRegex(ArenaPerceptionCheckpointRejected,
-                                    "malformed or duplicate reference"):
-            restore_arena_perception_ledger_from_history(
-                compact_current, forged_order, compact_history,
-                observer_id=compact_observer_id, entity_ids=compact_entities,
-                visible_entity_ids=compact_visible,
-                boundary=encounter.last_processed_boundary, time=encounter.time)
+        self.assertTrue(compact_order)
+        for label, forged_order in (
+                ("duplicate", compact_order + (compact_order[0],)),
+                ("dangling", (("missing-native-entity", compact_order[0][1]),))):
+            with self.subTest(recipe_order=label):
+                def mutate_recipe(value):
+                    if type(value) is tuple:
+                        if (len(value) == 5 and value[0] == "native-recipe"
+                                and value[2] == "arena.perception_ledger_from_history/1"
+                                and value[3][1] == compact_observer_id):
+                            return (*value[:4], (compact_current, forged_order))
+                        return tuple(mutate_recipe(item) for item in value)
+                    return value
+                forged_graph_wire = encode_graph(
+                    mutate_recipe(saved_graph), native=True)
+                forged_save = dict(saved_value)
+                forged_save["graph_b64"] = base64.b64encode(
+                    forged_graph_wire).decode("ascii")
+                unsigned = {key: value for key, value in forged_save.items()
+                            if key != "sha256"}
+                forged_save["sha256"] = hashlib.sha256(
+                    native_persistence._canonical(unsigned)).hexdigest()
+                forged_wire = native_persistence._canonical(forged_save)
+                with self.assertRaises(NativeSaveRejected):
+                    load_save(forged_wire)
         from checkpoint_arena_perception import encode_arena_perception_ledger
         def full_perception_graph(value):
             if type(value) is tuple:

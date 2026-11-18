@@ -492,6 +492,13 @@ def _compact_inventory(inventory, *, native=False):
                     flat.extend(pair)
                 content = tuple(flat)
             rows.append((ref, tag, content))
+        if native:
+            # Native object discovery order can change after fresh-process
+            # rehydration (for example, pending and finished scheduler-owned
+            # lists may be traversed in a different order). References are
+            # stable logical IDs, so canonically order the node table to make
+            # Save→Load→Save independent of incidental traversal order.
+            rows.sort(key=lambda row: _canonical(row[0]))
         sections.append(('nodes', tuple(rows)))
 
     def collect(value):

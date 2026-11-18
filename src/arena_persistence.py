@@ -8,6 +8,7 @@ import json
 import math
 import stat
 import zipfile
+import zlib
 
 from arena_native_snapshot import encode as encode_native, decode as decode_native
 
@@ -21,6 +22,9 @@ _FIELDS = frozenset(('schema','native_state_base64','session','sha256'))
 _ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/3'
 _LEGACY_ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/2'
 _EARLIER_ARCHIVE_SCHEMA = 'universe.generated-arena-portable-archive/1'
+_NATIVE_SESSION_SCHEMA = 'universe.generated-arena-native-session/1'
+_NATIVE_SESSION_FIELDS = frozenset((
+    'schema', 'native_state_zlib_base64', 'session', 'sha256'))
 
 
 class ArenaSaveRejected(ValueError):
@@ -173,6 +177,32 @@ def encode(session, native_inventory):
                 _write_archive_entry(archive,name,data)
         wire=output.getvalue()
     if len(wire)>MAX_BYTES:raise ArenaSaveRejected('Arena archive exceeds the file size limit')
+    return wire
+
+
+def encode_native_session(session, native_save_wire):
+    """Wrap the Arena-only presentation metadata around the native Save API.
+
+    Native state/history remain owned by ``native_persistence``. This small
+    consumer envelope carries only the generated Arena map and source-profile
+    metadata needed to restore the browser view; accepted `/10`–`/12` files
+    continue to use their existing strict readers below.
+    """
+    if type(native_save_wire) is not bytes or not native_save_wire:
+        raise ArenaSaveRejected('native Save payload is empty or malformed')
+    if len(native_save_wire) > MAX_BYTES:
+        raise ArenaSaveRejected('native Save payload exceeds the Arena file size limit')
+    session_record = _session_record(session, native_save_wire)
+    _tree(session_record)
+    body = {
+        'schema': _NATIVE_SESSION_SCHEMA,
+        'native_state_zlib_base64': base64.b64encode(
+            zlib.compress(native_save_wire, level=6)).decode('ascii'),
+        'session': session_record,
+    }
+    wire = _canonical(dict(body, sha256=hashlib.sha256(_canonical(body)).hexdigest()))
+    if len(wire) > MAX_BYTES:
+        raise ArenaSaveRejected('native Arena session file exceeds the size limit')
     return wire
 
 
@@ -374,29 +404,54 @@ def decode(wire):
         except ArenaSaveRejected:raise
         except (UnicodeDecodeError,json.JSONDecodeError,RecursionError) as exc:
             raise ArenaSaveRejected(f'Arena save is not valid UTF-8 JSON: {exc}') from exc
-        if (type(data) is not dict or set(data)!=_FIELDS
-                or data['schema'] not in _PREVIOUS_SCHEMAS):
+        if (type(data) is not dict
+                or (data.get('schema') == _NATIVE_SESSION_SCHEMA
+                    and set(data) != _NATIVE_SESSION_FIELDS)
+                or (data.get('schema') != _NATIVE_SESSION_SCHEMA
+                    and (set(data) != _FIELDS
+                         or data['schema'] not in _PREVIOUS_SCHEMAS))):
             raise ArenaSaveRejected('unknown Arena save schema or field set')
         payload={key:data[key] for key in data if key!='sha256'}
         if type(data['sha256']) is not str or hashlib.sha256(_canonical(payload)).hexdigest()!=data['sha256']:
             raise ArenaSaveRejected('Arena save digest does not match its contents')
         if _canonical(data)!=wire:raise ArenaSaveRejected('Arena save is not canonical')
     _tree(data['session'])
+    native_roots = None
     if segmented:
         native_wire=None
         decoded=data['decoded_native']
     else:
-        try:native_wire=base64.b64decode(data['native_state_base64'],validate=True)
-        except (TypeError,ValueError) as exc:raise ArenaSaveRejected('embedded native state encoding is invalid') from exc
-        try:decoded=decode_native(native_wire)
-        except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'embedded native Arena state refused: {exc}') from exc
+        try:
+            if data['schema'] == _NATIVE_SESSION_SCHEMA:
+                compressed = base64.b64decode(
+                    data['native_state_zlib_base64'], validate=True)
+                decoder = zlib.decompressobj()
+                native_wire = decoder.decompress(compressed, MAX_BYTES + 1)
+                if (len(native_wire) > MAX_BYTES or decoder.unconsumed_tail
+                        or decoder.unused_data or not decoder.eof):
+                    raise ArenaSaveRejected(
+                        'compressed native Save exceeds bounds or has trailing data')
+                native_wire += decoder.flush()
+                if len(native_wire) > MAX_BYTES:
+                    raise ArenaSaveRejected('decompressed native Save exceeds the file size limit')
+            else:
+                native_wire=base64.b64decode(
+                    data['native_state_base64'],validate=True)
+        except ArenaSaveRejected:
+            raise
+        except (TypeError,ValueError,zlib.error) as exc:raise ArenaSaveRejected('embedded native state encoding is invalid') from exc
+        if data['schema'] == _NATIVE_SESSION_SCHEMA:
+            decoded = None
+        else:
+            try:decoded=decode_native(native_wire)
+            except (TypeError,ValueError) as exc:raise ArenaSaveRejected(f'embedded native Arena state refused: {exc}') from exc
     s=data['session']
     required={'encounter_name','player_name','player_id','opponent_id','starting_experience',
         'root_seed','placement_seed',
         'map','world_premise','display_names','movement_plan_base64','movement_sequence',
         'selected_entity_id','source_beings','ground_objects','ground_loadout_provenance',
         'initial_equipment_provenance','equipment_mode'}
-    if data['schema'] in (SCHEMA, 'universe.generated-arena-save/11',
+    if data['schema'] in (_NATIVE_SESSION_SCHEMA, SCHEMA, 'universe.generated-arena-save/11',
                            'universe.generated-arena-save/10',
                            'universe.generated-arena-save/8',
                            'universe.generated-arena-save/7'):
@@ -449,6 +504,17 @@ def decode(wire):
     if s['movement_plan_base64'] is not None:
         try:base64.b64decode(s['movement_plan_base64'],validate=True)
         except (TypeError,ValueError) as exc:raise ArenaSaveRejected('movement plan encoding is invalid') from exc
+    if not segmented and data['schema'] == _NATIVE_SESSION_SCHEMA:
+        try:
+            from native_persistence import load_save
+            native_roots = load_save(native_wire)
+            from arena_native_snapshot import capture as capture_arena_native
+            decoded = capture_arena_native(*native_roots)
+        except (TypeError,ValueError,RuntimeError) as exc:
+            raise ArenaSaveRejected(
+                f'embedded native Save refused for Arena restoration: {exc}') from exc
     result={'native_wire':native_wire,'decoded_native':decoded,'session':s}
+    if native_roots is not None:
+        result['native_roots'] = native_roots
     if segmented:result['manifest']=data['manifest']
     return result
