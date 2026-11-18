@@ -3,7 +3,7 @@
 **Prepared:** 2026-11-18
 **Intended repository path:** `docs/handoffs/universe-9-to-10.md`
 **Project:** `~/Projects/universe` (NOT `universe-old`, `npc-generator`, or `universe-geology`)
-**Handoff status:** ChatGPT accepted U-PER-SCALE-001 DONE. Archival reconciliation and the authorized non-force publication were completed on 2026-11-18; the initial closeout tip `5a112442a355f77f5e74af170b14e9bf43718491` was verified on `origin/main`. A final documentation-only closeout correction will record this result. No implementation program is ACTIVE; U-SHIELD-001 is assigned for the next session and has not started.
+**Handoff status:** ChatGPT accepted U-PER-SCALE-001 DONE. Archival reconciliation and the authorized non-force publication were completed on 2026-11-18; the initial closeout tip `5a112442a355f77f5e74af170b14e9bf43718491` was verified on `origin/main`. The follow-up report/handoff correction `f45c3a6af9d934410033cf7ea8406d897c14e46f` was then pushed after a separate one-commit range audit; local HEAD and `origin/main` matched at that verification. No implementation program is ACTIVE; U-SHIELD-001 is assigned for the next session and has not started.
 
 ## 1. Start here: authority and working method
 
@@ -36,7 +36,7 @@ The accepted system is **Arena-independent native persistence**, with a typed re
 - Reconcile `TASKS.md`: U-PER-SCALE-001 DONE accepted under clarified scope, UI smoke an independent VERIFY item; `U-SHIELD-001` is assigned/next but shield **implementation has not started**. Keep all other task IDs and deferred priorities.
 - Archive the accepted persistence assignment/report according to the actual process, preserving links and evidence. Do not erase the large historical report. Install this handoff and `docs/assignments/U-SHIELD-001.md` as needed. Write an audited, **path-scoped** local closeout commit, excluding unrelated staged/untracked content.
 - **Audit the entire unpublished commit range** before pushing: fetch `origin/main`, verify remote main is an ancestor of local `HEAD`, inspect `git log --oneline origin/main..HEAD`, `git diff --name-status origin/main..HEAD` and suspicious content. Verify no secrets, large local saves, user-private files, unintended archived moves or unrelated independent-project changes. A push sends *all unpublished commits*, not just the closeout commit.
-- This transition was published from `main` to `origin/main` with an ordinary fast-forward push after the 398-commit full-range audit passed with zero findings. Dry-run and actual push both succeeded. Remote URL is `https://github.com/tucotuco/universe.git`; GitHub reported PUBLIC. The post-push check returned local HEAD and `refs/heads/main` as `5a112442a355f77f5e74af170b14e9bf43718491`. A documentation-only report/handoff correction remains part of closeout; do not interpret it as authorization to publish later shield implementation.
+- This transition was published from `main` to `origin/main` with an ordinary fast-forward push after the 398-commit full-range audit passed with zero findings. Dry-run and actual push both succeeded. Remote URL is `https://github.com/tucotuco/universe.git`; GitHub reported PUBLIC. The first post-push check returned local HEAD and `refs/heads/main` as `5a112442a355f77f5e74af170b14e9bf43718491`; the follow-up report/handoff correction then verified both at `f45c3a6af9d934410033cf7ea8406d897c14e46f`. No shield implementation is included or authorized for this publication.
 
 ## 4. Next program: U-SHIELD-001
 
