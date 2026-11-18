@@ -488,6 +488,9 @@ class NativeHistoryTests(unittest.TestCase):
         for boundary in reversed(range(log["latest_boundary"] + 1)):
             self.assertEqual(query.committed_actions_at(boundary),
                              actual_by_boundary[boundary])
+            if boundary:
+                self.assertEqual(query.inspect_committed_at(boundary),
+                    _plain(self.demo["encounter"].inspect_committed(boundary)))
         detached = query.committed_actions_at(log["latest_boundary"])
         detached["actions"].clear()
         self.assertTrue(query.committed_actions_at(log["latest_boundary"])["actions"])
