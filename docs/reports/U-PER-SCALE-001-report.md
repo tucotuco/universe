@@ -1947,3 +1947,8 @@ Added a shared test assertion and applied it to the shield-protection hit, unres
 - Start: `2026-11-17T22:55:59Z`.
 - End: pending actual closeout timestamp.
 - Elapsed: pending calculation from the recorded timestamps.
+
+
+### Post-commit integration verification — Arena ledger compaction
+
+After commit `704e393327a92abc114ccf27d5e1e96249df1b8c`, the complete `test_native_persistence` module passed **69/69 in 253.683s**, including accepted `/10`–`/12` reads, native history upgrades, pending and settled continuation, observer ownership, projectile/simultaneous combat, file-write fault recovery, strict integrity, and the new Arena compaction case. The focused Arena/legacy/matrix gate passed **7/7 in 9.889s**; `test_checkpoint_arena_perception` passed **7/7 in 2.453s**; adjacent `test_native_history` and `test_checkpoint_adapters` passed **86/86 in 231.307s**. This validates the code commit and keeps `/12` production behavior unchanged. It does not establish the full capability matrix or application cutover. U-PER-SCALE-001 remains ACTIVE.
