@@ -1,9 +1,9 @@
 # U-PER-SCALE-001 — Engineering report
 
-**Problems first — current status.** The revised U-PER-SCALE-001 implementation criteria are verified; U-PER-SCALE-001 remains ACTIVE pending ChatGPT report acceptance. Production Arena Save/Load uses the Arena-independent native envelope/graph/history for supported progressed transactional sessions, with strict accepted Arena `/10`–`/12` readers and a legacy-mode `/12` writer retained. The current field graph is a complete typed resumable snapshot; native history stores committed changes/Events and rebuilds the existing historical inspection projections on demand. A 64-Action/200-quiet-boundary profile, strict fresh-process continuation, RNG/identity/history parity, transactional rollback, atomic file publication, delivered-format compatibility, multi-Encounter/observer/Group/reproduction/projectile/Action scenarios and the current HTTP app route have evidence. This continuation fixes absolute-time origin restoration and adds user-authored Being/Object definition portability. Final affected verification is green: native persistence, all 25 Action-family continuations, history/query, checkpoint adapters, field matrix, and generated-Arena HTTP Save/Load passed 188 tests in 516.416s; separate current-version replay/headless scenario validation passed 8 tests in 13.041s. The served Chrome UI was inspected; a new Save click did not produce a browser download within 30 seconds and Chrome logged an extension async-channel error. The directly exercised HTTP app route remains green and proves strict native Save/Load, so this browser-tool failure is recorded as a limitation, not a persistence blocker. No rule, data, or architectural decision blocks the deliverable.
+**Problems first — current status.** Estimated engineering completion is **about 95%**: the revised implementation criteria have evidence, while final assignment disposition still depends on independent ChatGPT report acceptance and any corrections it requests. U-PER-SCALE-001 remains ACTIVE until that review. Production Arena Save/Load uses the Arena-independent native envelope/graph/history for supported progressed transactional sessions, with strict accepted Arena `/10`–`/12` readers and a legacy-mode `/12` writer retained. The current field graph is a complete typed resumable snapshot; native history stores committed changes/Events and rebuilds the existing historical inspection projections on demand. A 64-Action/200-quiet-boundary profile, strict fresh-process continuation, RNG/identity/history parity, transactional rollback, atomic file publication, delivered-format compatibility, multi-Encounter/observer/Group/reproduction/projectile/Action scenarios and the current HTTP app route have evidence. This continuation fixes absolute-time origin restoration and adds user-authored Being/Object definition portability. Final affected verification is green: native persistence, all 25 Action-family continuations, history/query, checkpoint adapters, field matrix, and generated-Arena HTTP Save/Load passed 188 tests in 516.416s; separate current-version replay/headless scenario validation passed 8 tests in 13.041s. A follow-up Group history/registry check passed 4 tests in 3.050s. The served Chrome UI was inspected; a new Save click did not produce a browser download within 30 seconds and Chrome logged an extension async-channel error. The directly exercised HTTP app route remains green and proves strict native Save/Load, so this browser-tool failure is recorded as a limitation, not a persistence blocker. No rule, data, or architectural decision blocks the deliverable.
 
 **Binding scope clarification (2026-11-18):** Compatibility acceptance covers generated-Arena Saves `/10`–`/12` plus native envelope `/2`, graph `/2`, history `/12` and Arena native-session `/1`, as first emitted through the application Save interface in commit `820c4d1`. Pre-interface native envelope `/1`, graph `/1`, and history `/1`–`/11` are transitional development formats, not acceptance targets without evidence that a user-facing interface delivered those artifacts. The application currently has internal strict readers for these old formats, but no further migration work is required for them. Save integrity, atomic publication, last-complete-Save preservation and transaction rollback remain mandatory. Continuous journaling, autosave, unsaved-progress recovery, speculative query expansion, exhaustive equivalent combinations, gameplay expansion and cross-version deterministic replay are out of scope.
-**Execution interval:** Start `2026-11-18T09:28:28Z` (observed when work resumed; no earlier start was recorded). End and calculated elapsed duration will be recorded immediately before closeout.
+**Execution interval:** Start `2026-11-18T09:28:28Z` (observed when work resumed; no earlier start was recorded); End `2026-11-18T09:59:44Z`; Elapsed `PT31M16S`.
 
 
 **Remaining-work assessment under the binding scope clarification (2026-11-18):** Do not count native `/1`, graph `/1`, or history `/1`–`/11` migration, continuous journaling/autosave, unsaved-progress recovery, exhaustive equivalent recipient combinations, speculative query APIs, cross-version deterministic replay, or graph-free current snapshots as obligations. Actual supported coverage is evaluated by current-state field contracts, distinct committed historical semantics, accepted Arena `/10`–`/12` compatibility, and native formats emitted through the app. The capability matrix records the 159-type field registry and representative continuation/query cases for each distinct live family. The remaining disposition is ChatGPT report acceptance. A new in-Chrome Save click did not dispatch through the connected extension, so the HTTP/API integration is the verified app interaction; this optional UI-tooling limitation does not leave an application Save/Load behavior untested.
@@ -307,7 +307,7 @@ Verification: `PYTHONPATH=tests:src:../examples:../npc-generator .venv/bin/pytho
 | Full native bridge continuation | 2026-11-17T06:10:55Z | Not recorded in the prior closeout | Elapsed unavailable; no estimate added |
 | Native observer-knowledge and scheduler-history continuation | 2026-11-17T09:06:49Z | End not recorded | Elapsed unavailable; no estimate added |
 | Native projectile-history integration continuation | 2026-11-17T15:34:30Z | End not recorded | Elapsed unavailable; no estimate added |
-| Native publication receipt and scale continuation | 2026-11-17T19:15:12Z | IN PROGRESS | Recorded at closeout |
+| Native publication receipt and scale continuation | 2026-11-17T19:15:12Z | End not recorded in that closeout | Elapsed unavailable; no estimate added |
 
 ## Problems-first — cumulative observer-recipient history in `/10`, with strict `/9` migration
 
@@ -1207,7 +1207,7 @@ Verification after the correction: `.venv/bin/python -B tests/test_native_draw_p
 
 The native matrix's `action.Action` and `GrappleStateEffect` rows now cite the fresh-process initial Grapple→Takedown case. This is a tested supported profile only: it does not close all Grapple escape/recovery combinations, every native historical reader, general Action-family parity, graph duplication, durable journaling, accepted legacy migration for every family, or the normal production API cutover. Neither the capability matrix nor U-PER-SCALE-001 is marked complete. No push was made.
 
-**Execution interval:** Start `2026-11-17T06:10:55Z`; End **IN PROGRESS**; elapsed **to be calculated at closeout**.
+**Execution interval:** Start `2026-11-17T06:10:55Z`; End not recorded in that historical closeout; elapsed unavailable, not estimated.
 
 ## Failed and successful Grapple Escape restoration
 
@@ -1879,8 +1879,8 @@ The field rows now cite the focused source and test. This verifies these configu
 ### Execution interval
 
 - Start: `2026-11-17T22:55:59Z`.
-- End: pending actual closeout timestamp.
-- Elapsed: pending calculation from the recorded timestamps.
+- End: not recorded in that historical closeout.
+- Elapsed: unavailable; not estimated.
 
 ## Problems-first — Arena passive-perception history duplicated in native graph
 
@@ -1895,8 +1895,8 @@ The fresh-process test compares a full-ledger graph and history-backed compact g
 ### Execution interval
 
 - Start: `2026-11-17T22:55:59Z`.
-- End: pending actual closeout timestamp.
-- Elapsed: pending calculation from the recorded timestamps.
+- End: not recorded in that historical closeout.
+- Elapsed: unavailable; not estimated.
 
 
 ## Problems-first — preserve registered Universe entities outside an Encounter
@@ -1979,8 +1979,8 @@ Added a shared test assertion and applied it to the shield-protection hit, unres
 ### Execution interval
 
 - Start: `2026-11-17T22:55:59Z`.
-- End: pending actual closeout timestamp.
-- Elapsed: pending calculation from the recorded timestamps.
+- End: not recorded in that historical closeout.
+- Elapsed: unavailable; not estimated.
 
 
 ### Post-commit integration verification — Arena ledger compaction
@@ -2024,8 +2024,8 @@ This increment does not close the program: custom/caller-defined state, family-c
 ### Current execution interval
 
 - Start: `2026-11-18T08:23:11Z`.
-- End: pending actual closeout timestamp.
-- Elapsed: pending calculation from the recorded timestamps.
+- End: not recorded in that historical closeout.
+- Elapsed: unavailable; not estimated.
 
 ## Scope reassessment and nonzero Encounter origin — 2026-11-18
 
@@ -2045,5 +2045,29 @@ The implementation milestone is substantial but does not complete U-PER-SCALE-00
 ### Current execution interval
 
 - Start: `2026-11-18T08:23:11Z`.
-- End: pending actual closeout timestamp.
-- Elapsed: pending calculation from the recorded timestamp.
+- End: not recorded in that historical closeout.
+- Elapsed: unavailable; not estimated.
+
+
+## Current reassessment under the binding scope — 2026-11-18
+
+The preceding dated “substantial but incomplete” paragraphs are historical checkpoints and are superseded by the final scope review above. Reassessment against the user's binding clarification yields an estimated **95% engineering completion**. No independently implementable acceptance gap was found in this continuation. The estimate leaves room for independent report review and any resulting correction; it does not mark the ACTIVE program accepted or DONE.
+
+| Clarified acceptance area | Current evidence and disposition |
+|---|---|
+| Accepted Save formats and application cutover | Native app-emitted envelope `/2`, graph `/2`, history `/12`, and Arena session `/1` are written for supported progressed sessions; accepted Arena `/10`–`/12` remain strictly readable and legacy sessions retain the `/12` writer. Fresh-process pending/committed HTTP Save/Load and atomic replacement pass. The browser extension click was not verified; this is an automation limitation, not an untested app route. |
+| Snapshot fidelity and supported continuation | Closed 159-type current-state field contract; strict restoration keeps logical IDs, pending/completed state, RNG and future native continuation. Custom Being/Object definitions, Group/ReproductionGroup, observer-specific evidence, projectiles, timed conditions, Choices and multiple Encounters have fresh-process cases. |
+| Committed history and existing readers | Native history captures atomic deltas and meaningful Events/Effects, reconstructs tested existing inspection/query projections on demand, and matches source inspections at tested Action and quiet cuts. No speculative query API or cross-version replay is required. The Group `state_at()` membership-history Save/Load scenario was rechecked in this continuation. |
+| Integrity, publication, and rollback | Strict schema/reference/digest/resource guards, accepted-format checks, pre/post-publication failure tests, preservation of the last complete Save and native transaction rollback are covered in the 188-test affected gate. |
+| Long-run scaling and determinism | A lawful 64-Action and 200-quiet-boundary workload restores and continues in fresh processes at multiple cuts with exact native state, identity, history and RNG comparison. Quiet graph size remains constant; history growth is proportional to recorded committed facts. |
+| Regression and current-version replay | The final affected gate passed **188 tests / 516.416s**; faithful replay plus headless native scenario passed **8 / 13.041s**. The final Group-history plus exact-registry check passed **4 / 3.050s**. These are focused affected suites, not a whole-repository run. |
+
+No persistence rule or external dependency blocks completion. U-PER-SCALE-001 stays the sole ACTIVE program pending ChatGPT's review and acceptance of this report. No push occurred. The previously staged historical archive paths, untracked assignment drafts/saves, and local data remain untouched.
+
+### Current execution interval
+
+- Start: `2026-11-18T09:28:28Z` (captured when resumed; no earlier start was recorded).
+- End: `2026-11-18T09:59:44Z`.
+- Elapsed: `PT31M16S`.
+
+Earlier historical execution notes retain their contemporaneous timestamps. Where an earlier End time was never recorded, it is left explicitly unavailable rather than reconstructed or estimated.
