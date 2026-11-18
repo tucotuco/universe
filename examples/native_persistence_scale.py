@@ -51,7 +51,7 @@ def _being_count(world):
                for value in world.object_registry.object_instances.values())
 
 
-def _verify_history_boundaries(encounter):
+def _verify_history_boundaries(encounter, *, timing=None):
     """Compare reconstructed history with every authoritative native receipt."""
     log = capture_history(encounter)
     history = NativeHistoryQuery(log)
@@ -62,9 +62,20 @@ def _verify_history_boundaries(encounter):
         raise RuntimeError('native receipt boundaries are not contiguous')
     action_prefix = []
     effect_prefix = []
+    timing = timing if timing is not None else {}
+    timing.setdefault('composite_inspection_query_seconds', 0.0)
+    timing.setdefault('native_reference_inspection_seconds', 0.0)
     for boundary, receipt in receipts.items():
         action_prefix.extend(receipt.action_ids)
         effect_prefix.extend(receipt.effect_ids)
+        query_started = time.perf_counter()
+        reconstructed_inspection = history.inspect_committed_at(boundary)
+        timing['composite_inspection_query_seconds'] += (
+            time.perf_counter() - query_started)
+        reference_started = time.perf_counter()
+        source_inspection = encounter.inspect_committed(boundary)
+        timing['native_reference_inspection_seconds'] += (
+            time.perf_counter() - reference_started)
         state = history.state_at(boundary)
         events = history.events_at(boundary)
         cumulative = history.committed_actions_at(boundary)
@@ -89,9 +100,10 @@ def _verify_history_boundaries(encounter):
                 or cumulative['effect_ids'] != [_plain(item) for item in effect_ids]
                 or cumulative['actions'] != _plain(expected_actions)
                 or cumulative['effects'] != _plain(expected_effects)
+                or reconstructed_inspection != _plain(source_inspection)
                 or history.rng_state_at(boundary) != _plain(receipt.rng_state)):
             raise RuntimeError(
-                f'native state/Event/Action/Effect history differs from committed receipt at {boundary}')
+                f'native state/Event/Action/Effect/inspection history differs from committed receipt at {boundary}')
     return log
 
 
@@ -165,7 +177,8 @@ def run(action_count=64, registry_count=2):
         resolved.append(action.id)
     authored_seconds = time.perf_counter() - started
     history_query_started = time.perf_counter()
-    _verify_history_boundaries(encounter)
+    read_timing = {}
+    _verify_history_boundaries(encounter, timing=read_timing)
     history_query_seconds = time.perf_counter() - history_query_started
     export_started = time.perf_counter()
     uncompacted_candidate = capture_checkpoint_candidate(
@@ -267,6 +280,10 @@ def run(action_count=64, registry_count=2):
         'history_bytes': history_bytes,
         'scenario_seconds': round(authored_seconds, 3),
         'history_query_seconds': round(history_query_seconds, 3),
+        'composite_inspection_query_seconds': round(
+            read_timing['composite_inspection_query_seconds'], 3),
+        'native_reference_inspection_seconds': round(
+            read_timing['native_reference_inspection_seconds'], 3),
         'export_seconds': round(export_seconds, 3),
         'fresh_process_load_and_continue_seconds': round(load_continue_seconds, 3),
         'peak_rss_platform_units': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
@@ -305,7 +322,8 @@ def run_quiet(boundary_count=200, registry_count=2):
     encounter.step(boundary_count)
     scenario_seconds = time.perf_counter() - started
     history_query_started = time.perf_counter()
-    _verify_history_boundaries(encounter)
+    read_timing = {}
+    _verify_history_boundaries(encounter, timing=read_timing)
     history_query_seconds = time.perf_counter() - history_query_started
     export_started = time.perf_counter()
     wire = export_save(encounter)
@@ -351,6 +369,10 @@ def run_quiet(boundary_count=200, registry_count=2):
         'graph_bytes': graph_bytes, 'history_bytes': history_bytes,
         'save_bytes': len(wire), 'scenario_seconds': round(scenario_seconds, 3),
         'history_query_seconds': round(history_query_seconds, 3),
+        'composite_inspection_query_seconds': round(
+            read_timing['composite_inspection_query_seconds'], 3),
+        'native_reference_inspection_seconds': round(
+            read_timing['native_reference_inspection_seconds'], 3),
         'export_seconds': round(export_seconds, 3),
         'fresh_process_load_and_continue_seconds': round(load_continue_seconds, 3),
         'fresh_process_matches_uninterrupted_control': True,

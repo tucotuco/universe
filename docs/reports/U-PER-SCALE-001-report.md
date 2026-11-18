@@ -1888,6 +1888,22 @@ Expanded the pending Spot/LocationEvidence fresh-process scenario so it saves wh
 - These test, matrix, TASKS and report changes are pending scoped commit. Prior verification commits through `6790f44` are listed in TASKS; no rule or compatibility decision is needed. General matrix closure and application cutover remain open.
 
 
+## Problems-first — repeated composite inspection revisited old history cuts
+
+The new graph-free `inspect_committed_at()` returned exact projections but its first implementation rebuilt every prior TargetInspection row for each chronological request. The output itself contains cumulative history, but repeated traversal of already processed cuts was unnecessary. Added a per-query in-memory fold of Target histories and Disarm receipts: increasing reads visit only newly crossed logical cuts, reverse reads reset to the history origin, and every returned projection remains detached. This query-only cache does not change the portable schema or production `/12` path.
+
+The shared scale verifier now compares the complete normalized `EncounterInspection` against the authoritative native inspector at every receipt cut, in addition to state, Target, Event/Effect, schedule, objective, recipient, RNG and projectile fields. The 204-boundary quiet-plus-Action regression confirms full inspection parity even for cuts represented by compact quiet spans. The 25-scenario native Action suite reran with the composite query check and passed.
+
+| Scenario | Actions / cuts | Graph bytes | History bytes | Save bytes | Composite history query | Native reference inspection | Other timings | Result |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| Lawful Dagger Feint scale, fresh-process strict continuation | 64 / 129 | 4,859,640 → 978,538 (79.86% reduction) | 1,193,049 | 2,497,916 | 16.526s | 84.261s | simulation 60.436s; export 13.954s; child Load+continue 8.607s; peak RSS 211,337,216 platform units | exact per-cut inspection and same-Encounter continuation pass |
+| Action boundary then 200 quiet intervals, per-cut source comparison | 1 / 204 | not measured | not measured | not measured | combined test 174.285s | included in combined test | setup and both inspections included; no fresh-process Save in this unit case | exact inspection parity at all 204 cuts |
+
+The scale runner's `history_query_seconds` is the complete read-validation envelope, not query-only time; it was 106.568s in the 64-Action run and includes the native reference-inspection loop (84.261s) plus other fact checks. This avoids attributing native-source comparison cost to the history reader. The 25-Action suite passed **25/25 in 126.232s**. After enlarging the quiet-span case from 12 to 204 cuts, the current history/matrix/pending-Spot/legacy-AskAboutPast focused integration gate passed **41/41 in 196.733s**; the 204-cut case separately passed **1/1 in 174.285s**. The earlier 41-test timings (31.094/32.099s) were from before that extension. The isolated query portion of the 64-Action gate took 16.526s versus 84.261s for live native reference inspection, though full reference parity across hundreds of cuts remains a slow verification operation.
+
+Still incomplete: the matrix contains many current persistent families without scenario-level continuation coverage; production `/12` Save/Load cutover, durable history journaling/recovery, full accepted legacy Save migration breadth, and general current-snapshot minimization remain open. This query improvement does not close U-PER-SCALE-001; no rules or external blocker has been identified.
+
+
 ## Problems-first — broad native integration regression after registry coverage
 
 The recent matrix/test increments touched native graph interpretation and added registered nonparticipants; isolated passing cases were not sufficient to establish that the wider migration, privacy, atomicity, and Action continuation portfolio remained intact.

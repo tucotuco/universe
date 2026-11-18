@@ -2932,6 +2932,10 @@ class NativeHistoryQuery:
             self._segment_ends, self._objective_boundary)
         self._objective_subjects = {}
         self._objective_uses = []
+        self._inspection_origin = self._objective_boundary
+        self._inspection_boundary = self._inspection_origin
+        self._inspection_histories = {}
+        self._inspection_landings = []
 
     def _boundary(self, boundary):
         if type(boundary) is not int or not 0 <= boundary <= self._latest:
@@ -3434,72 +3438,69 @@ class NativeHistoryQuery:
                 or type(effects) is not dict):
             raise NativeHistoryRejected("native committed inspection event facts are malformed")
 
-        histories = {}
-        landings = []
-        for row in self._segments:
-            start = row.get("from_boundary", row.get("boundary"))
-            end = row.get("to_boundary", row.get("boundary"))
-            if start > boundary:
-                break
-            if end > boundary:
-                end = boundary
-            cuts = (range(start, end + 1) if row.get("kind") == "quiet_span"
-                    else (end,))
-            for cut in cuts:
-                state = self.state_at(cut)
-                entities = self.entity_context_at(cut)
-                if type(entities) is not dict:
+        if boundary < self._inspection_boundary:
+            self._inspection_boundary = self._inspection_origin
+            self._inspection_histories = {}
+            self._inspection_landings = []
+        initial_boundary = self._inspection_origin
+        for cut in range(self._inspection_boundary + 1, boundary + 1):
+            if cut <= initial_boundary:
+                continue
+            state = self.state_at(cut)
+            entities = self.entity_context_at(cut)
+            if type(entities) is not dict:
+                raise NativeHistoryRejected(
+                    "native committed inspection Entity context is unavailable")
+            target_states = state.get("entities")
+            projectiles = _materialize_plain(state.get("projectile_states"))
+            receipt_facts = self.receipt_facts_at(cut)
+            if receipt_facts is None:
+                raise NativeHistoryRejected(
+                    "native committed inspection receipt facts are unavailable")
+            boundary_landings = _materialize_plain(receipt_facts["disarm_landings"])
+            if (type(target_states) is not dict or type(projectiles) is not dict
+                    or type(boundary_landings) is not tuple
+                    or any(type(item) is not DisarmLandingReceipt
+                           for item in boundary_landings)):
+                raise NativeHistoryRejected(
+                    "native committed inspection Target or receipt facts are malformed")
+            self._inspection_landings.extend(boundary_landings)
+            for target_id, encoded in target_states.items():
+                if (type(encoded) is not dict
+                        or encoded.get("$record") != "action_settlement.TargetCandidate"):
+                    continue
+                target = _materialize_plain(encoded)
+                entity = _materialize_plain(entities.get(target_id))
+                if (type(target) is not TargetCandidate
+                        or target.target_id != target_id
+                        or type(entity) is not EntityInspection):
                     raise NativeHistoryRejected(
-                        "native committed inspection Entity context is unavailable")
-                target_states = state.get("entities")
-                projectiles = _materialize_plain(state.get("projectile_states"))
-                receipt_facts = self.receipt_facts_at(cut)
-                if receipt_facts is None:
+                        "native committed inspection Target identity is malformed")
+                projectile = projectiles.get(target_id)
+                if projectile is not None and type(projectile) is not ProjectileBoundaryState:
                     raise NativeHistoryRejected(
-                        "native committed inspection receipt facts are unavailable")
-                boundary_landings = _materialize_plain(receipt_facts["disarm_landings"])
-                if (type(target_states) is not dict or type(projectiles) is not dict
-                        or type(boundary_landings) is not tuple
-                        or any(type(item) is not DisarmLandingReceipt
-                               for item in boundary_landings)):
-                    raise NativeHistoryRejected(
-                        "native committed inspection Target or receipt facts are malformed")
-                landings.extend(boundary_landings)
-                for target_id, encoded in target_states.items():
-                    if (type(encoded) is not dict
-                            or encoded.get("$record") != "action_settlement.TargetCandidate"):
-                        continue
-                    target = _materialize_plain(encoded)
-                    entity = _materialize_plain(entities.get(target_id))
-                    if (type(target) is not TargetCandidate
-                            or target.target_id != target_id
-                            or type(entity) is not EntityInspection):
-                        raise NativeHistoryRejected(
-                            "native committed inspection Target identity is malformed")
-                    projectile = projectiles.get(target_id)
-                    if projectile is not None and type(projectile) is not ProjectileBoundaryState:
-                        raise NativeHistoryRejected(
-                            "native committed inspection projectile state is malformed")
-                    landing = next((item for item in reversed(boundary_landings)
-                                    if item.target_id == target_id), None)
-                    position = (CartesianPosition(*landing.position) if landing is not None
-                                else projectile.position if projectile is not None
-                                else entity.position)
-                    damage_by_action = {}
-                    for identified in target.incoming:
-                        if type(identified.effect) is DamageEffect:
-                            source_id = identified.identity.source_action_id
-                            components = damage_by_action.setdefault(source_id, {})
-                            component = identified.effect.component
-                            components[component] = components.get(component, 0) + identified.effect.amount
-                    inspection = TargetInspection(
-                        cut, target, position, entity,
-                        MappingProxyType({key: MappingProxyType(value)
-                                          for key, value in damage_by_action.items()}),
-                        (target.starting_hp - min(target.starting_hp, -10)
-                         if target.fatal_effect_ids else 0),
-                        _practice_history(target.practice_state), projectile)
-                    histories.setdefault(target_id, []).append(inspection)
+                        "native committed inspection projectile state is malformed")
+                landing = next((item for item in reversed(boundary_landings)
+                                if item.target_id == target_id), None)
+                position = (CartesianPosition(*landing.position) if landing is not None
+                            else projectile.position if projectile is not None
+                            else entity.position)
+                damage_by_action = {}
+                for identified in target.incoming:
+                    if type(identified.effect) is DamageEffect:
+                        source_id = identified.identity.source_action_id
+                        components = damage_by_action.setdefault(source_id, {})
+                        component = identified.effect.component
+                        components[component] = components.get(component, 0) + identified.effect.amount
+                inspection = TargetInspection(
+                    cut, target, position, entity,
+                    MappingProxyType({key: MappingProxyType(value)
+                                      for key, value in damage_by_action.items()}),
+                    (target.starting_hp - min(target.starting_hp, -10)
+                     if target.fatal_effect_ids else 0),
+                    _practice_history(target.practice_state), projectile)
+                self._inspection_histories.setdefault(target_id, []).append(inspection)
+        self._inspection_boundary = boundary
 
         if boundary == 0:
             events = {"participants": self._log["initial"]["participants"]}
@@ -3614,16 +3615,16 @@ class NativeHistoryQuery:
             raise NativeHistoryRejected(
                 "native committed inspection projection is malformed")
         current_targets = {identity: rows[-1]
-                           for identity, rows in histories.items() if rows}
+                           for identity, rows in self._inspection_histories.items() if rows}
         return self._copy(_plain(EncounterInspection(
             self._log["initial"]["encounter_id"], boundary, self._latest,
             MappingProxyType(actions), MappingProxyType(current_targets),
             MappingProxyType({identity: tuple(rows)
-                              for identity, rows in histories.items()}),
+                              for identity, rows in self._inspection_histories.items()}),
             timeline, MappingProxyType(effects), MappingProxyType(objective),
             objective_uses, recipients, participants,
             _materialize_plain(schedule),
-            disarm_landings=tuple(landings))))
+            disarm_landings=tuple(self._inspection_landings))))
 
     def rng_state_at(self, boundary):
         self._boundary(boundary)

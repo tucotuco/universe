@@ -494,6 +494,11 @@ class NativeHistoryTests(unittest.TestCase):
         detached = query.committed_actions_at(log["latest_boundary"])
         detached["actions"].clear()
         self.assertTrue(query.committed_actions_at(log["latest_boundary"])["actions"])
+        detached_inspection = query.inspect_committed_at(log["latest_boundary"])
+        detached_inspection["fields"]["actions"].clear()
+        self.assertEqual(query.inspect_committed_at(log["latest_boundary"]),
+                         _plain(self.demo["encounter"].inspect_committed(
+                             log["latest_boundary"])))
 
     def test_initial_native_state_and_entity_facts_are_queryable_at_boundary_zero(self):
         expected_state = {
@@ -546,12 +551,12 @@ class NativeHistoryTests(unittest.TestCase):
     def test_scale_verifier_checks_action_and_quiet_span_receipts(self):
         demo = encounter_delta_headless.build_demo(until=4)
         encounter = demo["encounter"]
-        encounter.step(8)
+        encounter.step(200)
         log = native_persistence_scale._verify_history_boundaries(encounter)
-        self.assertEqual(log["latest_boundary"], 12)
+        self.assertEqual(log["latest_boundary"], 204)
         self.assertEqual(sum(row.get("to_boundary", row.get("boundary", 0))
                              - row.get("from_boundary", row.get("boundary", 0)) + 1
-                             for row in log["boundaries"]), 12)
+                             for row in log["boundaries"]), 204)
         class MismatchedReader:
             def __init__(self, _log):
                 pass
@@ -567,6 +572,9 @@ class NativeHistoryTests(unittest.TestCase):
 
             def entity_context_at(self, _boundary):
                 return None
+
+            def inspect_committed_at(self, _boundary):
+                return {}
 
             def rng_state_at(self, _boundary):
                 return None
