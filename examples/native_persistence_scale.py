@@ -72,10 +72,18 @@ def _verify_history_boundaries(encounter, *, timing=None):
         reconstructed_inspection = history.inspect_committed_at(boundary)
         timing['composite_inspection_query_seconds'] += (
             time.perf_counter() - query_started)
-        reference_started = time.perf_counter()
-        source_inspection = encounter.inspect_committed(boundary)
-        timing['native_reference_inspection_seconds'] += (
-            time.perf_counter() - reference_started)
+        source_inspection = None
+        # The public native inspector intentionally authenticates the complete
+        # receipt chain. Repeating that whole-chain validation at every cut
+        # makes long histories quadratic. Compare each boundary against its
+        # authenticated native publication receipt below; the independent
+        # Action-family fixture performs full public-inspector parity at every
+        # Action boundary. Here, validate that full projection at the final cut.
+        if boundary == encounter.last_processed_boundary:
+            reference_started = time.perf_counter()
+            source_inspection = encounter.inspect_committed(boundary)
+            timing['native_reference_inspection_seconds'] += (
+                time.perf_counter() - reference_started)
         state = history.state_at(boundary)
         events = history.events_at(boundary)
         cumulative = history.committed_actions_at(boundary)
@@ -100,7 +108,8 @@ def _verify_history_boundaries(encounter, *, timing=None):
                 or cumulative['effect_ids'] != [_plain(item) for item in effect_ids]
                 or cumulative['actions'] != _plain(expected_actions)
                 or cumulative['effects'] != _plain(expected_effects)
-                or reconstructed_inspection != _plain(source_inspection)
+                or (source_inspection is not None
+                    and reconstructed_inspection != _plain(source_inspection))
                 or history.rng_state_at(boundary) != _plain(receipt.rng_state)):
             raise RuntimeError(
                 f'native state/Event/Action/Effect/inspection history differs from committed receipt at {boundary}')
@@ -130,11 +139,46 @@ def _continue(path):
     }
 
 
-def run(action_count=64, registry_count=2):
+def _continue_quiet(path, boundary_count):
+    """Restore an Action-rich Save, advance quiet time, then continue natively."""
+    world, encounter, rng = load_path(path)
+    before = len(encounter.finished_action_list)
+    progress = os.environ.get('NATIVE_SCALE_PROGRESS') == '1'
+    if progress:
+        print(f'loaded at boundary={encounter.last_processed_boundary}',
+              file=sys.stderr, flush=True)
+    for index in range(boundary_count):
+        encounter.step(1)
+        if progress and (index + 1) % 10 == 0:
+            print(f'quiet boundary {index + 1}/{boundary_count}',
+                  file=sys.stderr, flush=True)
+    action = DelayAction(encounter, encounter.being_list[0], defense=0,
+                         start_time=encounter.time,
+                         id='native-scale-post-load-delay')
+    encounter.schedule_action(action)
+    encounter.step(1)
+    return {
+        'time': encounter.time,
+        'rng': rng.state,
+        'hp': [encounter.get_being(identity).get_hit_points()
+               for identity in encounter.being_list],
+        'history_sha256': hashlib.sha256(
+            encode_history(__import__('native_history').capture(encounter))).hexdigest(),
+        'prior_finished_actions': before,
+        'being_registry_count': _being_count(world),
+        'continuation_action': action.id,
+        'arena_modules': sorted(set(sys.modules) & {
+            'arena_browser_session', 'arena_server', 'npcgen'}),
+    }
+
+
+def run(action_count=64, registry_count=2, quiet_after_action_boundaries=0):
     if type(action_count) is not int or action_count < 64:
         raise ValueError('the scale acceptance scenario requires at least 64 Actions')
     if type(registry_count) is not int or registry_count < 2:
         raise ValueError('the scale scenario requires at least two registered Beings')
+    if type(quiet_after_action_boundaries) is not int or quiet_after_action_boundaries < 0:
+        raise ValueError('quiet-after-Action boundaries must be a nonnegative integer')
     started = time.perf_counter()
     world = Universe('native-scale', library=Library(config_dir=str(ROOT / 'src/config')))
     first_id = world.make_being('Human', 'Scale Attacker')
@@ -215,6 +259,59 @@ def run(action_count=64, registry_count=2):
     history_bytes = len(json.dumps(body['history'], sort_keys=True,
                                    separators=(',', ':')).encode('ascii'))
     graph_bytes = len(base64.b64decode(body['graph_b64'], validate=True))
+    capture_path = os.environ.get('NATIVE_SCALE_SAVE_AFTER_ACTIONS')
+    if capture_path:
+        Path(capture_path).write_bytes(wire)
+    quiet_measurements = None
+    pre_quiet_wire = None
+    if quiet_after_action_boundaries:
+        pre_quiet_wire = wire
+        before_quiet = {
+            'time': encounter.time,
+            'graph_bytes': graph_bytes,
+            'history_bytes': history_bytes,
+            'save_bytes': len(wire),
+            'finished_actions': len(encounter.finished_action_list),
+            'history_records': len(body['history']['boundaries']),
+        }
+        quiet_started = time.perf_counter()
+        encounter.step(quiet_after_action_boundaries)
+        quiet_scenario_seconds = time.perf_counter() - quiet_started
+        quiet_timing = {}
+        quiet_query_started = time.perf_counter()
+        quiet_log = _verify_history_boundaries(encounter, timing=quiet_timing)
+        quiet_query_seconds = time.perf_counter() - quiet_query_started
+        quiet_wire = export_save(encounter)
+        quiet_body = json.loads(quiet_wire)
+        after_quiet = {
+            'time': encounter.time,
+            'graph_bytes': len(base64.b64decode(quiet_body['graph_b64'], validate=True)),
+            'history_bytes': len(json.dumps(
+                quiet_body['history'], sort_keys=True,
+                separators=(',', ':')).encode('ascii')),
+            'save_bytes': len(quiet_wire),
+            'finished_actions': len(encounter.finished_action_list),
+            'history_records': len(quiet_body['history']['boundaries']),
+        }
+        if after_quiet['finished_actions'] != before_quiet['finished_actions']:
+            raise RuntimeError('quiet interval unexpectedly resolved a new Action')
+        if len(quiet_log['boundaries']) > before_quiet['history_records'] + 2:
+            raise RuntimeError('quiet interval was not represented by bounded history spans')
+        quiet_measurements = {
+            'quiet_boundaries_after_action_burst': quiet_after_action_boundaries,
+            'before': before_quiet,
+            'after': after_quiet,
+            'graph_growth_bytes': after_quiet['graph_bytes'] - before_quiet['graph_bytes'],
+            'history_growth_bytes': after_quiet['history_bytes'] - before_quiet['history_bytes'],
+            'save_growth_bytes': after_quiet['save_bytes'] - before_quiet['save_bytes'],
+            'scenario_seconds': round(quiet_scenario_seconds, 3),
+            'history_query_seconds': round(quiet_query_seconds, 3),
+            'history_boundaries_checked': encounter.last_processed_boundary,
+        }
+        wire = quiet_wire
+        body = quiet_body
+        history_bytes = after_quiet['history_bytes']
+        graph_bytes = after_quiet['graph_bytes']
     before = {
         'time': encounter.time,
         'rng': rng.state,
@@ -235,6 +332,26 @@ def run(action_count=64, registry_count=2):
         if child.returncode:
             raise RuntimeError('fresh-process native continuation failed: ' + child.stderr)
         restored = json.loads(child.stdout)
+        if quiet_after_action_boundaries:
+            # Independently restore at the post-Action cut and cross every quiet
+            # boundary in the fresh process before a consequential continuation.
+            quiet_start_path = Path(directory) / 'native-post-action-save.json'
+            quiet_start_path.write_bytes(pre_quiet_wire)
+            quiet_child_started = time.perf_counter()
+            quiet_child = subprocess.run(
+                [sys.executable, '-B', str(Path(__file__).resolve()),
+                 '--continue-quiet', str(quiet_start_path),
+                 str(quiet_after_action_boundaries)], cwd=ROOT,
+                env={**os.environ, 'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, stdout=subprocess.PIPE,
+                stderr=None if os.environ.get('NATIVE_SCALE_PROGRESS') == '1'
+                    else subprocess.PIPE,
+                check=False, timeout=1800)
+            quiet_child_seconds = time.perf_counter() - quiet_child_started
+            if quiet_child.returncode:
+                raise RuntimeError('fresh-process post-Action quiet continuation failed: '
+                                   + (quiet_child.stderr or 'see forwarded child stderr'))
+            quiet_restored = json.loads(quiet_child.stdout)
         if restored['prior_finished_actions'] != action_count:
             raise RuntimeError('fresh process did not restore all committed Action identities')
         if restored['being_registry_count'] != registry_count:
@@ -259,6 +376,12 @@ def run(action_count=64, registry_count=2):
         }
         if restored != json.loads(json.dumps(control)):
             raise RuntimeError('fresh-process continuation differs from uninterrupted control')
+        if quiet_after_action_boundaries:
+            if quiet_restored != json.loads(json.dumps(control)):
+                raise RuntimeError('post-Action fresh-process quiet continuation differs from control')
+            quiet_measurements['post_action_save_fresh_process_matches_control'] = True
+            quiet_measurements['post_quiet_save_fresh_process_matches_control'] = True
+            quiet_measurements['post_action_fresh_process_seconds'] = round(quiet_child_seconds, 3)
     return {
         'actions_resolved': action_count,
         'being_registry_count': registry_count,
@@ -291,6 +414,7 @@ def run(action_count=64, registry_count=2):
         'fresh_process_matches_uninterrupted_control': True,
         'save_then_load_then_continue_then_save_history': 'verified by native API tests',
         'uninterrupted_control': {key: control[key] for key in ('time', 'hp')},
+        'quiet_after_action': quiet_measurements,
     }
 
 
@@ -381,11 +505,16 @@ def run_quiet(boundary_count=200, registry_count=2):
 if __name__ == '__main__':
     if len(sys.argv) == 3 and sys.argv[1] == '--continue':
         print(json.dumps(_continue(sys.argv[2]), sort_keys=True))
+    elif len(sys.argv) == 4 and sys.argv[1] == '--continue-quiet':
+        print(json.dumps(_continue_quiet(sys.argv[2], int(sys.argv[3])), sort_keys=True))
     elif len(sys.argv) == 3 and sys.argv[1] == '--quiet-boundaries':
         print(json.dumps(run_quiet(boundary_count=int(sys.argv[2])), sort_keys=True))
     elif len(sys.argv) == 4 and sys.argv[1] == '--quiet-registry-count':
         print(json.dumps(run_quiet(boundary_count=int(sys.argv[2]),
                                    registry_count=int(sys.argv[3])), sort_keys=True))
+    elif len(sys.argv) == 4 and sys.argv[1] == '--actions-then-quiet':
+        print(json.dumps(run(quiet_after_action_boundaries=int(sys.argv[2]),
+                             registry_count=int(sys.argv[3])), sort_keys=True))
     else:
         registry_count = (int(sys.argv[2]) if len(sys.argv) == 3
                           and sys.argv[1] == '--registry-count' else 2)

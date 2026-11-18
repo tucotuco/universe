@@ -405,14 +405,19 @@ def _apply(state, changes):
 
 def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
     meta = receipt.inspection
-    timeline = next((row for row in latest_view.timeline if row.boundary == receipt.boundary), None)
-    if timeline is None:
-        raise NativeHistoryRejected("native boundary receipt is missing from inspection timeline")
-    actions = {action_id: latest_view.actions[action_id]
-               for action_id in timeline.action_ids}
-    effects = {effect_id: latest_view.effects[effect_id]
-               for effect_id in timeline.effect_ids}
-    targets = targets_by_boundary.get(receipt.boundary, {})
+    if latest_view is None:
+        actions, effects, targets = _project_authenticated_boundary(encounter, receipt)
+    else:
+        timeline = next((row for row in latest_view.timeline
+                         if row.boundary == receipt.boundary), None)
+        if timeline is None:
+            raise NativeHistoryRejected(
+                "native boundary receipt is missing from inspection timeline")
+        actions = {action_id: latest_view.actions[action_id]
+                   for action_id in timeline.action_ids}
+        effects = {effect_id: latest_view.effects[effect_id]
+                   for effect_id in timeline.effect_ids}
+        targets = targets_by_boundary.get(receipt.boundary, {})
     landing_rows = tuple(row for row in encounter.__dict__.get(
         "_disarm_landing_receipts", ()) if row.boundary == receipt.boundary)
     return {
@@ -436,6 +441,120 @@ def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
         "projectile_states": _plain(meta.projectile_states),
         "rng_after": _plain(receipt.rng_state),
     }
+
+
+def _project_authenticated_boundary(encounter, receipt):
+    """Project only a newly published, authenticated receipt for the recorder.
+
+    The public inspector deliberately reauthenticates the complete receipt and
+    Target chain. Calling it once for every empty time boundary made resumed
+    quiet history O(boundaries × prior receipts). The recorder has already
+    validated its prior immutable log, and publication issues a fingerprinted
+    receipt for this exact boundary. Validate that new receipt's Action and
+    Target anchors locally, then append its facts without rescanning history.
+    Full-chain verification still runs on Save/Load and public inspection.
+    """
+    import atomic_publication
+    from action_settlement import TargetCandidate
+    from action_evaluation import (DamageEffect, DropObjectEffect, FatalEffect,
+                                   PickupEffect, ProjectileReleaseEffect, freeze)
+    from atomic_publication import TargetIntervalRecord
+    from encounter_inspection import ActionInspection, fingerprint
+    from observer_proposals import LifecycleEffect
+    from interval_staging import _ACTIONS
+
+    issued = atomic_publication._COMMITTED_RECEIPTS.get(id(receipt))
+    if (issued is None or issued[0]() is not receipt
+            or issued[1]() is not encounter
+            or issued[2] != fingerprint(receipt)):
+        raise NativeHistoryRejected("new native boundary receipt is not authenticated")
+    meta = receipt.inspection
+    from encounter_inspection import CommittedBoundaryRecord
+    if (type(meta) is not CommittedBoundaryRecord
+            or receipt.encounter_id != encounter.id
+            or receipt.boundary != encounter.last_processed_boundary
+            or encounter.time != receipt.boundary
+            or tuple(meta.actions) != tuple(receipt.action_ids)
+            or tuple(meta.effects) != tuple(receipt.effect_ids)):
+        raise NativeHistoryRejected("new native boundary metadata is inconsistent")
+
+    objects = encounter.universe.object_registry.object_instances
+    actions = {}
+    for action_id, (declaration, facts) in meta.actions.items():
+        action = encounter.universe.event_history.get(action_id)
+        if (type(action) not in _ACTIONS
+                or id(action) != meta.action_anchors.get(action_id)):
+            raise NativeHistoryRejected("new native Action identity differs from its receipt")
+        data = object.__getattribute__(action, "__dict__")
+        own = tuple(row for row in meta.effects.values()
+                    if row.identity.source_action_id == action_id)
+        lifecycle = tuple(row.effect for row in own
+                          if type(row.effect) is LifecycleEffect)
+        if (data.get("id") != action_id or data.get("resolution") != facts
+                or tuple(data.get("_atomic_effect_ids", ()))
+                    != tuple(row.identity for row in own)
+                or len(lifecycle) != 1
+                or data.get("_atomic_lifecycle") != lifecycle[0]
+                or declaration.id != action_id
+                or declaration.actor_id != data.get("actor_id")
+                or declaration.target_id != data.get("target_id")
+                or declaration.instrument_id != data.get("instrument_id")
+                or declaration.start != data.get("start_time")
+                or declaration.nominal_end != data.get("end_time")):
+            raise NativeHistoryRejected("new native Action facts differ from its receipt")
+        damage = {}
+        for row in own:
+            if type(row.effect) is DamageEffect:
+                target = damage.setdefault(row.effect.target_id, {})
+                target[row.effect.component] = (
+                    target.get(row.effect.component, 0) + row.effect.amount)
+        actions[action_id] = ActionInspection(
+            declaration, facts, own, freeze(damage),
+            tuple(row.effect.target_id for row in own
+                  if type(row.effect) is FatalEffect), lifecycle[0])
+
+    targets = {}
+    authorized_spatial_ids = set()
+    for row in meta.effects.values():
+        effect = row.effect
+        if type(effect) is PickupEffect:
+            authorized_spatial_ids.add(effect.object_id)
+        elif type(effect) in (DropObjectEffect, ProjectileReleaseEffect):
+            authorized_spatial_ids.add(effect.target_id)
+    authorized_spatial_ids.update(
+        row.target_id for row in encounter.__dict__.get(
+            "_disarm_landing_receipts", ())
+        if row.boundary == receipt.boundary)
+    for target_id, anchor in meta.target_anchors.items():
+        obj = objects.get(target_id)
+        if (obj is None or obj.id != target_id or id(obj) != anchor[0]
+                or id(obj.current) != anchor[1]
+                or (id(obj.spatial_state) != anchor[2]
+                    and target_id not in authorized_spatial_ids)):
+            raise NativeHistoryRejected("new native Target owner differs from its receipt")
+        storage = object.__getattribute__(obj, "__dict__").get(
+            "_atomic_target_history")
+        if type(storage) is not list:
+            raise NativeHistoryRejected("new native Target history is unavailable")
+        row = next((candidate for candidate in reversed(storage)
+                    if type(candidate) is TargetIntervalRecord
+                    and candidate.encounter_id == encounter.id
+                    and candidate.boundary == receipt.boundary), None)
+        if (row is None or id(row) != anchor[4]
+                or fingerprint(row) != anchor[5]
+                or type(row.state) is not TargetCandidate
+                or row.state.target_id != target_id
+                or any(item.identity not in meta.effects
+                       or item != meta.effects[item.identity]
+                       for item in row.state.incoming)
+                or any(identity not in meta.effects
+                       for identity in row.state.outgoing_effect_ids)):
+            raise NativeHistoryRejected("new native Target facts differ from its receipt")
+        targets[target_id] = row.state
+    effects = dict(meta.effects)
+    if set(effects) != set(receipt.effect_ids):
+        raise NativeHistoryRejected("new native Effects differ from the committed receipt")
+    return actions, effects, targets
 
 
 def initial_entities_from_snapshot(encounter, snapshot):
@@ -1903,6 +2022,18 @@ def _append_compact_row(boundaries, row):
 
 
 def append_committed(log, encounter):
+    """Strict public append; authenticate the complete source history."""
+    return _append_committed(log, encounter, recorder_owned=False)
+
+
+def _append_committed_from_recorder(log, encounter, cache):
+    """Append using the recorder's validated prefix and new issued receipt."""
+    import atomic_publication
+    with atomic_publication.coordinated_access(encounter.universe):
+        return _append_committed(log, encounter, recorder_owned=True, cache=cache)
+
+
+def _append_committed(log, encounter, *, recorder_owned, cache=None):
     """Return a new history log with exactly the next authenticated commit.
 
     The caller invokes this only after ordinary native publication returns.
@@ -1910,7 +2041,11 @@ def append_committed(log, encounter):
     appended. One receipt is one atomic boundary, including a simultaneous
     multi-Action batch. The input log is never modified on refusal.
     """
-    validate(log)
+    if recorder_owned:
+        if log.get("schema") != SCHEMA or type(cache) is not dict:
+            raise NativeHistoryRejected("recorder prefix or append cache is unavailable")
+    else:
+        validate(log)
     from encounter import Encounter
     import atomic_publication
     from encounter_inspection import fingerprint
@@ -1934,14 +2069,23 @@ def append_committed(log, encounter):
             or issued[2] != fingerprint(receipt)):
         raise NativeHistoryRejected("native boundary receipt is not authenticated")
 
-    # inspect_committed validates the complete receipt chain and obtains the
-    # authoritative, detached historical read model after publication.
-    view = encounter.inspect_committed(receipt=receipt)
-    targets = _target_candidates(encounter).get(expected, {})
-    payload = _boundary_payload(encounter, receipt, view, {expected: targets})
-    log = upgrade(log)
-    previous = state_at(log, log["latest_boundary"])
-    previous_rng = rng_state_at(log, log["latest_boundary"])
+    if recorder_owned:
+        # The recorder prefix was validated on attach/restore and each prior
+        # append. Validate the exact newly issued publication row and its
+        # Action/Target anchors; do not re-scan every prior native receipt.
+        payload = _boundary_payload(encounter, receipt, None, {})
+    else:
+        # Standalone callers receive the full public-inspector validation.
+        view = encounter.inspect_committed(receipt=receipt)
+        targets = _target_candidates(encounter).get(expected, {})
+        payload = _boundary_payload(encounter, receipt, view, {expected: targets})
+    if recorder_owned:
+        previous = cache["state"]
+        previous_rng = cache["rng"]
+    else:
+        log = upgrade(log)
+        previous = state_at(log, log["latest_boundary"])
+        previous_rng = rng_state_at(log, log["latest_boundary"])
     payload["recipients"] = _merge_recipient_rows(
         previous["recipients"], payload["recipients"])
     state = {
@@ -1977,7 +2121,8 @@ def append_committed(log, encounter):
         log["receipt_facts_complete"] and row["receipt_facts_available"])
     entity_context = json.loads(_canonical(log["entity_context"]).decode("ascii"))
     if entity_context["available"]:
-        prior_context = entity_context_at(log, log["latest_boundary"])
+        prior_context = (cache["entity_context"] if recorder_owned else
+                         entity_context_at(log, log["latest_boundary"]))
         if prior_context != payload["entity_context"]:
             changes = _diff(prior_context, payload["entity_context"])
             entity_context["changes"].append({
@@ -2008,7 +2153,13 @@ def append_committed(log, encounter):
         body["observer_knowledge"] = knowledge
     _measure(body)
     result = _seal(body)
-    validate(result)
+    if recorder_owned:
+        cache["state"] = state
+        cache["rng"] = payload["rng_after"]
+        cache["entity_context"] = payload["entity_context"]
+        cache["observer_knowledge"] = body["observer_knowledge"]
+    else:
+        validate(result)
     return result
 
 
@@ -2030,11 +2181,31 @@ def capture_legacy_entity_anchor(encounter, *, initial_schedule=None,
 class NativeHistoryRecorder:
     """Opt-in in-memory recorder fed only after successful native publication."""
 
-    def __init__(self, encounter, log, *, initial_schedule=None):
+    def __init__(self, encounter, log, *, initial_schedule=None,
+                 full_chain_append=False):
         self._encounter_ref = weakref(encounter)
         self._log = log
         self._initial_schedule = initial_schedule
         self.failure = None
+        self._full_chain_append = bool(full_chain_append)
+        self._append_cache = None
+        self._log_digest = None
+        if log is not None:
+            self._initialize_append_cache(log)
+
+    def _initialize_append_cache(self, log):
+        query = NativeHistoryQuery(log)
+        boundary = query._latest
+        self._append_cache = {
+            # Keep the exact internal delta anchor. Public queries intentionally
+            # return None for legacy-unavailable initial scheduler facts, but
+            # append validation must retain the authenticated legacy anchor.
+            "state": state_at(log, boundary),
+            "rng": rng_state_at(log, boundary),
+            "entity_context": query.entity_context_at(boundary),
+            "observer_knowledge": log["observer_knowledge"],
+        }
+        self._log_digest = hashlib.sha256(_canonical(log)).digest()
 
     @property
     def encounter(self):
@@ -2060,12 +2231,15 @@ class NativeHistoryRecorder:
             recorder = _RECORDERS.get(encounter)
             if recorder is None:
                 candidate = capture(encounter) if log is None else upgrade(log)
+                needs_full_chain = (log is not None
+                                    and log.get("schema") != SCHEMA)
                 if (candidate["initial"]["encounter_id"] != encounter.id
                         or candidate["initial"]["universe_id"] != encounter.universe.id
                         or candidate["latest_boundary"] != encounter.last_processed_boundary):
                     raise NativeHistoryRejected(
                         "native history does not match the completed Save cut")
-                recorder = cls(encounter, candidate)
+                recorder = cls(encounter, candidate,
+                               full_chain_append=needs_full_chain)
                 _RECORDERS[encounter] = recorder
                 _remember_record_initial_schedule(encounter, candidate)
                 _remember_record_initial_entities(encounter, candidate)
@@ -2101,6 +2275,7 @@ class NativeHistoryRecorder:
     @classmethod
     def restore(cls, encounter, log, *, current_history=None):
         """Resume recording from an authenticated Save history after Load."""
+        needs_full_chain = (type(log) is dict and log.get("schema") != SCHEMA)
         log = upgrade(log)
         actual_history = (encode(capture(encounter)) if current_history is None
                           else current_history)
@@ -2114,7 +2289,8 @@ class NativeHistoryRecorder:
             if encounter in _RECORDERS:
                 raise NativeHistoryRejected(
                     'a native history recorder is already attached')
-            recorder = cls(encounter, decode(encode(log)))
+            recorder = cls(encounter, decode(encode(log)),
+                           full_chain_append=needs_full_chain)
             _RECORDERS[encounter] = recorder
             _remember_record_initial_schedule(encounter, log)
             _remember_record_initial_entities(encounter, log)
@@ -2178,12 +2354,43 @@ def record_committed_boundary(encounter, *, initial_schedule=None,
             with _RECORDER_LOCK:
                 _INITIAL_ENTITIES.setdefault(encounter, initial_entities)
                 initial_entities = _INITIAL_ENTITIES.get(encounter)
-        updated = (capture(encounter, initial_schedule=baseline,
-                           initial_entities=initial_entities)
-                   if recorder._log is None
-                   else append_committed(recorder._log, encounter))
+        if recorder._log is None:
+            updated = capture(encounter, initial_schedule=baseline,
+                              initial_entities=initial_entities)
+            recorder._initialize_append_cache(updated)
+        else:
+            current_digest = hashlib.sha256(_canonical(recorder._log)).digest()
+            if current_digest != recorder._log_digest:
+                raise NativeHistoryRejected(
+                    "native history recorder prefix changed outside its append API")
+            if recorder._full_chain_append:
+                updated = append_committed(recorder._log, encounter)
+                next_cache = None
+            else:
+                cache = dict(recorder._append_cache)
+                updated = _append_committed_from_recorder(
+                    recorder._log, encounter, cache)
+                next_cache = cache
+            # Periodic full validation bounds the interval during which an
+            # internal construction defect could remain latent. Every Action
+            # boundary and each 32nd quiet boundary is checked; Save/export
+            # always validates the complete history before publication.
+            expected = updated["latest_boundary"]
+            if (not recorder._full_chain_append and
+                    (encounter.__dict__["_atomic_interval_history"][-1].action_ids
+                     or expected % 32 == 0)):
+                validate(updated)
+            if recorder._full_chain_append:
+                recorder._initialize_append_cache(updated)
+                recorder._full_chain_append = False
+            else:
+                recorder._append_cache = next_cache
+            recorder._log = updated
+            recorder._log_digest = hashlib.sha256(_canonical(updated)).digest()
         with _RECORDER_LOCK:
             recorder._log = updated
+            if recorder._log_digest is None:
+                recorder._log_digest = hashlib.sha256(_canonical(updated)).digest()
             recorder._initial_schedule = None
             _remember_record_initial_schedule(encounter, updated)
     except Exception as exc:
@@ -2245,6 +2452,7 @@ def record_committed_disarm_landing(encounter):
         validate(updated)
         with _RECORDER_LOCK:
             recorder._log = updated
+            recorder._initialize_append_cache(updated)
             _remember_record_initial_schedule(encounter, updated)
     except Exception as exc:
         # The no-time publication has already committed.  Match interval

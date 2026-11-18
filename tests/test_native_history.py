@@ -910,7 +910,12 @@ class NativeHistoryTests(unittest.TestCase):
                              start_time=encounter.time, id='append-after-quiet-span')
         encounter.schedule_action(action)
         encounter.step(1)
+        from native_history import (NativeHistoryRecorder,
+                                    _append_committed_from_recorder)
         appended = append_committed(quiet_appended, encounter)
+        recorder = NativeHistoryRecorder(encounter, quiet_appended)
+        self.assertEqual(_append_committed_from_recorder(
+            quiet_appended, encounter, recorder._append_cache), appended)
         self.assertEqual(appended['latest_boundary'], encounter.last_processed_boundary)
         self.assertEqual(events_at(appended, appended['latest_boundary'])['action_ids'],
                          [action.id])
@@ -1142,6 +1147,22 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(recorder.latest_boundary, 5)
         self.assertEqual(events_at(log, 5)["action_ids"], [action.id])
         self.assertEqual(log, capture(encounter))
+
+    def test_recorder_refuses_a_mutated_cached_prefix_before_incremental_append(self):
+        demo = encounter_delta_headless.build_demo(until=4)
+        encounter = demo["encounter"]
+        recorder = NativeHistoryRecorder.attach(encounter)
+        recorder._log["initial"]["universe_id"] = "forged-prefix"
+        from activities import DelayAction
+        encounter.schedule_action(DelayAction(
+            encounter, encounter.being_list[1], defense=0,
+            start_time=4, id="mutated-recorder-prefix-delay"))
+        encounter.step(1)
+        self.assertEqual(recorder.latest_boundary, 4)
+        self.assertIn("prefix changed outside its append API", recorder.failure)
+        with self.assertRaisesRegex(NativeHistoryRejected,
+                                    "native history recorder failed"):
+            recorder.export()
 
     def test_two_observers_keep_distinct_group_evidence_in_native_history(self):
         # This is a current native observation Action, not a fabricated
