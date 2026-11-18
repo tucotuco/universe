@@ -2161,7 +2161,8 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         }
         query = native_history.NativeHistoryQuery(
             native_history.current_recording(encounter))
-        self.assertIsNone(query.skill_use_history_at(actor.id, 0))
+        self.assertEqual(query.skill_use_history_at(actor.id, 0),
+                         uses_at_boundary_1)
         expected_uses = {1: uses_at_boundary_1, 2: uses_at_boundary_2,
                          3: uses_at_boundary_3}
         versions = {}
@@ -2192,6 +2193,8 @@ world,encounter,rng=load_path(sys.argv[1])
 action=world.event_history['native-run-pending-continuation']
 actor=world.get_object_by_id(action.actor_id)
 assert actor.physiology_id == 'native-human@1'
+initial_query=native_history.NativeHistoryQuery(native_history.current_recording(encounter))
+assert initial_query.skill_use_history_at(actor.id,0) == tuple(actor.skill_use_history)
 assert encounter.last_fatigue_frame.view(actor.id).to_dict() == json.loads(sys.argv[2])
 saved_versions=json.loads(sys.argv[3])
 assert {mode:encounter.last_fatigue_frame.physiology(actor.id,mode=mode).version_hash

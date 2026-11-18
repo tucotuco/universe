@@ -3042,21 +3042,40 @@ class NativeHistoryQuery:
         self._boundary(boundary)
         if type(being_id) is not str or not being_id:
             raise NativeHistoryRejected("skill-use history requires a stable Being identity")
-        if boundary == 0:
-            return None
-        target = self.target_at(being_id, boundary)
+        initial_boundary = math.floor(
+            _number_value(self._log["initial"]["start"]))
+        if boundary == initial_boundary:
+            first_commit = initial_boundary + 1
+            if self._latest < first_commit:
+                return None
+            # The first committed candidate carries the immutable pre-action
+            # practice input. It is the exact initial use list, even when the
+            # first Action also records new practice at that boundary.
+            state = self.state_at(first_commit)
+            entities = state.get("entities")
+            target = entities.get(being_id) if type(entities) is dict else None
+        else:
+            target = self.target_at(being_id, boundary)
         fields_value = target.get("fields") if type(target) is dict else None
         if (type(fields_value) is not dict
                 or fields_value.get("category") != "being"):
-            raise NativeHistoryRejected("skill-use history owner is not a committed Being Target")
+            if boundary == initial_boundary:
+                return None
+            raise NativeHistoryRejected(
+                "skill-use history owner is not a committed Being Target")
         encoded = fields_value.get("practice_state")
         if encoded is None:
-            raise NativeHistoryRejected("committed Being Target has no practice projection")
+            if boundary == initial_boundary:
+                return None
+            raise NativeHistoryRejected(
+                "committed Being Target has no practice projection")
         practice = _materialize_plain(encoded)
         from frozen_practice import PracticeProjection
         if (type(practice) is not PracticeProjection
                 or practice.being_id != being_id):
             raise NativeHistoryRejected("committed Being practice projection has a foreign owner")
+        if boundary == initial_boundary:
+            return tuple(practice.prior_uses)
         from encounter_inspection import _practice_history
         return tuple(_practice_history(practice))
 
