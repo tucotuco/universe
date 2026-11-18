@@ -3377,6 +3377,67 @@ print(json.dumps({'times':[r[0].time for r in rows],
             for index, ledger in enumerate(ledgers))
         wire = export_save(encounter, recipient_bindings=bindings)
         action_ids = [action.id for action in actions]
+        # The preceding descriptor version did not include the pinned origin.
+        # Its strict reader recovers that origin from the saved Action refs,
+        # including when a later earlier-sorting declaration reuses a ledger.
+        import native_graph_snapshot
+        legacy_payload = json.loads(wire)
+        legacy_inventory = native_graph_snapshot.decode(
+            base64.b64decode(legacy_payload['graph_b64']), native=True)
+        compatibility, inventory_body = legacy_inventory
+        legacy_sections = []
+        for section in inventory_body[1:]:
+            if section[0] == 'native-adapters':
+                markers = tuple('observer-recipient-facts/1'
+                    if marker == 'observer-recipient-facts/2' else marker
+                    for marker in section[1:])
+                section = (section[0], *markers)
+            elif section[0] == 'host-bindings':
+                section = (section[0], tuple(row[:6] for row in section[1]))
+            legacy_sections.append(section)
+        legacy_inventory = (compatibility,
+                            (inventory_body[0], *legacy_sections))
+        legacy_payload['graph_b64'] = base64.b64encode(
+            native_graph_snapshot.encode(legacy_inventory, native=True)
+        ).decode('ascii')
+        legacy_unsigned = {key: value for key, value in legacy_payload.items()
+                           if key != 'sha256'}
+        legacy_payload['sha256'] = hashlib.sha256(
+            native_persistence._canonical(legacy_unsigned)).hexdigest()
+        migrated_world, migrated_encounter, _migrated_rng = load_save(
+            native_persistence._canonical(legacy_payload))
+        migrated_actions = [migrated_world.get_event_by_id(identity)
+                            for identity in action_ids]
+        self.assertIsNot(migrated_actions[0].ledger, migrated_actions[1].ledger)
+        self.assertEqual(migrated_encounter.id, encounter.id)
+        # Re-seal the container after substituting a well-formed, unique but
+        # false stable identity. Strict graph decode must derive it again from
+        # the saved Action references instead of trusting the descriptor.
+        payload = json.loads(wire)
+        inventory = native_graph_snapshot.decode(
+            base64.b64decode(payload['graph_b64']), native=True)
+        compatibility, inventory_body = inventory
+        sections = []
+        for section in inventory_body[1:]:
+            if section[0] == 'host-bindings':
+                descriptors = list(section[1])
+                descriptor = descriptors[0]
+                descriptors[0] = (*descriptor[:5], 'f' * 64, descriptor[6])
+                section = (section[0], tuple(descriptors))
+            sections.append(section)
+        forged_inventory = (compatibility,
+                            (inventory_body[0], *sections))
+        payload['graph_b64'] = base64.b64encode(
+            native_graph_snapshot.encode(forged_inventory, native=True)
+        ).decode('ascii')
+        unsigned = {key: value for key, value in payload.items()
+                    if key != 'sha256'}
+        payload['sha256'] = hashlib.sha256(
+            native_persistence._canonical(unsigned)).hexdigest()
+        with self.assertRaisesRegex(
+                NativeSaveRejected,
+                'Action references'):
+            load_save(native_persistence._canonical(payload))
         encounter.schedule_action(DelayAction(encounter, actor_id, defense=0,
             start_time=2, id='native-same-owner-continuation'))
         encounter.step(1)
@@ -3473,7 +3534,7 @@ print(json.dumps({'time':enc.time,'rng':rng_owner_for(enc).state,
         markers = next(row[1:] for row in graph[1]
                        if row[0] == "native-adapters")
         self.assertIn("committed-receipt-facts/1", markers)
-        self.assertIn("observer-recipient-facts/1", markers)
+        self.assertIn("observer-recipient-facts/2", markers)
         self.assertIn("published-interval-facts/1", markers)
         self.assertIn("committed-boundary-history/1", markers)
         for encounter,*_ in rows:

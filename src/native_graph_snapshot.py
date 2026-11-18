@@ -607,7 +607,8 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
         markers=sections['native-adapters']
         marker_order=('native-closure-recipes/1','target-candidate-history/1',
             'entity-context-history/1','committed-receipt-facts/1',
-            'observer-recipient-facts/1','published-interval-facts/1',
+            'observer-recipient-facts/1','observer-recipient-facts/2',
+            'published-interval-facts/1',
             'disarm-landing-facts/1','committed-boundary-history/1')
         _need(type(markers) is tuple and markers
               and len(set(markers))==len(markers)
@@ -617,9 +618,15 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
               'native adapter recipe version differs')
         _need(markers[0]=='native-closure-recipes/1',
               'native adapter recipe root is missing')
+        _need(not {'observer-recipient-facts/1',
+                   'observer-recipient-facts/2'} <= set(markers),
+              'native recipient fact recipe versions conflict')
         _validate_host_binding_descriptors(
             sections['host-bindings'],
-            require_binding_ids='observer-recipient-facts/1' in
+            require_binding_ids=bool({'observer-recipient-facts/1',
+                                      'observer-recipient-facts/2'}
+                                     & set(sections['native-adapters'])),
+            require_binding_origins='observer-recipient-facts/2' in
                 sections['native-adapters'])
     _need(sections['readiness'] == (False, False, False), 'unsupported inventory readiness claim')
     _need(sections['rng'][:2] == ('caller_cursor', 'exclusive_encounter'),
@@ -654,7 +661,8 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
     _walk_refs(envelope, refs)
 
 
-def _validate_host_binding_descriptors(section, *, require_binding_ids=False):
+def _validate_host_binding_descriptors(section, *, require_binding_ids=False,
+                                       require_binding_origins=False):
     _need(type(section) is tuple and len(section) == 1
           and type(section[0]) is tuple,
           'native host bindings are malformed')
@@ -664,8 +672,9 @@ def _validate_host_binding_descriptors(section, *, require_binding_ids=False):
     roles = {'in_world_belief_ledger', 'in_world_received_accounts',
              'observer_location_evidence', 'observer_object_evidence'}
     for row in section[0]:
-        _need(type(row) is tuple and len(row) in ((6,) if require_binding_ids
-                                                   else (5, 6)),
+        allowed_lengths = ((7,) if require_binding_origins else
+                           (6,) if require_binding_ids else (5, 6, 7))
+        _need(type(row) is tuple and len(row) in allowed_lengths,
               'native host binding row is malformed')
         namespace, name, role, observers, reference = row[:5]
         _need(type(namespace) is str and namespace.strip()
@@ -696,6 +705,23 @@ def _validate_host_binding_descriptors(section, *, require_binding_ids=False):
                   'native host recipient reference has conflicting binding identities')
             binding_references[identity_key] = reference
             reference_bindings[reference_key] = identity_key
+        if len(row) == 7:
+            binding_id, origin = row[5:]
+            _need(type(origin) is tuple and len(origin) == 2
+                  and type(origin[0]) is str and bool(origin[0])
+                  and type(origin[1]) is str and bool(origin[1])
+                  and type(binding_id) is str and len(binding_id) == 64
+                  and all(char in '0123456789abcdef' for char in binding_id),
+                  'native host binding origin is malformed')
+            identity_key = (role, binding_id)
+            prior_reference = binding_references.get(identity_key)
+            _need(prior_reference is None or prior_reference == reference,
+                  'native host binding identity aliases distinct recipient references')
+            prior_identity = reference_bindings.get(reference)
+            _need(prior_identity is None or prior_identity == identity_key,
+                  'native host recipient reference has conflicting binding identities')
+            binding_references[identity_key] = reference
+            reference_bindings[reference] = identity_key
         seen.add((namespace, name))
 
 
@@ -792,8 +818,9 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'entity-context-history/1' in native_adapter_markers)
     compact_receipt_facts = (native and
         'committed-receipt-facts/1' in native_adapter_markers)
-    compact_recipient_facts = (native and
-        'observer-recipient-facts/1' in native_adapter_markers)
+    compact_recipient_facts = (native and bool(
+        {'observer-recipient-facts/1', 'observer-recipient-facts/2'}
+        & set(native_adapter_markers)))
     compact_publication_facts = (native and
         'published-interval-facts/1' in native_adapter_markers)
     compact_disarm_landings = (native and
@@ -1054,7 +1081,7 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
                     reconstruct_recipients=compact_recipient_facts,
                     recipient_bindings=tuple(
                         ((role,observer_ids,cache[reference[1]],descriptor[5])
-                         if len(descriptor)==6 else
+                         if len(descriptor)>=6 else
                          (role,observer_ids,cache[reference[1]]))
                         for descriptor in sections['host-bindings'][0]
                         for role,observer_ids,reference in (descriptor[2:5],)))
@@ -1269,7 +1296,6 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     recipient_by_name = {}
     for descriptor in bindings:
         namespace, name, role, observer_ids, reference = descriptor[:5]
-        saved_binding_id = descriptor[5] if len(descriptor) == 6 else None
         if role != 'in_world_received_accounts':
             continue
         recipient = cache.get(reference[1])
@@ -1332,7 +1358,7 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     recipient_tokens = {}
     for descriptor in bindings:
         namespace, name, role, observer_ids, reference = descriptor[:5]
-        saved_binding_id = descriptor[5] if len(descriptor) == 6 else None
+        saved_binding_id = descriptor[5] if len(descriptor) >= 6 else None
         key = reference[1]
         recipient = cache.get(key)
         _need(recipient is not None and (namespace, name) not in names,
@@ -1392,9 +1418,17 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
             _need(False, 'native host recipient role is unsupported')
         recipients[id(recipient)] = role
         if saved_binding_id is not None:
-            from native_history import _register_recipient_binding
+            from native_history import (_find_recipient_binding_origin,
+                _register_recipient_binding, _validate_recipient_binding_origin)
+            saved_origin = descriptor[6] if len(descriptor) == 7 else None
+            if saved_origin is None:
+                saved_origin = _find_recipient_binding_origin(
+                    world, role, id(recipient), saved_binding_id)
+            else:
+                _validate_recipient_binding_origin(
+                    world, role, id(recipient), saved_binding_id, saved_origin)
             _register_recipient_binding(
-                world, role, recipient, saved_binding_id)
+                world, role, recipient, saved_binding_id, saved_origin)
         from checkpoint_adapters import RecipientBinding, _portable_recipient_token
         token = _portable_recipient_token(RecipientBinding(
             world, namespace, name, role, observer_ids, recipient))

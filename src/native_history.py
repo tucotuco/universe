@@ -623,52 +623,42 @@ def capture_initial_schedule(encounter):
     return _plain(projection)
 
 
-def _register_recipient_binding(world, role, handle, binding_id):
+_RECIPIENT_ACTION_FIELDS = {
+    "in_world_belief_ledger": ("ledger",),
+    "in_world_received_accounts": ("received_accounts",),
+    "observer_location_evidence": ("location_ledger",),
+    "observer_object_evidence": ("object_ledger",),
+}
+
+
+def _register_recipient_binding(world, role, handle, binding_id, origin):
     if (type(binding_id) is not str or len(binding_id) != 64
             or any(char not in "0123456789abcdef" for char in binding_id)):
         raise NativeHistoryRejected("native recipient binding identity is malformed")
+    if (role not in _RECIPIENT_ACTION_FIELDS or type(origin) is not tuple
+            or len(origin) != 2 or type(origin[0]) is not str
+            or not origin[0] or origin[1] not in _RECIPIENT_ACTION_FIELDS[role]):
+        raise NativeHistoryRejected("native recipient binding origin is malformed")
     try:
         with _RECIPIENT_BINDING_LOCK:
             bindings = _RECIPIENT_BINDING_IDS.setdefault(world, {})
             prior = bindings.get(id(handle))
             if prior is not None and (prior[0] is not handle
-                    or prior[1] != role or prior[2] != binding_id):
+                    or prior[1] != role or prior[2] != binding_id
+                    or prior[3] != origin):
                 raise NativeHistoryRejected(
                     "native recipient handle has conflicting stable bindings")
-            bindings[id(handle)] = (handle, role, binding_id)
+            bindings[id(handle)] = (handle, role, binding_id, origin)
     except TypeError as exc:
         raise NativeHistoryRejected(
             "native recipient owner cannot register process-local bindings") from exc
 
 
-def _recipient_binding_id(world, role, identity, *, action_events=None):
-    """Return a portable identity for one native recipient object.
-
-    Role/owner is insufficient when one observer owns multiple ledgers (or
-    account lists). A process-local weak Universe registry pins the first
-    canonical registered Action-field reference as the stable store identity.
-    The hash survives later Action reuse without serializing a Python address
-    or a caller-supplied name.
-    """
-    fields_by_role = {
-        "in_world_belief_ledger": ("ledger",),
-        "in_world_received_accounts": ("received_accounts",),
-        "observer_location_evidence": ("location_ledger",),
-        "observer_object_evidence": ("object_ledger",),
-    }
-    fields_for_role = fields_by_role.get(role)
+def _derive_recipient_binding(world, role, identity, *, action_events=None):
+    """Recompute the portable recipient identity from native Action references."""
+    fields_for_role = _RECIPIENT_ACTION_FIELDS.get(role)
     if fields_for_role is None:
         raise NativeHistoryRejected("native recipient role is unreviewed")
-    try:
-        with _RECIPIENT_BINDING_LOCK:
-            bound = _RECIPIENT_BINDING_IDS.get(world, {}).get(identity)
-        if bound is not None:
-            if bound[1] != role:
-                raise NativeHistoryRejected(
-                    "native recipient handle is registered to another role")
-            return bound[2]
-    except TypeError:
-        pass
     event_history = (action_events if action_events is not None else
         world.get("event_history") if type(world) is dict else
         object.__getattribute__(world, "__dict__").get("event_history"))
@@ -710,13 +700,149 @@ def _recipient_binding_id(world, role, identity, *, action_events=None):
     # already recorded for that native recipient object.
     value = {"role": role, "first_action_field": list(references[0])}
     binding_id = hashlib.sha256(_canonical(value)).hexdigest()
+    return binding_id, references[0]
+
+
+def _validate_recipient_binding_origin(world, role, identity, binding_id, origin):
+    """Check that a saved origin still names the exact recipient Action field."""
+    if (role not in _RECIPIENT_ACTION_FIELDS or type(origin) is not tuple
+            or len(origin) != 2 or type(origin[0]) is not str
+            or not origin[0] or origin[1] not in _RECIPIENT_ACTION_FIELDS[role]):
+        raise NativeHistoryRejected("native recipient binding origin is malformed")
+    expected = hashlib.sha256(_canonical({"role": role,
+        "first_action_field": list(origin)})).hexdigest()
+    event_history = object.__getattribute__(world, "__dict__").get("event_history")
+    actions_by_id = {}
+    if type(event_history) in (dict, MappingProxyType):
+        for event_id, event in event_history.items():
+            data = object.__getattribute__(event, "__dict__")
+            if data.get("id") != event_id:
+                raise NativeHistoryRejected(
+                    "native recipient Action identity differs from its Event key")
+            actions_by_id[event_id] = event
+            book = data.get("_choice_book")
+            if book is None:
+                continue
+            for accepted in object.__getattribute__(book, "__dict__").get(
+                    "_choices", {}).values():
+                for member in accepted.members:
+                    action = member.action
+                    action_id = object.__getattribute__(action, "__dict__").get("id")
+                    if type(action_id) is str:
+                        prior = actions_by_id.get(action_id)
+                        if prior is not None and prior is not action:
+                            raise NativeHistoryRejected(
+                                "native Action ID names multiple recipient declarations")
+                        actions_by_id[action_id] = action
+    event = actions_by_id.get(origin[0])
+    data = object.__getattribute__(event, "__dict__") if event is not None else {}
+    if (expected != binding_id or data.get("id") != origin[0]
+            or data.get(origin[1]) is None or id(data[origin[1]]) != identity):
+        raise NativeHistoryRejected(
+            "native recipient binding origin disagrees with Action references "
+            f"({role}/{origin[0]}/{origin[1]})")
+
+
+def _find_recipient_binding_origin(world, role, identity, binding_id):
+    """Recover a legacy descriptor's pinned Action origin without re-keying."""
+    event_history = object.__getattribute__(world, "__dict__").get("event_history")
+    if type(event_history) not in (dict, MappingProxyType):
+        raise NativeHistoryRejected("native recipient has no registered Event table")
+    actions_by_id = {}
+    for event_id, event in event_history.items():
+        data = object.__getattribute__(event, "__dict__")
+        if data.get("id") != event_id:
+            raise NativeHistoryRejected(
+                "native recipient Action identity differs from its Event key")
+        actions_by_id[event_id] = event
+        book = data.get("_choice_book")
+        if book is None:
+            continue
+        for accepted in object.__getattribute__(book, "__dict__").get(
+                "_choices", {}).values():
+            for member in accepted.members:
+                action = member.action
+                action_id = object.__getattribute__(action, "__dict__").get("id")
+                if type(action_id) is str:
+                    prior = actions_by_id.get(action_id)
+                    if prior is not None and prior is not action:
+                        raise NativeHistoryRejected(
+                            "native Action ID names multiple recipient declarations")
+                    actions_by_id[action_id] = action
+    matches = []
+    for event_id, event in actions_by_id.items():
+        data = object.__getattribute__(event, "__dict__")
+        if data.get("id") != event_id:
+            raise NativeHistoryRejected(
+                "native recipient Action identity differs from its Event key")
+        for field in _RECIPIENT_ACTION_FIELDS.get(role, ()):
+            handle = data.get(field)
+            if handle is None or id(handle) != identity:
+                continue
+            candidate = hashlib.sha256(_canonical({"role": role,
+                "first_action_field": [event_id, field]})).hexdigest()
+            if candidate == binding_id:
+                matches.append((event_id, field))
+    matches.sort()
+    if not matches:
+        raise NativeHistoryRejected(
+            "legacy native recipient binding has no matching Action reference")
+    return matches[0]
+
+
+def _recipient_binding_id(world, role, identity, *, action_events=None):
+    """Return a stable portable identity for one native recipient object.
+
+    A per-Universe weak registry pins the first canonical Action-field identity
+    so later Actions cannot re-key already-recorded history. New graph
+    descriptors persist that origin and verify it on load; the preceding
+    descriptor schema recovers the origin from its stable hash.
+    """
+    try:
+        with _RECIPIENT_BINDING_LOCK:
+            bound = _RECIPIENT_BINDING_IDS.get(world, {}).get(identity)
+        if bound is not None:
+            if bound[1] != role:
+                raise NativeHistoryRejected(
+                    "native recipient handle is registered to another role")
+            return bound[2]
+    except TypeError:
+        pass
+    binding_id, origin = _derive_recipient_binding(
+        world, role, identity, action_events=action_events)
     if type(world) is not dict:
-        handle = next(object.__getattribute__(event, "__dict__")[field]
-            for event_id, event in actions_by_id.items()
-            for field in fields_for_role
-            if (event_id, field) == references[0])
-        _register_recipient_binding(world, role, handle, binding_id)
+        event_history = (action_events if action_events is not None else
+            object.__getattribute__(world, "__dict__").get("event_history"))
+        # Locate the bound native handle only after identity derivation. This
+        # keeps the process-local registry out of the portable hash inputs.
+        candidates = []
+        for candidate_id, event in event_history.items():
+            data = object.__getattribute__(event, "__dict__")
+            for field in _RECIPIENT_ACTION_FIELDS[role]:
+                value = data.get(field)
+                if value is not None and id(value) == identity:
+                    candidates.append((candidate_id, field, value))
+        candidates.sort(key=lambda row: (row[0], row[1]))
+        if not candidates:
+            raise NativeHistoryRejected(
+                "native recipient identity has no registered Action reference")
+        # The cached association is pinned to the canonical origin returned by
+        # the derivation, even if later Actions sort earlier by logical ID.
+        handle = candidates[0][2]
+        _register_recipient_binding(world, role, handle, binding_id, origin)
     return binding_id
+
+
+def _recipient_binding_descriptor(world, role, identity):
+    binding_id = _recipient_binding_id(world, role, identity)
+    with _RECIPIENT_BINDING_LOCK:
+        bound = _RECIPIENT_BINDING_IDS.get(world, {}).get(identity)
+    if bound is None or bound[1] != role or bound[2] != binding_id:
+        # Read-only staging dictionaries do not participate in the weak owner
+        # cache; their exact origin is still derived from the supplied Action.
+        binding_id, origin = _derive_recipient_binding(world, role, identity)
+        return binding_id, origin
+    return binding_id, bound[3]
 
 
 def _stable_recipients(value, encounter):

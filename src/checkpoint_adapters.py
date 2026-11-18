@@ -1371,9 +1371,9 @@ class NativeInventory(_Inventory):
                 _capture_belief(b.recipient,b.observer_ids[0])
             descriptor=(b.namespace,b.name,b.role,b.observer_ids,ref)
             if self.full_native and self.compact_native_recipient_facts:
-                from native_history import _recipient_binding_id
-                descriptor += (_recipient_binding_id(
-                    world,b.role,id(b.recipient)),)
+                from native_history import _recipient_binding_descriptor
+                descriptor += _recipient_binding_descriptor(
+                    world,b.role,id(b.recipient))
             descriptions.append(descriptor)
         native_adapters = (ADAPTER_VERSION,
             *(('target-candidate-history/1',)
@@ -1382,7 +1382,7 @@ class NativeInventory(_Inventory):
               if self.compact_native_entity_context else ()),
             *(('committed-receipt-facts/1',)
               if self.compact_native_receipt_facts else ()),
-            *(('observer-recipient-facts/1',)
+            *(('observer-recipient-facts/2',)
               if self.compact_native_recipient_facts else ()),
             *(('published-interval-facts/1',)
               if self.compact_native_publication_facts else ()),
