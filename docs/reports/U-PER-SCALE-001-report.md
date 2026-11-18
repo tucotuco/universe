@@ -8,6 +8,8 @@ The defined-but-not-produced follow-up observer facts now have strict record-lev
 
 Verification after the practice query and follow-up record contract changes: `PYTHONPATH=tests:src:examples:../npc-generator .venv/bin/python -B -m unittest test_native_history test_persistence_capability_matrix -v` — **36 passed / 22.929s**; `py_compile` and `git diff --check` passed. The specific pending-Run fresh-process continuation also passed **1 / 2.543s** after adding the boundary-zero query check.
 
+Local commits: `64ecf98` adds the committed skill-use query; `51d2b6c` derives the initial pre-action projection; `5cc6f8e` adds strict defined follow-up observer-record contracts. All were scoped, staged-audited and kept separate from the five unrelated staged archival paths. No push.
+
 
 ## Problems-first — ChoiceBook and fatigue projections still duplicated in the graph
 
