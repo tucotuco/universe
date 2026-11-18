@@ -1915,3 +1915,19 @@ Ran the complete focused native persistence module after those changes. It exerc
 - The previously verified adjacent combined gate (Being, Run/Practice, nonparticipant, matrix): **6 passed / 5.922s**.
 
 This verifies the changed code/tests against the native persistence portfolio and known legacy inputs at that revision. Its statement that observer-heavy projections remained graph-backed is superseded by recipient recipe `/2` and commit `1271410` above. History API parity, durable journaling, full corruption/security and cross-version migration breadth, and ordinary application Save/Load cutover remain open. Production cutover remains correctly sequenced after the general native gate. No user rule or external blocker has been identified; U-PER-SCALE-001 stays ACTIVE.
+
+## Problems-first — delayed projectile branches lacked full inspection parity
+
+The native query already exposed projectile-state receipts, and separate Throw tests proved fresh-process hit/miss/movement/simultaneous outcomes. They did not compare the *whole* historical `EncounterInspection` against native authoritative receipts for those delayed branches. This left a concrete consumer-parity gap despite field-level projectile assertions.
+
+Added a shared test assertion and applied it to the shield-protection hit, unresolved miss, target-moved flight, and two-projectile simultaneous-arrival continuations. Parent and strict child-process paths now compare `NativeHistoryQuery.inspect_committed_at(boundary)` with `Encounter.inspect_committed(boundary)` at every committed cut, while retaining their existing projectile state, damage, target, RNG and history checks. The strict child scripts independently perform the same comparison. No resolver, Save schema or `/12` behavior changed.
+
+- From `tests/`, `PYTHONPATH=tests:src:examples:../npc-generator ../.venv/bin/python -B -m unittest -v test_native_persistence.NativePersistenceTests.test_projectile_shield_interception_continues_after_native_fresh_process_load test_native_persistence.NativePersistenceTests.test_missed_projectile_continues_with_native_unresolved_destination test_native_persistence.NativePersistenceTests.test_target_movement_during_projectile_flight_restores_natively test_native_persistence.NativePersistenceTests.test_simultaneous_projectile_arrivals_restore_as_one_native_boundary` — **4 passed / 20.582s**. An initial test-harness edit placed one assertion at the wrong indentation inside an embedded child script; the focused rerun after correction passed all four cases.
+- Matrix rows for `ThrowAction` and `CommittedBoundaryRecord` now cite these composite-query results. Other Action/state-family rows, legacy breadth, journal recovery and application cutover remain open.
+- Test and documentation changes are pending scoped safety audit and commit. No adopted-rule or external blocker is identified; U-PER-SCALE-001 remains ACTIVE.
+
+### Execution interval
+
+- Start: `2026-11-17T22:55:59Z`.
+- End: pending actual closeout timestamp.
+- Elapsed: pending calculation from the recorded timestamps.

@@ -149,6 +149,16 @@ def _legacy_initial_entity_anchor(value, encounter):
 
 
 class NativePersistenceTests(unittest.TestCase):
+    def _assert_full_history_inspection_matches(self, encounter):
+        """Compare the graph-free historical view with every live receipt."""
+        log = native_history.capture(encounter)
+        query = native_history.NativeHistoryQuery(log)
+        for boundary in range(1, log["latest_boundary"] + 1):
+            self.assertEqual(
+                query.inspect_committed_at(boundary),
+                native_history._plain(encounter.inspect_committed(boundary)),
+                boundary)
+
     def test_native_recipient_binding_descriptor_rejects_malformed_identity(self):
         from native_graph_snapshot import (
             ArenaNativeSnapshotRejected,
@@ -755,6 +765,7 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
                 enc.step(1)
             history_query = native_history.NativeHistoryQuery(
                 native_history.capture(enc))
+            self._assert_full_history_inspection_matches(enc)
             for entity in (thrown, shield, armor, victim):
                 for record in getattr(entity, "_atomic_target_history", ()):
                     if record.encounter_id == enc.id:
@@ -817,6 +828,8 @@ for _ in range(5):
  if thrown.__dict__['_projectile_flight'].impact_outcome is not None: break
  enc.step(1)
 history_query=native_history.NativeHistoryQuery(native_history.capture(enc))
+for boundary in range(1,enc.last_processed_boundary+1):
+ assert history_query.inspect_committed_at(boundary)==native_history._plain(enc.inspect_committed(boundary))
 for entity in (thrown,shield,armor,victim):
  for record in getattr(entity,'_atomic_target_history',()):
   if record.encounter_id==enc.id:
@@ -1411,6 +1424,7 @@ print(json.dumps({'time':encounter.time,
             state = thrown.__dict__["_atomic_projectile_history"][-1]
             log = native_history.capture(enc)
             query = native_history.NativeHistoryQuery(log)
+            self._assert_full_history_inspection_matches(enc)
             for boundary in range(enc.last_processed_boundary + 1):
                 receipt = next((row for row in enc._atomic_interval_history
                                 if row.boundary == boundary), None)
@@ -1456,6 +1470,7 @@ flight=thrown.__dict__['_projectile_flight']
 state=thrown.__dict__['_atomic_projectile_history'][-1]
 log=native_history.capture(enc); query=native_history.NativeHistoryQuery(log)
 for boundary in range(enc.last_processed_boundary+1):
+ if boundary: assert query.inspect_committed_at(boundary)==native_history._plain(enc.inspect_committed(boundary))
  receipt=next((row for row in enc._atomic_interval_history
   if row.boundary==boundary),None)
  recorded=None if receipt is None else receipt.inspection.projectile_states.get(thrown.id)
@@ -1555,6 +1570,7 @@ flight=thrown.__dict__['_projectile_flight']
 state=thrown.__dict__['_atomic_projectile_history'][-1]
 log=native_history.capture(enc);query=native_history.NativeHistoryQuery(log)
 for boundary in range(enc.last_processed_boundary+1):
+ if boundary: assert query.inspect_committed_at(boundary)==native_history._plain(enc.inspect_committed(boundary))
  receipt=next((row for row in enc._atomic_interval_history
   if row.boundary==boundary),None)
  recorded=None if receipt is None else receipt.inspection.projectile_states.get(thrown.id)
@@ -1811,6 +1827,7 @@ print(json.dumps({'time':enc.time,'flight_outcome':flight.impact_outcome,
             flight = thrown.__dict__["_projectile_flight"]
             log = native_history.capture(enc)
             query = native_history.NativeHistoryQuery(log)
+            self._assert_full_history_inspection_matches(enc)
             for boundary in range(1, enc.last_processed_boundary + 1):
                 inspection = enc.inspect_committed(boundary)
                 committed = query.committed_actions_at(boundary)
@@ -1913,6 +1930,7 @@ print(json.dumps({'time':enc.time,'action_id':event.id,
                        for object_id in (first_projectile.id, second_projectile_id)]
             log = native_history.capture(enc)
             query = native_history.NativeHistoryQuery(log)
+            self._assert_full_history_inspection_matches(enc)
             for boundary in range(1, enc.last_processed_boundary + 1):
                 receipt = enc.inspect_committed(boundary)
                 committed = query.committed_actions_at(boundary)
@@ -1953,6 +1971,7 @@ objects=json.loads(sys.argv[3]);enc.step(3)
 flights=[world.get_object_by_id(key).__dict__['_projectile_flight'] for key in objects]
 log=native_history.capture(enc);query=native_history.NativeHistoryQuery(log)
 for boundary in range(1,enc.last_processed_boundary+1):
+ assert query.inspect_committed_at(boundary)==native_history._plain(enc.inspect_committed(boundary))
  receipt=enc.inspect_committed(boundary);committed=query.committed_actions_at(boundary)
  assert committed['actions']==native_history._plain(receipt.actions)
  assert committed['effects']==native_history._plain(receipt.effects)
