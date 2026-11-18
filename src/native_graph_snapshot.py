@@ -609,7 +609,8 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
             'entity-context-history/1','committed-receipt-facts/1',
             'observer-recipient-facts/1','observer-recipient-facts/2',
             'published-interval-facts/1',
-            'disarm-landing-facts/1','committed-boundary-history/1')
+            'disarm-landing-facts/1','committed-boundary-history/1',
+            'choice-book-indexes/1')
         _need(type(markers) is tuple and markers
               and len(set(markers))==len(markers)
               and all(value in marker_order for value in markers)
@@ -827,6 +828,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'disarm-landing-facts/1' in native_adapter_markers)
     compact_boundary_history = (native and
         'committed-boundary-history/1' in native_adapter_markers)
+    compact_choice_indexes = (native and
+        'choice-book-indexes/1' in native_adapter_markers)
     _need(not compact_receipt_facts or compact_entity_context,
           'compacted native receipt facts require EntityInspection history')
     _need(not compact_recipient_facts or compact_receipt_facts,
@@ -1023,6 +1026,14 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
                 (member.key, declaration(member.action))
                 for member in accepted.members)
             object.__setattr__(accepted, 'signatures', signatures)
+        if compact_choice_indexes:
+            _need(book._registered == {} and book._states == {},
+                  'marked compact ChoiceBook indexes contain serialized entries')
+            from checkpoint_adapters import _derive_choice_book_indexes
+            registered, states = _derive_choice_book_indexes(
+                book, validate_existing=False)
+            book._registered = registered
+            book._states = states
         for action_id, row in tuple(book._registered.items()):
             _need(action_id not in book_by_action,
                   'native Action is registered to multiple Encounter ChoiceBooks')

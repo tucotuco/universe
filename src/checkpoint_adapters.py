@@ -60,6 +60,90 @@ class RecipientBinding:
     recipient: object
 
 
+def _derive_choice_book_indexes(book, *, validate_existing=False):
+    """Rebuild the ChoiceBook's Action lookup caches from accepted choices.
+
+    These maps are indexes: accepted records own their PreparedSchedule and
+    Actions, while Encounter lists and the Action start flag own lifecycle.
+    Validate exact agreement before omitting them from a Save.
+    """
+    from action_choice import ChoiceBook, _Accepted, declaration
+    from scheduling import PreparedSchedule
+    from encounter import Encounter
+
+    _require(type(book) is ChoiceBook,
+             'native ChoiceBook index owner has an unsupported type')
+    data = object.__getattribute__(book, '__dict__')
+    encounter = data.get('encounter')
+    _require(type(encounter) is Encounter
+             and type(encounter.universe.event_history) is dict,
+             'native ChoiceBook has no native Encounter/Event owner')
+    events = encounter.universe.event_history
+    pending = encounter.pending_action_list
+    finished = encounter.finished_action_list
+    cancelled = encounter.cancelled_action_list
+    _require(all(type(rows) is list for rows in (pending, finished, cancelled)),
+             'native ChoiceBook scheduler lists are malformed')
+    pending_ids, finished_ids, cancelled_ids = map(set,
+        (pending, finished, cancelled))
+    _require(len(pending_ids) == len(pending)
+             and len(finished_ids) == len(finished)
+             and len(cancelled_ids) == len(cancelled)
+             and not pending_ids & finished_ids
+             and not pending_ids & cancelled_ids
+             and not finished_ids & cancelled_ids,
+             'native ChoiceBook scheduler lists repeat an Action identity')
+
+    registered = {}
+    states = {}
+    for choice_id, record in data.get('_choices', {}).items():
+        _require(type(choice_id) is str and type(record) is _Accepted
+                 and record.view.id == choice_id,
+                 'native ChoiceBook accepted record identity is malformed')
+        _require(type(record.members) is tuple
+                 and type(record.prepared) is tuple
+                 and len(record.members) == len(record.prepared)
+                 and tuple(member.action.id for member in record.members)
+                     == record.view.action_ids,
+                 'native ChoiceBook member/preparation order differs')
+        if record.view.state == 'accepted':
+            _require(all(member.action.id not in events
+                         and member.action.id not in pending_ids | finished_ids | cancelled_ids
+                         for member in record.members),
+                     'unpublished accepted Choice already has scheduler registration')
+            continue
+        _require(record.view.state in ('executing', 'finished'),
+                 'native ChoiceBook lifecycle is unsupported')
+        for member, packet in zip(record.members, record.prepared):
+            action = member.action
+            action_data = object.__getattribute__(action, '__dict__')
+            action_id = action_data.get('id')
+            _require(type(action_id) is str and action_id
+                     and type(events.get(action_id)) is type(action)
+                     and events[action_id] is action
+                     and type(packet) is PreparedSchedule
+                     and packet.action_id == action_id
+                     and action_id not in registered,
+                     'published Choice Action or PreparedSchedule is inconsistent')
+            if action_id in finished_ids:
+                status = 'finished'
+            elif action_id in cancelled_ids:
+                status = 'cancelled'
+            else:
+                _require(action_id in pending_ids,
+                         'published Choice Action is absent from scheduler lists')
+                status = ('executing' if action_data.get('_activity_started') is True
+                          else 'registered')
+            registered[action_id] = (choice_id, packet, declaration(action))
+            states[action_id] = status
+
+    if validate_existing:
+        _require(data.get('_registered') == registered
+                 and data.get('_states') == states,
+                 'ChoiceBook derived indexes differ from accepted records/scheduler')
+    return registered, states
+
+
 def _data_tree(value, active=None):
     """Check exact finite native data before any native deepcopy/pure validator."""
     if value is None or type(value) in (str, bool, int): return
@@ -228,7 +312,8 @@ class NativeInventory(_Inventory):
                  compact_native_recipient_facts=False,
                  compact_native_publication_facts=False,
                  compact_native_disarm_landings=False,
-                 compact_native_boundary_history=False):
+                 compact_native_boundary_history=False,
+                 compact_native_choice_indexes=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
@@ -241,6 +326,7 @@ class NativeInventory(_Inventory):
         self.compact_native_publication_facts=compact_native_publication_facts
         self.compact_native_disarm_landings=compact_native_disarm_landings
         self.compact_native_boundary_history=compact_native_boundary_history
+        self.compact_native_choice_indexes=compact_native_choice_indexes
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -381,6 +467,31 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if (self.compact_native_choice_indexes
+                and tag == 'action_choice.ChoiceBook'
+                and field in ('_registered', '_states')):
+            _require(type(item) is dict,
+                     'ChoiceBook derived index is not a native dictionary')
+            book = self._objects_by_identity.get(self._owner_identity(ref))
+            _require(book is not None,
+                     'ChoiceBook derived index owner is missing')
+            _derive_choice_book_indexes(book, validate_existing=True)
+            # The parent graph adapter has a dedicated portable representation
+            # for PreparedSchedule registrations; native-history `_plain`
+            # intentionally does not admit those scheduling records. This
+            # digest is process-local freshness evidence only. Semantic
+            # re-derivation above is the portable integrity check.
+            source_digest = hashlib.sha256(repr(item).encode('utf-8')).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            replacement = {}
+            encoded = super().field(tag, field, replacement, ref, path, depth)
+            token_id = id(replacement)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
         if (self.compact_native_boundary_history
                 and tag == 'encounter.Encounter'
                 and field == '_atomic_interval_history'):
@@ -1389,5 +1500,7 @@ class NativeInventory(_Inventory):
             *(('disarm-landing-facts/1',)
               if self.compact_native_disarm_landings else ()),
             *(('committed-boundary-history/1',)
-              if self.compact_native_boundary_history else ()))
+              if self.compact_native_boundary_history else ()),
+            *(('choice-book-indexes/1',)
+              if self.compact_native_choice_indexes else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))

@@ -1040,6 +1040,82 @@ print(json.dumps({'time':enc.time,
         self.assertIs(world.event_history[restored.id], restored)
         self.assertEqual(export_save(restored), wire)
 
+    def test_native_save_rebuilds_choicebook_indexes_in_fresh_process(self):
+        """ChoiceBook lookup caches compact while accepted work still resumes."""
+        import os
+        from native_graph_snapshot import decode as decode_graph
+
+        encounter = encounter_delta_headless.build_demo(until=4)["encounter"]
+        future = DelayAction(encounter, encounter.being_list[0], defense=0,
+                             start_time=6, id="compact-choice-future-delay")
+        encounter.schedule_action(future)
+        before = encounter._choice_book.summary()
+        state_before = native_history.capture(encounter)
+        action_id = next(iter(encounter._choice_book._states))
+        prior_status = encounter._choice_book._states[action_id]
+        encounter._choice_book._states[action_id] = "cancelled"
+        with self.assertRaises(NativeSaveRejected):
+            export_save(encounter)
+        encounter._choice_book._states[action_id] = prior_status
+        self.assertIsNone(native_history.current_recording(encounter))
+        self.assertEqual(native_history.capture(encounter), state_before)
+
+        wire = export_save(encounter)
+        payload = json.loads(wire)
+        inventory = decode_graph(base64.b64decode(
+            payload["graph_b64"], validate=True), native=True)
+        nodes = next(row[1] for row in inventory[1] if row[0] == "nodes")
+        book_content = next(content for _ref, tag, content in nodes
+                            if tag == "action_choice.ChoiceBook")
+        fields = dict(book_content)
+        self.assertEqual(fields["_registered"], ("registration-index", ()))
+        states_ref = fields["_states"][1]
+        self.assertEqual(next(content for ref, tag, content in nodes
+                              if ref == states_ref and tag == "ordered-map"), ())
+        markers = next(row[1:] for row in inventory[1]
+                       if row[0] == "native-adapters")
+        self.assertIn("choice-book-indexes/1", markers)
+
+        def outcome(encounter, rng):
+            history = native_history.capture(encounter)
+            return {"time": encounter.time,
+                    "choicebook": encounter._choice_book.summary(),
+                    "events": sorted(encounter.universe.event_history),
+                    "rng": native_history._plain(rng.state),
+                    "history": hashlib.sha256(
+                        native_history.encode(history)).hexdigest(),
+                    "state": native_history.state_at(
+                        history, history["latest_boundary"])}
+
+        while encounter.time < 7:
+            encounter.step(1)
+        expected = outcome(encounter,
+                           native_persistence._native_rng_owner(encounter))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "compact-choice-book.json"
+            path.write_bytes(wire)
+            child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_path
+world,encounter,rng=load_path(sys.argv[1])
+while encounter.time < 7:
+    encounter.step(1)
+history=native_history.capture(encounter)
+print(json.dumps({'time':encounter.time,
+ 'choicebook':encounter._choice_book.summary(),
+ 'events':sorted(world.event_history),
+ 'rng':native_history._plain(rng.state),
+ 'history':hashlib.sha256(native_history.encode(history)).hexdigest(),
+ 'state':native_history.state_at(history,history['latest_boundary'])},sort_keys=True))'''
+            restored = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)], cwd=ROOT,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertEqual(json.loads(restored.stdout),
+                         json.loads(json.dumps(expected)))
+
     def test_compacted_entity_context_rejects_altered_source_receipt(self):
         """Omitted context remains covered by authenticated receipt integrity."""
         from checkpoint_inventory import (capture_checkpoint_candidate,
