@@ -2926,6 +2926,12 @@ class NativeHistoryQuery:
                            if self._knowledge_available else None)
         self._knowledge_changes = {row["boundary"]: row
                                    for row in knowledge["changes"]}
+        self._objective_boundary = math.floor(
+            _number_value(self._log["initial"]["start"]))
+        self._objective_segment_index = bisect_right(
+            self._segment_ends, self._objective_boundary)
+        self._objective_subjects = {}
+        self._objective_uses = []
 
     def _boundary(self, boundary):
         if type(boundary) is not int or not 0 <= boundary <= self._latest:
@@ -3013,6 +3019,85 @@ class NativeHistoryQuery:
         """Return detached committed objective-reality inspection facts."""
         self._boundary(boundary)
         return self._copy(self.state_at(boundary)["objective"])
+
+    def objective_inspection_at(self, boundary):
+        """Rebuild committed ObjectiveInspection facts without the live graph.
+
+        This is the graph-free counterpart of
+        ``Encounter.inspect_committed(boundary).objective``. It preserves
+        subject/fact identity, revisions, request/support/consumer attribution,
+        and counts. Process-local RealityLedger addresses are intentionally
+        omitted; this query never binds to the current graph or resolves facts.
+        """
+        self._boundary(boundary)
+        objective_boundary = self._objective_boundary
+        objective_segment_index = self._objective_segment_index
+        objective_subjects = dict(self._objective_subjects)
+        objective_uses = list(self._objective_uses)
+        if boundary < objective_boundary:
+            objective_boundary = math.floor(
+                _number_value(self._log["initial"]["start"]))
+            objective_segment_index = bisect_right(
+                self._segment_ends, objective_boundary)
+            objective_subjects = {}
+            objective_uses = []
+        for index in range(objective_segment_index, len(self._segments)):
+            row = self._segments[index]
+            end = row.get("to_boundary", row.get("boundary"))
+            if end > boundary:
+                break
+            objective_segment_index = index + 1
+            if row.get("kind") == "quiet_span":
+                objective_boundary = end
+                continue
+            state = self.state_at(end)
+            batch_subjects = _materialize_plain(state["objective"])
+            batch_uses = _materialize_plain(state["objective_use"])
+            if type(batch_subjects) is not dict or type(batch_uses) is not tuple:
+                raise NativeHistoryRejected("native objective history row is malformed")
+            objective_subjects.update(batch_subjects)
+            objective_uses.extend(batch_uses)
+            objective_boundary = end
+        self._objective_boundary = boundary
+        self._objective_segment_index = objective_segment_index
+        self._objective_subjects = objective_subjects
+        self._objective_uses = objective_uses
+        objective = objective_subjects
+        uses = tuple(objective_uses)
+        from objective_reality import ObjectiveFact, SubjectRealityCandidate
+        from observer_proposals import ObjectiveUse
+        if (type(objective) is not dict or type(uses) is not tuple
+                or any(type(row) is not ObjectiveUse for row in uses)):
+            raise NativeHistoryRejected("native objective inspection facts are malformed")
+        from encounter_inspection import ObjectiveFactInspection, ObjectiveInspection
+        result = {}
+        for subject_id, subject in objective.items():
+            if (type(subject_id) is not str or not subject_id
+                    or type(subject) is not SubjectRealityCandidate
+                    or subject.subject_id != subject_id
+                    or type(subject.facts) is not dict):
+                raise NativeHistoryRejected("native objective subject identity is malformed")
+            revision = subject.base_revision + int(
+                any(not fact.established for fact in subject.facts.values()))
+            facts = {}
+            for key, fact in subject.facts.items():
+                if type(fact) is not ObjectiveFact or fact.key != key:
+                    raise NativeHistoryRejected("native objective fact identity is malformed")
+                matching = [row for row in uses
+                            if row.subject_id == subject_id and row.key == key]
+                consumers = tuple(dict.fromkeys(
+                    action_id for row in matching for action_id in row.consumed_by))
+                requesters = tuple(dict.fromkeys(
+                    action_id for row in matching for action_id in row.requested_by))
+                facts[key] = ObjectiveFactInspection(
+                    fact.key, fact.value, fact.established,
+                    fact.committed_revision if fact.established else revision,
+                    fact.origins, requesters or fact.requesting_action_ids,
+                    fact.supporting_keys, consumers)
+            result[subject_id] = ObjectiveInspection(
+                subject_id, subject.ledger_identity, revision,
+                MappingProxyType(facts), subject.counts)
+        return self._copy(_plain(MappingProxyType(result)))
 
     def objective_use_at(self, boundary):
         """Return detached committed objective-fact use/cause rows."""
@@ -3316,6 +3401,229 @@ class NativeHistoryQuery:
         if type(action_id) is not str or not action_id:
             raise NativeHistoryRejected("Action history requires a stable identity")
         return self.committed_actions_at(boundary)["actions"].get(action_id)
+
+    def inspect_committed_at(self, boundary):
+        """Reconstruct the native committed inspection using history facts only.
+
+        The result has the same portable ``EncounterInspection`` projection as
+        ``Encounter.inspect_committed``. No Encounter, Event graph, live
+        ledger, or Action resolver is consulted. Process-local RealityLedger
+        addresses are omitted by the native plain-record encoder.
+        """
+        self._boundary(boundary)
+        from encounter_inspection import (
+            ActionInspection, DisarmLandingReceipt, EncounterInspection,
+            EntityInspection, TargetInspection,
+            _practice_history,
+        )
+        from action_settlement import TargetCandidate
+        from action_evaluation import DamageEffect
+        from history_conversation import HeardAccount
+        from observer_proposals import (
+            AccountsProjection, BeliefProjection, LocationEvidenceProjection,
+            ObjectEvidenceProjection, RecipientIdentity,
+        )
+        from spatial.state import CartesianPosition
+        from throwing import ProjectileBoundaryState
+
+        committed = self.committed_actions_at(boundary)
+        actions = _materialize_plain(committed["actions"])
+        effects = _materialize_plain(committed["effects"])
+        if (type(actions) is not dict
+                or any(type(row) is not ActionInspection for row in actions.values())
+                or type(effects) is not dict):
+            raise NativeHistoryRejected("native committed inspection event facts are malformed")
+
+        histories = {}
+        landings = []
+        for row in self._segments:
+            start = row.get("from_boundary", row.get("boundary"))
+            end = row.get("to_boundary", row.get("boundary"))
+            if start > boundary:
+                break
+            if end > boundary:
+                end = boundary
+            cuts = (range(start, end + 1) if row.get("kind") == "quiet_span"
+                    else (end,))
+            for cut in cuts:
+                state = self.state_at(cut)
+                entities = self.entity_context_at(cut)
+                if type(entities) is not dict:
+                    raise NativeHistoryRejected(
+                        "native committed inspection Entity context is unavailable")
+                target_states = state.get("entities")
+                projectiles = _materialize_plain(state.get("projectile_states"))
+                receipt_facts = self.receipt_facts_at(cut)
+                if receipt_facts is None:
+                    raise NativeHistoryRejected(
+                        "native committed inspection receipt facts are unavailable")
+                boundary_landings = _materialize_plain(receipt_facts["disarm_landings"])
+                if (type(target_states) is not dict or type(projectiles) is not dict
+                        or type(boundary_landings) is not tuple
+                        or any(type(item) is not DisarmLandingReceipt
+                               for item in boundary_landings)):
+                    raise NativeHistoryRejected(
+                        "native committed inspection Target or receipt facts are malformed")
+                landings.extend(boundary_landings)
+                for target_id, encoded in target_states.items():
+                    if (type(encoded) is not dict
+                            or encoded.get("$record") != "action_settlement.TargetCandidate"):
+                        continue
+                    target = _materialize_plain(encoded)
+                    entity = _materialize_plain(entities.get(target_id))
+                    if (type(target) is not TargetCandidate
+                            or target.target_id != target_id
+                            or type(entity) is not EntityInspection):
+                        raise NativeHistoryRejected(
+                            "native committed inspection Target identity is malformed")
+                    projectile = projectiles.get(target_id)
+                    if projectile is not None and type(projectile) is not ProjectileBoundaryState:
+                        raise NativeHistoryRejected(
+                            "native committed inspection projectile state is malformed")
+                    landing = next((item for item in reversed(boundary_landings)
+                                    if item.target_id == target_id), None)
+                    position = (CartesianPosition(*landing.position) if landing is not None
+                                else projectile.position if projectile is not None
+                                else entity.position)
+                    damage_by_action = {}
+                    for identified in target.incoming:
+                        if type(identified.effect) is DamageEffect:
+                            source_id = identified.identity.source_action_id
+                            components = damage_by_action.setdefault(source_id, {})
+                            component = identified.effect.component
+                            components[component] = components.get(component, 0) + identified.effect.amount
+                    inspection = TargetInspection(
+                        cut, target, position, entity,
+                        MappingProxyType({key: MappingProxyType(value)
+                                          for key, value in damage_by_action.items()}),
+                        (target.starting_hp - min(target.starting_hp, -10)
+                         if target.fatal_effect_ids else 0),
+                        _practice_history(target.practice_state), projectile)
+                    histories.setdefault(target_id, []).append(inspection)
+
+        if boundary == 0:
+            events = {"participants": self._log["initial"]["participants"]}
+            schedule = self.schedule_at(0)
+        else:
+            events = self.events_at(boundary)
+            schedule = self.schedule_at(boundary)
+        if schedule is None:
+            raise NativeHistoryRejected(
+                "native committed inspection scheduler projection is unavailable")
+        timeline = _materialize_plain(self.timeline_at(boundary))
+        objective = _materialize_plain(self.objective_inspection_at(boundary))
+        objective_uses = tuple(self._objective_uses)
+        participants = _materialize_plain(events["participants"])
+        recipient_rows = self.state_at(boundary)["recipients"]
+        if recipient_rows in ({}, []):
+            recipients = {}
+        elif type(recipient_rows) is list:
+            account_groups = {}
+            recipients = {}
+            for row in recipient_rows:
+                if (type(row) is not dict or set(row) != {
+                        "role", "owner_id", "binding_id", "projection"}
+                        or type(row["role"]) is not str
+                        or type(row["binding_id"]) is not str):
+                    raise NativeHistoryRejected(
+                        "native committed inspection recipient identity is malformed")
+                role, owner, binding_id = (row["role"], row["owner_id"],
+                                           row["binding_id"])
+                if len(binding_id) != 64:
+                    raise NativeHistoryRejected(
+                        "native committed inspection recipient binding is malformed")
+                identity = RecipientIdentity(role, 0, binding_id)
+                data = _materialize_plain(row["projection"])
+                if type(data) is not dict:
+                    raise NativeHistoryRejected(
+                        "native committed inspection recipient projection is malformed")
+                if role == "in_world_belief_ledger":
+                    if data.get("observer_id") != owner or set(data) != {
+                            "observer_id", "evidence", "interpretations",
+                            "current_readings", "belief_history", "auxiliary"}:
+                        raise NativeHistoryRejected(
+                            "native committed Belief projection is malformed")
+                    projection = BeliefProjection(identity, data["observer_id"],
+                        data["evidence"], data["interpretations"],
+                        data["current_readings"], data["belief_history"],
+                        data["auxiliary"])
+                    recipients[identity] = projection
+                elif role == "observer_location_evidence":
+                    if data.get("observer_id") != owner or set(data) != {
+                            "observer_id", "observations", "effect_ids"}:
+                        raise NativeHistoryRejected(
+                            "native committed LocationEvidence projection is malformed")
+                    recipients[identity] = LocationEvidenceProjection(
+                        identity, data["observer_id"], data["observations"],
+                        data["effect_ids"])
+                elif role == "observer_object_evidence":
+                    if data.get("observer_id") != owner or set(data) != {
+                            "observer_id", "observations", "effect_ids"}:
+                        raise NativeHistoryRejected(
+                            "native committed ObjectEvidence projection is malformed")
+                    recipients[identity] = ObjectEvidenceProjection(
+                        identity, data["observer_id"], data["observations"],
+                        data["effect_ids"])
+                elif role == "in_world_received_accounts":
+                    if (set(data) != {"accounts", "delivery_effect_ids", "listener_id"}
+                            or data["listener_id"] != owner
+                            or type(data["accounts"]) is not tuple
+                            or any(type(account) is not HeardAccount
+                                   for account in data["accounts"])):
+                        raise NativeHistoryRejected(
+                            "native committed testimony projection is malformed")
+                    group = account_groups.setdefault(binding_id, {
+                        "identity": identity, "accounts": [], "effect_ids": set(),
+                        "listeners": set()})
+                    if group["identity"].role != identity.role:
+                        raise NativeHistoryRejected(
+                            "native committed testimony binding role conflicts")
+                    group["accounts"].extend(data["accounts"])
+                    group["effect_ids"].update(data["delivery_effect_ids"])
+                    group["listeners"].add(owner)
+                else:
+                    raise NativeHistoryRejected(
+                        "native committed inspection recipient role is unsupported")
+            if account_groups:
+                action_order = {identity: index for index, identity in enumerate(
+                    committed["action_ids"])}
+                ordered_effects = _materialize_plain(committed["effects"])
+                effect_ids_order = _materialize_plain(committed["effect_ids"])
+                effect_order = {identity: index for index, identity in enumerate(
+                    effect_ids_order)}
+                for group in account_groups.values():
+                    accounts = tuple(sorted(group["accounts"], key=lambda account:
+                        (action_order.get(account.action_id, math.inf),
+                         account.heard_at, account.action_id)))
+                    effect_ids = tuple(identity for identity in ordered_effects
+                        if identity in group["effect_ids"])
+                    if len(effect_ids) != len(group["effect_ids"]):
+                        raise NativeHistoryRejected(
+                            "native committed testimony references an absent Effect")
+                    effect_ids = tuple(sorted(effect_ids,
+                        key=lambda identity: effect_order[identity]))
+                    projection = AccountsProjection(group["identity"], accounts,
+                        effect_ids, tuple(sorted(group["listeners"])))
+                    recipients[group["identity"]] = projection
+        else:
+            raise NativeHistoryRejected(
+                "native committed inspection recipient history is malformed")
+        if (type(timeline) is not tuple or type(objective) is not dict
+                or type(participants) is not tuple
+                or type(recipients) is not dict):
+            raise NativeHistoryRejected(
+                "native committed inspection projection is malformed")
+        current_targets = {identity: rows[-1]
+                           for identity, rows in histories.items() if rows}
+        return self._copy(_plain(EncounterInspection(
+            self._log["initial"]["encounter_id"], boundary, self._latest,
+            MappingProxyType(actions), MappingProxyType(current_targets),
+            MappingProxyType({identity: tuple(rows)
+                              for identity, rows in histories.items()}),
+            timeline, MappingProxyType(effects), MappingProxyType(objective),
+            objective_uses, recipients, participants,
+            _materialize_plain(schedule),
+            disarm_landings=tuple(landings))))
 
     def rng_state_at(self, boundary):
         self._boundary(boundary)
@@ -4374,6 +4682,11 @@ def committed_action_at(log, action_id, boundary):
     return NativeHistoryQuery(log).committed_action_at(action_id, boundary)
 
 
+def inspect_committed_at(log, boundary):
+    """Rebuild the committed native inspection without a live Encounter."""
+    return NativeHistoryQuery(log).inspect_committed_at(boundary)
+
+
 def target_at(log, target_id, boundary):
     """Return one detached historical TargetCandidate."""
     return NativeHistoryQuery(log).target_at(target_id, boundary)
@@ -4387,6 +4700,11 @@ def projectile_state_at(log, object_id, boundary):
 def objective_at(log, boundary):
     """Return detached objective inspection facts at a committed boundary."""
     return NativeHistoryQuery(log).objective_at(boundary)
+
+
+def objective_inspection_at(log, boundary):
+    """Rebuild the committed ObjectiveInspection projection from native facts."""
+    return NativeHistoryQuery(log).objective_inspection_at(boundary)
 
 
 def objective_use_at(log, boundary):

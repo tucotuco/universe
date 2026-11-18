@@ -46,6 +46,8 @@ class NativeDrawPersistenceTests(unittest.TestCase):
         for boundary in range(1, log['latest_boundary'] + 1):
             receipt = receipts[boundary]
             inspection = encounter.inspect_committed(boundary)
+            self.assertEqual(query.inspect_committed_at(boundary),
+                             _plain(inspection), boundary)
             expected_facts = _boundary_payload(encounter, receipt, inspection,
                                                targets)
             actual_facts = query.boundary_facts_at(boundary)

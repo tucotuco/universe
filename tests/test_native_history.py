@@ -56,6 +56,7 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
                             entity_at, entity_history_at, objective_at,
+                            objective_inspection_at,
                             objective_use_at, schedule_at, action_state_at,
                             choice_state_at, capture_initial_schedule,
                             _plain, _expand_rows, _target_candidates)
@@ -277,6 +278,12 @@ class NativeHistoryTests(unittest.TestCase):
         receipt = fixture.enc._atomic_interval_history[0]
         self.assertEqual(query.objective_at(1), _plain(receipt.inspection.objective))
         self.assertEqual(objective_at(log, 1), _plain(receipt.inspection.objective))
+        self.assertEqual(query.objective_inspection_at(1),
+                         _plain(fixture.enc.inspect_committed(1).objective))
+        self.assertEqual(objective_inspection_at(log, 1),
+                         _plain(fixture.enc.inspect_committed(1).objective))
+        self.assertEqual(query.inspect_committed_at(1),
+                         _plain(fixture.enc.inspect_committed(1)))
         self.assertEqual(query.objective_use_at(1), _plain(receipt.inspection.objective_use))
         self.assertEqual(objective_use_at(log, 1), _plain(receipt.inspection.objective_use))
         self.assertTrue(query.objective_at(1))
@@ -284,6 +291,12 @@ class NativeHistoryTests(unittest.TestCase):
         detached = query.objective_at(1)
         detached.clear()
         self.assertTrue(query.objective_at(1))
+        fixture.enc.step(1)
+        quiet_query = NativeHistoryQuery(capture(fixture.enc))
+        self.assertEqual(quiet_query.objective_inspection_at(2),
+                         _plain(fixture.enc.inspect_committed(2).objective))
+        self.assertEqual(quiet_query.inspect_committed_at(2),
+                         _plain(fixture.enc.inspect_committed(2)))
 
     def test_personal_history_fact_is_visible_only_after_its_committed_action(self):
         fixture = inspection_fixtures.InspectionFixture()
@@ -321,6 +334,16 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertEqual(current[subject.id]["$record"],
                          "objective_reality.SubjectRealityCandidate")
         self.assertTrue(current[subject.id]["fields"]["facts"]["$map"])
+        inspection = _plain(fixture.enc.inspect_committed(1).objective)
+        self.assertEqual(query.objective_inspection_at(1), inspection)
+        self.assertEqual(query.objective_inspection_at(0), {})
+        detached_inspection = query.objective_inspection_at(1)
+        detached_inspection.clear()
+        self.assertEqual(query.objective_inspection_at(1), inspection)
+        fixture.enc.step(1)
+        quiet_query = NativeHistoryQuery(capture(fixture.enc))
+        self.assertEqual(quiet_query.objective_inspection_at(2),
+                         _plain(fixture.enc.inspect_committed(2).objective))
         self.assertIsNotNone(subject.personal_history.inspect_episode(
             -1, "native-history-boundary"))
         use = query.objective_use_at(1)
@@ -370,11 +393,15 @@ class NativeHistoryTests(unittest.TestCase):
                           for row in second_rows[0]["projection"]["accounts"]["$tuple"]],
                          [fixture.b.id])
         self.assertEqual(len(query.state_at(1)["recipients"]), 2)
+        self.assertEqual(query.inspect_committed_at(1),
+                         _plain(fixture.enc.inspect_committed(1)))
 
         fixture.enc.step(1)
         later = NativeHistoryQuery(capture(fixture.enc))
         self.assertEqual(later.observer_facts_at(2, fixture.a.id), first_rows)
         self.assertEqual(later.observer_facts_at(2, fixture.b.id), second_rows)
+        self.assertEqual(later.inspect_committed_at(2),
+                         _plain(fixture.enc.inspect_committed(2)))
 
     def test_schedule_query_preserves_finished_and_future_accepted_choice_states(self):
         fixture = inspection_fixtures.InspectionFixture()
@@ -444,6 +471,8 @@ class NativeHistoryTests(unittest.TestCase):
                 self.assertEqual(actual["effects"], {})
                 continue
             inspection = self.demo["encounter"].inspect_committed(boundary)
+            self.assertEqual(query.inspect_committed_at(boundary),
+                             _plain(inspection))
             self.assertEqual(actual["actions"], _plain(inspection.actions))
             for action_id in inspection.actions:
                 self.assertEqual(query.committed_action_at(action_id, boundary),

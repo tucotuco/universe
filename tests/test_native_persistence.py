@@ -2802,6 +2802,12 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         fixture.enc.schedule_action(first)
         fixture.enc.step(1)
         wire = export_save(fixture.enc)
+        objective_at_one = native_history.objective_inspection_at(
+            native_history.capture(fixture.enc), 1)
+        inspection_at_one = native_history.inspect_committed_at(
+            native_history.capture(fixture.enc), 1)
+        self.assertEqual(inspection_at_one,
+                         native_history._plain(fixture.enc.inspect_committed(1)))
         self.assertEqual(history.inspect_episode(-1, "earlier-training").value,
                          {"description": "practiced earlier", "skill": "run",
                           "rank_after": 2})
@@ -2820,6 +2826,12 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         expected = {
             "time": fixture.enc.time,
             "rng": json.loads(json.dumps(fixture.rng.state)),
+            "objective_at_one": objective_at_one,
+            "objective_at_two": native_history.objective_inspection_at(
+                native_history.capture(fixture.enc), 2),
+            "inspection_at_one": inspection_at_one,
+            "inspection_at_two": native_history.inspect_committed_at(
+                native_history.capture(fixture.enc), 2),
             "history_digest": history_digest,
             "native_history": hashlib.sha256(native_history.encode(
                 native_history.capture(fixture.enc))).hexdigest(),
@@ -2833,6 +2845,11 @@ import native_history
 from activities import DelayAction
 from native_persistence import load_path
 world,enc,rng=load_path(sys.argv[1])
+query=native_history.NativeHistoryQuery(native_history.capture(enc))
+objective=query.objective_inspection_at(1)
+assert objective==native_history._plain(enc.inspect_committed(1).objective)
+inspection=query.inspect_committed_at(1)
+assert inspection==native_history._plain(enc.inspect_committed(1))
 being=world.get_object_by_id(enc.being_list[0])
 history=being.personal_history
 history._validate(history.reality.view())
@@ -2846,7 +2863,14 @@ action=DelayAction(enc,being.id,defense=0,start_time=enc.time,
  id='native-history-continuation')
 enc.schedule_action(action)
 enc.step(1)
-print(json.dumps({'time':enc.time,'rng':rng.state,
+query=native_history.NativeHistoryQuery(native_history.capture(enc))
+objective2=query.objective_inspection_at(2)
+assert objective2==native_history._plain(enc.inspect_committed(2).objective)
+inspection2=query.inspect_committed_at(2)
+assert inspection2==native_history._plain(enc.inspect_committed(2))
+print(json.dumps({'time':enc.time,'rng':rng.state,'objective_at_one':objective,
+ 'objective_at_two':objective2,
+ 'inspection_at_one':inspection,'inspection_at_two':inspection2,
  'history_digest':hashlib.sha256(json.dumps(history.to_jsonable(),sort_keys=True,
   separators=(',',':'),allow_nan=False).encode()).hexdigest(),
  'native_history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
