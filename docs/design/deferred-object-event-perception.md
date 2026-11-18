@@ -92,7 +92,7 @@ Any eventual executable increment should be narrow, independently green, and exp
 
 - **U-LOC-002A:** Completed within its bounded historical Being-location evidence scope, as recorded in the current task register and topic files. Do not broaden its completion claim.
 - **Proposed U-LOC-002B:** **DEFERRED / NOT AUTHORIZED** pending a richer discussion of perception and chosen next objective. Do not create a Codex implementation assignment from the earlier recommendation alone.
-- **U-SPOT-002, U-LOC-002, U-ATT-001, U-AGENT-001, U-PER-002:** Remain open/deferred according to their authoritative task records. No claim that generalized perception or Agent behavior is complete.
+- **U-SPOT-002, U-LOC-002, U-ATT-001, U-AGENT-001:** Remain open/deferred according to their authoritative task records. **U-PER-002 is DONE (bounded)** for the supported current Universe/Encounter model; its consumed report is archived. Manual served-Chrome Save/Open remains separately tracked as U-PER-003 VERIFY. No claim that generalized perception or Agent behavior is complete.
 - This note is cross-referenced from `TASKS.md`, `docs/tasks/encounter-engine.md`, `docs/tasks/generation-and-attention.md`, and `docs/tasks/broader-universe.md`. These links make the deferred design discoverable; they do not adopt its proposals or alter the Encounter rules.
 
 ## 10. Authority and sources

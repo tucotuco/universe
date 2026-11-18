@@ -116,4 +116,4 @@ For this fixed Encounter and its explicitly enumerated current-state closure, in
 
 ## Focused verification
 
-The exact focused commands, pass counts, syntax result, whitespace/publication audits and commit hashes are recorded in the active [U-PER-SCALE-001 report](../reports/U-PER-SCALE-001-report.md). No full repository test suite was run. The previously known adjacent transactional progression failures were not reassessed here and are not described as pre-existing or introduced by this bounded read-model work.
+The exact focused commands, pass counts, syntax result, whitespace/publication audits and commit hashes are recorded in the archived [U-PER-SCALE-001 report](../reports/archive/U-PER-SCALE-001-report.md). No full repository test suite was run. The previously known adjacent transactional progression failures were not reassessed here and are not described as pre-existing or introduced by this bounded read-model work.
