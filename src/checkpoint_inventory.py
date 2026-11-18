@@ -372,7 +372,8 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              compact_native_publication_facts=False,
              compact_native_disarm_landings=False,
              compact_native_boundary_history=False,
-             compact_native_choice_indexes=False):
+             compact_native_choice_indexes=False,
+             compact_native_fatigue_frames=False):
     from universe import Universe
     from encounter import Encounter
     from transactional_progression import _BINDINGS,_all_declarations
@@ -421,6 +422,11 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              and (not compact_native_choice_indexes
                   or native_adapters and full_native),
              'compact native ChoiceBook indexes require full native adapter mode')
+    _require(type(compact_native_fatigue_frames) is bool
+             and (not compact_native_fatigue_frames
+                  or native_adapters and full_native
+                  and compact_native_entity_context),
+             'compact native fatigue frames require complete native Entity history')
     _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
     _require(native_adapters or bindings == (), 'bindings require explicit native adapter mode')
     _require(quiescent is True,'explicit quiescent/coordinated read ownership is required')
@@ -488,7 +494,8 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
                                       compact_native_publication_facts=compact_native_publication_facts,
                                       compact_native_disarm_landings=compact_native_disarm_landings,
                                       compact_native_boundary_history=compact_native_boundary_history,
-                                      compact_native_choice_indexes=compact_native_choice_indexes)
+                                      compact_native_choice_indexes=compact_native_choice_indexes,
+                                      compact_native_fatigue_frames=compact_native_fatigue_frames)
         else:
             inventory=_Inventory()
         body=inventory.build(world,encounter,role,rng,rng_scope)
@@ -509,7 +516,8 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         compact_native_publication_facts=False,
         compact_native_disarm_landings=False,
         compact_native_boundary_history=False,
-        compact_native_choice_indexes=False):
+        compact_native_choice_indexes=False,
+        compact_native_fatigue_frames=False):
     """Return an inactive partial inventory; all readiness flags remain false.
 
     rng_scope is an explicit caller assertion, not evidence of global privacy.
@@ -525,7 +533,8 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         compact_native_publication_facts=compact_native_publication_facts,
         compact_native_disarm_landings=compact_native_disarm_landings,
         compact_native_boundary_history=compact_native_boundary_history,
-        compact_native_choice_indexes=compact_native_choice_indexes)
+        compact_native_choice_indexes=compact_native_choice_indexes,
+        compact_native_fatigue_frames=compact_native_fatigue_frames)
     candidate=CheckpointCandidate(SCHEMA,envelope,diagnostics,_digest(envelope))
     key=id(candidate)
     _ISSUED[key]=(weakref.ref(candidate,lambda ref,key=key:_ISSUED.pop(key,None)),
@@ -535,7 +544,7 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         compact_native_receipt_facts,compact_native_recipient_facts,
         compact_native_publication_facts,
         compact_native_disarm_landings,compact_native_boundary_history,
-        compact_native_choice_indexes)
+        compact_native_choice_indexes,compact_native_fatigue_frames)
     return candidate
 
 
@@ -553,6 +562,7 @@ def validate_checkpoint_candidate(world,encounter,candidate,*,quiescent=False):
         compact_native_publication_facts=issued[13],
         compact_native_disarm_landings=issued[14],
         compact_native_boundary_history=issued[15],
-        compact_native_choice_indexes=issued[16])
+        compact_native_choice_indexes=issued[16],
+        compact_native_fatigue_frames=issued[17])
     _require(stamp==issued[3] and envelope==candidate.envelope and diagnostics==candidate.diagnostics,'stale checkpoint inventory; recapture after correction')
     return CheckpointValidation(not any(d.code=='unsupported_native_value' for d in diagnostics),diagnostics)

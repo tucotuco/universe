@@ -2036,6 +2036,7 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
     def test_running_action_history_and_pending_continuation_in_fresh_process(self):
         """A real movement Action survives a mid-run native Save without replay."""
         world, encounter, rng, actor, _defender, _weapon_id = self._combat_encounter()
+        from native_graph_snapshot import decode as decode_graph
         from physiology_registry import PhysiologyRegistry, PhysiologyDefinition
         registry = PhysiologyRegistry((PhysiologyDefinition(
             "native-human@1", model="human-r4"),))
@@ -2061,6 +2062,18 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
             for mode in ("ordinary", "running")}
 
         wire = export_save(encounter)
+        graph = decode_graph(base64.b64decode(
+            json.loads(wire)["graph_b64"], validate=True), native=True)
+        inventory = graph[1]
+        nodes = next(row[1] for row in inventory if row[0] == "nodes")
+        saved_encounter = next(content for _ref, tag, content in nodes
+                               if tag == "encounter.Encounter")
+        fatigue_ref = dict(saved_encounter)["fatigue_frame_history"][1]
+        self.assertEqual(next(content for ref, tag, content in nodes
+                              if ref == fatigue_ref and tag == "list"), ())
+        markers = next(row[1:] for row in inventory
+                       if row[0] == "native-adapters")
+        self.assertIn("fatigue-frame-history/1", markers)
         query = native_history.NativeHistoryQuery(
             native_history.current_recording(encounter))
         for boundary, expected_x in ((1, .5),):

@@ -313,7 +313,8 @@ class NativeInventory(_Inventory):
                  compact_native_publication_facts=False,
                  compact_native_disarm_landings=False,
                  compact_native_boundary_history=False,
-                 compact_native_choice_indexes=False):
+                 compact_native_choice_indexes=False,
+                 compact_native_fatigue_frames=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
@@ -327,6 +328,7 @@ class NativeInventory(_Inventory):
         self.compact_native_disarm_landings=compact_native_disarm_landings
         self.compact_native_boundary_history=compact_native_boundary_history
         self.compact_native_choice_indexes=compact_native_choice_indexes
+        self.compact_native_fatigue_frames=compact_native_fatigue_frames
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -467,6 +469,34 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if (self.compact_native_fatigue_frames
+                and tag == 'encounter.Encounter'
+                and field == 'fatigue_frame_history'):
+            _require(type(item) is list,
+                     'Encounter fatigue frame cache is not a native list')
+            owner = self._objects_by_identity.get(self._owner_identity(ref))
+            _require(owner is not None,
+                     'Encounter fatigue frame cache owner is missing')
+            import native_history
+            log = native_history.current_recording(owner)
+            if log is None and owner.__dict__.get('_atomic_interval_history'):
+                log = native_history.capture(owner)
+            derived = ([] if log is None
+                       else native_history.fatigue_frames_from_history(log))
+            _require(derived == item,
+                     'Encounter fatigue frame cache differs from committed facts')
+            source_digest = hashlib.sha256(
+                native_history._canonical(native_history._plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            replacement = []
+            encoded = super().field(tag, field, replacement, ref, path, depth)
+            token_id = id(replacement)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
         if (self.compact_native_choice_indexes
                 and tag == 'action_choice.ChoiceBook'
                 and field in ('_registered', '_states')):
@@ -1502,5 +1532,7 @@ class NativeInventory(_Inventory):
             *(('committed-boundary-history/1',)
               if self.compact_native_boundary_history else ()),
             *(('choice-book-indexes/1',)
-              if self.compact_native_choice_indexes else ()))
+              if self.compact_native_choice_indexes else ()),
+            *(('fatigue-frame-history/1',)
+              if self.compact_native_fatigue_frames else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))

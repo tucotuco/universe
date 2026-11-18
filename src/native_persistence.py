@@ -163,6 +163,7 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
             compact_native_disarm_landings=compact_entity_context,
             compact_native_boundary_history=compact_boundary_history,
             compact_native_choice_indexes=True,
+            compact_native_fatigue_frames=compact_entity_context,
             bindings=recipient_bindings,
             rng_owner=_native_rng_owner(encounter))
         if candidate.diagnostics:

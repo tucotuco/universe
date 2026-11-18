@@ -610,7 +610,7 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
             'observer-recipient-facts/1','observer-recipient-facts/2',
             'published-interval-facts/1',
             'disarm-landing-facts/1','committed-boundary-history/1',
-            'choice-book-indexes/1')
+            'choice-book-indexes/1','fatigue-frame-history/1')
         _need(type(markers) is tuple and markers
               and len(set(markers))==len(markers)
               and all(value in marker_order for value in markers)
@@ -830,6 +830,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'committed-boundary-history/1' in native_adapter_markers)
     compact_choice_indexes = (native and
         'choice-book-indexes/1' in native_adapter_markers)
+    compact_fatigue_frames = (native and
+        'fatigue-frame-history/1' in native_adapter_markers)
     _need(not compact_receipt_facts or compact_entity_context,
           'compacted native receipt facts require EntityInspection history')
     _need(not compact_recipient_facts or compact_receipt_facts,
@@ -1074,6 +1076,9 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
               'compacted native graph requires histories for every Encounter')
         import native_history as history_codec
         try:
+            if compact_fatigue_frames:
+                history_codec.restore_compacted_fatigue_frames(
+                    world, native_histories)
             if compact_boundary_history:
                 history_codec.restore_compacted_boundary_history(world,
                                                                  native_histories)

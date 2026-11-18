@@ -2733,6 +2733,65 @@ def fatigue_context_at(log, boundary):
     return result
 
 
+def fatigue_frames_from_history(log):
+    """Rebuild Encounter's historical fatigue display rows from committed facts.
+
+    This is an on-demand adapter for the former per-Encounter cache. It uses
+    only recorded boundary starts and observer-independent fatigue/physiology
+    facts; it never recomputes fatigue or resolves an Action.
+    """
+    validate(log)
+    query = NativeHistoryQuery(log)
+    start_time = _number_value(log["initial"]["start"])
+    first_boundary = math.floor(start_time) + 1
+    result = []
+    for boundary in range(first_boundary, log["latest_boundary"] + 1):
+        facts = query.boundary_facts_at(boundary)
+        context = query.fatigue_context_at(boundary)
+        if context is None:
+            raise NativeHistoryRejected(
+                "committed native history lacks fatigue facts for a frame")
+        views = {}
+        for identity, row in sorted(context.items()):
+            fatigue = row.get("physical_fatigue")
+            if type(fatigue) is not dict:
+                raise NativeHistoryRejected(
+                    "committed fatigue frame lacks physical fatigue facts")
+            views[identity] = {
+                "q": _number_value(fatigue["q"]),
+                "b": _number_value(fatigue["b"]),
+                "physiology_id": fatigue["physiology_id"],
+                "check_modifier": fatigue["check_modifier"],
+            }
+        result.append({
+            "start": _number_value(facts["start"]),
+            "time": _number_value(query.state_at(boundary)["time"]),
+            "views": views,
+        })
+    return result
+
+
+def restore_compacted_fatigue_frames(world, histories):
+    """Rebuild compacted Encounter fatigue caches from authenticated history."""
+    from encounter import Encounter
+    if type(histories) is not dict:
+        raise NativeHistoryRejected("compacted fatigue history map is malformed")
+    encounters = {event.id: event for event in world.event_history.values()
+                  if type(event) is Encounter}
+    if set(encounters) != set(histories):
+        raise NativeHistoryRejected(
+            "compacted fatigue history roots differ from the restored Universe")
+    for identity, encounter in encounters.items():
+        storage = encounter.__dict__.get("fatigue_frame_history")
+        if type(storage) is not list or storage:
+            raise NativeHistoryRejected(
+                "marked compact fatigue cache contains serialized entries")
+        log = histories[identity]
+        frames = [] if log is None else fatigue_frames_from_history(log)
+        encounter.fatigue_frame_history = frames
+    return True
+
+
 class NativeHistoryQuery:
     """Validated, detached query session for repeated history reads.
 

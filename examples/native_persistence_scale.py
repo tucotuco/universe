@@ -185,6 +185,15 @@ def run(action_count=64, registry_count=2):
         raise RuntimeError('Target-history comparison candidate was not admitted')
     target_compact_graph_bytes = len(encode_native_graph(
         target_compact_candidate.envelope, native=True))
+    choice_compact_candidate = capture_checkpoint_candidate(
+        world, encounter, quiescent=True, rng_scope='exclusive_encounter',
+        native_adapters=True, full_native=True,
+        compact_native_choice_indexes=True,
+        rng_owner=_native_rng_owner(encounter))
+    if choice_compact_candidate.diagnostics:
+        raise RuntimeError('ChoiceBook-index comparison candidate was not admitted')
+    choice_compact_graph_bytes = len(encode_native_graph(
+        choice_compact_candidate.envelope, native=True))
     wire = export_save(encounter)
     validate_checkpoint_candidate(world, encounter, uncompacted_candidate,
                                   quiescent=True)
@@ -245,6 +254,9 @@ def run(action_count=64, registry_count=2):
         'save_bytes': len(wire), 'graph_bytes': graph_bytes,
         'uncompacted_graph_bytes': uncompacted_graph_bytes,
         'target_compact_graph_bytes': target_compact_graph_bytes,
+        'choice_compact_graph_bytes': choice_compact_graph_bytes,
+        'choice_index_graph_bytes_saved':
+            uncompacted_graph_bytes - choice_compact_graph_bytes,
         'target_history_graph_bytes_saved':
             uncompacted_graph_bytes - target_compact_graph_bytes,
         'receipt_and_publication_facts_graph_bytes_saved':
