@@ -427,7 +427,7 @@ FIELD_ADAPTERS = {
         "required": 'action_id after_commit source_action_id topic'.split(),
     },
     'observer_proposals.RecipientIdentity': {
-        "allowed": 'object_identity role'.split(),
+        "allowed": 'binding_id object_identity role'.split(),
         "required": 'object_identity role'.split(),
     },
     'observer_proposals.ReservationReleaseEffect': {

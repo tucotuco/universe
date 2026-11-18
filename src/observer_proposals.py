@@ -67,6 +67,7 @@ def frozen_value(value):
 class RecipientIdentity:
     role: str
     object_identity: int
+    binding_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -316,7 +317,7 @@ class SupportedBoundaryCandidate:
         return self.boundary.target(identity)
 
 
-def _capture_belief(ledger, observer_id):
+def _capture_belief(ledger, observer_id, binding_id=None):
     data = native_data(ledger, (BeliefLedger,))
     if (inspect.getattr_static(type(ledger),'learn') is not _NATIVE_BELIEF_LEARN
             or inspect.getattr_static(type(ledger),'count_estimate') is not _NATIVE_BELIEF_COUNT
@@ -335,11 +336,11 @@ def _capture_belief(ledger, observer_id):
                 and value.observation_id == key and value.observer_id == evidence[key].observer_id, 'invalid existing interpretation')
     auxiliary = frozen_value({k: data[k] for k in (
         '_reassessments','communication_log','_inquiry_history')})
-    return FrozenBelief(RecipientIdentity('in_world_belief_ledger', id(ledger)), observer_id, evidence,
+    return FrozenBelief(RecipientIdentity('in_world_belief_ledger', id(ledger), binding_id), observer_id, evidence,
         interpretations, current, frozen_value(data['_belief_history']), auxiliary)
 
 
-def _capture_location_evidence(ledger, observer_id):
+def _capture_location_evidence(ledger, observer_id, binding_id=None):
     if type(ledger) is not LocationEvidenceLedger or ledger.observer_id != observer_id:
         raise UnsupportedEvaluation('location evidence recipient must belong to the observing Being')
     if inspect.getattr_static(type(ledger), 'last_seen_location', None) is not _NATIVE_LOCATION_LAST_SEEN:
@@ -352,11 +353,11 @@ def _capture_location_evidence(ledger, observer_id):
         _check(type(key) is str and type(value) is BeingLocationObservation
                and key == value.id and value.observer_id == observer_id,
                'invalid or foreign existing location evidence')
-    identity = RecipientIdentity('observer_location_evidence', id(ledger))
+    identity = RecipientIdentity('observer_location_evidence', id(ledger), binding_id)
     return FrozenLocationEvidence(identity, observer_id, observations)
 
 
-def _capture_object_evidence(ledger, observer_id):
+def _capture_object_evidence(ledger, observer_id, binding_id=None):
     if type(ledger) is not ObjectObservationLedger or ledger.observer_id != observer_id:
         raise UnsupportedEvaluation('Object evidence recipient must belong to the observing Being')
     if inspect.getattr_static(type(ledger), 'last_observation', None) is not _NATIVE_OBJECT_LAST:
@@ -369,7 +370,7 @@ def _capture_object_evidence(ledger, observer_id):
         _check(type(key) is str and type(value) is ObjectObservation
                and key == value.id and value.observer_id == observer_id,
                'invalid or foreign existing Object evidence')
-    identity = RecipientIdentity('observer_object_evidence', id(ledger))
+    identity = RecipientIdentity('observer_object_evidence', id(ledger), binding_id)
     return FrozenObjectEvidence(identity, observer_id, observations)
 
 
@@ -386,6 +387,7 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
         world = dict(world, event_history=_stage.events)
         book = dict(book, _registered=_stage.registered, _states=_stage.states)
     actions, recipients, lifecycle = {}, {}, {}
+    from native_history import _recipient_binding_id
     for aid, view in context.snapshot.actions.items():
         action = world['event_history'][aid]
         data = object.__getattribute__(action, '__dict__')
@@ -418,7 +420,10 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
             _check(set(policy) == {'success','failure'} and all(type(v) is int and v >= 0 for v in policy.values()), 'invalid observation practice policy')
             recipient = None
             if data['ledger'] is not None:
-                frozen = _capture_belief(data['ledger'], view.actor_id)
+                binding_id = _recipient_binding_id(
+                    ed['universe'], 'in_world_belief_ledger',
+                    id(data['ledger']), action_events=world['event_history'])
+                frozen = _capture_belief(data['ledger'], view.actor_id, binding_id)
                 recipient = frozen.identity; recipients[recipient] = frozen
             actions[aid] = ObserverActionInputs(aid, sensor, interpreter, seed, key, data['focus_category'], policy, recipient)
         elif view.family == 'spot':
@@ -438,7 +443,11 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
                         or data.get('ledger') is not None
                         or data.get('group_fully_visible') is True):
                     raise UnsupportedEvaluation('Object evidence requires one participating native ObjectInstance and its owner ledger')
-                frozen = _capture_object_evidence(data['object_ledger'], view.actor_id)
+                binding_id = _recipient_binding_id(
+                    ed['universe'], 'observer_object_evidence',
+                    id(data['object_ledger']), action_events=world['event_history'])
+                frozen = _capture_object_evidence(
+                    data['object_ledger'], view.actor_id, binding_id)
                 recipients[frozen.identity] = frozen
                 actions[aid] = ObserverActionInputs(aid, object_recipient=frozen.identity)
             elif data.get('location_ledger') is not None:
@@ -446,7 +455,11 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
                         or view.target_id not in context.snapshot.participant_ids
                         or context.snapshot.entity(view.target_id).category != 'being'):
                     raise UnsupportedEvaluation('location evidence is supported only for a participating Being target')
-                frozen = _capture_location_evidence(data['location_ledger'], view.actor_id)
+                binding_id = _recipient_binding_id(
+                    ed['universe'], 'observer_location_evidence',
+                    id(data['location_ledger']), action_events=world['event_history'])
+                frozen = _capture_location_evidence(
+                    data['location_ledger'], view.actor_id, binding_id)
                 recipients[frozen.identity] = frozen
                 actions[aid] = ObserverActionInputs(aid, location_recipient=frozen.identity)
             elif aid in context.snapshot.objective_inputs.actions:
@@ -462,7 +475,11 @@ def capture_observer_context(encounter, boundary, *, rng_state=None, _stage=None
                 if type(values) is not list:
                     raise UnsupportedEvaluation('received_accounts must be a reviewed in-world native list')
                 _check(all(type(a) is HeardAccount for a in values), 'opaque in-world account contents')
-                recipient = RecipientIdentity('in_world_received_accounts', id(values))
+                binding_id = _recipient_binding_id(
+                    ed['universe'], 'in_world_received_accounts', id(values),
+                    action_events=world['event_history'])
+                recipient = RecipientIdentity(
+                    'in_world_received_accounts', id(values), binding_id)
                 existing = recipients.get(recipient)
                 listener_ids = set(() if type(existing) is not FrozenAccounts
                                    else existing.listener_ids)

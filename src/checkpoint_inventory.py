@@ -368,6 +368,7 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              compact_native_target_history=False,
              compact_native_entity_context=False,
              compact_native_receipt_facts=False,
+             compact_native_recipient_facts=False,
              compact_native_publication_facts=False,
              compact_native_disarm_landings=False,
              compact_native_boundary_history=False):
@@ -397,6 +398,10 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
              and (not compact_native_receipt_facts
                   or native_adapters and full_native and compact_native_entity_context),
              'compact native receipt facts require full native EntityInspection history')
+    _require(type(compact_native_recipient_facts) is bool
+             and (not compact_native_recipient_facts
+                  or native_adapters and full_native and compact_native_receipt_facts),
+             'compact native recipient facts require full native receipt history')
     _require(type(compact_native_publication_facts) is bool
              and (not compact_native_publication_facts
                   or native_adapters and full_native and compact_native_receipt_facts),
@@ -474,6 +479,7 @@ def _capture(world,encounter,*,quiescent,rng_scope,native_adapters=False,
                                       compact_native_target_history=compact_native_target_history,
                                       compact_native_entity_context=compact_native_entity_context,
                                       compact_native_receipt_facts=compact_native_receipt_facts,
+                                      compact_native_recipient_facts=compact_native_recipient_facts,
                                       compact_native_publication_facts=compact_native_publication_facts,
                                       compact_native_disarm_landings=compact_native_disarm_landings,
                                       compact_native_boundary_history=compact_native_boundary_history)
@@ -493,6 +499,7 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         native_adapters=False,bindings=(),rng_owner=None,full_native=False,
         compact_native_target_history=False,compact_native_entity_context=False,
         compact_native_receipt_facts=False,
+        compact_native_recipient_facts=False,
         compact_native_publication_facts=False,
         compact_native_disarm_landings=False,
         compact_native_boundary_history=False):
@@ -507,6 +514,7 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         compact_native_target_history=compact_native_target_history,
         compact_native_entity_context=compact_native_entity_context,
         compact_native_receipt_facts=compact_native_receipt_facts,
+        compact_native_recipient_facts=compact_native_recipient_facts,
         compact_native_publication_facts=compact_native_publication_facts,
         compact_native_disarm_landings=compact_native_disarm_landings,
         compact_native_boundary_history=compact_native_boundary_history)
@@ -516,7 +524,8 @@ def capture_checkpoint_candidate(world,encounter,*,quiescent=False,rng_scope=Non
         weakref.ref(world),weakref.ref(encounter),stamp,_candidate_seal(candidate),
         rng_scope,native_adapters,bindings,full_native,
         compact_native_target_history,compact_native_entity_context,
-        compact_native_receipt_facts,compact_native_publication_facts,
+        compact_native_receipt_facts,compact_native_recipient_facts,
+        compact_native_publication_facts,
         compact_native_disarm_landings,compact_native_boundary_history)
     return candidate
 
@@ -531,8 +540,9 @@ def validate_checkpoint_candidate(world,encounter,candidate,*,quiescent=False):
         full_native=issued[8],compact_native_target_history=issued[9],
         compact_native_entity_context=issued[10],
         compact_native_receipt_facts=issued[11],
-        compact_native_publication_facts=issued[12],
-        compact_native_disarm_landings=issued[13],
-        compact_native_boundary_history=issued[14])
+        compact_native_recipient_facts=issued[12],
+        compact_native_publication_facts=issued[13],
+        compact_native_disarm_landings=issued[14],
+        compact_native_boundary_history=issued[15])
     _require(stamp==issued[3] and envelope==candidate.envelope and diagnostics==candidate.diagnostics,'stale checkpoint inventory; recapture after correction')
     return CheckpointValidation(not any(d.code=='unsupported_native_value' for d in diagnostics),diagnostics)

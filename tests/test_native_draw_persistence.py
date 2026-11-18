@@ -75,7 +75,7 @@ class NativeDrawPersistenceTests(unittest.TestCase):
             self.assertEqual(query.objective_use_at(boundary),
                              _plain(inspection.objective_use))
             expected_recipients = native_history._stable_recipients(
-                inspection.recipients)
+                inspection.recipients, encounter)
             self.assertEqual(query.state_at(boundary)['recipients'],
                              expected_recipients)
             receipt_facts = query.receipt_facts_at(boundary)

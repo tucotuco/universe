@@ -67,7 +67,7 @@ class NativePersistenceCapabilityMatrixTests(unittest.TestCase):
         import native_history
         self.assertEqual(native_history.RECIPIENT_HISTORY_SCHEMA,
                          'universe.native-encounter-history/9')
-        self.assertEqual(native_history.SCHEMA, 'universe.native-encounter-history/11')
+        self.assertEqual(native_history.SCHEMA, 'universe.native-encounter-history/12')
         self.assertTrue(callable(native_history.entity_context_at))
         self.assertTrue(callable(native_history.entity_at))
         self.assertTrue(callable(native_history.entity_history_at))

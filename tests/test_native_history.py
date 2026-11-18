@@ -28,6 +28,10 @@ def _legacy_shape(body):
         row.pop("receipt_facts_available", None)
         if row.get("kind") == "quiet_span":
             row.pop("receipt_facts_available", None)
+        for change in row.get("changes", ()):
+            if change.get("path") == ["recipients"] and change.get("after"):
+                for recipient in change.get("value", ()):
+                    recipient.pop("binding_id", None)
     return body
 
 
@@ -45,6 +49,7 @@ from native_history import (NativeHistoryRejected, capture, decode, encode,
                             NativeHistoryQuery, entity_context_at, LEGACY_SCHEMA, PREVIOUS_SCHEMA,
                             QUIET_SPAN_SCHEMA, ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
                             INITIAL_RNG_SCHEMA, PUBLICATION_FACT_SCHEMA,
+                            INITIAL_ENTITY_SCHEMA,
                             SCHEMA, SAME_RNG, _seal,
                             fatigue_context_at, committed_actions_at, observer_facts_at,
                             entity_at, entity_history_at, objective_at,
@@ -182,9 +187,32 @@ class NativeHistoryTests(unittest.TestCase):
         self.assertFalse(upgraded["initial"]["initial_entities_available"])
         self.assertIsNone(query.state_at(0)["entities"])
         self.assertIsNone(query.entity_context_at(0))
+        self.assertIsNone(query.fatigue_context_at(0))
+        self.assertIsNone(query.boundary_facts_at(0)["fatigue_context"])
         for boundary in range(1, self.log["latest_boundary"] + 1):
             self.assertEqual(query.entity_context_at(boundary),
                              NativeHistoryQuery(self.log).entity_context_at(boundary))
+
+    def test_schema_eleven_migration_preserves_known_initial_entity_state(self):
+        body = {key: copy.deepcopy(value) for key, value in self.log.items()
+                if key != "sha256"}
+        body["schema"] = INITIAL_ENTITY_SCHEMA
+        for row in body["boundaries"]:
+            for change in row.get("changes", ()):
+                if change.get("path") == ["recipients"] and change.get("after"):
+                    for recipient in change.get("value", ()):
+                        recipient.pop("binding_id", None)
+        previous = _seal(body)
+        self.assertTrue(validate(previous))
+        migrated = upgrade(previous)
+        self.assertTrue(migrated["initial"]["initial_entities_available"])
+        old_query = NativeHistoryQuery(previous)
+        new_query = NativeHistoryQuery(migrated)
+        for boundary in range(self.log["latest_boundary"] + 1):
+            self.assertEqual(new_query.state_at(boundary),
+                             old_query.state_at(boundary))
+        self.assertEqual(new_query.entity_context_at(0),
+                         old_query.entity_context_at(0))
 
     def test_objective_fact_and_use_queries_match_committed_group_observation(self):
         fixture = inspection_fixtures.InspectionFixture()

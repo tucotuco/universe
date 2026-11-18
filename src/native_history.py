@@ -34,32 +34,39 @@ RECEIPT_FACT_SCHEMA = "universe.native-encounter-history/7"
 OBSERVER_KNOWLEDGE_SCHEMA = "universe.native-encounter-history/8"
 RECIPIENT_HISTORY_SCHEMA = "universe.native-encounter-history/9"
 PUBLICATION_FACT_SCHEMA = "universe.native-encounter-history/10"
-SCHEMA = "universe.native-encounter-history/11"
+INITIAL_ENTITY_SCHEMA = "universe.native-encounter-history/11"
+RECIPIENT_BINDING_SCHEMA = "universe.native-encounter-history/12"
+SCHEMA = RECIPIENT_BINDING_SCHEMA
 LEGACY_SCHEMAS = (LEGACY_SCHEMA, PREVIOUS_SCHEMA, QUIET_SPAN_SCHEMA,
                   ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA,
                   INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
                   OBSERVER_KNOWLEDGE_SCHEMA, RECIPIENT_HISTORY_SCHEMA,
-                  PUBLICATION_FACT_SCHEMA)
+                  PUBLICATION_FACT_SCHEMA, INITIAL_ENTITY_SCHEMA)
 RNG_HISTORY_SCHEMAS = (INITIAL_RNG_SCHEMA, RECEIPT_FACT_SCHEMA,
                        OBSERVER_KNOWLEDGE_SCHEMA, RECIPIENT_HISTORY_SCHEMA,
-                       PUBLICATION_FACT_SCHEMA, SCHEMA)
+                       PUBLICATION_FACT_SCHEMA, INITIAL_ENTITY_SCHEMA, SCHEMA)
 RECEIPT_FACT_SCHEMAS = (RECEIPT_FACT_SCHEMA, OBSERVER_KNOWLEDGE_SCHEMA,
-                        RECIPIENT_HISTORY_SCHEMA, PUBLICATION_FACT_SCHEMA, SCHEMA)
+                        RECIPIENT_HISTORY_SCHEMA, PUBLICATION_FACT_SCHEMA,
+                        INITIAL_ENTITY_SCHEMA, SCHEMA)
 OBSERVER_KNOWLEDGE_SCHEMAS = (OBSERVER_KNOWLEDGE_SCHEMA,
                               RECIPIENT_HISTORY_SCHEMA, PUBLICATION_FACT_SCHEMA,
-                              SCHEMA)
+                              INITIAL_ENTITY_SCHEMA, SCHEMA)
 INITIAL_SCHEDULE_SCHEMAS = (RECIPIENT_HISTORY_SCHEMA,
-                            PUBLICATION_FACT_SCHEMA, SCHEMA)
+                            PUBLICATION_FACT_SCHEMA, INITIAL_ENTITY_SCHEMA, SCHEMA)
 ENTITY_CONTEXT_SCHEMAS = (ENTITY_CONTEXT_SCHEMA, FATIGUE_CONTEXT_SCHEMA, INITIAL_RNG_SCHEMA,
                           RECEIPT_FACT_SCHEMA, OBSERVER_KNOWLEDGE_SCHEMA,
                           RECIPIENT_HISTORY_SCHEMA, PUBLICATION_FACT_SCHEMA,
+                          INITIAL_ENTITY_SCHEMA,
                           SCHEMA)
 CURRENT_ENTITY_CONTEXT_SCHEMAS = tuple(
     value for value in ENTITY_CONTEXT_SCHEMAS
     if value != ENTITY_CONTEXT_SCHEMA)
+INITIAL_ENTITY_SCHEMAS = (INITIAL_ENTITY_SCHEMA, SCHEMA)
 SAME_RNG = {"$same_as_previous": True}
 _EMPTY_EVENTS = {"action_ids": [], "effect_ids": [], "actions": {},
                  "effects": {}, "starts": [], "participants": []}
+_RECIPIENT_BINDING_LOCK = RLock()
+_RECIPIENT_BINDING_IDS = WeakKeyDictionary()
 MAX_BYTES = 64 * 1024 * 1024
 MAX_NODES = 10_000_000
 MAX_BOUNDARIES = 10_000_000
@@ -179,8 +186,11 @@ def _plain(value, depth=0, active=None):
             raise NativeHistoryRejected("native history record fields differ from the closed schema")
         if tag == "observer_proposals.RecipientIdentity":
             # object_identity is id(handle), not a logical identity. The
-            # originating Effect carries the stable observer/recipient ID.
+            # stable binding key distinguishes multiple same-owner stores.
             data = {"role": data["role"]}
+            if object.__getattribute__(value, "__dict__").get("binding_id") is not None:
+                data["binding_id"] = object.__getattribute__(
+                    value, "__dict__")["binding_id"]
         elif tag == "interval_staging.AuthorityReference":
             # Rebuild anchors bind through the stable role/key pair.
             data = {"key": data["key"], "role": data["role"]}
@@ -300,8 +310,9 @@ def _materialize_plain(value, depth=0):
         expected = {field.name for field in fields(cls)}
         encoded_fields = value["fields"]
         if (tag == "observer_proposals.RecipientIdentity"
-                and set(encoded_fields) == {"role"}
-                and expected == {"role", "object_identity"}):
+                and "role" in encoded_fields
+                and "object_identity" not in encoded_fields
+                and expected <= {"role", "object_identity", "binding_id"}):
             # `_plain` deliberately omits id(handle). Historical Target facts
             # retain this type only as a role marker; 0 is a fail-closed
             # process-local sentinel and is never rebound or dereferenced.
@@ -418,7 +429,7 @@ def _boundary_payload(encounter, receipt, latest_view, targets_by_boundary):
         "entity_context": _plain(meta.entities),
         "objective": _plain(meta.objective),
         "objective_use": _plain(meta.objective_use),
-        "recipients": _stable_recipients(meta.recipients),
+        "recipients": _stable_recipients(meta.recipients, encounter),
         "schedule": _plain(meta.schedule),
         "starts": _plain(meta.starts),
         "participants": _plain(meta.participants),
@@ -612,10 +623,107 @@ def capture_initial_schedule(encounter):
     return _plain(projection)
 
 
-def _stable_recipients(value):
+def _register_recipient_binding(world, role, handle, binding_id):
+    if (type(binding_id) is not str or len(binding_id) != 64
+            or any(char not in "0123456789abcdef" for char in binding_id)):
+        raise NativeHistoryRejected("native recipient binding identity is malformed")
+    try:
+        with _RECIPIENT_BINDING_LOCK:
+            bindings = _RECIPIENT_BINDING_IDS.setdefault(world, {})
+            prior = bindings.get(id(handle))
+            if prior is not None and (prior[0] is not handle
+                    or prior[1] != role or prior[2] != binding_id):
+                raise NativeHistoryRejected(
+                    "native recipient handle has conflicting stable bindings")
+            bindings[id(handle)] = (handle, role, binding_id)
+    except TypeError as exc:
+        raise NativeHistoryRejected(
+            "native recipient owner cannot register process-local bindings") from exc
+
+
+def _recipient_binding_id(world, role, identity, *, action_events=None):
+    """Return a portable identity for one native recipient object.
+
+    Role/owner is insufficient when one observer owns multiple ledgers (or
+    account lists). A process-local weak Universe registry pins the first
+    canonical registered Action-field reference as the stable store identity.
+    The hash survives later Action reuse without serializing a Python address
+    or a caller-supplied name.
+    """
+    fields_by_role = {
+        "in_world_belief_ledger": ("ledger",),
+        "in_world_received_accounts": ("received_accounts",),
+        "observer_location_evidence": ("location_ledger",),
+        "observer_object_evidence": ("object_ledger",),
+    }
+    fields_for_role = fields_by_role.get(role)
+    if fields_for_role is None:
+        raise NativeHistoryRejected("native recipient role is unreviewed")
+    try:
+        with _RECIPIENT_BINDING_LOCK:
+            bound = _RECIPIENT_BINDING_IDS.get(world, {}).get(identity)
+        if bound is not None:
+            if bound[1] != role:
+                raise NativeHistoryRejected(
+                    "native recipient handle is registered to another role")
+            return bound[2]
+    except TypeError:
+        pass
+    event_history = (action_events if action_events is not None else
+        world.get("event_history") if type(world) is dict else
+        object.__getattribute__(world, "__dict__").get("event_history"))
+    if type(event_history) not in (dict, MappingProxyType):
+        raise NativeHistoryRejected("native recipient has no registered Event table")
+    actions_by_id = {}
+    for event_id, event in event_history.items():
+        data = object.__getattribute__(event, "__dict__")
+        if data.get("id") != event_id:
+            raise NativeHistoryRejected(
+                "native recipient Action identity differs from its Event key")
+        actions_by_id[event_id] = event
+        book = data.get("_choice_book")
+        if book is None:
+            continue
+        for accepted in object.__getattribute__(book, "__dict__").get(
+                "_choices", {}).values():
+            for member in accepted.members:
+                action = member.action
+                action_id = object.__getattribute__(action, "__dict__").get("id")
+                if type(action_id) is str:
+                    prior = actions_by_id.get(action_id)
+                    if prior is not None and prior is not action:
+                        raise NativeHistoryRejected(
+                            "native Action ID names multiple recipient declarations")
+                    actions_by_id[action_id] = action
+    references = []
+    for event_id, event in actions_by_id.items():
+        data = object.__getattribute__(event, "__dict__")
+        for field in fields_for_role:
+            if data.get(field) is not None and id(data[field]) == identity:
+                references.append((event_id, field))
+    references.sort()
+    if not references:
+        raise NativeHistoryRejected(
+            "native recipient identity has no registered Action reference")
+    # Choose the first canonical registered Action field exactly once. Future
+    # Actions may reuse the same ledger/list; they must not re-key history
+    # already recorded for that native recipient object.
+    value = {"role": role, "first_action_field": list(references[0])}
+    binding_id = hashlib.sha256(_canonical(value)).hexdigest()
+    if type(world) is not dict:
+        handle = next(object.__getattribute__(event, "__dict__")[field]
+            for event_id, event in actions_by_id.items()
+            for field in fields_for_role
+            if (event_id, field) == references[0])
+        _register_recipient_binding(world, role, handle, binding_id)
+    return binding_id
+
+
+def _stable_recipients(value, encounter):
     if type(value) not in (dict, MappingProxyType):
         raise NativeHistoryRejected("native observer projections are not a mapping")
     rows = []
+    world = object.__getattribute__(encounter, "__dict__")["universe"]
     for identity, projection in value.items():
         if type(identity).__module__ + "." + type(identity).__name__ != "observer_proposals.RecipientIdentity":
             raise NativeHistoryRejected("native observer identity has an unreviewed type")
@@ -626,6 +734,7 @@ def _stable_recipients(value):
             owner = data.get("listener_id")
         if type(role) is not str or not role or owner is not None and type(owner) is not str:
             raise NativeHistoryRejected("native observer projection has no stable owner")
+        binding_id = _recipient_binding_id(world, role, identity.object_identity)
         if role in ("in_world_belief_ledger", "observer_location_evidence",
                     "observer_object_evidence") and owner is None:
             raise NativeHistoryRejected("observer-owned evidence has no logical owner ID")
@@ -654,13 +763,16 @@ def _stable_recipients(value):
                         "delivery_effect_ids": owned_effects,
                         "listener_id": listener_id}
                     rows.append({"role": role, "owner_id": listener_id,
+                                 "binding_id": binding_id,
                                  "projection": _plain(projection_data)})
                 continue
         projection_data = {key: item for key, item in data.items()
                            if key != "identity"}
         rows.append({"role": role, "owner_id": owner,
+                     "binding_id": binding_id,
                      "projection": _plain(projection_data)})
-    rows.sort(key=lambda row: (row["role"], row["owner_id"] or ""))
+    rows.sort(key=lambda row: (row["role"], row["owner_id"] or "",
+                               row["binding_id"]))
     return rows
 
 
@@ -678,21 +790,30 @@ def _merge_recipient_rows(previous, updates):
         raise NativeHistoryRejected("native recipient projection has an invalid shape")
     keyed = {}
     for row in previous:
-        if type(row) is not dict or set(row) != {"role", "owner_id", "projection"}:
+        if (type(row) is not dict
+                or set(row) not in ({"role", "owner_id", "projection"},
+                                    {"role", "owner_id", "binding_id", "projection"})):
             raise NativeHistoryRejected("native recipient projection row is malformed")
         owner = row["owner_id"]
-        key = ((row["role"], owner) if owner is not None else
+        binding = row.get("binding_id")
+        key = ((row["role"], owner, binding) if binding is not None else
+               (row["role"], owner) if owner is not None else
                (row["role"], None, _canonical(row["projection"])))
         keyed[key] = row
     for row in updates:
-        if type(row) is not dict or set(row) != {"role", "owner_id", "projection"}:
+        if (type(row) is not dict
+                or set(row) not in ({"role", "owner_id", "projection"},
+                                    {"role", "owner_id", "binding_id", "projection"})):
             raise NativeHistoryRejected("native recipient update is malformed")
         owner = row["owner_id"]
-        key = ((row["role"], owner) if owner is not None else
+        binding = row.get("binding_id")
+        key = ((row["role"], owner, binding) if binding is not None else
+               (row["role"], owner) if owner is not None else
                (row["role"], None, _canonical(row["projection"])))
         keyed[key] = row
     return sorted(keyed.values(), key=lambda row: (
-        row["role"], row["owner_id"] or "", _canonical(row["projection"])))
+        row["role"], row["owner_id"] or "", row.get("binding_id", ""),
+        _canonical(row["projection"])))
 
 
 def _upgrade_recipient_rows(rows):
@@ -702,12 +823,23 @@ def _upgrade_recipient_rows(rows):
     if type(rows) is not list:
         raise NativeHistoryRejected("legacy native recipient projection is malformed")
     upgraded = []
+
+    def with_legacy_binding(row):
+        if "binding_id" in row:
+            return row
+        identity = {"legacy_role": row["role"],
+                    "legacy_owner": row["owner_id"]}
+        return {**row, "binding_id": hashlib.sha256(
+            _canonical(identity)).hexdigest()}
+
     for row in rows:
-        if (type(row) is not dict or set(row) != {"role", "owner_id", "projection"}
+        if (type(row) is not dict
+                or set(row) not in ({"role", "owner_id", "projection"},
+                                    {"role", "owner_id", "binding_id", "projection"})
                 or type(row["projection"]) is not dict):
             raise NativeHistoryRejected("legacy native recipient row is malformed")
         if row["role"] != "in_world_received_accounts" or row["owner_id"] is not None:
-            upgraded.append(row)
+            upgraded.append(with_legacy_binding(row))
             continue
         projection = row["projection"]
         encoded_accounts = projection.get("accounts")
@@ -718,7 +850,7 @@ def _upgrade_recipient_rows(rows):
                 or type(encoded_effects) is not dict
                 or set(encoded_effects) != {"$tuple"}
                 or type(encoded_effects["$tuple"]) is not list):
-            upgraded.append(row)
+            upgraded.append(with_legacy_binding(row))
             continue
         by_listener = {}
         for account in encoded_accounts["$tuple"]:
@@ -730,7 +862,7 @@ def _upgrade_recipient_rows(rows):
                 raise NativeHistoryRejected("legacy testimony account has no listener identity")
             by_listener.setdefault(listener, []).append(account)
         if not by_listener:
-            upgraded.append(row)
+            upgraded.append(with_legacy_binding(row))
             continue
         for listener, accounts in sorted(by_listener.items()):
             action_ids = {account["fields"]["action_id"] for account in accounts}
@@ -742,13 +874,16 @@ def _upgrade_recipient_rows(rows):
                         and fields_value.get("source_action_id") in action_ids):
                     effects.append(effect)
             upgraded.append({"role": row["role"], "owner_id": listener,
+                "binding_id": hashlib.sha256(_canonical({
+                    "legacy_role": row["role"],
+                    "legacy_owner": listener})).hexdigest(),
                 "projection": {"accounts": {"$tuple": accounts},
                     "delivery_effect_ids": {"$tuple": effects},
                     "listener_id": listener}})
     return upgraded
 
 
-def _validate_recipient_state(state, participants):
+def _validate_recipient_state(state, participants, schema):
     recipients = state.get("recipients")
     if recipients == {}:
         return
@@ -757,9 +892,13 @@ def _validate_recipient_state(state, participants):
     seen = set()
     allowed = {"in_world_belief_ledger", "observer_location_evidence",
                "observer_object_evidence", "in_world_received_accounts"}
+    current_bindings = schema == SCHEMA
     for row in recipients:
+        expected_fields = ({"role", "owner_id", "binding_id", "projection"}
+                           if current_bindings else
+                           {"role", "owner_id", "projection"})
         if (type(row) is not dict
-                or set(row) != {"role", "owner_id", "projection"}
+                or set(row) != expected_fields
                 or type(row["role"]) is not str
                 or row["role"] not in allowed
                 or row["owner_id"] is not None
@@ -767,9 +906,15 @@ def _validate_recipient_state(state, participants):
                          or row["owner_id"] not in participants)
                 or type(row["projection"]) is not dict):
             raise NativeHistoryRejected("native recipient owner or projection is malformed")
+        binding_id = row.get("binding_id")
+        if current_bindings and (type(binding_id) is not str
+                or len(binding_id) != 64
+                or any(char not in "0123456789abcdef" for char in binding_id)):
+            raise NativeHistoryRejected("native recipient binding identity is malformed")
         owner = row["owner_id"]
-        key = (row["role"], owner)
-        if owner is not None and key in seen:
+        key = ((row["role"], owner, binding_id) if current_bindings else
+               (row["role"], owner))
+        if (owner is not None or current_bindings) and key in seen:
             raise NativeHistoryRejected("native recipient state repeats an owner binding")
         seen.add(key)
         projection = row["projection"]
@@ -1069,7 +1214,7 @@ def upgrade(log):
         log["observer_knowledge"]
         if log["schema"] in OBSERVER_KNOWLEDGE_SCHEMAS
         else _unavailable_observer_knowledge())
-    if log["schema"] != SCHEMA:
+    if log["schema"] not in INITIAL_ENTITY_SCHEMAS:
         body["initial"]["initial_entities_available"] = False
     rows = []
     old_state = _initial_state(log["initial"])
@@ -1296,7 +1441,7 @@ def _validate_plain_record(value, depth=0):
         if tag == "interval_staging.AuthorityReference":
             allowed = required = {"key", "role"}
         elif tag == "observer_proposals.RecipientIdentity":
-            allowed = required = {"role"}
+            allowed, required = {"role", "binding_id"}, {"role"}
         elif adapter is None and tag == "encounter_inspection.EntityInspection":
             allowed = {"category", "obj_type", "name", "position", "pre_action"}
             required = allowed
@@ -1455,6 +1600,62 @@ def capture(encounter, *, initial_schedule=None,
             "observer_knowledge": observer_context}
     _measure(body)
     return _seal(body)
+
+
+def semantically_equal_without_recipient_binding_ids(first, second):
+    """Compare a legacy history with its current binding-enriched projection.
+
+    Binding IDs were introduced after the legacy record versions. This narrow
+    compatibility check ignores only that derived recipient-store identity;
+    all recorded state, owners, facts, Events, Effects, chronology and RNG
+    remain byte-structured comparisons at every committed boundary.
+    """
+    validate(first)
+    validate(second)
+    if (first["schema"] != SCHEMA or second["schema"] != SCHEMA
+            or first["latest_boundary"] != second["latest_boundary"]
+            or _without_recipient_binding_ids(first["initial"])
+               != _without_recipient_binding_ids(second["initial"])):
+        return False
+    left = NativeHistoryQuery(first)
+    right = NativeHistoryQuery(second)
+    for boundary in range(first["latest_boundary"] + 1):
+        for read in (NativeHistoryQuery.state_at,
+                     NativeHistoryQuery.events_at,
+                     NativeHistoryQuery.entity_context_at,
+                     NativeHistoryQuery.boundary_facts_at):
+            if (_without_recipient_binding_ids(read(left, boundary))
+                    != _without_recipient_binding_ids(read(right, boundary))):
+                return False
+        try:
+            left_rng = left.rng_state_at(boundary)
+            right_rng = right.rng_state_at(boundary)
+        except NativeHistoryRejected:
+            if boundary == 0 and first["initial"].get(
+                    "rng_before_first_commit") is None:
+                continue
+            raise
+        if left_rng != right_rng:
+            return False
+    return True
+
+
+def _without_recipient_binding_ids(value):
+    if type(value) is dict:
+        result = {key: _without_recipient_binding_ids(item)
+                  for key, item in value.items()}
+        if (value.get("$record") == "observer_proposals.RecipientIdentity"
+                and type(result.get("fields")) is dict):
+            result["fields"].pop("binding_id", None)
+        if (set(value) == {"role", "owner_id", "binding_id", "projection"}
+                and type(value.get("role")) is str):
+            result.pop("binding_id", None)
+        return result
+    if type(value) is list:
+        return [_without_recipient_binding_ids(item) for item in value]
+    if type(value) is tuple:
+        return tuple(_without_recipient_binding_ids(item) for item in value)
+    return value
 
 
 def _expand_rows(log):
@@ -1920,7 +2121,7 @@ def validate(log):
         expected_initial.add("rng_before_first_commit")
     if has_initial_schedule:
         expected_initial.add("initial_schedule_available")
-    if version == SCHEMA:
+    if version in INITIAL_ENTITY_SCHEMAS:
         expected_initial.add("initial_entities_available")
     if (type(initial) is not dict or set(initial) != expected_initial or type(initial["encounter_id"]) is not str
             or not initial["encounter_id"] or type(initial["universe_id"]) is not str
@@ -1928,7 +2129,8 @@ def validate(log):
         raise NativeHistoryRejected("native history initial state schema differs")
     if version in RNG_HISTORY_SCHEMAS and initial["rng_before_first_commit"] is not None:
         _validate_rng_cursor(initial["rng_before_first_commit"])
-    if version == SCHEMA and type(initial["initial_entities_available"]) is not bool:
+    if (version in INITIAL_ENTITY_SCHEMAS
+            and type(initial["initial_entities_available"]) is not bool):
         raise NativeHistoryRejected("initial Entity state availability marker is malformed")
     if has_initial_schedule:
         if type(initial["initial_schedule_available"]) is not bool:
@@ -1978,7 +2180,7 @@ def validate(log):
             if type(row.get("from_boundary")) is not int or row["from_boundary"] != covered + 1:
                 raise NativeHistoryRejected("native quiet span boundary order differs")
             state = _apply_quiet_span(state, row, row.get("to_boundary"))
-            _validate_recipient_state(state, participant_ids)
+            _validate_recipient_state(state, participant_ids, version)
             if row["state_sha256"] != hashlib.sha256(_canonical(state)).hexdigest():
                 raise NativeHistoryRejected("native quiet span state digest differs")
             covered = row["to_boundary"]
@@ -2004,7 +2206,7 @@ def validate(log):
                 raise NativeHistoryRejected("native history RNG cursor has an invalid shape")
             prior_rng = row["rng_after"]
         state = _apply(state, row["changes"])
-        _validate_recipient_state(state, participant_ids)
+        _validate_recipient_state(state, participant_ids, version)
         if hashlib.sha256(_canonical(state)).hexdigest() != row["state_sha256"]:
             raise NativeHistoryRejected("native history reconstructed state digest differs")
         events = row["events"]
@@ -2104,7 +2306,8 @@ def validate(log):
         raise NativeHistoryRejected("native history latest boundary differs")
     if has_entity_context:
         _validate_entity_context(log["entity_context"], log["latest_boundary"], version)
-    if version == SCHEMA and initial["initial_entities_available"]:
+    if (version in INITIAL_ENTITY_SCHEMAS
+            and initial["initial_entities_available"]):
         context = log["entity_context"]
         if (not context["available"]
                 or context["initial"] != initial["entities"]):
@@ -2883,6 +3086,8 @@ class NativeHistoryQuery:
         if not self._context_available or not self._fatigue_available:
             return None
         entities = self.entity_context_at(boundary)
+        if entities is None:
+            return None
         return {identity: {
             "physical_fatigue": row["fields"]["pre_action"]["physical_fatigue"],
             "physiology": row["fields"]["pre_action"]["physiology"],
@@ -3214,7 +3419,9 @@ def restore_compacted_disarm_landings(world, histories):
     return True
 
 
-def restore_compacted_receipt_facts(world, histories):
+def restore_compacted_receipt_facts(world, histories, *,
+                                    reconstruct_recipients=False,
+                                    recipient_bindings=()):
     """Rebuild duplicated immutable receipt projections from authenticated facts.
 
     Action declarations/results, identified Effects, scheduler/fence state,
@@ -3229,13 +3436,211 @@ def restore_compacted_receipt_facts(world, histories):
     from action_evaluation import ActionView, ActionProposal, EffectIdentity, IdentifiedEffect
     from interval_staging import QueueProjection
     from statistical_group import StatisticalGroup
+    from history_conversation import HeardAccount
     from types import MappingProxyType
+    from observer_proposals import (RecipientIdentity, BeliefProjection,
+        AccountsProjection, LocationEvidenceProjection,
+        ObjectEvidenceProjection)
+
+    if (type(reconstruct_recipients) is not bool
+            or type(recipient_bindings) is not tuple):
+        raise NativeHistoryRejected(
+            "compacted recipient restoration contract is invalid")
+    recipient_handles = {}
+    if reconstruct_recipients:
+        for binding in recipient_bindings:
+            if (type(binding) is not tuple or len(binding) not in (3, 4)):
+                raise NativeHistoryRejected(
+                    "compacted recipient binding descriptor is malformed")
+            role, observer_ids, handle = binding[:3]
+            if (role not in ("in_world_belief_ledger",
+                             "in_world_received_accounts",
+                             "observer_location_evidence",
+                             "observer_object_evidence")
+                    or type(observer_ids) is not tuple or not observer_ids
+                    or any(type(owner) is not str or not owner
+                           for owner in observer_ids)):
+                raise NativeHistoryRejected(
+                    "compacted recipient binding role or owners are invalid")
+            if role != "in_world_received_accounts" and len(observer_ids) != 1:
+                raise NativeHistoryRejected(
+                    "compacted evidence recipient has multiple owners")
+            binding_id = (binding[3] if len(binding) == 4 else
+                _recipient_binding_id(world, role, id(handle)))
+            if (type(binding_id) is not str or len(binding_id) != 64
+                    or any(char not in "0123456789abcdef"
+                           for char in binding_id)):
+                raise NativeHistoryRejected(
+                    "compacted recipient binding identity is malformed")
+            for owner in observer_ids:
+                key = (role, owner, binding_id)
+                if key in recipient_handles:
+                    prior, _prior_owners = recipient_handles[key]
+                    if prior is not handle:
+                        raise NativeHistoryRejected(
+                            "compacted recipient owner is bound to multiple handles")
+                    continue
+                recipient_handles[key] = (handle, ())
+        owners_by_handle = {}
+        for (role, owner, _binding_id), (handle, _owners) in recipient_handles.items():
+            owners_by_handle.setdefault((role, id(handle)), set()).add(owner)
+        recipient_handles = {
+            key: (handle, tuple(sorted(owners_by_handle[(key[0], id(handle))])))
+            for key, (handle, _owners) in recipient_handles.items()}
+
+    def rebuild_recipients(query, receipt):
+        """Rebuild the committed observer projection from owner facts.
+
+        The authenticated history stores each current owner projection at every
+        boundary. Receipt-local effect identities remain ordered by the commit
+        record. Accounts are append-only; their stable Action IDs recover list
+        order from the single authoritative current list binding.
+        """
+        rows = query.state_at(receipt.boundary)["recipients"]
+        if rows == {}:
+            rows = []
+        if type(rows) is not list:
+            raise NativeHistoryRejected(
+                "committed recipient history is not an owner-fact list")
+        facts = {}
+        for row in rows:
+            if (type(row) is not dict
+                    or set(row) != {"role", "owner_id", "binding_id", "projection"}
+                    or type(row["role"]) is not str
+                    or type(row["owner_id"]) is not str
+                    or type(row["binding_id"]) is not str
+                    or type(row["projection"]) is not dict):
+                raise NativeHistoryRejected(
+                    "committed recipient history row is malformed")
+            key = (row["role"], row["owner_id"], row["binding_id"])
+            if legacy_binding_ids and key not in recipient_handles:
+                compatible = [candidate for candidate in recipient_handles
+                    if candidate[:2] == key[:2]]
+                if len(compatible) == 1:
+                    # Earlier schemas knew role/owner but had no independent
+                    # store identifier. A unique current host binding supplies
+                    # that missing derived identity without changing facts.
+                    key = compatible[0]
+                elif len(compatible) > 1:
+                    raise NativeHistoryRejected(
+                        "legacy recipient owner maps to multiple durable stores")
+            if key in facts:
+                raise NativeHistoryRejected(
+                    "committed recipient history repeats an owner")
+            if key not in recipient_handles:
+                raise NativeHistoryRejected(
+                    "committed recipient history has no durable host binding: "
+                    f"{key!r}; available={sorted(recipient_handles)!r}")
+            facts[key] = _materialize_plain(row["projection"])
+
+        identities = {}
+        for key, (handle, _owners) in recipient_handles.items():
+            if key in facts:
+                identities[key] = RecipientIdentity(key[0], id(handle), key[2])
+
+        result = {}
+        for key, data in facts.items():
+            role, owner, binding_id = key
+            handle, owners = recipient_handles[key]
+            identity = identities[key]
+            if role == "in_world_belief_ledger":
+                expected = {"evidence", "interpretations", "current_readings",
+                            "belief_history", "auxiliary", "observer_id"}
+                if type(data) is not dict or set(data) != expected or data["observer_id"] != owner:
+                    raise NativeHistoryRejected(
+                        "committed Belief recipient facts are malformed")
+                projection = BeliefProjection(identity, data["observer_id"],
+                    data["evidence"], data["interpretations"],
+                    data["current_readings"], data["belief_history"],
+                    data["auxiliary"])
+            elif role in ("observer_location_evidence",
+                          "observer_object_evidence"):
+                expected = {"observer_id", "observations", "effect_ids"}
+                if (type(data) is not dict or set(data) != expected
+                        or data["observer_id"] != owner
+                        or type(data["effect_ids"]) is not tuple):
+                    raise NativeHistoryRejected(
+                        "committed evidence recipient facts are malformed")
+                effect_ids = data["effect_ids"]
+                if len(effect_ids) != len(set(effect_ids)):
+                    raise NativeHistoryRejected(
+                        "committed evidence repeats an Effect identity")
+                ordered = tuple(effect for effect in receipt.effect_ids
+                                if effect in effect_ids)
+                if len(ordered) != len(effect_ids):
+                    raise NativeHistoryRejected(
+                        "committed evidence effects differ from their receipt")
+                cls = (LocationEvidenceProjection
+                       if role == "observer_location_evidence"
+                       else ObjectEvidenceProjection)
+                projection = cls(identity, data["observer_id"],
+                                 data["observations"], ordered)
+            else:
+                if (type(data) is not dict
+                        or set(data) != {"accounts", "delivery_effect_ids",
+                                         "listener_id"}
+                        or data["listener_id"] != owner
+                        or type(data["accounts"]) is not tuple
+                        or type(data["delivery_effect_ids"]) is not tuple):
+                    raise NativeHistoryRejected(
+                        "committed account recipient facts are malformed")
+                if (any(type(account) is not HeardAccount
+                        for account in data["accounts"])
+                        or len(data["delivery_effect_ids"])
+                           != len(set(data["delivery_effect_ids"]))):
+                    raise NativeHistoryRejected(
+                        "committed account facts repeat or contain an unknown record")
+                # A shared in-world account list is stored as one row per
+                # listener. Reassemble it in the exact append order of the
+                # restored, append-only host list.
+                binding = recipient_handles[key]
+                handle = binding[0]
+                if type(handle) is not list:
+                    raise NativeHistoryRejected(
+                        "committed account binding is not a native list")
+                order = {}
+                for index, account in enumerate(handle):
+                    if type(account) is not HeardAccount:
+                        raise NativeHistoryRejected(
+                            "committed account list contains an unsupported record")
+                    if account.action_id in order:
+                        raise NativeHistoryRejected(
+                            "committed account list repeats a source Action")
+                    order[account.action_id] = index
+                matching = [(listener, value) for (bound_role, listener, bound_id), value
+                            in facts.items()
+                            if bound_role == "in_world_received_accounts"
+                            and bound_id == binding_id
+                            and listener in owners]
+                accounts = [account for _listener, value in matching
+                            for account in value["accounts"]]
+                if any(account.action_id not in order for account in accounts):
+                    raise NativeHistoryRejected(
+                        "historical account is absent from its durable host list")
+                accounts.sort(key=lambda account: order[account.action_id])
+                delivery_ids = {effect for _listener, value in matching
+                                for effect in value["delivery_effect_ids"]}
+                ordered_delivery = tuple(effect for effect in receipt.effect_ids
+                                         if effect in delivery_ids)
+                if len(ordered_delivery) != len(delivery_ids):
+                    raise NativeHistoryRejected(
+                        "committed account effects differ from their receipt")
+                listener_ids = tuple(sorted(listener for listener, _value in matching))
+                # Each shared list appears once in this mapping. Other rows for
+                # its listeners are consumed by the same binding below.
+                if identity in result:
+                    continue
+                account_identity = RecipientIdentity(role, id(handle), binding_id)
+                result[account_identity] = AccountsProjection(
+                    account_identity, tuple(accounts), ordered_delivery,
+                    listener_ids)
+                continue
+            result[identity] = projection
+        return MappingProxyType(result)
 
     def rebind_recipient_identities(value, action_id):
         from observer_proposals import RecipientIdentity
         if type(value) is RecipientIdentity:
-            action = world.get_event_by_id(action_id)
-            data = {} if action is None else object.__getattribute__(action, "__dict__")
             field_by_role = {
                 "in_world_belief_ledger": "ledger",
                 "in_world_received_accounts": "received_accounts",
@@ -3243,11 +3648,27 @@ def restore_compacted_receipt_facts(world, histories):
                 "observer_object_evidence": "object_ledger",
             }
             field = field_by_role.get(value.role)
-            handle = None if field is None else data.get(field)
+            handle = None
+            if field is not None and action_id is not None:
+                action = world.get_event_by_id(action_id)
+                data = ({} if action is None else
+                        object.__getattribute__(action, "__dict__"))
+                handle = data.get(field)
+            elif field is not None:
+                for action in world.event_history.values():
+                    data = object.__getattribute__(action, "__dict__")
+                    candidate = data.get(field)
+                    if candidate is not None and id(candidate) == value.object_identity:
+                        handle = candidate
+                        break
             if handle is None:
                 raise NativeHistoryRejected(
                     "committed receipt recipient cannot be rebound to its Action")
-            return RecipientIdentity(value.role, id(handle))
+            binding_id = _recipient_binding_id(world, value.role, id(handle))
+            if value.binding_id not in (None, binding_id):
+                raise NativeHistoryRejected(
+                    "committed recipient binding identity differs from its Actions")
+            return RecipientIdentity(value.role, id(handle), binding_id)
         if type(value) in (dict, MappingProxyType):
             return MappingProxyType({
                 rebind_recipient_identities(key, action_id):
@@ -3349,6 +3770,7 @@ def restore_compacted_receipt_facts(world, histories):
             raise NativeHistoryRejected(
                 "compacted receipt facts differ from their committed boundary chain")
         query = NativeHistoryQuery(upgraded)
+        legacy_binding_ids = log.get("schema") != SCHEMA
         for receipt in receipts:
             meta = receipt.inspection
             if type(meta) is not CommittedBoundaryRecord:
@@ -3358,6 +3780,12 @@ def restore_compacted_receipt_facts(world, histories):
                     or meta.projectile_states):
                 raise NativeHistoryRejected(
                     "compacted receipt graph contains an unexpected projection")
+            if reconstruct_recipients:
+                object.__setattr__(meta, "recipients",
+                                   rebuild_recipients(query, receipt))
+            else:
+                object.__setattr__(meta, "recipients",
+                    rebind_recipient_identities(meta.recipients, None))
             facts = query.boundary_facts_at(receipt.boundary)
             encoded_actions = _materialize_plain(facts["actions"])
             encoded_effects = _materialize_plain(facts["effects"])
@@ -3518,10 +3946,12 @@ def restore_compacted_target_history(world, histories):
                     raise NativeHistoryRejected(
                         "compacted receipt has an unreviewed recipient identity")
                 role = identity.role
+                binding_id = identity.binding_id
                 owner_id = (getattr(projection, "observer_id", None)
                             or getattr(projection, "listener_id", None))
                 if type(owner_id) is str:
-                    recipient_identities.setdefault((role, owner_id), {})[
+                    recipient_identities.setdefault(
+                        (role, owner_id, binding_id), {})[
                         identity.object_identity] = identity
         for receipt in receipts:
             if (receipt.encounter_id != encounter_id
@@ -3556,8 +3986,17 @@ def restore_compacted_target_history(world, histories):
                 if observer is not None:
                     bound_identities = []
                     for marker in observer.belief_recipient_ids:
-                        matches = recipient_identities.get(
-                            (marker.role, observer.observer_id), {})
+                        if marker.binding_id is not None:
+                            matches = recipient_identities.get(
+                                (marker.role, observer.observer_id,
+                                 marker.binding_id), {})
+                        else:
+                            matches = {object_id: identity
+                                for (role, owner, _binding_id), values
+                                in recipient_identities.items()
+                                if role == marker.role
+                                and owner == observer.observer_id
+                                for object_id, identity in values.items()}
                         if len(matches) != 1:
                             raise NativeHistoryRejected(
                                 "compacted Target observer recipient is unavailable or ambiguous")

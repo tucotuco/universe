@@ -151,17 +151,14 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
         from encounter import Encounter
         compact_entity_context = _entity_context_history_available(
             encounter.universe)
-        compact_boundary_history = (compact_entity_context and not any(
-            receipt.inspection.recipients
-            for event in encounter.universe.event_history.values()
-            if type(event) is Encounter
-            for receipt in event.__dict__.get("_atomic_interval_history", ())))
+        compact_boundary_history = compact_entity_context
         candidate = capture_checkpoint_candidate(
             encounter.universe, encounter, quiescent=True,
             rng_scope="exclusive_encounter", native_adapters=True,
             full_native=True, compact_native_target_history=True,
             compact_native_entity_context=compact_entity_context,
             compact_native_receipt_facts=compact_entity_context,
+            compact_native_recipient_facts=compact_entity_context,
             compact_native_publication_facts=compact_entity_context,
             compact_native_disarm_landings=compact_entity_context,
             compact_native_boundary_history=compact_boundary_history,
@@ -346,8 +343,16 @@ def _load_v2_save(wire, value):
                     else None))
             actual_wire = native_history.encode(actual_log)
             if actual_wire != expected_wire:
-                raise NativeSaveRejected(
-                    "restored native Encounter disagrees with its saved history")
+                if (log.get("schema") == native_history.SCHEMA
+                        or not native_history.
+                            semantically_equal_without_recipient_binding_ids(
+                                expected_log, actual_log)):
+                    raise NativeSaveRejected(
+                        "restored native Encounter disagrees with its saved history")
+                # The old schema had only role/owner recipient identity. The
+                # strict graph host binding supplies the missing internal
+                # store ID; retain the fully verified current projection.
+                expected_wire = actual_wire
             native_history.NativeHistoryRecorder.restore(
                 saved, actual_log, current_history=actual_wire)
         return world, selected, selected_rng
@@ -393,7 +398,7 @@ def _load_v1_save(wire):
             decode_graph(graph_wire, native=True), native=True,
             native_histories=(None if expected_history_log is None else
                 {expected_history_log["initial"]["encounter_id"]:
-                 expected_history_log}))
+                 value["history"]}))
         if value["history"] is None:
             if (encounter.__dict__.get("_atomic_interval_history")
                     or encounter.time != encounter.start_time
@@ -439,7 +444,14 @@ def _load_v1_save(wire):
                 compatible_actual = native_history.encode(
                     native_history._without_observer_knowledge(actual_log))
             if compatible_actual != expected_history:
-                raise NativeSaveRejected("restored native graph disagrees with saved history")
+                legacy_binding_match = (
+                    source_schema != native_history.SCHEMA
+                    and native_history.
+                        semantically_equal_without_recipient_binding_ids(
+                            expected_history_log, actual_log))
+                if not legacy_binding_match:
+                    raise NativeSaveRejected("restored native graph disagrees with saved history")
+                actual_history = expected_history = native_history.encode(actual_log)
         if encounter.id != value["history"]["initial"]["encounter_id"]:
             raise NativeSaveRejected("restored Encounter logical identity differs")
         native_history.NativeHistoryRecorder.restore(

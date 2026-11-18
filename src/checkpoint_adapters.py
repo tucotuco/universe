@@ -225,6 +225,7 @@ class NativeInventory(_Inventory):
                  full_native=False, compact_native_target_history=False,
                  compact_native_entity_context=False,
                  compact_native_receipt_facts=False,
+                 compact_native_recipient_facts=False,
                  compact_native_publication_facts=False,
                  compact_native_disarm_landings=False,
                  compact_native_boundary_history=False):
@@ -236,6 +237,7 @@ class NativeInventory(_Inventory):
         self.compact_native_target_history=compact_native_target_history
         self.compact_native_entity_context=compact_native_entity_context
         self.compact_native_receipt_facts=compact_native_receipt_facts
+        self.compact_native_recipient_facts=compact_native_recipient_facts
         self.compact_native_publication_facts=compact_native_publication_facts
         self.compact_native_disarm_landings=compact_native_disarm_landings
         self.compact_native_boundary_history=compact_native_boundary_history
@@ -449,6 +451,31 @@ class NativeInventory(_Inventory):
                 replacement = None
             else:
                 replacement = ()
+            encoded = super().field(tag, field, replacement, ref, path, depth)
+            token_id = id(replacement)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
+        if (self.compact_native_recipient_facts
+                and tag == 'encounter_inspection.CommittedBoundaryRecord'
+                and field == 'recipients'):
+            from native_history import _canonical, _plain
+            from observer_proposals import (RecipientIdentity, BeliefProjection,
+                AccountsProjection, LocationEvidenceProjection,
+                ObjectEvidenceProjection)
+            _require(type(item) in (dict, MappingProxyType)
+                     and all(type(identity) is RecipientIdentity
+                         and type(projection) in (BeliefProjection,
+                             AccountsProjection, LocationEvidenceProjection,
+                             ObjectEvidenceProjection)
+                         for identity, projection in item.items()),
+                     'committed recipient projections cannot be compacted from unreviewed fields')
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            replacement = MappingProxyType({})
             encoded = super().field(tag, field, replacement, ref, path, depth)
             token_id = id(replacement)
             self.dependencies = [row for row in self.dependencies
@@ -1342,7 +1369,12 @@ class NativeInventory(_Inventory):
             if b.role=='in_world_belief_ledger':
                 from observer_proposals import _capture_belief
                 _capture_belief(b.recipient,b.observer_ids[0])
-            descriptions.append((b.namespace,b.name,b.role,b.observer_ids,ref))
+            descriptor=(b.namespace,b.name,b.role,b.observer_ids,ref)
+            if self.full_native and self.compact_native_recipient_facts:
+                from native_history import _recipient_binding_id
+                descriptor += (_recipient_binding_id(
+                    world,b.role,id(b.recipient)),)
+            descriptions.append(descriptor)
         native_adapters = (ADAPTER_VERSION,
             *(('target-candidate-history/1',)
               if self.compact_native_target_history else ()),
@@ -1350,6 +1382,8 @@ class NativeInventory(_Inventory):
               if self.compact_native_entity_context else ()),
             *(('committed-receipt-facts/1',)
               if self.compact_native_receipt_facts else ()),
+            *(('observer-recipient-facts/1',)
+              if self.compact_native_recipient_facts else ()),
             *(('published-interval-facts/1',)
               if self.compact_native_publication_facts else ()),
             *(('disarm-landing-facts/1',)

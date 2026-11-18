@@ -604,38 +604,23 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
     _need(set(sections) == expected_sections,
           'native inventory sections are incomplete or unknown')
     if native:
-        _need(sections['native-adapters'] in (
-                  ('native-closure-recipes/1',),
-                  ('native-closure-recipes/1', 'target-candidate-history/1'),
-                  ('native-closure-recipes/1', 'entity-context-history/1'),
-                  ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1'),
-                  ('native-closure-recipes/1', 'entity-context-history/1',
-                   'committed-receipt-facts/1'),
-                  ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1', 'committed-receipt-facts/1'),
-                  ('native-closure-recipes/1', 'entity-context-history/1',
-                   'committed-receipt-facts/1', 'published-interval-facts/1'),
-                  ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1', 'committed-receipt-facts/1',
-                   'published-interval-facts/1'),
-                  ('native-closure-recipes/1', 'entity-context-history/1',
-                   'committed-receipt-facts/1', 'disarm-landing-facts/1'),
-                  ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1', 'committed-receipt-facts/1',
-                   'disarm-landing-facts/1'),
-                  ('native-closure-recipes/1', 'entity-context-history/1',
-                   'committed-receipt-facts/1', 'published-interval-facts/1',
-                   'disarm-landing-facts/1'),
-                  ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1', 'committed-receipt-facts/1',
-                   'published-interval-facts/1', 'disarm-landing-facts/1'),
-                  ('native-closure-recipes/1', 'target-candidate-history/1',
-                   'entity-context-history/1', 'committed-receipt-facts/1',
-                   'published-interval-facts/1', 'disarm-landing-facts/1',
-                   'committed-boundary-history/1')),
+        markers=sections['native-adapters']
+        marker_order=('native-closure-recipes/1','target-candidate-history/1',
+            'entity-context-history/1','committed-receipt-facts/1',
+            'observer-recipient-facts/1','published-interval-facts/1',
+            'disarm-landing-facts/1','committed-boundary-history/1')
+        _need(type(markers) is tuple and markers
+              and len(set(markers))==len(markers)
+              and all(value in marker_order for value in markers)
+              and markers==tuple(value for value in marker_order
+                                 if value in markers),
               'native adapter recipe version differs')
-        _validate_host_binding_descriptors(sections['host-bindings'])
+        _need(markers[0]=='native-closure-recipes/1',
+              'native adapter recipe root is missing')
+        _validate_host_binding_descriptors(
+            sections['host-bindings'],
+            require_binding_ids='observer-recipient-facts/1' in
+                sections['native-adapters'])
     _need(sections['readiness'] == (False, False, False), 'unsupported inventory readiness claim')
     _need(sections['rng'][:2] == ('caller_cursor', 'exclusive_encounter'),
           'native save requires its exclusive caller-owned RNG cursor')
@@ -669,7 +654,7 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
     _walk_refs(envelope, refs)
 
 
-def _validate_host_binding_descriptors(section):
+def _validate_host_binding_descriptors(section, *, require_binding_ids=False):
     _need(type(section) is tuple and len(section) == 1
           and type(section[0]) is tuple,
           'native host bindings are malformed')
@@ -677,9 +662,10 @@ def _validate_host_binding_descriptors(section):
     roles = {'in_world_belief_ledger', 'in_world_received_accounts',
              'observer_location_evidence', 'observer_object_evidence'}
     for row in section[0]:
-        _need(type(row) is tuple and len(row) == 5,
+        _need(type(row) is tuple and len(row) in ((6,) if require_binding_ids
+                                                   else (5, 6)),
               'native host binding row is malformed')
-        namespace, name, role, observers, reference = row
+        namespace, name, role, observers, reference = row[:5]
         _need(type(namespace) is str and namespace.strip()
               and type(name) is str and name.strip()
               and (namespace, name) not in seen,
@@ -693,6 +679,11 @@ def _validate_host_binding_descriptors(section):
               and type(reference[1]) is tuple
               and reference[1][0] == 'host-recipient',
               'native host binding has no stable graph reference')
+        if len(row) == 6:
+            binding_id = row[5]
+            _need(type(binding_id) is str and len(binding_id) == 64
+                  and all(char in '0123456789abcdef' for char in binding_id),
+                  'native host binding identity is malformed')
         seen.add((namespace, name))
 
 
@@ -789,6 +780,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'entity-context-history/1' in native_adapter_markers)
     compact_receipt_facts = (native and
         'committed-receipt-facts/1' in native_adapter_markers)
+    compact_recipient_facts = (native and
+        'observer-recipient-facts/1' in native_adapter_markers)
     compact_publication_facts = (native and
         'published-interval-facts/1' in native_adapter_markers)
     compact_disarm_landings = (native and
@@ -797,6 +790,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'committed-boundary-history/1' in native_adapter_markers)
     _need(not compact_receipt_facts or compact_entity_context,
           'compacted native receipt facts require EntityInspection history')
+    _need(not compact_recipient_facts or compact_receipt_facts,
+          'compacted native recipient facts require committed receipt history')
     _need(not compact_publication_facts or compact_receipt_facts,
           'compacted publication facts require committed receipt history')
     _need(not compact_disarm_landings or compact_receipt_facts,
@@ -1043,7 +1038,14 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
                                                                 native_histories)
             if compact_receipt_facts:
                 history_codec.restore_compacted_receipt_facts(world,
-                                                               native_histories)
+                    native_histories,
+                    reconstruct_recipients=compact_recipient_facts,
+                    recipient_bindings=tuple(
+                        ((role,observer_ids,cache[reference[1]],descriptor[5])
+                         if len(descriptor)==6 else
+                         (role,observer_ids,cache[reference[1]]))
+                        for descriptor in sections['host-bindings'][0]
+                        for role,observer_ids,reference in (descriptor[2:5],)))
             if compact_target_history:
                 history_codec.restore_compacted_target_history(world,
                                                                 native_histories)
@@ -1253,7 +1255,9 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     _need(sorted(recipes, key=repr) == sorted(expected_recipes, key=repr),
           'native Save callback recipes do not match restored owners')
     recipient_by_name = {}
-    for namespace, name, role, observer_ids, reference in bindings:
+    for descriptor in bindings:
+        namespace, name, role, observer_ids, reference = descriptor[:5]
+        saved_binding_id = descriptor[5] if len(descriptor) == 6 else None
         if role != 'in_world_received_accounts':
             continue
         recipient = cache.get(reference[1])
@@ -1314,7 +1318,9 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
     recipients = {}
     names = set()
     recipient_tokens = {}
-    for namespace, name, role, observer_ids, reference in bindings:
+    for descriptor in bindings:
+        namespace, name, role, observer_ids, reference = descriptor[:5]
+        saved_binding_id = descriptor[5] if len(descriptor) == 6 else None
         key = reference[1]
         recipient = cache.get(key)
         _need(recipient is not None and (namespace, name) not in names,
@@ -1373,12 +1379,16 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
         else:
             _need(False, 'native host recipient role is unsupported')
         recipients[id(recipient)] = role
+        if saved_binding_id is not None:
+            from native_history import _register_recipient_binding
+            _register_recipient_binding(
+                world, role, recipient, saved_binding_id)
         from checkpoint_adapters import RecipientBinding, _portable_recipient_token
         token = _portable_recipient_token(RecipientBinding(
             world, namespace, name, role, observer_ids, recipient))
         _need(token not in recipient_tokens,
               'native recipient identity token collision')
-        recipient_tokens[token] = (role, recipient)
+        recipient_tokens[token] = (role, recipient, saved_binding_id)
     hash_containers = []
     for value in cache.values():
         if type(value) is dict:
@@ -1393,6 +1403,15 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
               and bound[0] == identity.role,
               'native observer identity has no restored recipient')
         recipient = bound[1]
+        binding_id = bound[2]
+        if binding_id is None:
+            from native_history import _recipient_binding_id
+            binding_id = _recipient_binding_id(world, identity.role, id(recipient))
+        saved_binding_id = object.__getattribute__(identity, "__dict__").get(
+            "binding_id")
+        _need(saved_binding_id in (None, binding_id),
+              "native recipient binding identity differs from its registered Actions")
+        object.__setattr__(identity, "binding_id", binding_id)
         object.__setattr__(identity, 'object_identity', id(recipient))
     # RecipientIdentity participates in immutable-map keys. Rebuild every
     # restored hash container after replacing its portable integer token with

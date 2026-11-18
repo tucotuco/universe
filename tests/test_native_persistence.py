@@ -83,6 +83,10 @@ def _legacy_history_shape(value):
         row.pop("notification_intents", None)
         row.pop("disarm_landings", None)
         row.pop("receipt_facts_available", None)
+        for change in row.get("changes", ()):
+            if change.get("path") == ["recipients"] and change.get("after"):
+                for recipient in change.get("value", ()):
+                    recipient.pop("binding_id", None)
     return value
 
 
@@ -96,6 +100,8 @@ def _legacy_initial_entity_anchor(value, encounter):
     committed_states = []
     for row in native_history._expand_rows(body):
         old_state = native_history._apply(old_state, row["changes"])
+        for recipient in old_state.get("recipients", ()):
+            recipient.pop("binding_id", None)
         committed_states.append(old_state)
     body["initial"]["entities"] = initial_entities
     body["initial"]["initial_entities_available"] = False
@@ -143,6 +149,23 @@ def _legacy_initial_entity_anchor(value, encounter):
 
 
 class NativePersistenceTests(unittest.TestCase):
+    def test_native_recipient_binding_descriptor_rejects_malformed_identity(self):
+        from native_graph_snapshot import (
+            ArenaNativeSnapshotRejected,
+            _validate_host_binding_descriptors,
+        )
+
+        row = ('native', 'ledger', 'in_world_belief_ledger',
+               ('observer',),
+               ('reference', ('host-recipient',
+                              ('universe', 'native-world', 'native', 'ledger'))),
+               'g' * 64)
+        with self.assertRaisesRegex(
+                ArenaNativeSnapshotRejected,
+                'native host binding identity is malformed'):
+            _validate_host_binding_descriptors(
+                ((row,),), require_binding_ids=True)
+
     def _assert_recipient_history_matches_receipts(self, encounter):
         """Check detached recipient history against every authoritative cut."""
         log = native_history.capture(encounter)
@@ -151,7 +174,8 @@ class NativePersistenceTests(unittest.TestCase):
         self.assertEqual(query.observer_facts_at(0, encounter.being_list[0]), [])
         for boundary in range(1, log["latest_boundary"] + 1):
             receipt_view = encounter.inspect_committed(boundary)
-            expected = native_history._stable_recipients(receipt_view.recipients)
+            expected = native_history._stable_recipients(
+                receipt_view.recipients, encounter)
             self.assertEqual(query.state_at(boundary)["recipients"], expected,
                              f"recipient projection at boundary {boundary}")
             owners = set(encounter.being_list)
@@ -3257,6 +3281,113 @@ print(json.dumps({'times':[r[0].time for r in rows],
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),json.loads(json.dumps(expected)))
 
+    def test_native_save_distinguishes_same_owner_belief_ledgers(self):
+        """Two native ledgers owned by one Being retain distinct stable IDs."""
+        import os
+        import random
+        from field_observation import BeliefLedger
+        from group_observation import ObserveGroupAction
+
+        world = Universe('native-same-owner-beliefs', library=Library(
+            config_dir=str(ROOT / 'src/config')))
+        actor_id = world.make_being('Human', 'Repeated observer')
+        actor = world.get_object_by_id(actor_id)
+        actor.set_position(CartesianPosition(0, 0, 0))
+        actor.set_geometry(Sphere(.25))
+        actor.set_skill_level(world.get_skill_dictionary(), 'spot', 10)
+        groups = []
+        for index, y in enumerate((0, 4)):
+            config = json.loads((ROOT / 'examples/nomadic_group.json').read_text())
+            config['motion']['position'] = [1.5, y, 0]
+            group = StatisticalGroup(f'Repeated owner group {index}',
+                f'native-same-owner-group-{index}', config, 81)
+            world.add_object(group)
+            groups.append(group)
+        encounter = Encounter(world, 10, 0, initiated=True,
+            id='native-same-owner-belief-encounter')
+        encounter.add_being(actor_id)
+        for group in groups:
+            encounter.add_object(group.id)
+        world.add_event(encounter)
+        rng = RNGCursor(random.Random(41).getstate())
+        encounter.enable_transactional_progression(quiescent=True, rng_owner=rng)
+        ledgers = (BeliefLedger(actor_id), BeliefLedger(actor_id))
+        actions = tuple(ObserveGroupAction(world, actor_id, group.id, index,
+            seed=41 + index, random_key=f'same-owner-belief-{index}',
+            observation={'coarse_range_m': 100, 'detailed_range_m': 50},
+            ledger=ledgers[index]) for index, group in enumerate(groups))
+        encounter.schedule_action(actions[0])
+        encounter.step(1)
+        encounter.schedule_action(actions[1])
+        encounter.step(1)
+        self.assertEqual([action.resolution.outcome for action in actions],
+                         ['success', 'success'])
+        query = native_history.NativeHistoryQuery(native_history.capture(encounter))
+        for boundary in (1, 2):
+            expected_rows = native_history._stable_recipients(
+                encounter.inspect_committed(boundary).recipients, encounter)
+            self.assertEqual(query.state_at(boundary)['recipients'], expected_rows)
+        final_rows = query.state_at(2)['recipients']
+        self.assertEqual(len(final_rows), 2)
+        self.assertEqual({row['owner_id'] for row in final_rows}, {actor_id})
+        self.assertEqual(len({row['binding_id'] for row in final_rows}), 2)
+        from native_history import _recipient_binding_id
+        first_binding_id = _recipient_binding_id(
+            world, 'in_world_belief_ledger', id(ledgers[0]))
+        later_alias = ObserveGroupAction(
+            world, actor_id, groups[0].id, 8, seed=41,
+            observation={'coarse_range_m': 100, 'detailed_range_m': 50},
+            random_key='same-owner-later-ledger-alias', ledger=ledgers[0])
+        later_alias.id = '000-native-same-owner-later-alias'
+        encounter.schedule_action(later_alias)
+        self.assertEqual(_recipient_binding_id(
+            world, 'in_world_belief_ledger', id(ledgers[0])),
+            first_binding_id,
+            'a later Action must not re-key an already recorded recipient')
+        bindings = tuple(RecipientBinding(world, 'same-owner', f'belief-{index}',
+            'in_world_belief_ledger', (actor_id,), ledger)
+            for index, ledger in enumerate(ledgers))
+        wire = export_save(encounter, recipient_bindings=bindings)
+        action_ids = [action.id for action in actions]
+        encounter.schedule_action(DelayAction(encounter, actor_id, defense=0,
+            start_time=2, id='native-same-owner-continuation'))
+        encounter.step(1)
+        expected = {
+            'time': encounter.time,
+            'rng': rng.state,
+            'action_ids': action_ids,
+            'evidence': [[row.id for row in ledger.evidence] for ledger in ledgers],
+            'history': hashlib.sha256(native_history.encode(
+                native_history.capture(encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+from activities import DelayAction
+import native_history
+from native_persistence import load_path,rng_owner_for
+world,enc,_rng=load_path(sys.argv[1])
+actions=[world.get_event_by_id(identity) for identity in sys.argv[2:4]]
+ledgers=[action.ledger for action in actions]
+assert len(ledgers[0].evidence)==1 and len(ledgers[1].evidence)==1
+assert ledgers[0] is not ledgers[1]
+assert [action.resolution.outcome for action in actions]==['success','success']
+enc.schedule_action(DelayAction(enc,enc.being_list[0],defense=0,start_time=2,
+ id='native-same-owner-continuation'));enc.step(1)
+print(json.dumps({'time':enc.time,'rng':rng_owner_for(enc).state,
+ 'action_ids':[action.id for action in actions],
+ 'evidence':[[row.id for row in ledger.evidence] for ledger in ledgers],
+ 'history':hashlib.sha256(native_history.encode(
+  native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'same-owner-beliefs.json'
+            path.write_bytes(wire)
+            result = subprocess.run([sys.executable, '-B', '-c', child,
+                str(path), *action_ids], cwd=directory, env={**os.environ,
+                'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
+
     def test_native_save_restores_listener_accounts_across_encounters(self):
         import os
         import random
@@ -3305,12 +3436,18 @@ print(json.dumps({'times':[r[0].time for r in rows],
         tags = [tag for _reference, tag, _content in nodes]
         self.assertNotIn("action_settlement.TargetIntervalRecord", tags)
         self.assertNotIn("encounter_inspection.EntityInspection", tags)
-        self.assertIn("encounter_inspection.CommittedBoundaryRecord", tags)
-        self.assertIn("atomic_publication.PublishedInterval", tags)
+        self.assertNotIn("encounter_inspection.CommittedBoundaryRecord", tags)
+        self.assertNotIn("atomic_publication.PublishedInterval", tags)
+        self.assertNotIn("observer_proposals.BeliefProjection", tags)
+        self.assertNotIn("observer_proposals.AccountsProjection", tags)
+        self.assertNotIn("observer_proposals.LocationEvidenceProjection", tags)
+        self.assertNotIn("observer_proposals.ObjectEvidenceProjection", tags)
         markers = next(row[1:] for row in graph[1]
                        if row[0] == "native-adapters")
         self.assertIn("committed-receipt-facts/1", markers)
-        self.assertNotIn("committed-boundary-history/1", markers)
+        self.assertIn("observer-recipient-facts/1", markers)
+        self.assertIn("published-interval-facts/1", markers)
+        self.assertIn("committed-boundary-history/1", markers)
         for encounter,*_ in rows:
             encounter.schedule_action(DelayAction(encounter,encounter.being_list[0],
                 defense=0,start_time=encounter.time,id=f'{encounter.id}-continuation'))
@@ -3509,7 +3646,7 @@ print(json.dumps({'times':[r[0].time for r in rows],
                     # boundary's touched recipient rows and had no listener
                     # owner field. The strict upgrade must recover ownership
                     # from recorded HeardAccount facts and carry state forward.
-                    def legacy_recipients(value):
+                    def legacy_recipients(value, _encounter):
                         output = []
                         for identity, projection in value.items():
                             role = object.__getattribute__(identity, "__dict__")["role"]
@@ -3536,8 +3673,12 @@ print(json.dumps({'times':[r[0].time for r in rows],
                     self.assertTrue(upgraded["initial"]["initial_schedule_available"])
                     for boundary in range(encounter.last_processed_boundary + 1):
                         self.assertEqual(
-                            upgraded_query.observer_facts_at(boundary, action.actor_id),
-                            query.observer_facts_at(boundary, action.actor_id))
+                            native_history._without_recipient_binding_ids(
+                                upgraded_query.observer_facts_at(
+                                    boundary, action.actor_id)),
+                            native_history._without_recipient_binding_ids(
+                                query.observer_facts_at(
+                                    boundary, action.actor_id)))
                     corrupted = native_history.decode(native_history.encode(upgraded))
                     expanded = native_history._expand_rows(corrupted)
                     state = native_history._initial_state(corrupted["initial"])
@@ -3590,7 +3731,8 @@ for index in range(3):
  query=native_history.NativeHistoryQuery(log)
  assert query.state_at(0)['recipients']=={}
  for boundary in range(1,log['latest_boundary']+1):
-  expected=native_history._stable_recipients(enc.inspect_committed(boundary).recipients)
+  expected=native_history._stable_recipients(
+   enc.inspect_committed(boundary).recipients,enc)
   assert query.state_at(boundary)['recipients']==expected
   owners=set(enc.being_list)|{row['owner_id'] for row in expected
    if row['owner_id'] is not None}
@@ -4105,6 +4247,11 @@ print(json.dumps({'registry':registry,'time':enc.time,
         binding = RecipientBinding(
             world, 'history', 'listener-accounts', 'in_world_received_accounts',
             (listener.id,), accounts)
+        boundary_binding_id = native_history.NativeHistoryQuery(
+            native_history.capture(encounter)).state_at(1)['recipients'][0]['binding_id']
+        from native_history import _recipient_binding_id
+        self.assertEqual(boundary_binding_id, _recipient_binding_id(
+            world, 'in_world_received_accounts', id(accounts)))
         wire = export_save(encounter, recipient_bindings=(binding,))
         # Present a valid prior /9 native Save: its receipt stores only the
         # touched recipient row and has no explicit row owner. The recorded
@@ -5062,7 +5209,7 @@ from activities import DelayAction
 from native_history import NativeHistoryQuery,current_recording
 from native_persistence import export_save,load_path,load_save
 world,enc,rng=load_path(sys.argv[1]); log=current_recording(enc)
-assert log['schema']=='universe.native-encounter-history/11'
+assert log['schema']=='universe.native-encounter-history/12'
 assert log['initial']['initial_entities_available'] is False
 query=NativeHistoryQuery(log)
 assert query.state_at(0)['entities'] is None
