@@ -4533,6 +4533,10 @@ print(json.dumps({'registry':registry,'time':enc.time,
         encounter.step(1)
         original_query = native_history.NativeHistoryQuery(
             native_history.capture(encounter))
+        for boundary in (1, 2):
+            self.assertEqual(
+                original_query.inspect_committed_at(boundary),
+                native_history._plain(encounter.inspect_committed(boundary)))
         history = {"boundaries": [
             {"state": original_query.state_at(boundary),
              "events": original_query.events_at(boundary),
@@ -4553,6 +4557,7 @@ inquiry=next(a for a in world.event_history.values()
  if type(a).__name__=='AskAboutPastAction')
 assert inquiry.generate is not None and len(inquiry.received_accounts)==1
 query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
+assert query.inspect_committed_at(1)==native_history._plain(enc.inspect_committed(1))
 facts=query.observer_facts_at(1,inquiry.actor_id)
 assert len(facts)==1 and facts[0]['owner_id']==inquiry.actor_id
 assert facts[0]['projection']['accounts']['$tuple'][0]['fields']['listener_id']==inquiry.actor_id
@@ -4562,6 +4567,8 @@ action=DelayAction(enc,enc.being_list[0],defense=0,start_time=enc.time,
 enc.schedule_action(action)
 enc.step(1)
 log=native_history.current_recording(enc); q=native_history.NativeHistoryQuery(log)
+assert q.inspect_committed_at(1)==native_history._plain(enc.inspect_committed(1))
+assert q.inspect_committed_at(2)==native_history._plain(enc.inspect_committed(2))
 history={'boundaries':[{'state':q.state_at(boundary),
  'events':q.events_at(boundary),'context':q.entity_context_at(boundary)}
  for boundary in range(1,enc.last_processed_boundary+1)]}
@@ -4663,16 +4670,27 @@ print(json.dumps({'time':enc.time,'rng':rng.state,
         spot = SpotAction(world, observer.id, target.id, 0, die_roll=20,
                           location_ledger=ledger, id='native-location-spot')
         encounter.schedule_action(spot)
-        encounter.step(6)
-        self.assertEqual(len(ledger.observations), 1)
         binding = RecipientBinding(
             world, 'perception', 'observer-location', 'observer_location_evidence',
             (observer.id,), ledger)
         wire = export_save(encounter, recipient_bindings=(binding,))
+        encounter.step(6)
+        self.assertEqual(len(ledger.observations), 1)
+        spot_query = native_history.NativeHistoryQuery(
+            native_history.capture(encounter))
+        self.assertEqual(
+            spot_query.inspect_committed_at(6),
+            native_history._plain(encounter.inspect_committed(6)))
         continuation = DelayAction(encounter, observer.id, defense=0,
                                    start_time=6, id='native-location-continuation')
         encounter.schedule_action(continuation)
         encounter.step(1)
+        continuation_query = native_history.NativeHistoryQuery(
+            native_history.capture(encounter))
+        for boundary in (6, 7):
+            self.assertEqual(
+                continuation_query.inspect_committed_at(boundary),
+                native_history._plain(encounter.inspect_committed(boundary)))
         row = ledger.observations[0]
         last_seen=ledger.last_seen_location(target.id)
         expected = {
@@ -4695,8 +4713,14 @@ import native_history
 from activities import DelayAction
 from native_persistence import load_path
 world,enc,rng=load_path(sys.argv[1])
-spot=world.get_event_by_id('native-location-spot')
+choice=next(row for row in enc._choice_book._choices.values()
+ if row.view.action_ids==('native-location-spot',))
+spot=choice.members[0].action
+assert spot.resolution is None
+enc.step(6)
 ledger=spot.location_ledger
+query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
+assert query.inspect_committed_at(6)==native_history._plain(enc.inspect_committed(6))
 row=ledger.observations[0]
 assert ledger.observer_id == spot.actor_id
 assert row.source_action_id == spot.id and row.being_id == spot.target_id
@@ -4706,6 +4730,9 @@ action=DelayAction(enc,spot.actor_id,defense=0,start_time=enc.time,
  id='native-location-continuation')
 enc.schedule_action(action)
 enc.step(1)
+query=native_history.NativeHistoryQuery(native_history.current_recording(enc))
+assert query.inspect_committed_at(6)==native_history._plain(enc.inspect_committed(6))
+assert query.inspect_committed_at(7)==native_history._plain(enc.inspect_committed(7))
 print(json.dumps({'time':enc.time,'rng':rng.state,
  'history':hashlib.sha256(native_history.encode(native_history.capture(enc))).hexdigest(),
  'observation':[row.id,row.observer_id,row.being_id,row.source_action_id,

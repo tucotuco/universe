@@ -1154,6 +1154,9 @@ class NativeHistoryTests(unittest.TestCase):
         fixture.enc.step(1)
 
         log = decode(encode(capture(fixture.enc)))
+        self.assertEqual(
+            NativeHistoryQuery(log).inspect_committed_at(1),
+            _plain(fixture.enc.inspect_committed(1)))
         boundary = state_at(log, 1)
         evidence = {row["owner_id"]: row["projection"]
                     for row in boundary["recipients"]

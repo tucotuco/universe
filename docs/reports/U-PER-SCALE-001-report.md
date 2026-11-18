@@ -1876,6 +1876,18 @@ The follow-up `test_history_refuses_resealed_duplicate_effects_and_forged_observ
 No incompatible rule or external blocker is identified. U-PER-SCALE-001 remains the sole ACTIVE program; production Save/Load cutover remains gated on the complete capability matrix, compatibility and application integration criteria.
 
 
+## Problems-first — observer Effect and pending-recipient historical parity
+
+Several `observer_proposals` rows in the source matrix still understated native support as “no production native restore path.” Those types include committed receipt Effects (`ObservationEffect`, `InterpretationEffect`, `BeliefAcquisitionEffect`, `LocationObservationEffect`, `AccountDeliveryEffect`, `TestimonyEffect`, Action/lifecycle outcomes), a derived `ObjectiveUse` view, and `FrozenLocationEvidence`, which is an interval-staging input rather than durable state. The missing evidence was exact composite historical inspection parity for these consequential observer receipts, including a pending native recipient restored before the Action commits.
+
+Expanded the pending Spot/LocationEvidence fresh-process scenario so it saves while Spot is still accepted and the recipient ledger is empty, loads the same pending Action and ledger in an OS child, commits Spot, then continues with Delay. At boundaries 6 and 7, `NativeHistoryQuery.inspect_committed_at()` exactly matches `Encounter.inspect_committed()` in uninterrupted and restored processes. The legacy AskAboutPast/listener-account scenario now compares the full committed inspection at both the Action and subsequent quiet boundaries before and after strict fresh-process Load. The two independent Group-observer fixture also compares the complete committed inspection, covering distinct observer Effect and projection identities.
+
+- `test_spot_location_evidence_restores_with_owner_and_provenance`, `test_completed_ask_about_past_and_listener_accounts_resume_with_binding`, and `test_two_observers_keep_distinct_group_evidence_in_native_history` — **3 passed / 8.096s**.
+- The final combined gate (`test_native_history`, capability matrix, pending-Spot fresh-process persistence, and AskAboutPast/legacy listener fresh-process persistence) passed **41 tests / 31.094s**. The first integration attempt rejected changed matrix classification phrases; the status text was restored to the registry test's required “Arena snapshot schema” / “Outside Arena snapshot schema” wording, and the full gate then passed.
+- These comparisons hash/compare the full normalized inspection projection; they do not infer missing observations or alter observer authorization. The matrix now marks `FrozenLocationEvidence` as transient staging input and cites native receipt/query evidence for committed observer families.
+- These test, matrix, TASKS and report changes are pending scoped commit. Prior verification commits through `6790f44` are listed in TASKS; no rule or compatibility decision is needed. General matrix closure and application cutover remain open.
+
+
 ## Problems-first — broad native integration regression after registry coverage
 
 The recent matrix/test increments touched native graph interpretation and added registered nonparticipants; isolated passing cases were not sufficient to establish that the wider migration, privacy, atomicity, and Action continuation portfolio remained intact.
