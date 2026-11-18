@@ -1848,6 +1848,22 @@ The field rows now cite the focused source and test. This verifies these configu
 - End: pending actual closeout timestamp.
 - Elapsed: pending calculation from the recorded timestamps.
 
+## Problems-first — Arena passive-perception history duplicated in native graph
+
+The native `/2` graph still serialized the full `ArenaPerceptionLedger` history despite schema `/8` already retaining its observer-owned initial evidence and sparse committed updates. A direct equality test initially showed that `observer_knowledge_at(latest)` is not a substitute for the ledger's *current* projection: current rows refresh `boundary` and `time` on quiet commits even when no meaningful history row is appended. Reconstructing the current view from older history would therefore invent a stale timestamp. The graph now stores exact current evidence plus a compact ordered `(Entity ID, visibility boundary)` history index; evidence rows are reconstructed only from the authenticated history at their recorded boundary. Strict ledger validation checks every identity, order reference, observer owner, Entity, Awareness set and current physical projection. Pre-first-commit Saves retain their full ledger recipe, and older history schemas without observer facts keep the previous complete graph recipe.
+
+The fresh-process test compares a full-ledger graph and history-backed compact graph made from the same current snapshot (**654,248 → 652,801 graph bytes, 1,447 B saved**), verifies the evidence nodes are absent from the compact graph, checks exact current/history ledger encoding and stable IDs, and continues with a native Delay. Its first Action boundary contains a real represented movement and committed observer evidence; the later Delay refreshes exact current evidence without adding a misleading historical row. Duplicate order references and dangling Entity references are refused. Compatibility covers a generated `/12` Arena Save and a reconstructed valid pre-compaction graph carrying history `/7`; the latter reports observer history unavailable instead of inferring it.
+
+- From `tests/`, `PYTHONPATH=.:../src:../examples:../../npc-generator ../.venv/bin/python -B -m unittest test_native_persistence.NativePersistenceTests.test_native_save_reconstructs_arena_perception_from_committed_history test_native_persistence.NativePersistenceTests.test_arena_observer_knowledge_appends_only_committed_evidence_changes test_native_persistence.NativePersistenceTests.test_generated_v12_arena_save_migrates_to_canonical_native_save test_native_persistence.NativePersistenceTests.test_generated_arena_first_choice_native_save_round_trips_and_continues test_persistence_capability_matrix -v` — **7 passed / 9.889s**. The dedicated `test_checkpoint_arena_perception` suite passed **7/7 / 2.453s**. The adjacent native history and checkpoint adapter gate passed **86/86 / 231.307s**. Earlier **4/4 / 8.636s** result predates the movement-evidence case and duplicate/dangling order checks.
+- `/12` production Save/Load is unchanged. This closes one graph-duplication family only; remaining state/query-family coverage, durable journal recovery, broader compatibility/security and application cutover remain open. U-PER-SCALE-001 remains ACTIVE.
+- The implementation, regression tests, matrix, TASKS and findings/report updates are awaiting explicit-path safety audit and a local commit. This compacting step does not close the remaining matrix or assignment acceptance criteria; no rules or external blocker is identified.
+
+### Execution interval
+
+- Start: `2026-11-17T22:55:59Z`.
+- End: pending actual closeout timestamp.
+- Elapsed: pending calculation from the recorded timestamps.
+
 
 ## Problems-first — preserve registered Universe entities outside an Encounter
 

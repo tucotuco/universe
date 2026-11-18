@@ -464,3 +464,85 @@ def decode_arena_perception_ledger(data, *, observer_id, entity_ids,
     ledger._current = dict(current)
     ledger._history = list(history)
     return ledger
+
+
+def arena_perception_history_order(ledger):
+    """Return the minimal ordered identity index for history-backed restore."""
+    _need(type(ledger) is ArenaPerceptionLedger
+          and type(ledger._history) is list,
+          "Arena perception ledger history is not a native ordered list")
+    rows = []
+    previous = -1
+    seen = set()
+    for evidence in ledger._history:
+        _need(type(evidence) is ArenaPerceptionEvidence,
+              "Arena perception history has an unreviewed evidence type")
+        boundary = evidence.visibility_boundary
+        marker = (evidence.entity_id, boundary)
+        _need(type(boundary) is int and boundary >= previous and marker not in seen,
+              "Arena perception history order is invalid")
+        previous = boundary
+        seen.add(marker)
+        rows.append(marker)
+    return tuple(rows)
+
+
+def restore_arena_perception_ledger_from_history(
+        current_data, order, history, *, observer_id, entity_ids,
+        visible_entity_ids, boundary, time):
+    """Rebuild ordered evidence from history and current state from the Save."""
+    from native_history import NativeHistoryQuery, _materialize_plain
+
+    _need(type(order) is tuple and len(order) <= MAX_HISTORY_ROWS,
+          "Arena perception history order is malformed or oversized")
+    query = NativeHistoryQuery(history)
+    _need(history.get("schema") and history.get("observer_knowledge", {}).get(
+        "available") is True,
+        "native history does not contain Arena observer evidence")
+    _need(history.get("latest_boundary") == boundary,
+          "native Arena evidence history is not at the current boundary")
+    evidence_history = []
+    prior_boundary = -1
+    seen = set()
+    for row in order:
+        _need(type(row) is tuple and len(row) == 2
+              and type(row[0]) is str and row[0] in entity_ids
+              and type(row[1]) is int and 0 <= row[1] <= boundary
+              and row[1] >= prior_boundary
+              and row not in seen,
+              "native observer history order has a malformed or duplicate reference")
+        entity_id, evidence_boundary = row
+        at_boundary = query.observer_knowledge_at(evidence_boundary, observer_id)
+        encoded = at_boundary.get(entity_id) if type(at_boundary) is dict else None
+        _need(type(encoded) is dict,
+              "native observer history order references missing evidence")
+        evidence = _materialize_plain(encoded)
+        _need(type(evidence) is ArenaPerceptionEvidence
+              and (evidence.observer_id, evidence.entity_id,
+                   evidence.visibility_boundary)
+                 == (observer_id, entity_id, evidence_boundary),
+              "native observer history order differs from its evidence row")
+        evidence_history.append(evidence)
+        prior_boundary = evidence_boundary
+        seen.add(row)
+
+    ledger = ArenaPerceptionLedger(observer_id)
+    _need(type(current_data) is tuple,
+          "saved current Arena evidence projection is malformed")
+    current = {}
+    for row in current_data:
+        _need(type(row) is tuple and len(row) == 2
+              and type(row[0]) is str and row[0] not in current,
+              "saved current Arena evidence row is malformed or duplicated")
+        evidence = _evidence_from_data(row[1])
+        _need(type(evidence) is ArenaPerceptionEvidence
+              and evidence.observer_id == observer_id
+              and evidence.entity_id == row[0],
+              "saved current Arena evidence identity differs")
+        current[row[0]] = evidence
+    ledger._current = current
+    ledger._history = evidence_history
+    encode_detached_arena_perception_ledger(
+        ledger, observer_id=observer_id, entity_ids=entity_ids,
+        visible_entity_ids=visible_entity_ids, boundary=boundary, time=time)
+    return ledger

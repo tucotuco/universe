@@ -1006,7 +1006,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
             saved_encounter._atomic_interval_history = []
     if native:
         _rehydrate_native_services(cache, nodes, native_recipes,
-                                   sections['host-bindings'][0])
+                                   sections['host-bindings'][0],
+                                   native_histories=native_histories)
     books = world.__dict__.get('_choice_books')
     _need(type(books) is list
           and len(books) == len(encounters)
@@ -1185,7 +1186,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
     return world, encounter, rng_owner
 
 
-def _rehydrate_native_services(cache, nodes, recipes, bindings):
+def _rehydrate_native_services(cache, nodes, recipes, bindings, *,
+                               native_histories=None):
     """Rebind the closed callback recipes admitted by NativeInventory."""
     from realization import RealityLedger
     from statistical_group import (StatisticalGroup,
@@ -1265,7 +1267,9 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
           'native Save has no unique selected Encounter for observer-ledger restoration')
     encounter = selected[0]
     arena_recipes = [recipe for recipe in recipes
-                     if len(recipe) >= 3 and recipe[2] == 'arena.perception_ledger']
+                     if len(recipe) >= 3 and recipe[2] in (
+                         'arena.perception_ledger',
+                         'arena.perception_ledger_from_history/1')]
     expected_observers = (tuple(encounter.being_list)
                           if encounter.arena_activation_enabled else ())
     _need(len(arena_recipes) == len(expected_observers)
@@ -1291,10 +1295,30 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
         observer = world.object_registry.object_instances.get(observer_id)
         _need(observer is not None,
               'native Arena perception observer is absent from the Entity registry')
-        ledger = decode_arena_perception_ledger(
-            recipe[4], observer_id=observer_id, entity_ids=entities,
-            visible_entity_ids=tuple(sorted(encounter.awareness[observer_id])),
-            boundary=encounter.last_processed_boundary, time=encounter.time)
+        if recipe[2] == 'arena.perception_ledger_from_history/1':
+            history = (native_histories or {}).get(encounter.id)
+            _need(history is not None,
+                  'compacted Arena perception recipe has no native history')
+            _need(type(recipe[4]) is tuple and len(recipe[4]) == 2,
+                  'compacted Arena perception payload is malformed')
+            current_data, order = recipe[4]
+            _need(all(type(row) is tuple and len(row) == 2
+                      and type(row[0]) is str and type(row[1]) is int
+                      for row in order),
+                  'compacted Arena perception order is malformed')
+            from checkpoint_arena_perception import (
+                restore_arena_perception_ledger_from_history,
+            )
+            ledger = restore_arena_perception_ledger_from_history(
+                current_data, order, history, observer_id=observer_id,
+                entity_ids=entities,
+                visible_entity_ids=tuple(sorted(encounter.awareness[observer_id])),
+                boundary=encounter.last_processed_boundary, time=encounter.time)
+        else:
+            ledger = decode_arena_perception_ledger(
+                recipe[4], observer_id=observer_id, entity_ids=entities,
+                visible_entity_ids=tuple(sorted(encounter.awareness[observer_id])),
+                boundary=encounter.last_processed_boundary, time=encounter.time)
         try:
             verified = encode_arena_perception_ledger(
                 ledger, observer=observer, encounter=encounter,
@@ -1302,8 +1326,9 @@ def _rehydrate_native_services(cache, nodes, recipes, bindings):
         except Exception as exc:
             raise ArenaNativeSnapshotRejected(
                 f'native Arena perception recipe failed semantic validation: {exc}') from exc
-        _need(verified == recipe[4],
-              'native Arena perception recipe differs from restored observer state')
+        if recipe[2] == 'arena.perception_ledger':
+            _need(verified == recipe[4],
+                  'native Arena perception recipe differs from restored observer state')
         object.__setattr__(observer, '_arena_perception_ledger', ledger)
         expected_recipes.append(recipe)
     owned_ledgers = {id(group._composition_reality) for group in groups}

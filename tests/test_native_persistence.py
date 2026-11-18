@@ -347,6 +347,33 @@ print(json.dumps({'encounter':encounter.id,
         # marker or passive observer timeline. Its scheduler projection came
         # from the first receipt, so it is not exposed as boundary-zero state.
         legacy_payload = json.loads(native_wire)
+        # Rebuild the matching pre-observer-history graph recipe: old graph
+        # saves retained the complete ledger payload instead of the compact
+        # order/current-state recipe introduced above. Keeping the modern
+        # compact graph while deleting its required history family would make
+        # an intentionally hybrid, non-restorable artifact.
+        from native_graph_snapshot import decode as decode_native_graph
+        from native_graph_snapshot import encode as encode_native_graph
+        from checkpoint_arena_perception import encode_arena_perception_ledger
+        graph = decode_native_graph(base64.b64decode(
+            legacy_payload["graph_b64"], validate=True), native=True)
+        def restore_legacy_perception_recipe(value):
+            if type(value) is tuple:
+                if (len(value) == 5 and value[0] == "native-recipe"
+                        and value[2] == "arena.perception_ledger_from_history/1"):
+                    owner_id = value[3][1]
+                    observer = world.get_object_by_id(owner_id)
+                    return (*value[:2], "arena.perception_ledger", value[3],
+                        encode_arena_perception_ledger(
+                        observer._arena_perception_ledger, observer=observer,
+                        encounter=encounter,
+                        registry=world.object_registry.object_instances))
+                return tuple(restore_legacy_perception_recipe(item)
+                             for item in value)
+            return value
+        legacy_graph = restore_legacy_perception_recipe(graph)
+        legacy_payload["graph_b64"] = base64.b64encode(
+            encode_native_graph(legacy_graph, native=True)).decode("ascii")
         legacy_history = {key: value for key, value in legacy_payload["history"].items()
                           if key != "sha256"}
         legacy_history.pop("observer_knowledge")
@@ -383,7 +410,11 @@ print(json.dumps({'encounter':encounter.id,
         # Attach before the first commit, then let the ordinary native
         # publisher create boundary evidence and append it on the next turn.
         export_save(encounter)
-        session.advance_one_second()
+        moving_target_id = encounter.being_list[1]
+        encounter.step(1, velocities={moving_target_id: (0.1, 0.0, 0.0)})
+        self.assertTrue(any(row.visibility_boundary == 1
+                            for row in encounter.get_being(
+                                encounter.being_list[0])._arena_perception_ledger._history))
         actor_id = encounter.being_list[0]
         encounter.schedule_action(DelayAction(
             encounter, actor_id, defense=0, start_time=encounter.time,
@@ -401,6 +432,169 @@ print(json.dumps({'encounter':encounter.id,
                         expected[evidence.entity_id] = native_history._plain(evidence)
                 self.assertEqual(reader.observer_knowledge_at(
                     boundary, observer_id), expected)
+
+    def test_native_save_reconstructs_arena_perception_from_committed_history(self):
+        """Committed Arena evidence is stored once and restores in a fresh process."""
+        import os
+        from arena_browser_session import GeneratedArenaSession
+        from native_graph_snapshot import (decode as decode_graph,
+                                           encode as encode_graph)
+
+        session = GeneratedArenaSession(root_seed_factory=lambda: 20261116)
+        session.generate({"starting_experience": "10000", "width_cells": "5",
+                          "height_cells": "5"})
+        session.choose_run()
+        encounter = session._active.encounter
+        initial_wire = export_save(encounter)
+        initial_graph_wire = base64.b64decode(
+            json.loads(initial_wire)["graph_b64"], validate=True)
+        self.assertIn(b"arena.perception_ledger", initial_graph_wire)
+        self.assertNotIn(b"arena.perception_ledger_from_history/1",
+                         initial_graph_wire)
+
+        moving_target_id = encounter.being_list[1]
+        encounter.step(1, velocities={moving_target_id: (0.1, 0.0, 0.0)})
+        actor_id = encounter.being_list[0]
+        encounter.schedule_action(DelayAction(
+            encounter, actor_id, defense=0, start_time=encounter.time,
+            id="native-arena-perception-history-continuation"))
+        encounter.step(1)
+        saved_wire = export_save(encounter)
+        saved_value = json.loads(saved_wire)
+        saved_graph_wire = base64.b64decode(
+            saved_value["graph_b64"], validate=True)
+        saved_graph = decode_graph(saved_graph_wire, native=True)
+        saved_nodes = next(row[1] for row in saved_graph[1] if row[0] == "nodes")
+        self.assertFalse(any(tag == "arena_perception.ArenaPerceptionLedger"
+                             for _ref, tag, _content in saved_nodes))
+        self.assertIn(b"arena.perception_ledger_from_history/1", saved_graph_wire)
+        from checkpoint_arena_perception import (
+            ArenaPerceptionCheckpointRejected,
+            restore_arena_perception_ledger_from_history,
+        )
+        def find_compacted_recipe(value):
+            if type(value) is tuple:
+                if (len(value) == 5 and value[0] == "native-recipe"
+                        and value[2] == "arena.perception_ledger_from_history/1"):
+                    return value
+                for item in value:
+                    found = find_compacted_recipe(item)
+                    if found is not None:
+                        return found
+            return None
+        compact_recipe = find_compacted_recipe(saved_graph)
+        self.assertIsNotNone(compact_recipe)
+        compact_observer_id = compact_recipe[3][1]
+        compact_current, compact_order = compact_recipe[4]
+        compact_history = native_history.current_recording(encounter)
+        compact_entities = tuple(sorted(encounter.entity_ids()))
+        compact_visible = tuple(sorted(encounter.awareness[compact_observer_id]))
+        with self.assertRaisesRegex(ArenaPerceptionCheckpointRejected,
+                                    "malformed or duplicate reference"):
+            restore_arena_perception_ledger_from_history(
+                compact_current, compact_order + (compact_order[0],),
+                compact_history, observer_id=compact_observer_id,
+                entity_ids=compact_entities, visible_entity_ids=compact_visible,
+                boundary=encounter.last_processed_boundary, time=encounter.time)
+        forged_order = (("missing-native-entity", compact_order[0][1]),)
+        with self.assertRaisesRegex(ArenaPerceptionCheckpointRejected,
+                                    "malformed or duplicate reference"):
+            restore_arena_perception_ledger_from_history(
+                compact_current, forged_order, compact_history,
+                observer_id=compact_observer_id, entity_ids=compact_entities,
+                visible_entity_ids=compact_visible,
+                boundary=encounter.last_processed_boundary, time=encounter.time)
+        from checkpoint_arena_perception import encode_arena_perception_ledger
+        def full_perception_graph(value):
+            if type(value) is tuple:
+                if (len(value) == 5 and value[0] == "native-recipe"
+                        and value[2] == "arena.perception_ledger_from_history/1"):
+                    owner_id = value[3][1]
+                    observer = encounter.universe.get_object_by_id(owner_id)
+                    return (*value[:2], "arena.perception_ledger", value[3],
+                        encode_arena_perception_ledger(
+                            observer._arena_perception_ledger, observer=observer,
+                            encounter=encounter,
+                            registry=encounter.universe.object_registry.object_instances))
+                return tuple(full_perception_graph(item) for item in value)
+            return value
+        full_graph_wire = encode_graph(
+            full_perception_graph(saved_graph), native=True)
+        self.assertLess(len(saved_graph_wire), len(full_graph_wire))
+
+        expected_world_id = encounter.universe.id
+        expected_encounter_id = encounter.id
+        expected_being_ids = list(encounter.being_list)
+        expected_time = encounter.time
+        expected_rng = encounter.rng.state if hasattr(encounter, "rng") else None
+        expected_history = hashlib.sha256(native_history.encode(
+            native_history.current_recording(encounter))).hexdigest()
+        expected_ledgers = {
+            being_id: native_history._plain(encode_arena_perception_ledger(
+                encounter.get_being(being_id)._arena_perception_ledger,
+                observer=encounter.get_being(being_id), encounter=encounter,
+                registry=encounter.universe.object_registry.object_instances))
+            for being_id in encounter.being_list
+        }
+
+        action_id = "native-arena-perception-history-continuation-2"
+        encounter.schedule_action(DelayAction(
+            encounter, actor_id, defense=0, start_time=encounter.time,
+            id=action_id))
+        encounter.step(1)
+        expected = {
+            "world_id": expected_world_id,
+            "encounter_id": expected_encounter_id,
+            "being_ids": expected_being_ids,
+            "loaded_time": expected_time,
+            "loaded_rng": expected_rng,
+            "loaded_history": expected_history,
+            "loaded_ledgers": expected_ledgers,
+            "time": encounter.time,
+            "rng": native_history._plain(native_persistence.rng_owner_for(encounter).state),
+            "history": hashlib.sha256(native_history.encode(
+                native_history.current_recording(encounter))).hexdigest(),
+            "action_id": action_id,
+            "observer_knowledge": native_history.NativeHistoryQuery(
+                native_history.current_recording(encounter)).observer_knowledge_at(
+                    encounter.last_processed_boundary),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from activities import DelayAction
+from checkpoint_arena_perception import encode_arena_perception_ledger
+from native_persistence import load_path,export_save,rng_owner_for
+world,enc,rng=load_path(sys.argv[1]); saved=open(sys.argv[1],'rb').read()
+assert export_save(enc)==saved
+being_ids=list(enc.being_list)
+ledgers={key:native_history._plain(encode_arena_perception_ledger(
+ enc.get_being(key)._arena_perception_ledger,observer=enc.get_being(key),
+ encounter=enc,registry=world.object_registry.object_instances)) for key in being_ids}
+loaded={'world_id':world.id,'encounter_id':enc.id,'being_ids':being_ids,
+ 'loaded_time':enc.time,'loaded_rng':None,
+ 'loaded_history':hashlib.sha256(native_history.encode(
+ native_history.current_recording(enc))).hexdigest(),'loaded_ledgers':ledgers}
+actor_id=being_ids[0];action_id='native-arena-perception-history-continuation-2'
+enc.schedule_action(DelayAction(enc,actor_id,defense=0,start_time=enc.time,id=action_id));enc.step(1)
+print(json.dumps({**loaded,'time':enc.time,'rng':native_history._plain(
+ rng_owner_for(enc).state),'history':hashlib.sha256(native_history.encode(
+ native_history.current_recording(enc))).hexdigest(),'action_id':action_id,
+ 'observer_knowledge':native_history.NativeHistoryQuery(
+ native_history.current_recording(enc)).observer_knowledge_at(
+ enc.last_processed_boundary)},sort_keys=True))'''
+        # The public RNG owner state is a tuple; compare it as the same JSON fact.
+        expected["loaded_rng"] = None
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-arena-perception.json"
+            path.write_bytes(saved_wire)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path)], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
 
     def test_legacy_v10_v11_pristine_arena_migrate_and_start_natively(self):
         """Accepted pristine legacy files migrate without inventing an Action."""

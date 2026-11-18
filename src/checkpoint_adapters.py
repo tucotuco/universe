@@ -809,6 +809,37 @@ class NativeInventory(_Inventory):
                 raise CheckpointRejected(str(exc)) from exc
             self.dependencies.append(('arena-perception-ledger',id(item),owner.id,encoded[0]))
             if self.full_native:
+                if self.compact_native_boundary_history:
+                    from native_history import (SCHEMA as HISTORY_SCHEMA,
+                        NativeHistoryQuery, _canonical, _plain, capture,
+                        current_recording)
+                    from checkpoint_arena_perception import arena_perception_history_order
+                    history = current_recording(self.encounter)
+                    if (history is None
+                            and self.encounter.__dict__.get('_atomic_interval_history')):
+                        history = capture(self.encounter)
+                    if (history is not None
+                            and history.get('schema') == HISTORY_SCHEMA
+                            and history.get('latest_boundary')
+                                == self.encounter.last_processed_boundary
+                            and history.get('observer_knowledge', {}).get('available') is True):
+                        query = NativeHistoryQuery(history)
+                        order = arena_perception_history_order(item)
+                        for source_evidence, (entity_id, boundary) in zip(
+                                item._history, order):
+                            observed = query.observer_knowledge_at(boundary, owner.id)
+                            evidence = observed.get(entity_id) if type(observed) is dict else None
+                            if (type(evidence) is not dict
+                                    or evidence != _plain(source_evidence)
+                                    or evidence.get('fields', {}).get(
+                                        'visibility_boundary') != boundary):
+                                raise CheckpointRejected(
+                                    'Arena observer history order differs from native history')
+                        self.dependencies.append((id(item._history), id(type(item._history)),
+                            hashlib.sha256(_canonical(_plain(item._history))).hexdigest()))
+                        return ('native-recipe', ADAPTER_VERSION,
+                                'arena.perception_ledger_from_history/1',
+                                ('object', owner.id), (encoded[3], order))
                 return ('native-recipe', ADAPTER_VERSION,
                         'arena.perception_ledger', ('object', owner.id), encoded)
             return ('arena-perception-ledger',encoded)
