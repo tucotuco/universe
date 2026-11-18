@@ -2869,6 +2869,64 @@ print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
         self.assertEqual(json.loads(child.stdout)["encounter_id"],
                          self.session.active_candidate.encounter.id)
 
+        # Exercise the same normal HTTP Save route after a native boundary has
+        # committed real Action/history facts, not only at a pending Choice cut.
+        committed_view = self.session.advance_one_second()
+        self.assertEqual(committed_view["time_seconds"], 1)
+        completed_handler = object.__new__(make_handler(self.session))
+        completed_handler.path = "/api/generated/save"
+        completed_handler.server = type("FakeServer", (), {"server_port": 8000})()
+        completed_handler.wfile = io.BytesIO()
+        completed_saved = {}
+        completed_handler._send = lambda status, body, content_type="application/json; charset=utf-8", extra_headers=None: completed_saved.update(
+            status=status, body=body, content_type=content_type, headers=extra_headers)
+        completed_handler.do_GET()
+        self.assertEqual(completed_saved["status"], 200)
+        completed_wire = completed_saved["body"]
+        self.assertEqual(json.loads(completed_wire)["schema"], _NATIVE_SESSION_SCHEMA)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "arena-native-committed.uarena"
+            source.write_bytes(completed_wire)
+            child = subprocess.run([sys.executable, "-B", "-c", """
+import json,sys
+from pathlib import Path
+from arena_browser_session import GeneratedArenaSession
+raw=Path(sys.argv[1]).read_bytes(); s=GeneratedArenaSession()
+view=s.load_encounter_bytes(raw)
+assert view['time_seconds']==1
+assert s.save_native_encounter_bytes()==raw
+print(json.dumps({'encounter_id':s.active_candidate.encounter.id,
+ 'finished':len(s.active_candidate.encounter.finished_action_list),
+ 'boundary':s.active_candidate.encounter.last_processed_boundary}))
+""", str(source)], cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "src") + os.pathsep
+                     + str(ROOT / "examples") + os.pathsep
+                     + str(ROOT.parent / "npc-generator"),
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+                capture_output=True, text=True, timeout=60)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        committed_child = json.loads(child.stdout)
+        self.assertEqual(committed_child["encounter_id"],
+                         self.session.active_candidate.encounter.id)
+        self.assertGreater(committed_child["finished"], 0)
+        self.assertEqual(committed_child["boundary"], 1)
+        committed_replacement = GeneratedArenaSession(root_seed_factory=lambda: 2)
+        committed_replacement.generate({"starting_experience": "10000",
+            "width_cells": "5", "height_cells": "5"})
+        committed_load = object.__new__(make_handler(committed_replacement))
+        committed_load.path = "/api/generated/load"
+        committed_load.server = type("FakeServer", (), {"server_port": 8000})()
+        committed_load.wfile = io.BytesIO()
+        committed_load.rfile = io.BytesIO(completed_wire)
+        committed_load.headers = {"Content-Length": str(len(completed_wire)),
+                                  "Content-Type": "application/octet-stream"}
+        committed_result = {}
+        committed_load._send = lambda status, body, content_type="application/json; charset=utf-8", extra_headers=None: committed_result.update(
+            status=status, body=body, content_type=content_type)
+        committed_load.do_POST()
+        self.assertEqual(committed_result["status"], 200)
+        self.assertEqual(committed_result["body"]["time_seconds"], 1)
+
         pristine = GeneratedArenaSession(root_seed_factory=lambda: 19)
         pristine.generate({"starting_experience": "10000",
                            "width_cells": "5", "height_cells": "5"})
