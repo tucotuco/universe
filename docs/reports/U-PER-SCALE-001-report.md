@@ -1966,3 +1966,29 @@ The focused route regression creates and accepts the first native Run Choice, sa
 - The `/12` production persistence module had passed **22/22 / 405.599s** during this continuation before the adapter work; the strict legacy route remains covered by the full generated-browser run. No `/12` reader/writer code was changed. The executed manual UI smoke did not reach Save/Load: a Delay before native initiation was correctly refused, and the browser tool expired while verifying the download. It is not claimed as a passing UI check.
 
 Native consumer integration is committed as `820c4d1adfb2a8293e829e649e4180cba1ec89fe`; the expanded committed-boundary history-query assertion and all-legacy `/12` fallback are pending the next scoped commit. The assignment's all-or-nothing gate remains unmet. The matrix still identifies supported Action, Choice, transient-effect, scheduler, Event, history and observer families without complete scenario/query evidence; durable committed-history recovery, broad accepted-file adversarial/compatibility coverage and final cutover UI verification remain open. No authoritative rules question or external blocker has been found. Keep U-PER-SCALE-001 sole ACTIVE; do not start shields, ranged Actions, U-ACT-GATE-001 or U-NET-001.
+
+## Problems-first — post-Action quiet recording and built-in definition breadth
+
+The recorder's post-Save append path formerly re-authenticated all earlier Action/Target receipts at every later boundary. That full-chain inspection is correct for the public standalone append contract, but it made a long quiet tail after an Action burst unnecessarily expensive. The internal recorder now authenticates its cached prefix digest and exact new `PublishedInterval`, verifies Action/lifecycle/effect links and the Target anchor/fingerprint before each append, then performs full-chain validation at every Action boundary and every 32nd quiet boundary. Save export and Load remain full strict validation. Cache changes commit transactionally only after append and scheduled validation succeed; a changed cached prefix is rejected before append/export. These checks retain rollback and publication semantics.
+
+The lawful native Feint profile resolved 64 Actions (128 committed cuts), saved, continued through 200 quiet cuts to t=328, then committed Delay at t=329. It compared all 329 committed cuts with authoritative native receipts and loaded in separate OS processes at both the post-Action and post-quiet cuts. Same Encounter IDs, Action identities, state, time, RNG and history matched uninterrupted control. Quiet-tail measurements:
+
+| Registered Beings | Graph before/after | History before/after | Save before/after | Growth | 329-cut query | Export | Post-quiet child Load + continuation | Peak RSS (platform units) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 978,538 / 978,538 B | 1,193,049 / 1,194,913 B | 2,497,916 / 2,499,780 B | 1,864 B | 101.95 s | 15.43 s | 14.159 s | 278,151,168 |
+| 20 | 1,220,621 / 1,220,621 B | 1,193,049 / 1,194,913 B | 2,820,692 / 2,822,556 B | 1,864 B | 109.28 s | 15.611 s | 18.305 s | 242,270,208 |
+| 200 | 3,639,614 / 3,639,614 B | 1,193,049 / 1,194,913 B | 6,046,016 / 6,047,880 B | 1,864 B | 96.414 s | 19.763 s | 13.126 s | 266,764,288 |
+
+Fresh-process continuation from the post-Action Save crossed the 200 quiet boundaries and committed Delay in 202.72 / 196.124 / 197.667 seconds at 2 / 20 / 200 registered Beings; each matched uninterrupted control. Scenario times were 181.328 / 185.06 seconds for quiet continuation and 69.241 / 72.55 seconds for the 64-Action setup at 20 / 200; the 2-Being run recorded 182.542 and 70.445 seconds. The graph is registry-dependent but constant across the quiet interval; history and total Save each add exactly 1,864 bytes of committed time/receipt facts for the 200 quiet boundaries across all registry sizes.
+
+The source-linked Universe/Library row now also has an exhaustive built-in entity-definition case. `test_native_save_round_trips_every_built_in_entity_definition_family` places all 27 current Being, 27 Object, 141 Weapon and 20 Armor definitions in one Arena-independent root (215 instances; Human alone participates), then strict-loads in a fresh process with `src/config` reads blocked. Each identity, class, name and shared Library definition identity matches; canonical Save→Load→Save is byte-identical. **1 passed / 1.770s.** This closes only the checked-in definitions inventory; custom definitions and all relationship/field combinations remain open.
+
+Committed integration evidence through `242fa7b390bf3c14f4b83da712e276c746d6538d` is the native persistence/Draw/scenario/matrix gate **100 passed / 383.314s**, native-history plus HTTP Save/Load **38 passed / 114.325s**, and five focused fast-append/mutated-prefix/`/1` migration/`/4` migration/pending-Disarm regressions **5 passed / 22.529s**. The new definition-family test then passed **1 / 1.770s**. A served Chrome session generated seed 14 and displayed the native-archive download confirmation after Save. Direct browser UI Load did not complete; the focused HTTP route does prove pending and committed Save/Load in fresh OS processes with exact bytes.
+
+This increment does not close the program: custom/caller-defined state, family-complete native historical-query parity, remaining pending/multi-Encounter/observer combinations, full adversarial/compatibility breadth remains acceptance work; the revised assignment requires atomic Save publication and rollback isolation, not a separate crash-recovery journal. No rules or external blocker is established; U-PER-SCALE-001 remains ACTIVE. The working tree retains the five unrelated staged archive changes and untracked user saves; no push occurred.
+
+### Current execution interval
+
+- Start: `2026-11-18T08:23:11Z`.
+- End: pending actual closeout timestamp.
+- Elapsed: pending calculation from the recorded timestamps.

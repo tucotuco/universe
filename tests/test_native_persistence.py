@@ -4364,6 +4364,115 @@ print(json.dumps({'changed_nodes':changed_nodes,
         self.assertEqual(json.loads(result.stdout),
                          json.loads(json.dumps(expected)))
 
+    def test_native_save_round_trips_every_built_in_entity_definition_family(self):
+        """The native root accepts all shipped Being/Object/Weapon/Armor definitions."""
+        import os
+        from armor import ArmorInstance
+        from being import BeingInstance
+        from native_scenario import NativeScenarioBuilder
+        from object import ObjectInstance
+        from weapon import WeaponInstance
+
+        builder = NativeScenarioBuilder(
+            'all built-in native entity definitions',
+            Library(config_dir=str(ROOT / 'src/config')),
+            seed=20261118, encounter_id='all-built-in-definitions-encounter')
+        library = builder.world.library
+        for being_type in sorted(library.being_dictionary.objects):
+            builder.add_being(
+                being_type, f'Native {being_type}',
+                participant=(being_type == 'Human'))
+        for object_type in sorted(library.object_dictionary.objects):
+            builder.make_object(object_type, f'Native {object_type}',
+                                participant=False)
+        for weapon_type in sorted(library.weapon_dictionary.objects):
+            identity = builder.world.make_weapon(
+                weapon_type, f'Native {weapon_type}')
+            self.assertIsNotNone(identity, weapon_type)
+        for armor_type in sorted(library.armor_dictionary.objects):
+            identity = builder.world.make_armor(
+                armor_type, f'Native {armor_type}')
+            self.assertIsNotNone(identity, armor_type)
+        builder.enable()
+        wire = export_save(builder.encounter)
+        expected = []
+        for identity, entity in sorted(
+                builder.world.object_registry.object_instances.items()):
+            self.assertIsInstance(entity, (BeingInstance, ObjectInstance))
+            definition = entity.original
+            if isinstance(entity, BeingInstance):
+                self.assertIs(definition,
+                              library.get_being_definition(definition.obj_type))
+                family = 'being'
+            elif isinstance(entity, WeaponInstance):
+                self.assertIs(definition,
+                              library.get_weapon_definition(definition.obj_type))
+                family = 'weapon'
+            elif isinstance(entity, ArmorInstance):
+                self.assertIs(definition,
+                              library.get_armor_definition(definition.obj_type))
+                family = 'armor'
+            else:
+                self.assertIs(definition,
+                              library.get_object_definition(definition.obj_type))
+                family = 'object'
+            expected.append([identity, family, entity.name, definition.obj_type])
+
+        self.assertEqual(len(expected), sum((
+            len(library.being_dictionary.objects),
+            len(library.object_dictionary.objects),
+            len(library.weapon_dictionary.objects),
+            len(library.armor_dictionary.objects))))
+        child = r'''import builtins,io,json,sys
+from pathlib import Path
+from native_persistence import export_save,load_path
+from being import BeingInstance
+from object import ObjectInstance
+from weapon import WeaponInstance
+from armor import ArmorInstance
+path=Path(sys.argv[1]); config=Path(sys.argv[2]).resolve()
+saved=path.read_bytes(); original_open=builtins.open; original_io_open=io.open
+def guard(function,path,*args,**kwargs):
+ try: selected=Path(path).resolve()
+ except (TypeError,ValueError): selected=None
+ if selected==config or (selected is not None and config in selected.parents):
+  raise AssertionError('native Load read an external Library definition')
+ return function(path,*args,**kwargs)
+builtins.open=lambda path,*a,**k:guard(original_open,path,*a,**k)
+io.open=lambda path,*a,**k:guard(original_io_open,path,*a,**k)
+world,enc,_rng=load_path(path)
+rows=[]
+for identity,entity in sorted(world.object_registry.object_instances.items()):
+ definition=entity.original
+ if isinstance(entity,BeingInstance):
+  family='being'; expected=world.library.get_being_definition(definition.obj_type)
+ elif isinstance(entity,WeaponInstance):
+  family='weapon'; expected=world.library.get_weapon_definition(definition.obj_type)
+ elif isinstance(entity,ArmorInstance):
+  family='armor'; expected=world.library.get_armor_definition(definition.obj_type)
+ else:
+  assert isinstance(entity,ObjectInstance)
+  family='object'; expected=world.library.get_object_definition(definition.obj_type)
+ assert definition is expected
+ rows.append([identity,family,entity.name,definition.obj_type])
+assert export_save(enc)==saved
+assert not (set(sys.modules)&{'arena_browser_session','arena_server','npcgen'})
+print(json.dumps({'rows':rows,'time':enc.time,'encounter':enc.id},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'all-built-in-entity-definitions.native'
+            path.write_bytes(wire)
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', child, str(path),
+                 str(ROOT / 'src/config')], cwd=directory,
+                env={**os.environ,
+                     'PYTHONPATH': f'{ROOT / "src"}:{ROOT / "examples"}'},
+                text=True, capture_output=True, check=False, timeout=90)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = json.loads(result.stdout)
+        self.assertEqual(actual['rows'], expected)
+        self.assertEqual(actual['time'], 0)
+        self.assertEqual(actual['encounter'], builder.encounter.id)
+
     def test_logical_reproduction_native_being_binding_restores_by_object_identity(self):
         world = Universe('native-reproduction-binding', library=Library(
             config_dir=str(ROOT / 'src/config')))
