@@ -3031,6 +3031,35 @@ class NativeHistoryQuery:
             raise NativeHistoryRejected("requested Target has no committed history")
         return rows
 
+    def skill_use_history_at(self, being_id, boundary):
+        """Return the exact committed SkillUse/BatchSkillUse view for a Being.
+
+        The values come from that boundary's validated TargetCandidate practice
+        projection. Boundary zero has EntityInspection rather than a committed
+        TargetCandidate and therefore returns ``None``; old schemas never
+        synthesize a use history from current Being state.
+        """
+        self._boundary(boundary)
+        if type(being_id) is not str or not being_id:
+            raise NativeHistoryRejected("skill-use history requires a stable Being identity")
+        if boundary == 0:
+            return None
+        target = self.target_at(being_id, boundary)
+        fields_value = target.get("fields") if type(target) is dict else None
+        if (type(fields_value) is not dict
+                or fields_value.get("category") != "being"):
+            raise NativeHistoryRejected("skill-use history owner is not a committed Being Target")
+        encoded = fields_value.get("practice_state")
+        if encoded is None:
+            raise NativeHistoryRejected("committed Being Target has no practice projection")
+        practice = _materialize_plain(encoded)
+        from frozen_practice import PracticeProjection
+        if (type(practice) is not PracticeProjection
+                or practice.being_id != being_id):
+            raise NativeHistoryRejected("committed Being practice projection has a foreign owner")
+        from encounter_inspection import _practice_history
+        return tuple(_practice_history(practice))
+
     def events_at(self, boundary):
         self._boundary(boundary)
         if boundary == 0:
@@ -4336,6 +4365,11 @@ def entity_at(log, entity_id, boundary):
 def entity_history_at(log, entity_id, boundary=None):
     """Return detached EntityInspection projections through a boundary."""
     return NativeHistoryQuery(log).entity_history_at(entity_id, boundary)
+
+
+def skill_use_history_at(log, being_id, boundary):
+    """Return one Being's recorded cumulative practice at a committed boundary."""
+    return NativeHistoryQuery(log).skill_use_history_at(being_id, boundary)
 
 
 def observer_facts_at(log, boundary, observer_id):

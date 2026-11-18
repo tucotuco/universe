@@ -2088,6 +2088,7 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         self.assertEqual(actor.get_position(), CartesianPosition(.5, 0, 0))
         self.assertEqual(action.start_position, CartesianPosition(0, 0, 0))
         self.assertIsNone(action.resolution)
+        uses_at_boundary_1 = tuple(actor.skill_use_history)
         saved_fatigue_view = encounter.last_fatigue_frame.view(actor.id).to_dict()
         saved_physiology_versions = {
             mode: encounter.last_fatigue_frame.physiology(actor.id, mode=mode).version_hash
@@ -2129,12 +2130,14 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                             if type(row.effect).__name__ == "PracticeEffect"]
         self.assertEqual(len(practice_effects), 1)
         self.assertEqual(practice_effects[0].source_action_id, action.id)
+        uses_at_boundary_2 = tuple(actor.skill_use_history)
         run_result = {
             "outcome": run_commit.facts.outcome,
             "practice_effect_sources": [row.source_action_id for row in practice_effects],
             "receipt_action_ids": list(encounter._atomic_interval_history[-1].action_ids),
         }
         encounter.step(1)
+        uses_at_boundary_3 = tuple(actor.skill_use_history)
         expected = {
             "time": encounter.time,
             "position": actor.get_position().as_tuple(),
@@ -2158,8 +2161,13 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
         }
         query = native_history.NativeHistoryQuery(
             native_history.current_recording(encounter))
+        self.assertIsNone(query.skill_use_history_at(actor.id, 0))
+        expected_uses = {1: uses_at_boundary_1, 2: uses_at_boundary_2,
+                         3: uses_at_boundary_3}
         versions = {}
         for boundary in (1, 2, 3):
+            self.assertEqual(query.skill_use_history_at(actor.id, boundary),
+                             expected_uses[boundary])
             context = query.entity_context_at(boundary)[actor.id]["fields"]
             position = context["position"]["fields"]
             self.assertEqual(float.fromhex(position["x"]["$number"]), .5 if boundary == 1 else 1.0)
@@ -2198,6 +2206,8 @@ run_result={'outcome':facts.outcome,
  'practice_effect_sources':[row.source_action_id for row in practice],
  'receipt_action_ids':list(encounter._atomic_interval_history[-1].action_ids)}
 encounter.step(1)
+query=native_history.NativeHistoryQuery(native_history.current_recording(encounter))
+assert query.skill_use_history_at(actor.id,3) == tuple(actor.skill_use_history)
 print(json.dumps({'time':encounter.time,'position':actor.get_position().as_tuple(),
  'experience':actor.get_skill_experience('run'),
  'skill_uses':[{'skill':row.skill_name,'experience':row.experience,
