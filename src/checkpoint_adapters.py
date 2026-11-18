@@ -314,7 +314,8 @@ class NativeInventory(_Inventory):
                  compact_native_disarm_landings=False,
                  compact_native_boundary_history=False,
                  compact_native_choice_indexes=False,
-                 compact_native_fatigue_frames=False):
+                 compact_native_fatigue_frames=False,
+                 compact_native_projectile_history=False):
         super().__init__()
         _require(type(bindings) is tuple, 'bindings must be an explicit tuple')
         self.world=world; self.encounter=encounter;self.bindings=bindings
@@ -329,6 +330,7 @@ class NativeInventory(_Inventory):
         self.compact_native_boundary_history=compact_native_boundary_history
         self.compact_native_choice_indexes=compact_native_choice_indexes
         self.compact_native_fatigue_frames=compact_native_fatigue_frames
+        self.compact_native_projectile_history=compact_native_projectile_history
         self.recipient_by_id={}; self.names=set();self.conditional_owners={};self.ledger_owners={}
         self.stack=set();self.checked=set();self.mutable_recipients={}
         objects=world.object_registry.object_instances
@@ -469,6 +471,49 @@ class NativeInventory(_Inventory):
         finally:self.stack.discard(id(value))
 
     def field(self,tag,field,item,ref,path,depth):
+        if (self.compact_native_projectile_history
+                and field == '_atomic_projectile_history'
+                and tag in ('object.ObjectInstance', 'weapon.WeaponInstance')):
+            from throwing import ProjectileBoundaryState
+            owner = self._objects_by_identity.get(self._owner_identity(ref))
+            _require(owner is not None and type(item) is list
+                     and all(type(row) is ProjectileBoundaryState for row in item),
+                     'projectile interval history is not a reviewed native list')
+            from encounter import Encounter
+            encounters = [event for event in self.world.event_history.values()
+                          if type(event) is Encounter]
+            roots = {row.source_effect_identity[0] for row in item
+                     if type(row.source_effect_identity) is tuple
+                     and len(row.source_effect_identity) == 5
+                     and type(row.source_effect_identity[0]) is str}
+            _require(len(roots) <= 1
+                     and all(type(row.source_effect_identity) is tuple
+                             and len(row.source_effect_identity) == 5
+                             and type(row.source_effect_identity[0]) is str
+                             for row in item),
+                     'projectile history spans roots without a portable append order')
+            expected = []
+            for encounter in encounters:
+                if roots and encounter.id not in roots:
+                    continue
+                for receipt in encounter.__dict__.get('_atomic_interval_history', ()):
+                    states = receipt.inspection.projectile_states
+                    if owner.id in states:
+                        expected.append(states[owner.id])
+            _require(item == expected,
+                     'projectile interval cache differs from committed boundary facts')
+            from native_history import _canonical, _plain
+            source_digest = hashlib.sha256(_canonical(_plain(item))).hexdigest()
+            self.dependencies.append((id(item), id(type(item)), source_digest))
+            replacement = []
+            encoded = super().field(tag, field, replacement, ref, path, depth)
+            token_id = id(replacement)
+            self.dependencies = [row for row in self.dependencies
+                                 if row[0] != token_id]
+            self._objects_by_identity.pop(token_id, None)
+            self.known.pop(token_id, None)
+            self.emitted.discard(token_id)
+            return encoded
         if (self.compact_native_fatigue_frames
                 and tag == 'encounter.Encounter'
                 and field == 'fatigue_frame_history'):
@@ -1534,5 +1579,7 @@ class NativeInventory(_Inventory):
             *(('choice-book-indexes/1',)
               if self.compact_native_choice_indexes else ()),
             *(('fatigue-frame-history/1',)
-              if self.compact_native_fatigue_frames else ()))
+              if self.compact_native_fatigue_frames else ()),
+            *(('projectile-interval-history/1',)
+              if self.compact_native_projectile_history else ()))
         return body+(('native-adapters',*native_adapters),('host-bindings',tuple(descriptions)))

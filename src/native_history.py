@@ -2792,6 +2792,46 @@ def restore_compacted_fatigue_frames(world, histories):
     return True
 
 
+def restore_compacted_projectile_history(world):
+    """Rebuild Object projectile interval indexes from committed receipt rows."""
+    from encounter import Encounter
+    from object import ObjectInstance
+    from weapon import WeaponInstance
+    from throwing import ProjectileBoundaryState
+    expected = {}
+    for event in world.event_history.values():
+        if type(event) is not Encounter:
+            continue
+        for receipt in event.__dict__.get("_atomic_interval_history", ()):
+            for object_id, state in receipt.inspection.projectile_states.items():
+                if type(state) is not ProjectileBoundaryState:
+                    raise NativeHistoryRejected(
+                        "compacted projectile receipt contains an unsupported state")
+                expected.setdefault(object_id, []).append(state)
+    for obj in world.object_registry.object_instances.values():
+        if type(obj) not in (ObjectInstance, WeaponInstance):
+            continue
+        present = "_atomic_projectile_history" in obj.__dict__
+        storage = obj.__dict__.get("_atomic_projectile_history")
+        rows = expected.pop(obj.id, [])
+        if not present:
+            if rows:
+                raise NativeHistoryRejected(
+                    "compacted projectile receipt lacks its source cache field")
+            # An absent-before-first-commit field remains absent; adding an
+            # empty list would change canonical Save bytes and its legacy
+            # optional-field semantics.
+            continue
+        if type(storage) is not list or storage:
+            raise NativeHistoryRejected(
+                "marked compact projectile cache contains serialized entries")
+        obj.__dict__["_atomic_projectile_history"] = rows
+    if expected:
+        raise NativeHistoryRejected(
+            "compacted projectile receipt references an absent Object")
+    return True
+
+
 class NativeHistoryQuery:
     """Validated, detached query session for repeated history reads.
 

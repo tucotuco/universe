@@ -610,7 +610,8 @@ def _validate_inventory(envelope, *, allow_legacy_paths=False,
             'observer-recipient-facts/1','observer-recipient-facts/2',
             'published-interval-facts/1',
             'disarm-landing-facts/1','committed-boundary-history/1',
-            'choice-book-indexes/1','fatigue-frame-history/1')
+            'choice-book-indexes/1','fatigue-frame-history/1',
+            'projectile-interval-history/1')
         _need(type(markers) is tuple and markers
               and len(set(markers))==len(markers)
               and all(value in marker_order for value in markers)
@@ -832,6 +833,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
         'choice-book-indexes/1' in native_adapter_markers)
     compact_fatigue_frames = (native and
         'fatigue-frame-history/1' in native_adapter_markers)
+    compact_projectile_history = (native and
+        'projectile-interval-history/1' in native_adapter_markers)
     _need(not compact_receipt_facts or compact_entity_context,
           'compacted native receipt facts require EntityInspection history')
     _need(not compact_recipient_facts or compact_receipt_facts,
@@ -1104,6 +1107,8 @@ def restore(envelope, *, native=False, companion_rng_owners=None,
             if compact_target_history:
                 history_codec.restore_compacted_target_history(world,
                                                                 native_histories)
+            if compact_projectile_history:
+                history_codec.restore_compacted_projectile_history(world)
         except history_codec.NativeHistoryRejected as exc:
             raise ArenaNativeSnapshotRejected(
                 f'compacted native history cannot be restored: {exc}') from exc

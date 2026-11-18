@@ -105,6 +105,33 @@ def _entity_context_history_available(world):
     return True
 
 
+def _projectile_history_compaction_available(world):
+    """Whether each projectile Object has one reconstructible receipt order."""
+    from object import ObjectInstance
+    from weapon import WeaponInstance
+    from throwing import ProjectileBoundaryState
+    for obj in world.object_registry.object_instances.values():
+        if type(obj) not in (ObjectInstance, WeaponInstance):
+            continue
+        rows = obj.__dict__.get("_atomic_projectile_history", ())
+        roots = set()
+        for row in rows:
+            if type(row) is not ProjectileBoundaryState:
+                return False
+            identity = object.__getattribute__(row, "__dict__").get(
+                "source_effect_identity")
+            if (type(identity) is not tuple or len(identity) != 5
+                    or type(identity[0]) is not str or not identity[0]):
+                return False
+            roots.add(identity[0])
+        if len(roots) > 1:
+            # Object history is append-ordered across Encounter roots. The
+            # records have no global sequence number, so retain this cache if
+            # its exact cross-root append order cannot be reconstructed.
+            return False
+    return True
+
+
 def _rng_json(value, depth=0):
     if depth > 8:
         raise NativeSaveRejected("native RNG state exceeds its nesting limit")
@@ -164,6 +191,9 @@ def _export_save_coordinated(encounter, *, recipient_bindings=()):
             compact_native_boundary_history=compact_boundary_history,
             compact_native_choice_indexes=True,
             compact_native_fatigue_frames=compact_entity_context,
+            compact_native_projectile_history=(
+                compact_boundary_history
+                and _projectile_history_compaction_available(encounter.universe)),
             bindings=recipient_bindings,
             rng_owner=_native_rng_owner(encounter))
         if candidate.diagnostics:

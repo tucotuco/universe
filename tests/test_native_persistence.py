@@ -716,7 +716,31 @@ print(json.dumps({'world_id':world.id,'encounter_id':enc.id,
         encounter.step(4)
         self.assertEqual(action.resolution.outcome, "released")
         self.assertIsNone(projectile.__dict__["_projectile_flight"].impact_outcome)
+        original_projectile_history = projectile.__dict__["_atomic_projectile_history"]
+        self.assertTrue(original_projectile_history)
+        prior_history = native_history.capture(encounter)
+        projectile.__dict__["_atomic_projectile_history"] = []
+        with self.assertRaises(NativeSaveRejected):
+            export_save(encounter)
+        projectile.__dict__["_atomic_projectile_history"] = original_projectile_history
+        self.assertEqual(native_history.capture(encounter), prior_history)
         wire = export_save(encounter)
+        from native_graph_snapshot import decode as decode_graph
+        graph = decode_graph(base64.b64decode(
+            json.loads(wire)["graph_b64"], validate=True), native=True)
+        inventory = graph[1]
+        nodes = next(row[1] for row in inventory if row[0] == "nodes")
+        projectile_content = next(content for _ref, tag, content in nodes
+                                  if tag in ("weapon.WeaponInstance",
+                                             "object.ObjectInstance")
+                                  and dict(content).get("id")
+                                      == ("string", projectile.id))
+        history_ref = dict(projectile_content)["_atomic_projectile_history"][1]
+        self.assertEqual(next(content for ref, tag, content in nodes
+                              if ref == history_ref and tag == "list"), ())
+        markers = next(row[1:] for row in inventory
+                       if row[0] == "native-adapters")
+        self.assertIn("projectile-interval-history/1", markers)
 
         def run_to_impact(enc, world, cursor):
             from atomic_publication import target_effects_from
@@ -1366,6 +1390,14 @@ print(json.dumps({'time':encounter.time,
         encounter.step(4)
         self.assertEqual(action.resolution.outcome, "released")
         self.assertIsNone(projectile.__dict__["_projectile_flight"].impact_outcome)
+        original_projectile_history = projectile.__dict__["_atomic_projectile_history"]
+        self.assertTrue(original_projectile_history)
+        prior_history = native_history.capture(encounter)
+        projectile.__dict__["_atomic_projectile_history"] = []
+        with self.assertRaises(NativeSaveRejected):
+            export_save(encounter)
+        projectile.__dict__["_atomic_projectile_history"] = original_projectile_history
+        self.assertEqual(native_history.capture(encounter), prior_history)
         wire = export_save(encounter)
 
         def continue_to_miss(enc, saved_world, cursor):
