@@ -166,6 +166,34 @@ class NativePersistenceTests(unittest.TestCase):
             _validate_host_binding_descriptors(
                 ((row,),), require_binding_ids=True)
 
+    def test_native_recipient_binding_descriptor_rejects_identity_collisions(self):
+        from native_graph_snapshot import (
+            ArenaNativeSnapshotRejected,
+            _validate_host_binding_descriptors,
+        )
+
+        def row(name, reference, binding_id):
+            return ('native', name, 'in_world_belief_ledger', ('observer',),
+                    ('reference', ('host-recipient', *reference)), binding_id)
+
+        first = ('universe', 'native-world', 'native', 'ledger-a')
+        second = ('universe', 'native-world', 'native', 'ledger-b')
+        binding = 'a' * 64
+        with self.assertRaisesRegex(
+                ArenaNativeSnapshotRejected,
+                'identity aliases distinct recipient references'):
+            _validate_host_binding_descriptors(
+                ((row('ledger-a', first, binding),
+                  row('ledger-b', second, binding),),),
+                require_binding_ids=True)
+        with self.assertRaisesRegex(
+                ArenaNativeSnapshotRejected,
+                'reference has conflicting binding identities'):
+            _validate_host_binding_descriptors(
+                ((row('ledger-a', first, binding),
+                  row('ledger-b', first, 'b' * 64),),),
+                require_binding_ids=True)
+
     def _assert_recipient_history_matches_receipts(self, encounter):
         """Check detached recipient history against every authoritative cut."""
         log = native_history.capture(encounter)

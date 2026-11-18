@@ -659,6 +659,8 @@ def _validate_host_binding_descriptors(section, *, require_binding_ids=False):
           and type(section[0]) is tuple,
           'native host bindings are malformed')
     seen = set()
+    binding_references = {}
+    reference_bindings = {}
     roles = {'in_world_belief_ledger', 'in_world_received_accounts',
              'observer_location_evidence', 'observer_object_evidence'}
     for row in section[0]:
@@ -684,6 +686,16 @@ def _validate_host_binding_descriptors(section, *, require_binding_ids=False):
             _need(type(binding_id) is str and len(binding_id) == 64
                   and all(char in '0123456789abcdef' for char in binding_id),
                   'native host binding identity is malformed')
+            identity_key = (role, binding_id)
+            prior_reference = binding_references.get(identity_key)
+            _need(prior_reference is None or prior_reference == reference,
+                  'native host binding identity aliases distinct recipient references')
+            reference_key = reference
+            prior_identity = reference_bindings.get(reference_key)
+            _need(prior_identity is None or prior_identity == identity_key,
+                  'native host recipient reference has conflicting binding identities')
+            binding_references[identity_key] = reference
+            reference_bindings[reference_key] = identity_key
         seen.add((namespace, name))
 
 
