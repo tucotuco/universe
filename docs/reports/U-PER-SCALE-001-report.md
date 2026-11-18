@@ -1866,10 +1866,12 @@ The prior native-history test set checked digest tampering, duplicate Action fac
 
 Added `test_history_parser_enforces_duplicate_and_resource_limits_before_write` to reject duplicate JSON keys, node/depth/boundary/byte-limit violations, and to verify a size refusal creates neither destination nor temporary artifact. Added `test_directory_sync_failure_leaves_only_complete_published_history`: inject failure on the directory `fsync` after the no-overwrite link, assert the API reports failure after atomic publication, then strictly decode the complete destination and confirm the temporary name is gone. The append-before/after-native-publication tests remain unchanged.
 
+The follow-up `test_history_refuses_resealed_duplicate_effects_and_forged_observer_owner` goes beyond digest mismatch: it reseals a duplicate Effect identity and a recipient owner change, then verifies native semantic validation rejects both against receipt and stable binding facts.
+
 - From `tests/`, `.venv` interpreter via `../.venv/bin/python -m unittest test_native_history.NativeHistoryTests.test_history_parser_enforces_duplicate_and_resource_limits_before_write test_native_history.NativeHistoryTests.test_directory_sync_failure_leaves_only_complete_published_history` — **2 passed / 0.999s**.
-- Focused integration: `test_native_history`, `test_persistence_capability_matrix`, and PersonalHistory strict fresh-process continuation — **39 passed / 26.170s**.
+- Focused integration: `test_native_history`, `test_persistence_capability_matrix`, and PersonalHistory strict fresh-process continuation — **40 passed / 26.355s**.
 - The publication-fault case is an API-level injected directory-sync failure, not physical power-loss testing. `/12` production Save/Load remains untouched; durable append recovery and full adversarial/migration coverage remain open.
-- Commits carrying the reader proof: `9649ce9`, `73cef99`, `a6ab6bf`; this safety regression and its matrix/findings/task updates are pending scoped audit and commit.
+- Commits carrying the reader proof: `9649ce9`, `73cef99`, `a6ab6bf`; parser/publication tests are in `2ef00eb`; the resealed semantic attacks and resulting count updates are pending scoped audit and commit.
 
 No incompatible rule or external blocker is identified. U-PER-SCALE-001 remains the sole ACTIVE program; production Save/Load cutover remains gated on the complete capability matrix, compatibility and application integration criteria.
 

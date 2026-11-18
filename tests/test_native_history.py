@@ -994,6 +994,33 @@ class NativeHistoryTests(unittest.TestCase):
             self.assertFalse(destination.exists())
             self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_history_refuses_resealed_duplicate_effects_and_forged_observer_owner(self):
+        duplicate = copy.deepcopy(self.log)
+        row = next(row for row in duplicate["boundaries"]
+                   if row.get("kind") != "quiet_span" and row["events"]["effect_ids"])
+        row["events"]["effect_ids"].append(copy.deepcopy(row["events"]["effect_ids"][0]))
+        with self.assertRaises(NativeHistoryRejected):
+            validate(_seal({key: value for key, value in duplicate.items()
+                            if key != "sha256"}))
+
+        import test_encounter_inspection as fixtures
+        from field_observation import BeliefLedger
+        fixture = fixtures.InspectionFixture()
+        fixture.setUp()
+        group = fixture.f.f.f.group()
+        fixture.enable()
+        ledger = BeliefLedger(fixture.a.id)
+        action = fixture.f.f.observe(fixture.a, group, ledger=ledger)
+        fixture.enc.schedule_choice((action,))
+        fixture.enc.step(1)
+        forged = copy.deepcopy(capture(fixture.enc))
+        change = next(item for item in forged["boundaries"][0]["changes"]
+                      if item["path"] == ["recipients"])
+        change["value"][0]["owner_id"] = fixture.b.id
+        with self.assertRaises(NativeHistoryRejected):
+            validate(_seal({key: value for key, value in forged.items()
+                            if key != "sha256"}))
+
     def test_standalone_write_does_not_overwrite_existing_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "history.json"

@@ -540,7 +540,7 @@ This removes only duplicate Target interval records. Full `CommittedBoundaryReco
 
 ## Problems-first — history parser bounds and post-publication failure
 
-Added hostile-input limits and publication-fault tests: duplicate JSON keys and patched node/depth/boundary/byte limits refuse; size refusal leaves no file or temporary artifact. An injected directory-fsync error after the atomic link is reported as post-publication, while the final history remains complete, strictly decodable, and has no temp name. The history, capability matrix and PersonalHistory fresh-process gate passes **39/39 in 26.170s**. This is API-level fault injection, not physical power-loss proof. Durable journal recovery, remaining security cases, the all-family matrix, and ordinary application Save/Load cutover remain open; `/12` production behavior was not changed.
+Added hostile-input limits and publication-fault tests: duplicate JSON keys and patched node/depth/boundary/byte limits refuse; size refusal leaves no file or temporary artifact. An injected directory-fsync error after the atomic link is reported as post-publication, while the final history remains complete, strictly decodable, and has no temp name. A semantic adversarial regression also reseals a duplicated Effect identity and forged recipient owner and confirms both are rejected. The history, capability matrix and PersonalHistory fresh-process gate passes **40/40 in 26.355s**. This is API-level fault injection, not physical power-loss proof. Durable journal recovery, remaining security cases, the all-family matrix, and ordinary application Save/Load cutover remain open; `/12` production behavior was not changed.
 
 ## Problems-first — compact native EntityInspection history in strict Save graph
 
