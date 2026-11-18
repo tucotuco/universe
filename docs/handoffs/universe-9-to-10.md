@@ -3,7 +3,7 @@
 **Prepared:** 2026-11-18
 **Intended repository path:** `docs/handoffs/universe-9-to-10.md`
 **Project:** `~/Projects/universe` (NOT `universe-old`, `npc-generator`, or `universe-geology`)
-**Handoff status:** ChatGPT accepted U-PER-SCALE-001 DONE; local reconciliation is underway. The authorized push is pending the final live range audit and non-force fast-forward verification. Record the resulting remote SHA after publication.
+**Handoff status:** ChatGPT accepted U-PER-SCALE-001 DONE. Archival reconciliation and the authorized non-force publication were completed on 2026-11-18; the initial closeout tip `5a112442a355f77f5e74af170b14e9bf43718491` was verified on `origin/main`. A final documentation-only closeout correction will record this result. No implementation program is ACTIVE; U-SHIELD-001 is assigned for the next session and has not started.
 
 ## 1. Start here: authority and working method
 
@@ -28,7 +28,7 @@ The accepted system is **Arena-independent native persistence**, with a typed re
 
 **Compatibility/scope boundary:** keep accepted generated Arena Save `/10`–`/12` readers; native app-delivered Save envelope `/2`, graph `/2`, history `/12` and `native-session/1`; legacy-mode `/12` writer as applicable. Transient pre-interface native formats `/1` and intermediate history `/1`–`/11` are not perpetual compatibility obligations. Last complete Save integrity and rollback matter; continuous disk journaling/autosave/unsaved-progress recovery, cross-rules-version deterministic replay, speculative query expansion and graph-free current state are not required.
 
-## 3. Immediate transition / GitHub publication
+## 3. Verified transition publication
 
 **Publication authorization:** user requested publication of the accepted milestone to GitHub. The safe scope is a normal **non-force** push of the reviewed milestone history to the existing configured `origin`/main branch, after live audit. No new remote, branch-history rewrite, tag publishing or inclusion of user-private files is inferred.
 
@@ -36,8 +36,7 @@ The accepted system is **Arena-independent native persistence**, with a typed re
 - Reconcile `TASKS.md`: U-PER-SCALE-001 DONE accepted under clarified scope, UI smoke an independent VERIFY item; `U-SHIELD-001` is assigned/next but shield **implementation has not started**. Keep all other task IDs and deferred priorities.
 - Archive the accepted persistence assignment/report according to the actual process, preserving links and evidence. Do not erase the large historical report. Install this handoff and `docs/assignments/U-SHIELD-001.md` as needed. Write an audited, **path-scoped** local closeout commit, excluding unrelated staged/untracked content.
 - **Audit the entire unpublished commit range** before pushing: fetch `origin/main`, verify remote main is an ancestor of local `HEAD`, inspect `git log --oneline origin/main..HEAD`, `git diff --name-status origin/main..HEAD` and suspicious content. Verify no secrets, large local saves, user-private files, unintended archived moves or unrelated independent-project changes. A push sends *all unpublished commits*, not just the closeout commit.
-- Dry-run `git push --dry-run origin HEAD:main`, then `git push origin HEAD:main` only if audit is clean. Never force-push or auto-rebase; if divergent/upstream changed, stop with an exact report rather than inventing a resolution.
-- Verify `git rev-parse HEAD` equals `git ls-remote --heads origin main` after publication; record branch, SHA, remote URL, visibility if verified, and any remaining local staged/untracked entries in the Codex closeout message. **This handoff does not itself certify any remote push.**
+- This transition was published from `main` to `origin/main` with an ordinary fast-forward push after the 398-commit full-range audit passed with zero findings. Dry-run and actual push both succeeded. Remote URL is `https://github.com/tucotuco/universe.git`; GitHub reported PUBLIC. The post-push check returned local HEAD and `refs/heads/main` as `5a112442a355f77f5e74af170b14e9bf43718491`. A documentation-only report/handoff correction remains part of closeout; do not interpret it as authorization to publish later shield implementation.
 
 ## 4. Next program: U-SHIELD-001
 
