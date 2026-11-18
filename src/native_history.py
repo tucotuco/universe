@@ -637,6 +637,7 @@ def _arena_observer_context(encounter, latest_boundary):
             raise NativeHistoryRejected("Arena perception ledger owner or storage differs")
         ledgers[owner_id] = ledger
 
+    origin_boundary = math.floor(encounter.start_time)
     initial = {}
     rows_by_boundary = {}
     seen_rows = set()
@@ -645,7 +646,7 @@ def _arena_observer_context(encounter, latest_boundary):
             if type(evidence) is not ArenaPerceptionEvidence:
                 raise NativeHistoryRejected("Arena observer evidence has an unreviewed type")
             boundary = evidence.visibility_boundary
-            if (type(boundary) is not int or not 0 <= boundary <= latest_boundary
+            if (type(boundary) is not int or not origin_boundary <= boundary <= latest_boundary
                     or evidence.observer_id != owner_id):
                 raise NativeHistoryRejected("Arena observer evidence boundary or owner differs")
             identity = (owner_id, evidence.entity_id, boundary)
@@ -654,7 +655,7 @@ def _arena_observer_context(encounter, latest_boundary):
                     "Arena observer evidence repeats an Entity at one boundary")
             seen_rows.add(identity)
             encoded = _plain(evidence)
-            if boundary == 0:
+            if boundary == origin_boundary:
                 initial.setdefault(owner_id, {})[evidence.entity_id] = encoded
             else:
                 rows_by_boundary.setdefault(boundary, []).append(
@@ -1204,6 +1205,18 @@ def _initial_state(initial):
     }
 
 
+def _origin_boundary(log):
+    """Return the committed cut immediately before this history's first row.
+
+    Native Encounters may start at an absolute clock time other than zero.
+    The initial cut is the floored Encounter start time.
+    """
+    try:
+        return math.floor(_number_value(log["initial"]["start"]))
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise NativeHistoryRejected("native history start boundary is malformed") from exc
+
+
 def _rng_record(value, previous, schema=SCHEMA):
     if schema == SCHEMA and previous is not None and value == previous:
         return dict(SAME_RNG)
@@ -1402,13 +1415,14 @@ def _apply_quiet_span(state, row, through_boundary):
 def rng_state_at(log, boundary):
     """Return the exact RNG cursor after a committed boundary."""
     validate(log)
-    if type(boundary) is int and boundary == 0:
+    origin = _origin_boundary(log)
+    if type(boundary) is int and boundary == origin:
         initial = log["initial"].get("rng_before_first_commit")
         if initial is None:
             raise NativeHistoryRejected(
                 "initial RNG cursor is not recorded in this native history")
         return json.loads(_canonical(initial).decode("ascii"))
-    if type(boundary) is not int or not 1 <= boundary <= log["latest_boundary"]:
+    if type(boundary) is not int or not origin < boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native RNG boundary is not committed")
     current = log["initial"].get("rng_before_first_commit")
     for row in log["boundaries"]:
@@ -1822,6 +1836,9 @@ def capture(encounter, *, initial_schedule=None,
     boundaries = []
     previous_boundary = None
     previous_rng = initial["rng_before_first_commit"]
+    origin_boundary = math.floor(encounter.start_time)
+    if receipts[0].boundary != origin_boundary + 1:
+        raise NativeHistoryRejected("native history first boundary does not follow its start")
     for receipt in receipts:
         if (receipt.encounter_id != encounter.id
                 or type(receipt.boundary) is not int
@@ -1902,7 +1919,10 @@ def semantically_equal_without_recipient_binding_ids(first, second):
         return False
     left = NativeHistoryQuery(first)
     right = NativeHistoryQuery(second)
-    for boundary in range(first["latest_boundary"] + 1):
+    origin = _origin_boundary(first)
+    if origin != _origin_boundary(second):
+        return False
+    for boundary in range(origin, first["latest_boundary"] + 1):
         for read in (NativeHistoryQuery.state_at,
                      NativeHistoryQuery.events_at,
                      NativeHistoryQuery.entity_context_at,
@@ -1914,7 +1934,7 @@ def semantically_equal_without_recipient_binding_ids(first, second):
             left_rng = left.rng_state_at(boundary)
             right_rng = right.rng_state_at(boundary)
         except NativeHistoryRejected:
-            if boundary == 0 and first["initial"].get(
+            if boundary == origin and first["initial"].get(
                     "rng_before_first_commit") is None:
                 continue
             raise
@@ -2530,7 +2550,8 @@ def validate(log):
     seen_actions = set()
     seen_effects = set()
     prior_rng = initial.get("rng_before_first_commit")
-    covered = 0
+    origin_boundary = _origin_boundary(log)
+    covered = origin_boundary
     receipt_completeness = []
     for row in boundaries:
         if type(row) is dict and row.get("kind") == "quiet_span":
@@ -2673,11 +2694,12 @@ def validate(log):
                     raise NativeHistoryRejected("Disarm landing position is malformed")
         covered = expected
     if (type(log["latest_boundary"]) is not int
-            or not 0 <= log["latest_boundary"] <= MAX_BOUNDARIES
+            or not origin_boundary <= log["latest_boundary"] <= origin_boundary + MAX_BOUNDARIES
             or log["latest_boundary"] != covered):
         raise NativeHistoryRejected("native history latest boundary differs")
     if has_entity_context:
-        _validate_entity_context(log["entity_context"], log["latest_boundary"], version)
+        _validate_entity_context(log["entity_context"], log["latest_boundary"],
+                                 version, origin_boundary)
     if (version in INITIAL_ENTITY_SCHEMAS
             and initial["initial_entities_available"]):
         context = log["entity_context"]
@@ -2689,7 +2711,8 @@ def validate(log):
         raise NativeHistoryRejected("receipt-fact completeness marker disagrees with boundaries")
     if has_observer_knowledge:
         _validate_observer_knowledge(log["observer_knowledge"],
-                                     log["latest_boundary"], initial, state)
+                                     log["latest_boundary"], initial, state,
+                                     origin_boundary)
     return True
 
 
@@ -2752,7 +2775,7 @@ def _validate_queue_projection(value):
         raise NativeHistoryRejected("initial scheduler revision is malformed")
 
 
-def _validate_entity_context(context, latest_boundary, schema):
+def _validate_entity_context(context, latest_boundary, schema, origin_boundary=0):
     expected_keys = ({"available", "initial", "changes"}
                      if schema == ENTITY_CONTEXT_SCHEMA else
                      {"available", "fatigue_available", "initial", "changes"})
@@ -2774,7 +2797,7 @@ def _validate_entity_context(context, latest_boundary, schema):
     state = context["initial"]
     if schema in current_context_schemas and context["fatigue_available"]:
         _validate_fatigue_context_entities(state)
-    previous = 0
+    previous = origin_boundary
     for row in context["changes"]:
         if (type(row) is not dict or set(row) != {"boundary", "changes", "state_sha256"}
                 or type(row["boundary"]) is not int
@@ -2791,7 +2814,8 @@ def _validate_entity_context(context, latest_boundary, schema):
         previous = row["boundary"]
 
 
-def _validate_observer_knowledge(context, latest_boundary, initial, state):
+def _validate_observer_knowledge(context, latest_boundary, initial, state,
+                                 origin_boundary=0):
     if (type(context) is not dict
             or set(context) != {"available", "initial", "changes"}
             or type(context["available"]) is not bool
@@ -2828,13 +2852,13 @@ def _validate_observer_knowledge(context, latest_boundary, initial, state):
                         or fields_value.get("basis") !=
                             "arena.r65.initial_unobstructed_perception"
                         or type(fields_value.get("boundary")) is not int
-                        or fields_value["boundary"] < 0
+                        or fields_value["boundary"] < origin_boundary
                         or type(fields_value.get("time")) is not dict
                         or set(fields_value["time"]) != {"$number"}
                         or type(fields_value["time"].get("$number")) is not str
                         or type(fields_value.get("currently_observable")) is not bool
                         or type(fields_value.get("visibility_boundary")) is not int
-                        or not 0 <= fields_value["visibility_boundary"] <= boundary
+                        or not origin_boundary <= fields_value["visibility_boundary"] <= boundary
                         or fields_value["boundary"] > fields_value["visibility_boundary"]
                         or fields_value.get("category") not in ("being", "object")
                         or fields_value.get("present_state") not in
@@ -2857,9 +2881,9 @@ def _validate_observer_knowledge(context, latest_boundary, initial, state):
                         raise NativeHistoryRejected(
                             "native observer evidence has an invalid Object owner")
 
-    validate_state(initial_knowledge, 0)
+    validate_state(initial_knowledge, origin_boundary)
     current = initial_knowledge
-    previous = 0
+    previous = origin_boundary
     for row in context["changes"]:
         if (type(row) is not dict or set(row) != {"boundary", "changes", "state_sha256"}
                 or type(row["boundary"]) is not int
@@ -2912,10 +2936,11 @@ def _validate_fatigue_context_entities(entities):
 def state_at(log, boundary):
     """Reconstruct the historical property projection without Action resolution."""
     validate(log)
-    if type(boundary) is not int or not 0 <= boundary <= log["latest_boundary"]:
+    origin = _origin_boundary(log)
+    if type(boundary) is not int or not origin <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
     initial = log["initial"]
-    if boundary == 0:
+    if boundary == origin:
         result = json.loads(_canonical(_initial_state(initial)).decode("ascii"))
         if not initial.get("initial_entities_available", False):
             result["entities"] = None
@@ -2941,12 +2966,13 @@ def entity_context_at(log, boundary):
     context, with the initial context retained once.
     """
     validate(log)
-    if type(boundary) is not int or not 0 <= boundary <= log["latest_boundary"]:
+    origin = _origin_boundary(log)
+    if type(boundary) is not int or not origin <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
     context = log.get("entity_context", _unavailable_entity_context())
     if not context["available"]:
         return None
-    if boundary == 0:
+    if boundary == origin:
         if not log["initial"].get("initial_entities_available", False):
             return None
         return json.loads(_canonical(context["initial"]).decode("ascii"))
@@ -3089,6 +3115,7 @@ class NativeHistoryQuery:
     def __init__(self, log):
         self._log = decode(encode(log))
         self._latest = self._log["latest_boundary"]
+        self._origin = _origin_boundary(self._log)
         self._segments = []
         self._segment_starts = []
         self._segment_ends = []
@@ -3104,19 +3131,19 @@ class NativeHistoryQuery:
             self._segment_starts.append(start)
             self._segment_ends.append(end)
             self._segment_rng.append(cursor)
-        self._actions_boundary = 0
+        self._actions_boundary = self._origin
         self._action_ids = []
         self._seen_actions = set()
         self._effect_ids = []
         self._seen_effects = set()
         self._actions = {}
         self._effect_rows = {}
-        self._state_boundary = 0
+        self._state_boundary = self._origin
         self._state = _initial_state(self._log["initial"])
         context = self._log.get("entity_context", _unavailable_entity_context())
         self._context_available = context["available"]
         self._fatigue_available = context.get("fatigue_available", False)
-        self._context_boundary = 0
+        self._context_boundary = self._origin
         self._context = (json.loads(_canonical(context["initial"]).decode("ascii"))
                          if self._context_available else None)
         self._context_changes = {row["boundary"]: row
@@ -3129,7 +3156,7 @@ class NativeHistoryQuery:
         knowledge = self._log.get("observer_knowledge",
                                   _unavailable_observer_knowledge())
         self._knowledge_available = knowledge["available"]
-        self._knowledge_boundary = 0
+        self._knowledge_boundary = self._origin
         self._knowledge = (json.loads(_canonical(knowledge["initial"]).decode("ascii"))
                            if self._knowledge_available else None)
         self._knowledge_changes = {row["boundary"]: row
@@ -3146,7 +3173,7 @@ class NativeHistoryQuery:
         self._inspection_landings = []
 
     def _boundary(self, boundary):
-        if type(boundary) is not int or not 0 <= boundary <= self._latest:
+        if type(boundary) is not int or not self._origin <= boundary <= self._latest:
             raise NativeHistoryRejected("requested native boundary is not committed")
 
     def _segment(self, boundary):
@@ -3163,7 +3190,7 @@ class NativeHistoryQuery:
         self._boundary(boundary)
         if boundary < self._state_boundary:
             state = _initial_state(self._log["initial"])
-            first = 1
+            first = self._origin + 1
         else:
             state = self._state
             first = self._state_boundary + 1
@@ -3181,11 +3208,11 @@ class NativeHistoryQuery:
             self._state = state
             self._state_boundary = boundary
         result = self._copy(state)
-        if boundary == 0 and not self._initial_entities_available:
+        if boundary == self._origin and not self._initial_entities_available:
             result["entities"] = None
         if not self._initial_schedule_available:
             result["initial_schedule"] = None
-            if boundary == 0:
+            if boundary == self._origin:
                 result["schedule"] = None
         return result
 
@@ -3319,7 +3346,7 @@ class NativeHistoryQuery:
     def schedule_at(self, boundary):
         """Return the detached committed native queue and Choice projection."""
         self._boundary(boundary)
-        if boundary == 0 and not self._initial_schedule_available:
+        if boundary == self._origin and not self._initial_schedule_available:
             return None
         return self._copy(self.state_at(boundary)["schedule"])
 
@@ -3357,7 +3384,7 @@ class NativeHistoryQuery:
         if type(target_id) is not str or not target_id:
             raise NativeHistoryRejected("Target history requires a stable identity")
         rows = []
-        for current in range(1, boundary + 1):
+        for current in range(self._origin + 1, boundary + 1):
             state = self.state_at(current)
             target = state["entities"].get(target_id)
             if target is not None:
@@ -3416,7 +3443,7 @@ class NativeHistoryQuery:
 
     def events_at(self, boundary):
         self._boundary(boundary)
-        if boundary == 0:
+        if boundary == self._origin:
             return self._copy({"action_ids": [], "effect_ids": [], "actions": {},
                                "effects": {}, "starts": {"$tuple": []},
                                "participants": self._log["initial"]["participants"]})
@@ -3470,7 +3497,7 @@ class NativeHistoryQuery:
         self._boundary(boundary)
         if not self._has_receipt_facts:
             return None
-        if boundary == 0:
+        if boundary == self._origin:
             return {"notification_intents": {"$tuple": []},
                     "disarm_landings": {"$tuple": []}}
         _index, row = self._segment(boundary)
@@ -3497,7 +3524,7 @@ class NativeHistoryQuery:
         state = self.state_at(boundary)
         events = self.events_at(boundary)
         receipt_facts = self.receipt_facts_at(boundary)
-        if boundary == 0:
+        if boundary == self._origin:
             start = self._log["initial"]["start"]
             end = state["time"]
         else:
@@ -3517,7 +3544,7 @@ class NativeHistoryQuery:
             if type(value) is dict
             and value.get("$record") == "action_settlement.TargetCandidate"
         } if type(candidates) is dict else {})
-        rng_after = (None if boundary == 0
+        rng_after = (None if boundary == self._origin
                      and self._log["initial"].get("rng_before_first_commit") is None
                      else self.rng_state_at(boundary))
         return self._copy({
@@ -3564,7 +3591,7 @@ class NativeHistoryQuery:
         """
         self._boundary(boundary)
         if boundary < self._actions_boundary:
-            self._actions_boundary = 0
+            self._actions_boundary = self._origin
             self._action_ids = []
             self._seen_actions = set()
             self._effect_ids = []
@@ -3710,9 +3737,9 @@ class NativeHistoryQuery:
                 self._inspection_histories.setdefault(target_id, []).append(inspection)
         self._inspection_boundary = boundary
 
-        if boundary == 0:
+        if boundary == self._origin:
             events = {"participants": self._log["initial"]["participants"]}
-            schedule = self.schedule_at(0)
+            schedule = self.schedule_at(self._origin)
         else:
             events = self.events_at(boundary)
             schedule = self.schedule_at(boundary)
@@ -3836,7 +3863,7 @@ class NativeHistoryQuery:
 
     def rng_state_at(self, boundary):
         self._boundary(boundary)
-        if boundary == 0:
+        if boundary == self._origin:
             cursor = self._log["initial"].get("rng_before_first_commit")
             if cursor is None:
                 raise NativeHistoryRejected(
@@ -3851,12 +3878,12 @@ class NativeHistoryQuery:
     def entity_context_at(self, boundary):
         self._boundary(boundary)
         if (not self._context_available or
-                boundary == 0 and not self._initial_entities_available):
+                boundary == self._origin and not self._initial_entities_available):
             return None
         if boundary < self._context_boundary:
             context = json.loads(_canonical(
                 self._log["entity_context"]["initial"]).decode("ascii"))
-            first = 1
+            first = self._origin + 1
         else:
             context = self._context
             first = self._context_boundary + 1
@@ -3950,7 +3977,7 @@ class NativeHistoryQuery:
         if boundary < self._knowledge_boundary:
             context = json.loads(_canonical(
                 self._log["observer_knowledge"]["initial"]).decode("ascii"))
-            first = 1
+            first = self._origin + 1
         else:
             context = self._knowledge
             first = self._knowledge_boundary + 1
@@ -4003,7 +4030,8 @@ def restore_compacted_boundary_history(world, histories):
                 "compacted committed-boundary origin differs from the restored Encounter")
         query = NativeHistoryQuery(upgraded)
         receipts = []
-        for boundary in range(1, upgraded["latest_boundary"] + 1):
+        for boundary in range(_origin_boundary(upgraded) + 1,
+                              upgraded["latest_boundary"] + 1):
             facts = query.boundary_facts_at(boundary)
             action_ids = tuple(facts["action_ids"])
             effect_ids = tuple(_materialize_plain(facts["effect_ids"]))
@@ -4083,7 +4111,8 @@ def restore_compacted_entity_context(world, histories):
                 or upgraded["latest_boundary"] != encounter.last_processed_boundary
                 or type(receipts) is not list
                 or [row.boundary for row in receipts]
-                    != list(range(1, upgraded["latest_boundary"] + 1))):
+                    != list(range(_origin_boundary(upgraded) + 1,
+                                  upgraded["latest_boundary"] + 1))):
             raise NativeHistoryRejected(
                 "compacted EntityInspection history differs from its receipt chain")
         query = NativeHistoryQuery(upgraded)
@@ -4161,7 +4190,8 @@ def restore_compacted_publication_facts(world, histories):
                 or upgraded["latest_boundary"] != encounter.last_processed_boundary
                 or type(receipts) is not list
                 or [row.boundary for row in receipts]
-                    != list(range(1, upgraded["latest_boundary"] + 1))):
+                    != list(range(_origin_boundary(upgraded) + 1,
+                                  upgraded["latest_boundary"] + 1))):
             raise NativeHistoryRejected(
                 "compacted publication facts differ from their boundary history")
         query = NativeHistoryQuery(upgraded)
@@ -4231,7 +4261,8 @@ def restore_compacted_disarm_landings(world, histories):
                 "compacted Disarm landing shell differs from native history")
         query = NativeHistoryQuery(upgraded)
         restored = []
-        for boundary in range(1, upgraded["latest_boundary"] + 1):
+        for boundary in range(_origin_boundary(upgraded) + 1,
+                              upgraded["latest_boundary"] + 1):
             facts = query.receipt_facts_at(boundary)
             if facts is None or facts.get("disarm_landings") is None:
                 raise NativeHistoryRejected(
@@ -4594,7 +4625,8 @@ def restore_compacted_receipt_facts(world, histories, *,
                 or upgraded["latest_boundary"] != encounter.last_processed_boundary
                 or type(receipts) is not list
                 or [row.boundary for row in receipts]
-                    != list(range(1, upgraded["latest_boundary"] + 1))):
+                    != list(range(_origin_boundary(upgraded) + 1,
+                                  upgraded["latest_boundary"] + 1))):
             raise NativeHistoryRejected(
                 "compacted receipt facts differ from their committed boundary chain")
         query = NativeHistoryQuery(upgraded)
@@ -4853,9 +4885,10 @@ def restore_compacted_target_history(world, histories):
 
 def events_at(log, boundary):
     validate(log)
-    if type(boundary) is not int or not 0 <= boundary <= log["latest_boundary"]:
+    origin = _origin_boundary(log)
+    if type(boundary) is not int or not origin <= boundary <= log["latest_boundary"]:
         raise NativeHistoryRejected("requested native boundary is not committed")
-    if boundary == 0:
+    if boundary == origin:
         return json.loads(_canonical({"action_ids": [], "effect_ids": [],
             "actions": {}, "effects": {}, "starts": {"$tuple": []},
             "participants": log["initial"]["participants"]}).decode("ascii"))

@@ -722,8 +722,12 @@ def _bind_restored_arena_progression(encounter, rng_owner, authority):
         raise TransactionalProgressionError('Arena restore graph cannot be quarantined')
     ed = object.__getattribute__(encounter, '__dict__')
     history = ed.get('_atomic_interval_history')
+    origin_boundary = math.floor(encounter.start_time)
+    expected_boundary = origin_boundary + len(history) if type(history) is list else None
     if (type(history) is not list or encounter.time != encounter.last_processed_boundary
-            or encounter.time != len(history) or encounter.active_boundary is not None
+            or encounter.time != expected_boundary or encounter.active_boundary is not None
+            or [row.boundary for row in history]
+                != list(range(origin_boundary + 1, expected_boundary + 1))
             or encounter.boundary_fault is not None or encounter.pending_action_list is None
             or encounter._advancing or encounter._running or encounter._dispatching):
         raise TransactionalProgressionError('restored Arena cursor/receipt chain is not quiescent')

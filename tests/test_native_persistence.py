@@ -2516,11 +2516,19 @@ print(json.dumps({'time':encounter.time,'position':actor.get_position().as_tuple
         self.assertIn(later.id, fixture.enc.cancelled_action_list)
         save = export_save(fixture.enc)
         fixture.enc.step(8)
+        stun_history = native_history.NativeHistoryQuery(
+            native_history.capture(fixture.enc))
+        historical_stun = [
+            stun_history.entity_at(fixture.b.id, boundary)["fields"][
+                "pre_action"]["states"]["stunned"]
+            for boundary in (4, 9, 10)]
+        self.assertEqual(historical_stun, [True, True, False])
         expected = {
             "time": fixture.enc.time,
             "rng": json.loads(json.dumps(rng.state)),
             "hp": [fixture.a.get_hit_points(), fixture.b.get_hit_points()],
             "stunned_until": fixture.b.current.states.states["stunned_until"],
+            "historical_stun": historical_stun,
             "cancelled": list(fixture.enc.cancelled_action_list),
             "history": hashlib.sha256(native_history.encode(
                 native_history.capture(fixture.enc))).hexdigest(),
@@ -2533,9 +2541,13 @@ import native_history
 from native_persistence import load_path
 world,encounter,rng=load_path(sys.argv[1])
 encounter.step(8)
+stun_history=native_history.NativeHistoryQuery(native_history.capture(encounter))
+historical_stun=[stun_history.entity_at(encounter.being_list[1],boundary)['fields']
+ ['pre_action']['states']['stunned'] for boundary in (4,9,10)]
 print(json.dumps({'time':encounter.time,'rng':rng.state,
  'hp':[encounter.get_being(i).get_hit_points() for i in encounter.being_list],
  'stunned_until':encounter.get_being(encounter.being_list[1]).current.states.states['stunned_until'],
+ 'historical_stun':historical_stun,
  'cancelled':list(encounter.cancelled_action_list),
  'history':hashlib.sha256(native_history.encode(native_history.capture(encounter))).hexdigest()},sort_keys=True))'''
             result = subprocess.run(
@@ -2545,6 +2557,86 @@ print(json.dumps({'time':encounter.time,'rng':rng.state,
                 text=True, capture_output=True, check=False, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
+
+    def test_native_subdual_recovery_anchor_resumes_from_old_elapsed_time(self):
+        """A saved Subdual burden recovers from its persisted hourly anchor."""
+        import os
+        from native_scenario import NativeScenarioBuilder
+
+        builder = NativeScenarioBuilder(
+            "native elapsed Subdual recovery",
+            Library(config_dir=str(ROOT / "src/config")),
+            start_time=3600, end_time=3610, seed=18,
+            encounter_id="native-subdual-recovery-encounter")
+        actor = builder.add_being(
+            "Human", "Recovery Action actor", hit_points=100)
+        target = builder.add_being(
+            "Human", "Recovering target", hit_points=9)
+        target.current.states.states.update({
+            "subdual_damage": 9,
+            "subdual_recovery_anchor": 0,
+            "subdual_unconscious": True,
+        })
+        builder.enable()
+        delay = DelayAction(
+            builder.encounter, actor.id, defense=0,
+            start_time=builder.encounter.time,
+            id="native-subdual-recovery-delay")
+        builder.schedule(delay)
+        builder.step(1)
+        advanced = export_save(builder.encounter)
+        builder.step(1)
+        query = native_history.NativeHistoryQuery(
+            native_history.capture(builder.encounter))
+        self.assertEqual(native_history._number_value(
+            query.state_at(3600)["time"]), 3600)
+        self.assertEqual(query.events_at(3600)["action_ids"], [])
+        self.assertEqual(query.timeline_at(3600)["$tuple"], [])
+        historical = query.entity_at(target.id, 3601)["fields"][
+            "pre_action"]["states"]
+        self.assertEqual(historical["subdual_damage_current"], 8)
+        self.assertEqual(historical["subdual_recovery_anchor"], 0)
+        self.assertFalse(historical["subdual_unconscious"])
+        expected = {
+            "time": builder.encounter.time,
+            "origin_time": native_history._number_value(query.state_at(3600)["time"]),
+            "action_id": delay.id,
+            "finished": list(builder.encounter.finished_action_list),
+            "states": dict(target.current.states.states),
+            "historical_states": historical,
+            "rng": builder.rng.state,
+            "history": hashlib.sha256(native_history.encode(
+                native_history.capture(builder.encounter))).hexdigest(),
+        }
+        child = r'''import hashlib,json,sys
+import native_history
+from native_persistence import load_save,rng_owner_for
+world,enc,rng=load_save(open(sys.argv[1],'rb').read())
+target=world.get_object_by_id(sys.argv[2]);action_id=sys.argv[3]
+assert action_id in enc.finished_action_list
+query=native_history.NativeHistoryQuery(native_history.capture(enc))
+origin_time=native_history._number_value(query.state_at(3600)['time'])
+enc.step(1)
+query=native_history.NativeHistoryQuery(native_history.capture(enc))
+historical=query.entity_at(target.id,3601)['fields']['pre_action']['states']
+print(json.dumps({'time':enc.time,'origin_time':origin_time,'action_id':action_id,
+ 'finished':list(enc.finished_action_list),
+ 'states':dict(target.current.states.states),'historical_states':historical,
+ 'rng':rng_owner_for(enc).state,
+ 'history':hashlib.sha256(native_history.encode(
+  native_history.capture(enc))).hexdigest()},sort_keys=True))'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-subdual-recovery.native"
+            path.write_bytes(advanced)
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", child, str(path),
+                 target.id, delay.id], cwd=directory,
+                env={**os.environ,
+                     "PYTHONPATH": f"{ROOT / 'src'}:{ROOT / 'examples'}"},
+                text=True, capture_output=True, check=False, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         json.loads(json.dumps(expected)))
 
     def test_native_local_frame_movement_resumes_in_fresh_process(self):
         fixture=inspection_fixtures.InspectionFixture();fixture.setUp()

@@ -8,6 +8,7 @@ by the scheduling lock. No native completion/mutation callbacks execute here.
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import itertools
+import math
 import random
 import threading
 import weakref
@@ -1749,8 +1750,9 @@ def _register_arena_restored_receipts(encounter, authority):
         raise PublicationRejected('native Arena receipt history is malformed')
     if not history:
         return ()
-    if (len(history) > 4096 or encounter.start_time != 0
-            or encounter.time != len(history)
+    origin_boundary = math.floor(encounter.start_time)
+    if (len(history) > 4096
+            or encounter.time != origin_boundary + len(history)
             or encounter.last_processed_boundary != encounter.time
             or encounter._coordinator_time != encounter.time
             or encounter._interval_start != encounter.time):
@@ -1758,8 +1760,8 @@ def _register_arena_restored_receipts(encounter, authority):
             f'(start={encounter.start_time!r}, time={encounter.time!r}, '
             f'cursor={encounter.last_processed_boundary!r}, coordinator={encounter._coordinator_time!r}, '
             f'interval={encounter._interval_start!r}, receipts={len(history)})')
-    previous = 0
-    for boundary, receipt in enumerate(history, 1):
+    previous = origin_boundary
+    for boundary, receipt in enumerate(history, origin_boundary + 1):
         if (type(receipt) is not PublishedInterval or receipt.encounter_id != encounter.id
                 or receipt.boundary != boundary or receipt.committed is not True
                 or type(receipt.inspection) is not CommittedBoundaryRecord
